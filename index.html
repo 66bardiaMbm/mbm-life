@@ -752,6 +752,7 @@ function renderHome(){
   const up=[];
   tasks.filter(t=>!t.done&&t.date&&t.date>ts).forEach(t=>up.push({date:t.date,time:t.time,txt:t.text,em:'✓',coll:'tasks',id:t.id}));
   active('appts').filter(a=>userMatch(a.user)&&a.date>=ts).forEach(a=>up.push({date:a.date,time:a.time,txt:a.title,em:'📅',coll:'appts',id:a.id}));
+  active('shop').filter(i=>!i.done&&i.date&&i.date>ts).forEach(i=>up.push({date:i.date,time:i.time,txt:i.text,em:'🛒',coll:'shop',id:i.id}));
   active('bills').filter(b=>!b.paid&&b.date&&b.date>=ts).forEach(b=>up.push({date:b.date,txt:b.title+(b.amount?' · $'+b.amount:''),em:'💳',coll:'bills',id:b.id}));
   bdayUpcoming(30).forEach(b=>up.push({date:b.next,txt:b.name,em:'🎂',coll:'bdays',id:b.id}));
   up.sort((a,b)=>a.date<b.date?-1:1);
@@ -1163,9 +1164,9 @@ function renderShop(){
   const addL=document.createElement('button');addL.textContent=tr('addList');addL.onclick=addShopList;tabs.appendChild(addL);
   const box=document.getElementById('shopList');
   const items=active('shop').filter(i=>i.list===shopActive).sort((a,b)=>(a.done?1:0)-(b.done?1:0));
-  let h=items.length?items.map(i=>`<div class="li ${i.done?'done':''}">
+  let h=items.length?items.map(i=>`<div class="li ${i.done?'done':''}" data-detail="shop:${i.id}">
     <div class="check ${i.done?'on':''}" data-shop="${i.id}"></div>
-    <div class="tx" data-detail="shop:${i.id}">${i.pinned?'📌 ':''}${esc(i.text)}${(i.date||i.time)?`<div class="meta">${i.date?shortDate(i.date):''}${i.time?' · '+i.time:''}</div>`:''}</div>
+    <div class="tx">${i.pinned?'📌 ':''}${esc(i.text)}${(i.date||i.time)?`<div class="meta">${i.date?shortDate(i.date):''}${i.time?' · '+i.time:''}</div>`:''}</div>
     <button class="act ${i.pinned?'pinned':''}" data-spin="${i.id}">📌</button>
     <button class="act" data-arch="shop:${i.id}">🗄</button></div>`).join(''):`<div class="empty">${tr('noItems')}</div>`;
   h+=`<div class="miniadd"><input id="shopInput" placeholder="${tr('addItem')}…"><button id="shopAdd">＋</button></div>`;
