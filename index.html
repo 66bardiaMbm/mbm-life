@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v47';                 // bump on each deploy; used for update detection
+const APP_VERSION='v48';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -744,6 +744,50 @@ function save(){
 }
 function makeRestorePoint(){
   try{ localStorage.setItem(RESTORE_KEY,JSON.stringify(DB)); return true; }catch(e){ return false; }
+}
+// Attach live address autocomplete to a location input.
+// Shows suggestions under the field as the user types (debounced).
+function attachLocationAutocomplete(inputId){
+  const inp=document.getElementById(inputId);
+  if(!inp)return;
+  // build a dropdown right after the input's row container
+  let box=document.getElementById(inputId+'_ac');
+  if(!box){
+    box=document.createElement('div');
+    box.id=inputId+'_ac';
+    box.style.cssText='position:relative;z-index:50';
+    box.innerHTML='<div class="ac-list" style="position:absolute;left:0;right:0;top:2px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:none"></div>';
+    // place it right after the row that holds the input
+    const row=inp.closest('.fld')||inp.parentElement;
+    if(row&&row.parentElement){ row.parentElement.insertBefore(box,row.nextSibling); }
+  }
+  const list=box.querySelector('.ac-list');
+  let timer=null, lastQ='';
+  function hide(){list.style.display='none';list.innerHTML='';}
+  function show(items){
+    if(!items.length){hide();return;}
+    list.innerHTML=items.map((p,i)=>`<div class="ac-item" data-i="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line2);font-size:13px;line-height:1.4">📍 ${esc(p.display_name)}</div>`).join('');
+    list.style.display='block';
+    list.querySelectorAll('.ac-item').forEach(el=>el.onclick=()=>{
+      inp.value=items[+el.dataset.i].display_name;
+      hide();
+    });
+  }
+  inp.addEventListener('input',()=>{
+    const q=inp.value.trim();
+    if(timer)clearTimeout(timer);
+    if(q.length<3){hide();return;}
+    if(q===lastQ)return;
+    timer=setTimeout(()=>{
+      lastQ=q;
+      fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=5&q='+encodeURIComponent(q),
+        {headers:{'Accept':'application/json'}})
+        .then(r=>r.json())
+        .then(d=>{ if(inp.value.trim()===q) show(d); })
+        .catch(()=>{});
+    },600); // debounce: wait 600ms after typing stops
+  });
+  inp.addEventListener('blur',()=>setTimeout(hide,250));
 }
 function fillCurrentLocation(inputId,btn){
   const inp=document.getElementById(inputId);
@@ -1262,6 +1306,7 @@ function editSheet(c,id){
     if(!v){toast(L==='fa'?'اول مکان را بنویسید':'Type a location first');return;}
     window.open(mapsLink(v),'_blank');
   };
+  attachLocationAutocomplete('e_loc');
   if(c==='tasks'||c==='appts')chipSel('e_user',r.user||'all');
   document.getElementById('e_save').onclick=()=>{
     const t=val('e_title');if(!t){toast(c==='bdays'?tr('vName'):(c==='notes'?tr('vText'):tr('vTitle')));flashField('e_title');return;}
@@ -1583,6 +1628,7 @@ function addShopSheet(){
    <button class="savebtn" id="f_save">${tr('save')}</button><button class="cancel" id="f_cancel">${tr('cancel')}</button>`);
   const tg=document.getElementById('f_loc_gps');if(tg)tg.onclick=()=>fillCurrentLocation('f_loc',tg);
   const tm=document.getElementById('f_loc_map');if(tm)tm.onclick=()=>{const v=document.getElementById('f_loc').value.trim();if(!v){toast(L==='fa'?'اول مکان را بنویسید':'Type a location first');return;}window.open(mapsLink(v),'_blank');};
+  attachLocationAutocomplete('f_loc');
   document.getElementById('f_save').onclick=()=>{
     const text=val('f_text');if(!text){toast(tr('vTitle'));flashField('f_text');return;}
     const id=uid();
@@ -1968,6 +2014,7 @@ function addTaskSheet(presetDate){
   chipSel('f_pri','p2');chipSel('f_user','all');chipSel('f_rep','none');chipSel('f_cat','');
   const tg=document.getElementById('f_loc_gps');if(tg)tg.onclick=()=>fillCurrentLocation('f_loc',tg);
   const tm=document.getElementById('f_loc_map');if(tm)tm.onclick=()=>{const v=document.getElementById('f_loc').value.trim();if(!v){toast(L==='fa'?'اول مکان را بنویسید':'Type a location first');return;}window.open(mapsLink(v),'_blank');};
+  attachLocationAutocomplete('f_loc');
   document.getElementById('f_save').onclick=()=>{const text=val('f_text');if(!text){toast(tr('vTitle'));flashField('f_text');return;}const id=uid();
     DB.tasks[id]={id,text,date:val('f_date')||null,time:val('f_time')||null,location:val('f_loc')||'',priority:chipVal('f_pri'),user:chipVal('f_user'),repeat:chipVal('f_rep'),category:chipVal('f_cat'),status:'none',created:new Date().toISOString(),assignedBy:USER==='all'?null:USER,done:false,pinned:false,archived:false};
     logHistory('created','task',text);save();closeSheet();render();};
@@ -1986,6 +2033,7 @@ function addApptSheet(){openSheet(`<h3>${tr('addAppt')}</h3>
   chipSel('f_user','all');
   const ag=document.getElementById('f_loc_gps');if(ag)ag.onclick=()=>fillCurrentLocation('f_loc',ag);
   const am=document.getElementById('f_loc_map');if(am)am.onclick=()=>{const v=document.getElementById('f_loc').value.trim();if(!v){toast(L==='fa'?'اول مکان را بنویسید':'Type a location first');return;}window.open(mapsLink(v),'_blank');};
+  attachLocationAutocomplete('f_loc');
   document.getElementById('f_save').onclick=()=>{const title=val('f_text');if(!title){toast(tr('vTitle'));flashField('f_text');return;}const id=uid();
     DB.appts[id]={id,title,date:val('f_date'),time:val('f_time'),location:val('f_loc'),note:val('f_note'),user:chipVal('f_user'),pinned:false,archived:false};save();closeSheet();render();};
   document.getElementById('f_cancel').onclick=closeSheet;}
