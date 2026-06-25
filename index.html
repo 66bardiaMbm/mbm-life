@@ -340,7 +340,7 @@ function initFirebase(){
   </div>
 </div>
 <div class="app">
-  <header>
+  <header id="appHeader">
     <div class="htop">
       <div class="logo"><span class="mk">M</span><span id="brandtxt">MBM Life</span></div>
       <div class="hbtns">
@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v37';                 // bump on each deploy; used for update detection
+const APP_VERSION='v38';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -895,6 +895,11 @@ function render(){
   const map={home:'sc-home',tasks:'sc-tasks',cal:'sc-cal',shop:'sc-shop',more:'sc-more',
     appts:'sc-appts',bills:'sc-bills',bdays:'sc-bdays',notes:'sc-notes',archive:'sc-archive',history:'sc-history',cats:'sc-cats',reports:'sc-reports',search:'sc-search',profile:'sc-profile',settings:'sc-settings'};
   document.getElementById(map[screen]).classList.add('on');
+  // Hide the main header (logo + who filter) on subscreens — AppBar takes over
+  const appHeader=document.getElementById('appHeader');
+  const curEl=document.getElementById(map[screen]);
+  const isSub=curEl&&curEl.classList.contains('subscreen');
+  if(appHeader)appHeader.style.display=isSub?'none':'';
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.s===screen||
     (['appts','bills','bdays','notes','archive','history','cats','reports','profile','settings'].includes(screen)&&b.dataset.s==='more')));
 
