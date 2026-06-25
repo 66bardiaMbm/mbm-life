@@ -510,7 +510,11 @@ function initFirebase(){
   <section class="screen" id="sc-appts"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="appts-h">Appointments</span></h2><div class="card" id="apptList"></div></section>
   <section class="screen" id="sc-bills"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="bills-h">Bills</span></h2><div class="card" id="billList"></div></section>
   <section class="screen" id="sc-bdays"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="bdays-h">Birthdays</span></h2><div class="card" id="bdayList"></div></section>
-  <section class="screen" id="sc-notes"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="notes-h">Notes</span></h2><div class="card" id="noteList"></div></section>
+  <section class="screen" id="sc-notes">
+    <h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="notes-h">Notes</span></h2>
+    <div id="notesSyncBadge" style="font-size:12px;padding:6px 12px;margin-bottom:8px;border-radius:8px;display:none"></div>
+    <div class="card" id="noteList"></div>
+  </section>
   <section class="screen" id="sc-archive"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="arch-h">Archive</span></h2><div class="card" id="archList"></div></section>
   <section class="screen" id="sc-history"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="hist-h">Activity History</span></h2>
     <div class="miniadd"><input id="histSearch" placeholder="Search…"><button id="histClear">✕</button></div>
@@ -587,7 +591,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v33';                 // bump on each deploy; used for update detection
+const APP_VERSION='v34';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -1005,7 +1009,7 @@ function showDetail(c,id){
     else if(a==='snooze'){snoozeItem(c,id);closeSheet();render();return;}
     else if(a==='paid'){DB.bills[id].paid=!DB.bills[id].paid;if(DB.bills[id].paid)logHistory('paid','bill',DB.bills[id].title);}
     else if(a==='pin')DB[c][id].pinned=!DB[c][id].pinned;
-    else if(a==='arch'){if(!confirm(L==='fa'?'این مورد آرشیو شود؟':'Archive this item?'))return;DB[c][id].archived=true;DB[c][id].pinned=false;logHistory('archived',c.replace(/s$/,''),DB[c][id].text||DB[c][id].title||DB[c][id].name);}
+    else if(a==='arch'){if(!confirm(L==='fa'?'این مورد آرشیو شود؟':'Archive this item?'))return;DB[c][id].archived=true;DB[c][id].pinned=false;DB[c][id].updatedAt=Date.now();logHistory('archived',c.replace(/s$/,''),DB[c][id].text||DB[c][id].title||DB[c][id].name);if(c==='notes')notesPushOne(id);}
     save();closeSheet();render();
   });
   document.getElementById('f_cancel').onclick=closeSheet;
@@ -1067,6 +1071,8 @@ function editSheet(c,id){
     if(c==='tasks'){r.priority=chipVal('e_pri');r.repeat=chipVal('e_rep');r.category=chipVal('e_cat');r.status=chipVal('e_status');}
     if(c==='tasks'||c==='appts')r.user=chipVal('e_user');
     logHistory('edited',c.replace(/s$/,''),t);
+    r.updatedAt=Date.now();
+    if(c==='notes') notesPushOne(id);
     save();closeSheet();render();
   };
   document.getElementById('e_cancel').onclick=closeSheet;
@@ -1376,10 +1382,31 @@ function renderBdays(){const box=document.getElementById('bdayList');
   if(!active('bdays').length){box.innerHTML=`<div class="empty">${tr('noBdays')}</div>`;return;}
   box.innerHTML=bdayUpcoming(400).map(b=>{const d=pYmd(b.next);const age=b.year?` · ${d.getFullYear()-(+b.year)} ${tr('turns')}`:'';
     return `<div class="li" data-detail="bdays:${b.id}"><span style="font-size:18px">🎂</span><div class="tx">${b.pinned?'📌 ':''}${esc(b.name)}<div class="meta">${shortDate(b.next)}${age} · ${b.inDays===0?tr('today'):b.inDays+'d'}</div></div>${metaActions('bdays',b)}</div>`;}).join('');bindMeta(box);bindDetail(box);}
-function renderNotes(){const box=document.getElementById('noteList');
-  const all=active('notes').sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||(b.id<a.id?-1:1));
+function renderNotes(){
+  const box=document.getElementById('noteList');
+  // sync badge
+  const badge=document.getElementById('notesSyncBadge');
+  if(badge){
+    if(FB.ready&&FB.user){
+      badge.style.display='block';
+      badge.style.background='rgba(31,174,107,.12)';
+      badge.style.color='#1fae6b';
+      badge.textContent='☁️ '+(L==='fa'?'یادداشت‌ها سینک می‌شوند':'Notes are syncing with cloud');
+    } else {
+      badge.style.display='block';
+      badge.style.background='rgba(180,120,0,.1)';
+      badge.style.color='#b47800';
+      badge.textContent='📱 '+(L==='fa'?'فقط روی این دستگاه (ورود نکردید)':'Local only — not signed in');
+    }
+  }
+  const all=active('notes').sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||(b.updatedAt||b.id)<(a.updatedAt||a.id)?-1:1);
   if(!all.length){box.innerHTML=`<div class="empty">${tr('noNotes')}</div>`;return;}
-  box.innerHTML=all.map(n=>`<div class="li" data-detail="notes:${n.id}"><span style="font-size:18px">📝</span><div class="tx"><div style="white-space:pre-wrap;line-height:1.5">${n.pinned?'📌 ':''}${esc(n.text)}</div></div>${metaActions('notes',n)}</div>`).join('');bindMeta(box);bindDetail(box);}
+  box.innerHTML=all.map(n=>{
+    const conflict=n._isConflict?'<span style="color:#d4434f;font-size:11px;display:block;margin-top:2px">⚠️ Conflict copy</span>':'';
+    return `<div class="li" data-detail="notes:${n.id}"><span style="font-size:18px">📝</span><div class="tx"><div style="white-space:pre-wrap;line-height:1.5">${n.pinned?'📌 ':''}${esc(n.text)}</div>${conflict}</div>${metaActions('notes',n)}</div>`;
+  }).join('');
+  bindMeta(box);bindDetail(box);
+}
 
 /* ===================== ARCHIVE ===================== */
 function renderArchive(){const box=document.getElementById('archList');const out=[];
@@ -1392,7 +1419,9 @@ function renderArchive(){const box=document.getElementById('archList');const out
     <button class="act" data-perm="${c}:${r.id}" title="${tr('delForever')}">🗑</button></div>`).join('');
   box.querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>{const[c,id]=b.dataset.restore.split(':');DB[c][id].archived=false;save();render();});
   box.querySelectorAll('[data-perm]').forEach(b=>b.onclick=()=>{const[c,id]=b.dataset.perm.split(':');
-    if(confirm(tr('delForever')+'?')){delete DB[c][id];save();render();}});
+    if(confirm(tr('delForever')+'?')){
+      if(c==='notes') notesPushOne(id); // push delete to cloud before removing locally
+      delete DB[c][id];save();render();}});
 }
 
 /* ===================== ACTIVITY HISTORY VIEW ===================== */
@@ -1649,7 +1678,9 @@ function addNoteSheet(){openSheet(`<h3>${tr('addNote')}</h3>
    <div class="fld"><textarea id="f_text" rows="4" autofocus placeholder="${tr('notesF')}…"></textarea></div>
    <button class="savebtn" id="f_save">${tr('save')}</button><button class="cancel" id="f_cancel">${tr('cancel')}</button>`);
   document.getElementById('f_save').onclick=()=>{const text=val('f_text');if(!text){toast(tr('vText'));flashField('f_text');return;}const id=uid();
-    DB.notes[id]={id,text,pinned:false,archived:false};save();closeSheet();render();};
+    const now=Date.now();
+    DB.notes[id]={id,text,pinned:false,archived:false,createdAt:now,updatedAt:now,owner:FB.user?FB.user.uid:''};
+    save();notesPushOne(id);closeSheet();render();};
   document.getElementById('f_cancel').onclick=closeSheet;}
 
 function val(id){const e=document.getElementById(id);return e?e.value.trim():'';}
@@ -2147,8 +2178,122 @@ async function tasksPush(){
 }
 
 // start/stop sync with auth state
-function startTasksSync(){ tasksListen(); }
-function stopTasksSync(){ if(tasksUnsub){tasksUnsub();tasksUnsub=null;} syncOn=false; }
+function startTasksSync(){ tasksListen(); notesListen(); }
+function stopTasksSync(){ 
+  if(tasksUnsub){tasksUnsub();tasksUnsub=null;}
+  if(notesUnsub){notesUnsub();notesUnsub=null;}
+  syncOn=false; 
+}
+
+/* ===================== NOTES SYNC ===================== */
+let notesUnsub=null;
+
+function notesCol(){ return FB.db.collection('workspaces').doc(WS).collection('notes'); }
+
+function notesListen(){
+  if(!FB.ready||!FB.user)return;
+  if(notesUnsub)notesUnsub();
+  let first=true;
+  notesUnsub=notesCol().onSnapshot(snap=>{
+    const cloud={};
+    snap.forEach(doc=>{ cloud[doc.id]=doc.data(); });
+
+    if(first){
+      first=false;
+      const cloudEmpty=Object.keys(cloud).length===0;
+      const localCount=Object.keys(DB.notes||{}).length;
+      if(cloudEmpty && localCount>0){
+        // Seed cloud from local — add timestamps if missing
+        const batch=FB.db.batch();
+        const now=Date.now();
+        for(const id in DB.notes){
+          const n=DB.notes[id];
+          if(!n.createdAt) n.createdAt=now;
+          if(!n.updatedAt) n.updatedAt=now;
+          if(!n.owner) n.owner=FB.user.uid;
+          batch.set(notesCol().doc(id), n);
+        }
+        batch.commit().catch(e=>console.warn('notes seed failed',e));
+        return;
+      }
+    }
+
+    // Merge: per-document, never overwrite newer local edits
+    const now=Date.now();
+    const merged=Object.assign({}, DB.notes);
+    let changed=false;
+
+    for(const id in cloud){
+      const remote=cloud[id];
+      const local=merged[id];
+      if(!local){
+        // New note from cloud — add it
+        merged[id]=remote;
+        changed=true;
+      } else {
+        const remoteTime=remote.updatedAt||0;
+        const localTime=local.updatedAt||0;
+        if(remoteTime > localTime){
+          // Cloud is newer — take cloud version, preserve local as conflict if text differs
+          if(local.text && local.text!==remote.text && localTime>0){
+            // Save local version as a conflict copy
+            const conflictId=id+'_conflict_'+localTime;
+            if(!merged[conflictId]){
+              merged[conflictId]={
+                ...local,
+                id:conflictId,
+                text:'⚠️ [Conflict] '+local.text,
+                createdAt:local.createdAt||localTime,
+                updatedAt:localTime,
+                _isConflict:true
+              };
+            }
+          }
+          merged[id]=remote;
+          changed=true;
+        }
+        // if localTime >= remoteTime: local is same or newer, keep local, push will sync it
+      }
+    }
+
+    // Check for local notes not yet in cloud (new local notes)
+    for(const id in merged){
+      if(!cloud[id] && !merged[id]._isConflict && !merged[id].archived){
+        // Push this local-only note to cloud
+        const n=merged[id];
+        if(!n.createdAt) n.createdAt=now;
+        if(!n.updatedAt) n.updatedAt=now;
+        if(!n.owner) n.owner=FB.user.uid;
+        notesCol().doc(id).set(n).catch(e=>console.warn('note push failed',id,e));
+        changed=true;
+      }
+    }
+
+    applyingRemote=true;
+    DB.notes=merged;
+    try{ localStorage.setItem(KEY,JSON.stringify(DB)); }catch(e){}
+    applyingRemote=false;
+    if(changed) render();
+  },err=>{
+    console.warn('notes listen error',err);
+  });
+}
+
+// Push a single note to cloud (called after add/edit/delete)
+function notesPushOne(id){
+  if(!FB.ready||!FB.user)return;
+  const n=DB.notes[id];
+  if(!n){
+    // Deleted — remove from cloud
+    notesCol().doc(id).delete().catch(e=>console.warn('note delete failed',e));
+    return;
+  }
+  const now=Date.now();
+  if(!n.createdAt) n.createdAt=now;
+  n.updatedAt=now;
+  if(!n.owner) n.owner=FB.user.uid;
+  notesCol().doc(id).set(n).catch(e=>console.warn('note push failed',e));
+}
 
 function showSplash(show){
   const s=document.getElementById('splashOverlay');
