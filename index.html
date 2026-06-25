@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v41';                 // bump on each deploy; used for update detection
+const APP_VERSION='v44';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -744,6 +744,34 @@ function save(){
 }
 function makeRestorePoint(){
   try{ localStorage.setItem(RESTORE_KEY,JSON.stringify(DB)); return true; }catch(e){ return false; }
+}
+function fillCurrentLocation(inputId,btn){
+  const inp=document.getElementById(inputId);
+  if(!inp)return;
+  if(!navigator.geolocation){toast(L==='fa'?'دستگاه GPS ندارد':'No GPS available');return;}
+  const old=btn?btn.textContent:'';
+  if(btn){btn.textContent='⏳';btn.disabled=true;}
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const {latitude:lat,longitude:lon}=pos.coords;
+    // Try reverse geocoding (free, no key) — fall back to coordinates
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18`)
+      .then(r=>r.json())
+      .then(d=>{
+        const name=d.display_name||`${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+        inp.value=name.length>80?name.slice(0,80):name;
+        if(btn){btn.textContent=old;btn.disabled=false;}
+      })
+      .catch(()=>{
+        inp.value=`${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+        if(btn){btn.textContent=old;btn.disabled=false;}
+      });
+  },err=>{
+    toast(L==='fa'?'دسترسی به موقعیت رد شد':'Location access denied');
+    if(btn){btn.textContent=old;btn.disabled=false;}
+  },{enableHighAccuracy:true,timeout:10000});
+}
+function mapsLink(loc){
+  return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(loc);
 }
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 
@@ -1068,12 +1096,16 @@ function showDetail(c,id){
   if(r.priority&&r.priority!=='none')rows.push([tr('priority'),tr(r.priority)]);
   if(r.category)rows.push([tr('category'),catLabel(r.category)]);
   if(r.user&&r.user!=='all')rows.push([tr('assign'),r.user==='behnam'?tr('behnam'):tr('mahsa')]);
-  if(r.location)rows.push([tr('location'),r.location]);
   if(r.amount)rows.push([tr('amount'),'$'+r.amount]);
   if(r.note)rows.push([tr('notesF'),r.note]);
   const em={tasks:'✓',appts:'📅',bills:'💳',bdays:'🎂',notes:'📝',shop:'🛒'}[c];
   let h=(c==='notes')?`<h3>📝</h3><div style="white-space:pre-wrap;line-height:1.6;font-size:15px;margin:-6px 2px 4px">${esc(title)}</div>`:`<h3>${em} ${esc(title)}</h3>`;
   h+=rows.map(([k,v])=>`<div class="li"><div class="tx" style="color:var(--mut)">${k}</div><div class="tx" style="text-align:${L==='fa'?'left':'right'}">${esc(v)}</div></div>`).join('');
+  // location row with Google Maps link
+  if(r.location){
+    h+=`<div class="li"><div class="tx" style="color:var(--mut)">${tr('location')}</div>
+      <a href="${mapsLink(r.location)}" target="_blank" rel="noopener" class="tx" style="text-align:${L==='fa'?'left':'right'};color:var(--brand);text-decoration:none">📍 ${esc(r.location)} ↗</a></div>`;
+  }
   // actions
   h+=`<div class="snooze" style="margin-top:14px">`;
   if(c==='tasks')h+=`<button data-act="done">${DB.tasks[id].done?tr('active'):tr('completed')}</button>`;
@@ -1126,7 +1158,12 @@ function editSheet(c,id){
     h+=`</div>`;
   }
   if(c==='bills')h+=`<div class="fld"><label>${tr('amount')}</label><input id="e_amount" type="number" value="${esc(r.amount||'')}"></div>`;
-  if(c==='appts')h+=`<div class="fld"><label>${tr('location')}</label><input id="e_loc" value="${esc(r.location||'')}"></div>`;
+  // location available for every type (incl. notes)
+  h+=`<div class="fld"><label>${tr('location')}</label>
+    <div style="display:flex;gap:8px">
+      <input id="e_loc" value="${esc(r.location||'')}" placeholder="${L==='fa'?'اختیاری':'optional'}" style="flex:1">
+      <button type="button" id="e_loc_gps" class="bkbtn" style="flex:none;padding:8px 12px" title="${L==='fa'?'موقعیت فعلی':'Current location'}">📍</button>
+    </div></div>`;
   if(c==='tasks'){
     h+=`<div class="fld"><label>${tr('priority')}</label><div class="chipsel" id="e_pri">
       <button data-v="p1">${tr('p1')}</button><button data-v="p2">${tr('p2')}</button><button data-v="p3">${tr('p3')}</button></div></div>`;
@@ -1146,6 +1183,8 @@ function editSheet(c,id){
   h+=`<button class="savebtn" id="e_save">${tr('save')}</button><button class="cancel" id="e_cancel">${tr('cancel')}</button>`;
   openSheet(h);
   if(c==='tasks'){chipSel('e_pri',r.priority||'p2');chipSel('e_rep',r.repeat||'none');chipSel('e_cat',r.category||'');chipSel('e_status',r.status||'none');}
+  const gpsBtn=document.getElementById('e_loc_gps');
+  if(gpsBtn)gpsBtn.onclick=()=>fillCurrentLocation('e_loc',gpsBtn);
   if(c==='tasks'||c==='appts')chipSel('e_user',r.user||'all');
   document.getElementById('e_save').onclick=()=>{
     const t=val('e_title');if(!t){toast(c==='bdays'?tr('vName'):(c==='notes'?tr('vText'):tr('vTitle')));flashField('e_title');return;}
@@ -1385,23 +1424,34 @@ function renderCalDayCard(){
 /* ===================== SHOPPING ===================== */
 function renderShop(){
   const tabs=document.getElementById('shopTabs');tabs.innerHTML='';
-  Object.values(DB.shopLists).forEach(l=>{const b=document.createElement('button');b.textContent=l.name[L]||l.name.en;
+  Object.values(DB.shopLists).forEach(l=>{const b=document.createElement('button');b.textContent=(l.emoji?l.emoji+' ':'')+(l.name[L]||l.name.en);
     if(l.id===shopActive){b.classList.add('on');b.style.background=l.color;b.style.borderColor=l.color;}
     b.onclick=()=>{shopActive=l.id;render();};tabs.appendChild(b);});
-  const addL=document.createElement('button');addL.textContent=tr('addList');addL.onclick=addShopList;tabs.appendChild(addL);
+  const addL=document.createElement('button');addL.textContent='＋ '+tr('addList');addL.onclick=addShopList;tabs.appendChild(addL);
   const box=document.getElementById('shopList');
   const items=active('shop').filter(i=>i.list===shopActive).sort((a,b)=>(a.done?1:0)-(b.done?1:0));
-  let h=items.length?items.map(i=>`<div class="li ${i.done?'done':''}" data-detail="shop:${i.id}">
+  const curList=DB.shopLists[shopActive];
+  let h='';
+  if(curList){
+    h+=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-weight:700;font-size:15px;display:flex;align-items:center;gap:6px"><span>${curList.emoji||'🛒'}</span><span>${esc(curList.name[L]||curList.name.en)}</span></div>
+      <button class="act" id="editListBtn" title="${L==='fa'?'ویرایش لیست':'Edit list'}">✏️</button></div>`;
+  }
+  h+=items.length?items.map(i=>`<div class="li ${i.done?'done':''}" data-detail="shop:${i.id}">
     <div class="check ${i.done?'on':''}" data-shop="${i.id}"></div>
     <div class="tx">${i.pinned?'📌 ':''}${esc(i.text)}${(i.date||i.time)?`<div class="meta">${i.date?shortDate(i.date):''}${i.time?' · '+i.time:''}</div>`:''}</div>
     <button class="act ${i.pinned?'pinned':''}" data-spin="${i.id}">📌</button>
+    <button class="act" data-sedit="${i.id}">✏️</button>
     <button class="act" data-arch="shop:${i.id}">🗄</button></div>`).join(''):`<div class="empty">${tr('noItems')}</div>`;
   h+=`<div style="position:relative"><div class="miniadd"><input id="shopInput" autocomplete="off" placeholder="${tr('addItem')}…"><button id="shopAdd">＋</button></div><div id="shopSuggest" style="position:absolute;left:0;right:52px;top:100%;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-top:4px;box-shadow:var(--shadow);overflow:hidden;display:none"></div></div>`;
   h+=`<button class="bkbtn" id="shopBulk" style="width:100%;margin-top:8px">📝 ${L==='fa'?'افزودن چند مورد':'Add multiple items'}</button>`;
   box.innerHTML=h;
   box.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>{DB.shop[c.dataset.shop].done=!DB.shop[c.dataset.shop].done;save();render();});
   box.querySelectorAll('[data-spin]').forEach(b=>b.onclick=()=>{DB.shop[b.dataset.spin].pinned=!DB.shop[b.dataset.spin].pinned;save();render();});
-  box.querySelectorAll('[data-arch]').forEach(b=>b.onclick=()=>{if(!confirm(L==='fa'?'آرشیو شود؟':'Archive this item?'))return;const[c,id]=b.dataset.arch.split(':');DB[c][id].archived=true;save();render();});
+  box.querySelectorAll('[data-sedit]').forEach(b=>b.onclick=()=>editSheet('shop',b.dataset.sedit));
+  const elb=document.getElementById('editListBtn');
+  if(elb)elb.onclick=()=>shopListSheet(shopActive);
+  box.querySelectorAll('[data-arch]').forEach(b=>b.onclick=()=>{if(!confirm(L==='fa'?'آرشیو شود؟':'Archive this item?'))return;const[c,id]=b.dataset.arch.split(':');DB[c][id].archived=true;DB[c][id].updatedAt=Date.now();logHistory('archived','shop',DB[c][id].text);save();render();});
   const inp=document.getElementById('shopInput'),btn=document.getElementById('shopAdd');
   // single input also accepts several items separated by comma or newline
   const add=()=>{const v=inp.value.trim();if(!v)return;
@@ -1458,18 +1508,66 @@ function bulkShopSheet(){
   };
   document.getElementById('bk_cancel').onclick=closeSheet;
 }
-function addShopList(){
-  openSheet(`<h3>${tr('addList')}</h3>
-   <div class="fld"><label>${tr('name')}</label><input id="f_listname" autofocus></div>
-   <button class="savebtn" id="f_save">${tr('save')}</button><button class="cancel" id="f_cancel">${tr('cancel')}</button>`);
+const SHOP_COLORS=['#ff9f43','#3aa0ff','#9d7bff','#1fc28a','#ff5c72','#e4002b','#0a7d3c','#e0699a','#5b6cff'];
+const SHOP_EMOJIS=['🛒','🏪','🥦','🍞','🧴','👶','☕','🎉','💊','🐱','🏠','🎁','🔧','📦'];
+
+function shopListSheet(editId){
+  const ex = editId ? DB.shopLists[editId] : null;
+  const curName = ex ? (ex.name[L]||ex.name.en||'') : '';
+  const curColor = ex ? ex.color : SHOP_COLORS[Object.keys(DB.shopLists).length%SHOP_COLORS.length];
+  const curEmoji = ex ? (ex.emoji||'🛒') : '🛒';
+  const title = ex ? (L==='fa'?'ویرایش لیست':'Edit list') : tr('addList');
+
+  let h=`<h3>${title}</h3>
+   <div class="fld"><label>${tr('name')}</label><input id="f_listname" autofocus value="${esc(curName)}"></div>
+   <div class="fld"><label>${L==='fa'?'آیکون':'Icon'}</label>
+     <div id="f_emoji" style="display:flex;flex-wrap:wrap;gap:8px">${SHOP_EMOJIS.map(e=>`<button type="button" data-e="${e}" style="width:42px;height:42px;border-radius:12px;border:2px solid ${e===curEmoji?'var(--brand)':'var(--line)'};background:var(--card);font-size:20px;cursor:pointer">${e}</button>`).join('')}</div></div>
+   <div class="fld"><label>${L==='fa'?'رنگ':'Colour'}</label>
+     <div id="f_color" style="display:flex;flex-wrap:wrap;gap:10px">${SHOP_COLORS.map(c=>`<button type="button" data-c="${c}" style="width:34px;height:34px;border-radius:50%;background:${c};border:3px solid ${c===curColor?'var(--ink)':'transparent'};cursor:pointer"></button>`).join('')}</div></div>
+   <button class="savebtn" id="f_save">${tr('save')}</button>`;
+  if(editId)h+=`<button class="cancel" id="f_del" style="background:#d4434f;color:#fff;border:none">${tr('delForever')}</button>`;
+  h+=`<button class="cancel" id="f_cancel">${tr('cancel')}</button>`;
+  openSheet(h);
+
+  let selColor=curColor, selEmoji=curEmoji;
+  document.querySelectorAll('#f_emoji button').forEach(b=>b.onclick=()=>{
+    selEmoji=b.dataset.e;
+    document.querySelectorAll('#f_emoji button').forEach(x=>x.style.borderColor='var(--line)');
+    b.style.borderColor='var(--brand)';
+  });
+  document.querySelectorAll('#f_color button').forEach(b=>b.onclick=()=>{
+    selColor=b.dataset.c;
+    document.querySelectorAll('#f_color button').forEach(x=>x.style.borderColor='transparent');
+    b.style.borderColor='var(--ink)';
+  });
   document.getElementById('f_save').onclick=()=>{
-    const name=val('f_listname');if(!name)return;const id=uid();
-    const colors=['#ff9f43','#3aa0ff','#9d7bff','#1fc28a','#ff5c72','#e4002b','#0a7d3c'];
-    DB.shopLists[id]={id,name:{en:name,fa:name},color:colors[Object.keys(DB.shopLists).length%colors.length]};
-    shopActive=id;save();closeSheet();render();
+    const name=val('f_listname');if(!name){flashField('f_listname');return;}
+    if(editId){
+      DB.shopLists[editId].name={en:name,fa:name};
+      DB.shopLists[editId].color=selColor;
+      DB.shopLists[editId].emoji=selEmoji;
+    } else {
+      const id=uid();
+      DB.shopLists[id]={id,name:{en:name,fa:name},color:selColor,emoji:selEmoji};
+      shopActive=id;
+    }
+    save();closeSheet();render();
   };
+  if(editId){
+    document.getElementById('f_del').onclick=()=>{
+      if(!confirm(L==='fa'?'این لیست و آیتم‌هایش حذف شوند؟':'Delete this list and its items?'))return;
+      // remove items in this list
+      Object.values(DB.shop).forEach(it=>{if(it.list===editId)delete DB.shop[it.id];});
+      delete DB.shopLists[editId];
+      // fall back to first available list
+      const remaining=Object.keys(DB.shopLists);
+      shopActive=remaining.length?remaining[0]:'home';
+      save();closeSheet();render();
+    };
+  }
   document.getElementById('f_cancel').onclick=closeSheet;
 }
+function addShopList(){ shopListSheet(null); }
 
 /* ===================== SUB SCREENS ===================== */
 function metaActions(c,r){return `<button class="act ${r.pinned?'pinned':''}" data-gpin="${c}:${r.id}">📌</button><button class="act" data-garch="${c}:${r.id}">🗄</button>`;}
@@ -1536,6 +1634,8 @@ function renderArchive(){const box=document.getElementById('archList');const out
   box.querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>{const[c,id]=b.dataset.restore.split(':');DB[c][id].archived=false;save();render();});
   box.querySelectorAll('[data-perm]').forEach(b=>b.onclick=()=>{const[c,id]=b.dataset.perm.split(':');
     if(confirm(tr('delForever')+'?')){
+      const r=DB[c][id];
+      if(r)logHistory('deleted',c.replace(/s$/,''),r.text||r.title||r.name||'');
       if(c==='notes') notesPushOne(id); // push delete to cloud before removing locally
       delete DB[c][id];save();render();}});
 }
@@ -1556,7 +1656,7 @@ function renderHistory(){
   const box=document.getElementById('histList');
   let h=histFiltered();
   if(!h.length){box.innerHTML=`<div class="empty">${tr('noHist')}</div>`;return;}
-  const actLabel={created:tr('hCreated'),completed:tr('hCompleted'),reopened:tr('hReopened'),paid:tr('hPaid'),archived:tr('hArchived'),edited:tr('hEdited')};
+  const actLabel={created:tr('hCreated'),completed:tr('hCompleted'),reopened:tr('hReopened'),paid:tr('hPaid'),archived:tr('hArchived'),edited:tr('hEdited'),deleted:(L==='fa'?'حذف شد':'Deleted'),added:(L==='fa'?'اضافه شد':'Added')};
   const ems={task:'✓',bill:'💳',appt:'📅',bday:'🎂',note:'📝',shop:'🛒'};
   box.innerHTML=h.slice(0,300).map(x=>{
     const d=new Date(x.at);const when=d.toLocaleDateString()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
@@ -1755,10 +1855,16 @@ function addTaskSheet(presetDate){
      <button data-v="weekly">${tr('weekly')}</button><button data-v="monthly">${tr('monthly')}</button><button data-v="yearly">${tr('yearly')}</button></div></div>
    <div class="fld"><label>${tr('category')}</label><div class="chipsel" id="f_cat">
      <button data-v="" class="on">${tr('none')}</button>${catChips()}</div></div>
+   <div class="fld"><label>${tr('location')}</label>
+     <div style="display:flex;gap:8px">
+       <input id="f_loc" placeholder="${L==='fa'?'اختیاری':'optional'}" style="flex:1">
+       <button type="button" id="f_loc_gps" class="bkbtn" style="flex:none;padding:8px 12px">📍</button>
+     </div></div>
    <button class="savebtn" id="f_save">${tr('save')}</button><button class="cancel" id="f_cancel">${tr('cancel')}</button>`);
   chipSel('f_pri','p2');chipSel('f_user','all');chipSel('f_rep','none');chipSel('f_cat','');
+  const tg=document.getElementById('f_loc_gps');if(tg)tg.onclick=()=>fillCurrentLocation('f_loc',tg);
   document.getElementById('f_save').onclick=()=>{const text=val('f_text');if(!text){toast(tr('vTitle'));flashField('f_text');return;}const id=uid();
-    DB.tasks[id]={id,text,date:val('f_date')||null,time:val('f_time')||null,priority:chipVal('f_pri'),user:chipVal('f_user'),repeat:chipVal('f_rep'),category:chipVal('f_cat'),status:'none',created:new Date().toISOString(),assignedBy:USER==='all'?null:USER,done:false,pinned:false,archived:false};
+    DB.tasks[id]={id,text,date:val('f_date')||null,time:val('f_time')||null,location:val('f_loc')||'',priority:chipVal('f_pri'),user:chipVal('f_user'),repeat:chipVal('f_rep'),category:chipVal('f_cat'),status:'none',created:new Date().toISOString(),assignedBy:USER==='all'?null:USER,done:false,pinned:false,archived:false};
     logHistory('created','task',text);save();closeSheet();render();};
   document.getElementById('f_cancel').onclick=closeSheet;
 }
@@ -1766,12 +1872,14 @@ function addApptSheet(){openSheet(`<h3>${tr('addAppt')}</h3>
    <div class="fld"><label>${tr('title')}</label><input id="f_text" autofocus></div>
    <div class="frow"><div class="fld"><label>${tr('date')}</label><input id="f_date" type="date" value="${ymd(calSel)}"></div>
      <div class="fld"><label>${tr('time')}</label><input id="f_time" type="time"></div></div>
-   <div class="fld"><label>${tr('location')}</label><input id="f_loc"></div>
+   <div class="fld"><label>${tr('location')}</label>
+     <div style="display:flex;gap:8px"><input id="f_loc" style="flex:1"><button type="button" id="f_loc_gps" class="bkbtn" style="flex:none;padding:8px 12px">📍</button></div></div>
    <div class="fld"><label>${tr('notesF')}</label><textarea id="f_note" rows="2"></textarea></div>
    <div class="fld"><label>${tr('assign')}</label><div class="chipsel" id="f_user">
      <button data-v="all" class="on">${tr('all')}</button><button data-v="behnam">${tr('behnam')}</button><button data-v="mahsa">${tr('mahsa')}</button></div></div>
    <button class="savebtn" id="f_save">${tr('save')}</button><button class="cancel" id="f_cancel">${tr('cancel')}</button>`);
   chipSel('f_user','all');
+  const ag=document.getElementById('f_loc_gps');if(ag)ag.onclick=()=>fillCurrentLocation('f_loc',ag);
   document.getElementById('f_save').onclick=()=>{const title=val('f_text');if(!title){toast(tr('vTitle'));flashField('f_text');return;}const id=uid();
     DB.appts[id]={id,title,date:val('f_date'),time:val('f_time'),location:val('f_loc'),note:val('f_note'),user:chipVal('f_user'),pinned:false,archived:false};save();closeSheet();render();};
   document.getElementById('f_cancel').onclick=closeSheet;}
