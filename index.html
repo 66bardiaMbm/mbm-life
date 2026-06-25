@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v39';                 // bump on each deploy; used for update detection
+const APP_VERSION='v41';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -746,6 +746,39 @@ function makeRestorePoint(){
   try{ localStorage.setItem(RESTORE_KEY,JSON.stringify(DB)); return true; }catch(e){ return false; }
 }
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+
+/* ===== GROCERY AUTOCOMPLETE DATABASE (emoji + en + fa) ===== */
+const GROCERY=[
+  ['🍞','bread','نان'],['🥖','baguette','باگت'],['🥐','croissant','کروسان'],
+  ['🥛','milk','شیر'],['🧀','cheese','پنیر'],['🧈','butter','کره'],['🥚','eggs','تخم‌مرغ'],
+  ['🥩','meat','گوشت'],['🍗','chicken','مرغ'],['🥓','bacon','بیکن'],['🌭','sausage','سوسیس'],
+  ['🐟','fish','ماهی'],['🦐','shrimp','میگو'],['🍤','prawns','میگو سرخ‌شده'],
+  ['🍚','rice','برنج'],['🍝','pasta','ماکارونی'],['🌾','flour','آرد'],['🥣','cereal','غلات صبحانه'],
+  ['🫘','beans','لوبیا'],['🫛','lentils','عدس'],['🧅','onion','پیاز'],['🧄','garlic','سیر'],
+  ['🥔','potato','سیب‌زمینی'],['🍅','tomato','گوجه'],['🥕','carrot','هویج'],['🥒','cucumber','خیار'],
+  ['🫑','pepper','فلفل دلمه'],['🌶️','chili','فلفل تند'],['🥬','lettuce','کاهو'],['🥦','broccoli','بروکلی'],
+  ['🍆','eggplant','بادمجان'],['🌽','corn','ذرت'],['🍄','mushroom','قارچ'],['🫒','olives','زیتون'],
+  ['🥗','salad','سالاد'],['🥑','avocado','آووکادو'],
+  ['🍎','apple','سیب'],['🍌','banana','موز'],['🍊','orange','پرتقال'],['🍋','lemon','لیمو'],
+  ['🍇','grapes','انگور'],['🍓','strawberry','توت‌فرنگی'],['🍉','watermelon','هندوانه'],['🍈','melon','خربزه'],
+  ['🍑','peach','هلو'],['🍒','cherry','گیلاس'],['🥝','kiwi','کیوی'],['🍍','pineapple','آناناس'],
+  ['🍐','pear','گلابی'],['🥭','mango','انبه'],['🍅','dates','خرما'],['🥥','coconut','نارگیل'],
+  ['🫐','blueberry','بلوبری'],['🍈','pomegranate','انار'],
+  ['☕','coffee','قهوه'],['🍵','tea','چای'],['🧃','juice','آبمیوه'],['🥤','soda','نوشابه'],
+  ['💧','water','آب'],['🍫','chocolate','شکلات'],['🍬','candy','آبنبات'],['🍪','cookies','بیسکویت'],
+  ['🍯','honey','عسل'],['🧂','salt','نمک'],['🍚','sugar','شکر'],['🫙','jam','مربا'],
+  ['🛢️','oil','روغن'],['🍶','vinegar','سرکه'],['🥫','canned','کنسرو'],['🍜','noodles','نودل'],
+  ['🧊','ice','یخ'],['🍦','icecream','بستنی'],['🍕','pizza','پیتزا'],['🥯','bagel','بیگل'],
+  ['🧻','tissue','دستمال کاغذی'],['🧼','soap','صابون'],['🧴','shampoo','شامپو'],['🪥','toothpaste','خمیردندان'],
+  ['🧹','broom','جارو'],['🧽','sponge','اسفنج'],['🗑️','trashbags','کیسه زباله'],['🔋','batteries','باتری'],
+  ['🧺','detergent','مایع لباسشویی'],['🧯','cleaner','شوینده'],['🐱','catfood','غذای گربه'],['🐶','dogfood','غذای سگ'],
+  ['🍼','babyfood','غذای کودک'],['🧷','diapers','پوشک']
+];
+function groceryMatch(q){
+  q=(q||'').trim().toLowerCase();
+  if(!q)return[];
+  return GROCERY.filter(g=>g[1].includes(q)||g[2].includes(q)).slice(0,6);
+}
 function seed(){const d=blank();
   d.shopLists={
     home:{id:'home',name:{en:'Home',fa:'خانه'},color:'#5b6cff'},
@@ -1017,7 +1050,7 @@ function renderHome(){
   if(notesHome.length){
     nh.style.display='block';
     nh.innerHTML=`<h3><span class="em">📝</span>${tr('notesH')}</h3>`+
-      notesHome.map(n=>`<div class="li" data-detail="notes:${n.id}"><span style="font-size:16px">📝</span><div class="tx">${esc(n.text)}</div></div>`).join('');
+      notesHome.map(n=>`<div class="li" style="align-items:flex-start" data-detail="notes:${n.id}"><span style="font-size:16px;margin-top:2px">📝</span><div class="tx" style="white-space:pre-wrap;line-height:1.5">${esc(n.text)}</div></div>`).join('');
     bindDetail(nh);
   } else nh.style.display='none';
 }
@@ -1363,7 +1396,7 @@ function renderShop(){
     <div class="tx">${i.pinned?'📌 ':''}${esc(i.text)}${(i.date||i.time)?`<div class="meta">${i.date?shortDate(i.date):''}${i.time?' · '+i.time:''}</div>`:''}</div>
     <button class="act ${i.pinned?'pinned':''}" data-spin="${i.id}">📌</button>
     <button class="act" data-arch="shop:${i.id}">🗄</button></div>`).join(''):`<div class="empty">${tr('noItems')}</div>`;
-  h+=`<div class="miniadd"><input id="shopInput" placeholder="${tr('addItem')}…"><button id="shopAdd">＋</button></div>`;
+  h+=`<div style="position:relative"><div class="miniadd"><input id="shopInput" autocomplete="off" placeholder="${tr('addItem')}…"><button id="shopAdd">＋</button></div><div id="shopSuggest" style="position:absolute;left:0;right:52px;top:100%;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-top:4px;box-shadow:var(--shadow);overflow:hidden;display:none"></div></div>`;
   h+=`<button class="bkbtn" id="shopBulk" style="width:100%;margin-top:8px">📝 ${L==='fa'?'افزودن چند مورد':'Add multiple items'}</button>`;
   box.innerHTML=h;
   box.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>{DB.shop[c.dataset.shop].done=!DB.shop[c.dataset.shop].done;save();render();});
@@ -1376,6 +1409,32 @@ function renderShop(){
     parts.forEach(p=>{const id=uid();DB.shop[id]={id,text:p,list:shopActive,date:null,time:null,done:false,pinned:false,archived:false};});
     save();render();setTimeout(()=>{const el=document.getElementById('shopInput');if(el)el.focus();},0);};
   btn.onclick=add;inp.addEventListener('keydown',e=>{if(e.key==='Enter')add();});
+  // ---- grocery autocomplete ----
+  const sug=document.getElementById('shopSuggest');
+  function hideSug(){if(sug){sug.style.display='none';sug.innerHTML='';}}
+  function pickItem(name){
+    const id=uid();
+    DB.shop[id]={id,text:name,list:shopActive,date:null,time:null,done:false,pinned:false,archived:false};
+    save();render();
+    setTimeout(()=>{const el=document.getElementById('shopInput');if(el)el.focus();},0);
+  }
+  inp.addEventListener('input',()=>{
+    const matches=groceryMatch(inp.value);
+    if(!matches.length){hideSug();return;}
+    sug.innerHTML=matches.map(g=>{
+      const label=(L==='fa')?g[2]:g[1];
+      const sub=(L==='fa')?g[1]:g[2];
+      return `<div class="sug-item" data-emoji="${g[0]}" data-name="${esc(g[0]+' '+label)}" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line2)">
+        <span style="font-size:20px">${g[0]}</span>
+        <span style="font-weight:600;font-size:14px">${label}</span>
+        <span style="color:var(--mut);font-size:12px;margin-${L==='fa'?'right':'left'}:auto">${sub}</span></div>`;
+    }).join('');
+    sug.style.display='block';
+    sug.querySelectorAll('.sug-item').forEach(it=>it.onclick=()=>{
+      hideSug();inp.value='';pickItem(it.dataset.name);
+    });
+  });
+  inp.addEventListener('blur',()=>setTimeout(hideSug,200));
   document.getElementById('shopBulk').onclick=()=>bulkShopSheet();
   bindDetail(box);
 }
@@ -1460,7 +1519,7 @@ function renderNotes(){
   if(!all.length){box.innerHTML=`<div class="empty">${tr('noNotes')}</div>`;return;}
   box.innerHTML=all.map(n=>{
     const conflict=n._isConflict?'<span style="color:#d4434f;font-size:11px;display:block;margin-top:2px">⚠️ Conflict copy</span>':'';
-    return `<div class="li" data-detail="notes:${n.id}"><span style="font-size:18px">📝</span><div class="tx"><div style="white-space:pre-wrap;line-height:1.5">${n.pinned?'📌 ':''}${esc(n.text)}</div>${conflict}</div>${metaActions('notes',n)}</div>`;
+    return `<div class="li" style="align-items:flex-start" data-detail="notes:${n.id}"><span style="font-size:18px;margin-top:2px">📝</span><div class="tx"><div style="white-space:pre-wrap;line-height:1.5">${n.pinned?'📌 ':''}${esc(n.text)}</div>${conflict}</div>${metaActions('notes',n)}</div>`;
   }).join('');
   bindMeta(box);bindDetail(box);
 }
