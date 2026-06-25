@@ -260,6 +260,19 @@ function initFirebase(){
 </script>
 </head>
 <body>
+<!-- ===== SPLASH (shown while auth resolves) ===== -->
+<div id="splashOverlay" style="position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,#2E4FE0,#9d7bff);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px">
+  <div style="width:64px;height:64px;border-radius:18px;background:rgba(255,255,255,.15);color:#fff;font-size:32px;font-weight:800;display:flex;align-items:center;justify-content:center">M</div>
+  <div style="color:#fff;font-size:18px;font-weight:700;letter-spacing:.5px">MBM Life</div>
+  <div style="color:rgba(255,255,255,.7);font-size:13px" id="splashMsg">Checking sign-in…</div>
+  <div style="width:36px;height:4px;border-radius:4px;background:rgba(255,255,255,.25);overflow:hidden;margin-top:4px">
+    <div style="height:100%;background:#fff;border-radius:4px;animation:splashbar 1.2s ease-in-out infinite"></div>
+  </div>
+</div>
+<style>
+@keyframes splashbar{0%{width:0%;margin-left:0}50%{width:100%;margin-left:0}100%{width:0%;margin-left:100%}}
+</style>
+
 <!-- ===== LOGIN OVERLAY (Firebase Auth) ===== -->
 <div id="authOverlay" style="position:fixed;inset:0;z-index:9999;background:linear-gradient(160deg,#2E4FE0,#9d7bff);display:none;align-items:center;justify-content:center;padding:24px">
   <div style="background:#fff;border-radius:22px;max-width:380px;width:100%;padding:28px 22px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:Georgia,serif">
@@ -541,7 +554,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v31';                 // bump on each deploy; used for update detection
+const APP_VERSION='v32';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -2098,21 +2111,31 @@ async function tasksPush(){
 function startTasksSync(){ tasksListen(); }
 function stopTasksSync(){ if(tasksUnsub){tasksUnsub();tasksUnsub=null;} syncOn=false; }
 
+function showSplash(show){
+  const s=document.getElementById('splashOverlay');
+  if(s)s.style.display=show?'flex':'none';
+}
 function startAuth(){
   if(!initFirebase()){
-    // Not configured → run fully offline (no login wall), exactly like before
+    // Not configured → run fully offline, no login wall
+    showSplash(false);
     showLogin(false);
     render();
     return;
   }
-  // configured → gate the app behind login
-  showLogin(true);
+  // Show splash, hide login until auth resolves
+  showSplash(true);
+  showLogin(false);
+  let resolved=false;
   FB.auth.getRedirectResult().catch(err=>{ if(err&&err.message)setAuthMsg(err.message); });
   FB.auth.onAuthStateChanged(u=>{
     FB.user=u||null;
+    if(!resolved){ resolved=true; showSplash(false); }
     if(u){ showLogin(false); setAuthMsg(''); applyAuthUI(); render(); startTasksSync(); }
     else { stopTasksSync(); showLogin(true); }
   });
+  // Safety timeout: if Firebase hangs, hide splash after 5s and show login
+  setTimeout(()=>{ if(!resolved){ resolved=true; showSplash(false); showLogin(true); } },5000);
 }
 startAuth();
 </script>
