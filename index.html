@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v38';                 // bump on each deploy; used for update detection
+const APP_VERSION='v39';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -1757,52 +1757,89 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{nav(b.dataset
      4. already Home       -> allow exit (don't preventDefault)
 */
 const SUBSCREENS=['appts','bills','bdays','notes','archive','history','cats','reports','search','profile','settings'];
+const TABS=['home','tasks','cal','shop','more'];
 function modalOpen(){const m=document.getElementById('modal');return m&&m.classList.contains('on');}
-const _scrollMem={};  // remembers scroll position per screen
-function nav(to,viaPop){
-  if(to===screen){return;}
-  // save current screen's scroll position before leaving
-  _scrollMem[screen]=window.scrollY||document.documentElement.scrollTop||0;
+
+/* ===================== STACK NAVIGATOR =====================
+   navStack = array of open screens, e.g. ['more','settings','reports'].
+   - Bottom tabs reset to their own root (single-entry stack).
+   - data-go pushes a new screen onto the stack.
+   - Back (button or Android) pops the stack.
+   - Only the top screen is rendered; scroll position saved per depth.
+*/
+let navStack=['home'];
+const _scrollMem={};  // scroll position keyed by stack depth signature
+
+function _stackKey(){ return navStack.join('>'); }
+
+function _applyScreen(viaPop){
+  const to=navStack[navStack.length-1];
   screen=to;
-  if(!viaPop){ try{history.pushState({t:'screen',screen:to},'');}catch(e){} }
   if(to==='profile'||to==='settings')applyAuthUI();
   render();
-  // restore scroll: subscreens start at top, returning to a parent restores its position
   requestAnimationFrame(()=>{
-    const y = (viaPop && _scrollMem[to]!=null) ? _scrollMem[to] : 0;
+    const y=(viaPop && _scrollMem[_stackKey()]!=null)?_scrollMem[_stackKey()]:0;
     window.scrollTo(0,y);
   });
 }
+
+// Navigate: tab switch (reset root) vs push (drill into a subscreen)
+function nav(to){
+  if(to===screen && navStack.length===1)return;
+  // save current scroll
+  _scrollMem[_stackKey()]=window.scrollY||document.documentElement.scrollTop||0;
+
+  if(TABS.includes(to)){
+    // Bottom tab → reset that tab's stack to its root
+    navStack=[to];
+    try{history.pushState({t:'screen',stack:navStack.slice()},'');}catch(e){}
+    _applyScreen(false);
+    return;
+  }
+  // Subscreen → push onto stack
+  if(to===screen)return;
+  navStack.push(to);
+  try{history.pushState({t:'screen',stack:navStack.slice()},'');}catch(e){}
+  _applyScreen(false);
+}
+
+// Pop the stack (Back). Returns true if it handled the back.
+function navPop(){
+  if(navStack.length>1){
+    _scrollMem[_stackKey()]=0;            // leaving the top page
+    navStack.pop();
+    _applyScreen(true);
+    return true;
+  }
+  // At a tab root
+  if(navStack[0]!=='home'){
+    navStack=['home'];
+    _applyScreen(true);
+    return true;
+  }
+  return false; // already at Home root → allow app exit
+}
+
 window.addEventListener('popstate',e=>{
-  // login overlay visible: let default happen (nothing to navigate)
   const ov=document.getElementById('authOverlay');
   if(ov&&ov.style.display!=='none'){return;}
-  // 1) modal/sheet open -> close it, keep us where we are
-  if(modalOpen()){
-    _modalState=false;
-    closeSheet(true);
+  if(modalOpen()){ _modalState=false; closeSheet(true);
+    try{history.pushState({t:'modal'},'');}catch(_){}
+    return; }
+  // Prefer the stack stored in the history state we're landing on
+  const st=(e.state&&e.state.stack)?e.state.stack.slice():null;
+  if(st){
+    _scrollMem[_stackKey()]=window.scrollY||0;
+    navStack=st;
+    _applyScreen(true);
     return;
   }
-  // 2) subscreen -> parent (More)
-  if(SUBSCREENS.includes(screen)){
-    _scrollMem[screen]=0;
-    screen='more'; render();
-    requestAnimationFrame(()=>window.scrollTo(0,_scrollMem['more']||0));
-    try{history.pushState({t:'screen',screen:'more'},'');}catch(_){}
-    return;
-  }
-  // 3) main tab (not home) -> Home
-  if(screen!=='home'){
-    screen='home'; render();
-    requestAnimationFrame(()=>window.scrollTo(0,_scrollMem['home']||0));
-    try{history.pushState({t:'screen',screen:'home'},'');}catch(_){}
-    return;
-  }
-  // 4) already home -> allow exit (do nothing; Android handles it)
+  // Fallback: manual pop
+  navPop();
 });
-try{history.replaceState({t:'screen',screen:'home'},'');}catch(e){}
+try{history.replaceState({t:'screen',stack:['home']},'');}catch(e){}
 document.querySelectorAll('[data-go]').forEach(c=>c.onclick=()=>{nav(c.dataset.go);});
-document.querySelectorAll('[data-back]').forEach(c=>c.onclick=()=>{nav(c.dataset.back);});
+document.querySelectorAll('[data-back]').forEach(c=>c.onclick=()=>{navPop();});
 document.getElementById('taskSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{taskFilter=b.dataset.f;render();});
 document.getElementById('calSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{calView=b.dataset.v;render();});
 document.querySelectorAll('#whoRow button').forEach(b=>b.onclick=()=>{USER=b.dataset.u;DB.meta.user=USER;save();render();});
