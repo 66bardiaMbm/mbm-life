@@ -212,6 +212,8 @@ body.rtl .fab{right:auto;left:20px}
 .counter.bills .cn{color:var(--info)}
 .counter.bday .cn{color:var(--brand2)}
 .bkrow{display:flex;gap:8px;flex-wrap:wrap}
+.set-section{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--soft);margin:18px 6px 6px;}
+.set-section:first-of-type{margin-top:6px;}
 .bkbtn{flex:1;min-width:90px;background:var(--bg);border:1px solid var(--line);color:var(--ink);padding:12px;border-radius:13px;font-weight:700;font-size:13px;cursor:pointer}
 .bkbtn:active{background:var(--brand);color:#fff}
 .bkhint{font-size:12px;color:var(--mut);margin-top:10px;min-height:0}
@@ -471,22 +473,56 @@ function initFirebase(){
       </div>
       <span style="color:var(--mut)">›</span>
     </div>
-    <div class="card" id="syncCard" style="display:none">
-      <h3 style="margin:0 0 8px"><span class="em">☁️</span><span id="syncCardT">Sync</span></h3>
-      <div id="syncStatusLine" style="font-size:13px;color:var(--mut);margin-bottom:10px">—</div>
-      <button class="bkbtn" id="syncNowBtn" style="width:100%">🔄 Sync now</button>
-      <div id="syncLimitNote" style="font-size:12px;color:var(--soft);margin-top:10px;line-height:1.5"></div>
-    </div>
     <div class="card rowbtn" data-go="appts"><h3 style="margin:0"><span class="em">📅</span><span id="m-appts">Appointments</span></h3><span style="color:var(--mut)">›</span></div>
     <div class="card rowbtn" data-go="bills"><h3 style="margin:0"><span class="em">💳</span><span id="m-bills">Bills</span></h3><span style="color:var(--mut)">›</span></div>
     <div class="card rowbtn" data-go="bdays"><h3 style="margin:0"><span class="em">🎂</span><span id="m-bdays">Birthdays</span></h3><span style="color:var(--mut)">›</span></div>
     <div class="card rowbtn" data-go="notes"><h3 style="margin:0"><span class="em">📝</span><span id="m-notes">Notes</span></h3><span style="color:var(--mut)">›</span></div>
-    <div class="card rowbtn" data-go="archive"><h3 style="margin:0"><span class="em">🗄️</span><span id="m-archive">Archive</span></h3><span style="color:var(--mut)">›</span></div>
-    <div class="card rowbtn" data-go="history"><h3 style="margin:0"><span class="em">🕘</span><span id="m-history">Activity History</span></h3><span style="color:var(--mut)">›</span></div>
+    <div class="card rowbtn" data-go="settings"><h3 style="margin:0"><span class="em">⚙️</span><span id="m-settings">Settings</span></h3><span style="color:var(--mut)">›</span></div>
+    <div class="syncnote" id="syncnote">Offline · saved on this device</div>
+  </section>
+
+  <!-- SETTINGS / TOOLS -->
+  <section class="screen" id="sc-settings">
+    <h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="settings-h">Settings</span></h2>
+
+    <!-- ACCOUNT -->
+    <div class="set-section" id="set-account-h">Account</div>
+    <div class="card rowbtn" data-go="profile">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <img id="setAvatar" src="" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;display:none">
+        <div id="setAvatarFb" style="width:34px;height:34px;border-radius:50%;background:var(--acc);color:#fff;font-size:16px;display:flex;align-items:center;justify-content:center">👤</div>
+        <div>
+          <div id="setProfName" style="font-weight:600;font-size:14px">Profile</div>
+          <div id="setProfEmail" style="font-size:12px;color:var(--mut)">Account &amp; sign out</div>
+        </div>
+      </div>
+      <span style="color:var(--mut)">›</span>
+    </div>
+
+    <!-- SYNC -->
+    <div class="set-section" id="set-sync-h">Sync</div>
+    <div class="card rowbtn" id="syncCard" style="display:none;padding:14px" data-go="settings">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <span class="em" style="margin:0">☁️</span>
+        <div>
+          <div style="font-weight:600;font-size:14px"><span id="syncCardT">Cloud sync</span></div>
+          <div id="syncStatusLine" style="font-size:12px;color:var(--mut);margin-top:1px">—</div>
+        </div>
+      </div>
+      <button class="bkbtn" id="syncNowBtn" style="flex:none;padding:8px 14px">🔄</button>
+    </div>
+    <div id="syncLimitNote" style="font-size:11px;color:var(--soft);margin:0 4px 4px;line-height:1.5"></div>
+
+    <!-- TOOLS -->
+    <div class="set-section" id="set-tools-h">Tools</div>
     <div class="card rowbtn" data-go="reports"><h3 style="margin:0"><span class="em">📊</span><span id="m-reports2">Reports</span></h3><span style="color:var(--mut)">›</span></div>
     <div class="card rowbtn" data-go="cats"><h3 style="margin:0"><span class="em">🏷️</span><span id="m-cats">Categories</span></h3><span style="color:var(--mut)">›</span></div>
+    <div class="card rowbtn" data-go="archive"><h3 style="margin:0"><span class="em">🗄️</span><span id="m-archive">Archive</span></h3><span style="color:var(--mut)">›</span></div>
+    <div class="card rowbtn" data-go="history"><h3 style="margin:0"><span class="em">🕘</span><span id="m-history">Activity History</span></h3><span style="color:var(--mut)">›</span></div>
+
+    <!-- BACKUP -->
+    <div class="set-section" id="set-backup-h">Backup &amp; Restore</div>
     <div class="card">
-      <h3><span class="em">💾</span><span id="m-backup">Backup &amp; Restore</span></h3>
       <div class="bkrow">
         <button class="bkbtn" id="bkJson">Export JSON</button>
         <button class="bkbtn" id="bkCsv">Export CSV</button>
@@ -498,13 +534,14 @@ function initFirebase(){
       <div id="bkHistory"></div>
     </div>
 
-    <div class="card" id="aboutCard" style="margin-top:10px">
+    <!-- ABOUT -->
+    <div class="set-section" id="set-about-h">About</div>
+    <div class="card" id="aboutCard">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
         <div><b id="aboutName">MBM Life</b> <span id="aboutVer" style="color:var(--mut);font-size:13px"></span><div id="aboutUpd" style="font-size:12px;color:var(--soft);margin-top:3px"></div><div id="aboutEmail" style="font-size:12px;color:var(--mut);margin-top:4px;word-break:break-all"></div></div>
         <button class="bkbtn" id="checkUpdBtn" style="flex:none">🔄 <span id="checkUpdL">Check update</span></button>
       </div>
     </div>
-    <div class="syncnote" id="syncnote">Offline · saved on this device</div>
   </section>
 
   <section class="screen" id="sc-appts"><h2 class="sc"><span class="bk" data-back="more">‹ </span><span id="appts-h">Appointments</span></h2><div class="card" id="apptList"></div></section>
@@ -591,7 +628,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v34';                 // bump on each deploy; used for update detection
+const APP_VERSION='v36';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -744,7 +781,7 @@ const T={
    pinned:'Pinned',todaysFocus:"Today's Focus",comingUp:'Coming Up',
    allClear:'All clear ✨',nothingToday:'Nothing for today 🎉',nothingNext:'Nothing coming up',noPinned:'',
    active:'Active',noTasks:'No tasks here.',month:'Month',week:'Week',day:'Day',
-   shopTitle:'Shopping',bills:'Bills',bdays:'Birthdays',notes:'Notes',archive:'Archive',
+   shopTitle:'Shopping',bills:'Bills',bdays:'Birthdays',notes:'Notes',archive:'Archive',settingsT:'Settings',setAccount:'Account',setSync:'Sync',setTools:'Tools',setBackup:'Backup & Restore',setAbout:'About',
    apptH:'Appointments',billsH:'Bills',bdaysH:'Birthdays',notesH:'Notes',archH:'Archive',search:'Search',searchPh:'Search…',
    addTask:'Add Task',addAppt:'Add Appointment',addBill:'Add Bill',addBday:'Add Birthday',addNote:'Add Note',addItem:'Add Item',
    title:'Title',date:'Date',time:'Time',location:'Location',notesF:'Notes',priority:'Priority',assign:'Assign to',repeat:'Repeat',
@@ -766,7 +803,7 @@ const T={
    pinned:'سنجاق‌شده',todaysFocus:'تمرکز امروز',comingUp:'در پیش',
    allClear:'همه‌چی مرتبه ✨',nothingToday:'برای امروز چیزی نیست 🎉',nothingNext:'چیزی در پیش نیست',noPinned:'',
    active:'فعال',noTasks:'کاری اینجا نیست.',month:'ماه',week:'هفته',day:'روز',
-   shopTitle:'خرید',bills:'قبض‌ها',bdays:'تولدها',notes:'یادداشت‌ها',archive:'آرشیو',
+   shopTitle:'خرید',bills:'قبض‌ها',bdays:'تولدها',notes:'یادداشت‌ها',archive:'آرشیو',settingsT:'تنظیمات',setAccount:'حساب کاربری',setSync:'همگام‌سازی',setTools:'ابزارها',setBackup:'پشتیبان‌گیری',setAbout:'درباره',
    apptH:'قرارها',billsH:'قبض‌ها',bdaysH:'تولدها',notesH:'یادداشت‌ها',archH:'آرشیو',search:'جستجو',searchPh:'جستجو…',
    addTask:'کار جدید',addAppt:'قرار جدید',addBill:'قبض جدید',addBday:'تولد جدید',addNote:'یادداشت جدید',addItem:'آیتم جدید',
    title:'عنوان',date:'تاریخ',time:'ساعت',location:'مکان',notesF:'یادداشت',priority:'اولویت',assign:'واگذار به',repeat:'تکرار',
@@ -826,7 +863,7 @@ function render(){
   document.getElementById('langbtn').textContent=L==='en'?'FA':'EN';
   ['brandtxt:brand','nv-home:home','nv-tasks:tasks','nv-cal:cal','nv-shop:shop','nv-more:more',
    'tasksTitle:tasks','calTitleTop:cal','shopTitle:shopTitle','moreTitle:more','searchTitle:search',
-   'm-appts:apptH','m-bills:billsH','m-bdays:bdaysH','m-notes:notesH','m-archive:archH','m-history:histH','m-reports:reports','m-reports2:reportsT','m-cats:catsT','m-backup:backup',
+   'm-appts:apptH','m-bills:billsH','m-bdays:bdaysH','m-notes:notesH','m-archive:archH','m-history:histH','m-reports:reports','m-reports2:reportsT','m-cats:catsT','m-backup:backup','m-settings:settingsT','settings-h:settingsT','set-account-h:setAccount','set-sync-h:setSync','set-tools-h:setTools','set-backup-h:setBackup','set-about-h:setAbout',
    'appts-h:apptH','bills-h:billsH','bdays-h:bdaysH','notes-h:notesH','arch-h:archH','cats-h:catsT','reports-h:reportsT','catAddL:catAdd','syncnote:sync',
    'hist-h:histH','hf-user-l:userF','hf-act-l:actionF','hf-from-l:fromF','hf-to-l:toF',
    'sf-type-l:typeF','sf-user-l:userF','sf-status-l:statusL','sf-from-l:fromF','sf-to-l:toF',
@@ -841,10 +878,10 @@ function render(){
 
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   const map={home:'sc-home',tasks:'sc-tasks',cal:'sc-cal',shop:'sc-shop',more:'sc-more',
-    appts:'sc-appts',bills:'sc-bills',bdays:'sc-bdays',notes:'sc-notes',archive:'sc-archive',history:'sc-history',cats:'sc-cats',reports:'sc-reports',search:'sc-search',profile:'sc-profile'};
+    appts:'sc-appts',bills:'sc-bills',bdays:'sc-bdays',notes:'sc-notes',archive:'sc-archive',history:'sc-history',cats:'sc-cats',reports:'sc-reports',search:'sc-search',profile:'sc-profile',settings:'sc-settings'};
   document.getElementById(map[screen]).classList.add('on');
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.s===screen||
-    (['appts','bills','bdays','notes','archive','history','cats','reports'].includes(screen)&&b.dataset.s==='more')));
+    (['appts','bills','bdays','notes','archive','history','cats','reports','profile','settings'].includes(screen)&&b.dataset.s==='more')));
 
   ({home:renderHome,tasks:renderTasks,cal:renderCal,shop:renderShop,appts:renderAppts,
     bills:renderBills,bdays:renderBdays,notes:renderNotes,archive:renderArchive,history:renderHistory,cats:renderCats,reports:renderReports,search:renderSearch}[screen]||(()=>{}))();
@@ -1699,13 +1736,13 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{nav(b.dataset
      3. on a main tab     -> go Home
      4. already Home       -> allow exit (don't preventDefault)
 */
-const SUBSCREENS=['appts','bills','bdays','notes','archive','history','cats','reports','search','profile'];
+const SUBSCREENS=['appts','bills','bdays','notes','archive','history','cats','reports','search','profile','settings'];
 function modalOpen(){const m=document.getElementById('modal');return m&&m.classList.contains('on');}
 function nav(to,viaPop){
   if(to===screen){return;}
   screen=to;
   if(!viaPop){ try{history.pushState({t:'screen',screen:to},'');}catch(e){} }
-  if(to==='profile')applyAuthUI();
+  if(to==='profile'||to==='settings')applyAuthUI();
   render();
 }
 window.addEventListener('popstate',e=>{
@@ -2023,6 +2060,13 @@ function applyAuthUI(){
     const pe=document.getElementById('profEmail'); if(pe)pe.textContent=email;
     const mn=document.getElementById('moreProfName'); if(mn)mn.textContent=name;
     const me=document.getElementById('moreProfEmail'); if(me)me.textContent=email;
+    // Settings > Account row
+    const setAv=document.getElementById('setAvatar');
+    const setAvFb=document.getElementById('setAvatarFb');
+    if(setAv){setAv.src=photo;setAv.style.display=photo?'block':'none';}
+    if(setAvFb)setAvFb.style.display=photo?'none':'flex';
+    const sn=document.getElementById('setProfName'); if(sn)sn.textContent=name;
+    const se=document.getElementById('setProfEmail'); if(se)se.textContent=email;
   }
   const pss=document.getElementById('profSyncStatus'); if(pss)pss.textContent=syncLabel();
   const pls=document.getElementById('profLastSync');
