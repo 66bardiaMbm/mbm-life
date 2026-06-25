@@ -260,33 +260,66 @@ function initFirebase(){
 </script>
 </head>
 <body>
-<!-- ===== SPLASH (shown while auth resolves) ===== -->
-<div id="splashOverlay" style="position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,#2E4FE0,#9d7bff);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px">
-  <div style="width:64px;height:64px;border-radius:18px;background:rgba(255,255,255,.15);color:#fff;font-size:32px;font-weight:800;display:flex;align-items:center;justify-content:center">M</div>
-  <div style="color:#fff;font-size:18px;font-weight:700;letter-spacing:.5px">MBM Life</div>
-  <div style="color:rgba(255,255,255,.7);font-size:13px" id="splashMsg">Checking sign-in…</div>
-  <div style="width:36px;height:4px;border-radius:4px;background:rgba(255,255,255,.25);overflow:hidden;margin-top:4px">
-    <div style="height:100%;background:#fff;border-radius:4px;animation:splashbar 1.2s ease-in-out infinite"></div>
-  </div>
-</div>
+
 <style>
-@keyframes splashbar{0%{width:0%;margin-left:0}50%{width:100%;margin-left:0}100%{width:0%;margin-left:100%}}
+/* ===== AUTH STYLES ===== */
+@keyframes splashbar{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+#splashOverlay,#authOverlay{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+#splashOverlay{background:linear-gradient(160deg,#1a2e6e 0%,#2E4FE0 50%,#6c47ff 100%);}
+#authOverlay{background:linear-gradient(160deg,#1a2e6e 0%,#2E4FE0 50%,#6c47ff 100%);display:none;overflow-y:auto;padding:0;}
+.auth-card{background:#fff;border-radius:28px 28px 0 0;width:100%;max-width:480px;padding:36px 28px 48px;margin-top:auto;box-shadow:0 -8px 40px rgba(0,0,0,.18);animation:fadeInUp .4s ease both;}
+.auth-logo-wrap{text-align:center;padding:48px 0 32px;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.auth-logo{width:72px;height:72px;border-radius:20px;background:rgba(255,255,255,.15);backdrop-filter:blur(10px);border:2px solid rgba(255,255,255,.3);color:#fff;font-size:36px;font-weight:900;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 8px 32px rgba(0,0,0,.2);}
+.auth-logo-title{color:#fff;font-size:26px;font-weight:800;letter-spacing:-.5px;margin-bottom:6px;}
+.auth-logo-sub{color:rgba(255,255,255,.7);font-size:14px;}
+.auth-card h2{font-size:22px;font-weight:800;color:#1a2036;margin:0 0 6px;}
+.auth-card p{font-size:14px;color:#6b7280;margin:0 0 28px;line-height:1.5;}
+.auth-google-btn{width:100%;box-sizing:border-box;padding:16px;border:1.5px solid #e5e7eb;border-radius:14px;background:#fff;color:#1a2036;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:12px;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,.06);}
+.auth-google-btn:active{background:#f8f9ff;transform:scale(.98);}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:#9ca3af;font-size:12px;}
+.auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:#e5e7eb;}
+.auth-future{display:flex;gap:10px;margin-bottom:20px;}
+.auth-future-btn{flex:1;padding:14px;border:1.5px solid #e5e7eb;border-radius:14px;background:#f9fafb;color:#9ca3af;font-size:13px;font-weight:600;cursor:not-allowed;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.auth-future-btn span{font-size:20px;}
+.auth-privacy{font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;line-height:1.6;}
+#authMsg{margin-top:14px;font-size:13px;color:#d4434f;text-align:center;min-height:16px;font-weight:500;}
+.splash-progress{width:48px;height:3px;border-radius:3px;background:rgba(255,255,255,.2);overflow:hidden;margin-top:24px;}
+.splash-bar{height:100%;width:40%;background:#fff;border-radius:3px;animation:splashbar 1s ease-in-out infinite;}
 </style>
 
-<!-- ===== LOGIN OVERLAY (Firebase Auth) ===== -->
-<div id="authOverlay" style="position:fixed;inset:0;z-index:9999;background:linear-gradient(160deg,#2E4FE0,#9d7bff);display:none;align-items:center;justify-content:center;padding:24px">
-  <div style="background:#fff;border-radius:22px;max-width:380px;width:100%;padding:28px 22px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:Georgia,serif">
-    <div style="text-align:center;margin-bottom:18px">
-      <div style="display:inline-flex;width:54px;height:54px;border-radius:14px;background:linear-gradient(160deg,#2E4FE0,#9d7bff);color:#fff;align-items:center;justify-content:center;font-size:26px;font-weight:800">M</div>
-      <h2 style="margin:12px 0 2px;font-size:22px;color:#1a2036">MBM Life</h2>
-      <div id="authSub" style="font-size:13px;color:#6b7280">Family sign in</div>
-    </div>
-    <button id="authGoogle" style="width:100%;box-sizing:border-box;padding:14px;border:1px solid #d9deec;border-radius:12px;background:#fff;color:#1a2036;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+<!-- ===== SPLASH ===== -->
+<div id="splashOverlay">
+  <div class="auth-logo-wrap">
+    <div class="auth-logo">M</div>
+    <div class="auth-logo-title">MBM Life</div>
+    <div class="auth-logo-sub">Family Planner</div>
+    <div class="splash-progress"><div class="splash-bar"></div></div>
+  </div>
+</div>
+
+<!-- ===== LOGIN ===== -->
+<div id="authOverlay">
+  <div class="auth-logo-wrap" style="padding:40px 28px 24px">
+    <div class="auth-logo">M</div>
+    <div class="auth-logo-title">Welcome to MBM Life</div>
+    <div class="auth-logo-sub">Family planner for Bahman &amp; Mahsa</div>
+  </div>
+  <div class="auth-card">
+    <h2>Sign in</h2>
+    <p>Use your family Google account to access your shared planner.</p>
+    <button class="auth-google-btn" id="authGoogle">
       <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-7.6l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.3 5.3C40.9 35.5 44 30.2 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
-      Sign in with Google
+      Continue with Google
     </button>
-    <div id="authMsg" style="margin-top:12px;font-size:13px;color:#d4434f;text-align:center;min-height:18px"></div>
-    <div style="margin-top:6px;font-size:11px;color:#9aa1b0;text-align:center">Bahman &amp; Mahsa · MBM Family</div>
+    <div class="auth-divider">coming soon</div>
+    <div class="auth-future">
+      <div class="auth-future-btn"><span>🔢</span>4-digit PIN</div>
+      <div class="auth-future-btn"><span>👆</span>Fingerprint</div>
+    </div>
+    <div id="authMsg"></div>
+    <div class="auth-privacy">🔒 Your data is encrypted and synced securely via Google Firebase.<br>MBM Life does not share your data with third parties.</div>
   </div>
 </div>
 <div class="app">
@@ -554,7 +587,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v32';                 // bump on each deploy; used for update detection
+const APP_VERSION='v33';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -1917,7 +1950,13 @@ clockTimer=setInterval(tick,1000);
 /* ===================== AUTH (Gam 1) ===================== */
 const authOverlay=document.getElementById('authOverlay');
 const authMsg=document.getElementById('authMsg');
-function showLogin(show){authOverlay.style.display=show?'flex':'none';}
+function showLogin(show){
+  const ov=document.getElementById('authOverlay');
+  if(!ov)return;
+  ov.style.display=show?'flex':'none';
+  // smooth entry
+  if(show){ov.style.opacity='0';requestAnimationFrame(()=>{ov.style.transition='opacity .3s';ov.style.opacity='1';});}
+}
 function setAuthMsg(t,ok){authMsg.style.color=ok?'#1fae6b':'#d4434f';authMsg.textContent=t||'';}
 function whoLabel(){
   if(!FB.user)return '';
