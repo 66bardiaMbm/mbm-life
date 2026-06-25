@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v46';                 // bump on each deploy; used for update detection
+const APP_VERSION='v47';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -1516,11 +1516,12 @@ function renderShop(){
   }
   h+=items.length?items.map(i=>`<div class="li ${i.done?'done':''}" data-detail="shop:${i.id}">
     <div class="check ${i.done?'on':''}" data-shop="${i.id}"></div>
-    <div class="tx">${i.pinned?'📌 ':''}${esc(i.text)}${(i.date||i.time)?`<div class="meta">${i.date?shortDate(i.date):''}${i.time?' · '+i.time:''}</div>`:''}</div>
+    <div class="tx">${i.pinned?'📌 ':''}${esc(i.text)}${(i.date||i.time||i.location)?`<div class="meta">${i.date?shortDate(i.date):''}${i.time?' · '+i.time:''}${i.location?' · 📍'+esc(i.location.length>20?i.location.slice(0,20)+'…':i.location):''}</div>`:''}</div>
     <button class="act ${i.pinned?'pinned':''}" data-spin="${i.id}">📌</button>
     <button class="act" data-sedit="${i.id}">✏️</button>
     <button class="act" data-arch="shop:${i.id}">🗄</button></div>`).join(''):`<div class="empty">${tr('noItems')}</div>`;
   h+=`<div style="position:relative"><div class="miniadd"><input id="shopInput" autocomplete="off" placeholder="${tr('addItem')}…"><button id="shopAdd">＋</button></div><div id="shopSuggest" style="position:absolute;left:0;right:52px;top:100%;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-top:4px;box-shadow:var(--shadow);overflow:hidden;display:none"></div></div>`;
+  h+=`<button class="bkbtn" id="shopDetailed" style="width:100%;margin-top:8px">📍 ${L==='fa'?'افزودن با تاریخ و مکان':'Add with date & location'}</button>`;
   h+=`<button class="bkbtn" id="shopBulk" style="width:100%;margin-top:8px">📝 ${L==='fa'?'افزودن چند مورد':'Add multiple items'}</button>`;
   box.innerHTML=h;
   box.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>{DB.shop[c.dataset.shop].done=!DB.shop[c.dataset.shop].done;save();render();});
@@ -1563,9 +1564,34 @@ function renderShop(){
   });
   inp.addEventListener('blur',()=>setTimeout(hideSug,200));
   document.getElementById('shopBulk').onclick=()=>bulkShopSheet();
+  document.getElementById('shopDetailed').onclick=()=>addShopSheet();
   bindDetail(box);
 }
 // Add many shop items at once, with one shared (optional) date/time applied to all
+function addShopSheet(){
+  openSheet(`<h3>🛒 ${tr('addItem')}</h3>
+   <div class="fld"><label>${tr('title')}</label><input id="f_text" autofocus placeholder="${tr('addItem')}…"></div>
+   <div class="frow"><div class="fld"><label>${tr('date')}</label><input id="f_date" type="date"></div>
+     <div class="fld"><label>${tr('time')}</label><input id="f_time" type="time"></div></div>
+   <div class="fld"><label>${tr('location')}</label>
+     <div style="display:flex;gap:8px">
+       <input id="f_loc" placeholder="${L==='fa'?'مثلاً Woolworths Moonah':'e.g. Woolworths Moonah'}" style="flex:1">
+       <button type="button" id="f_loc_map" class="bkbtn" style="flex:none;padding:8px 12px">🗺️</button>
+       <button type="button" id="f_loc_gps" class="bkbtn" style="flex:none;padding:8px 12px">📍</button>
+     </div>
+     <div style="font-size:11px;color:var(--soft);margin-top:5px">${L==='fa'?'🗺️ باز کردن در نقشه · 📍 موقعیت فعلی':'🗺️ open in Maps · 📍 current location'}</div></div>
+   <button class="savebtn" id="f_save">${tr('save')}</button><button class="cancel" id="f_cancel">${tr('cancel')}</button>`);
+  const tg=document.getElementById('f_loc_gps');if(tg)tg.onclick=()=>fillCurrentLocation('f_loc',tg);
+  const tm=document.getElementById('f_loc_map');if(tm)tm.onclick=()=>{const v=document.getElementById('f_loc').value.trim();if(!v){toast(L==='fa'?'اول مکان را بنویسید':'Type a location first');return;}window.open(mapsLink(v),'_blank');};
+  document.getElementById('f_save').onclick=()=>{
+    const text=val('f_text');if(!text){toast(tr('vTitle'));flashField('f_text');return;}
+    const id=uid();
+    DB.shop[id]={id,text,list:shopActive,date:val('f_date')||null,time:val('f_time')||null,location:val('f_loc')||'',done:false,pinned:false,archived:false};
+    logHistory('added','shop',text);
+    save();closeSheet();render();
+  };
+  document.getElementById('f_cancel').onclick=closeSheet;
+}
 function bulkShopSheet(){
   const h=`<h3>${L==='fa'?'افزودن چند مورد':'Add multiple items'}</h3>
    <div class="fld"><label>${L==='fa'?'هر مورد در یک خط':'One item per line'}</label>
