@@ -643,7 +643,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v48';                 // bump on each deploy; used for update detection
+const APP_VERSION='v49';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -780,8 +780,12 @@ function attachLocationAutocomplete(inputId){
     if(q===lastQ)return;
     timer=setTimeout(()=>{
       lastQ=q;
-      fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=5&q='+encodeURIComponent(q),
-        {headers:{'Accept':'application/json'}})
+      // Restrict to Australia + bias toward Tasmania/Hobart so local stores rank first
+      const url='https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=6'
+        +'&countrycodes=au'
+        +'&viewbox=144.5,-43.7,148.5,-40.5&bounded=0'  // Tasmania bounding box (soft bias)
+        +'&q='+encodeURIComponent(q);
+      fetch(url,{headers:{'Accept':'application/json'}})
         .then(r=>r.json())
         .then(d=>{ if(inp.value.trim()===q) show(d); })
         .catch(()=>{});
