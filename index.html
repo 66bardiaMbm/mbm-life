@@ -203,14 +203,12 @@ body.rtl .fab{right:auto;left:20px}
 .herotop{margin-bottom:4px}
 .dualclock{display:flex;gap:10px;margin-top:14px}
 .cz{flex:1;background:rgba(255,255,255,.14);border-radius:16px;padding:13px 10px;text-align:center;backdrop-filter:blur(4px);transition:background .6s ease}
-.cz.day{background:linear-gradient(160deg,rgba(255,236,179,.45),rgba(135,206,250,.35))}
-.cz.dawn{background:linear-gradient(160deg,rgba(255,183,140,.45),rgba(255,221,193,.35))}
-.cz.dusk{background:linear-gradient(160deg,rgba(255,138,101,.45),rgba(126,87,194,.4))}
-.cz.night{background:linear-gradient(160deg,rgba(26,35,110,.55),rgba(13,20,50,.5))}
+.cz.day{background:linear-gradient(160deg,rgba(120,200,255,.55),rgba(90,160,235,.45))}
+.cz.dawn{background:linear-gradient(160deg,rgba(255,190,130,.55),rgba(255,150,120,.45))}
+.cz.dusk{background:linear-gradient(160deg,rgba(255,140,100,.55),rgba(120,80,180,.5))}
+.cz.night{background:linear-gradient(160deg,rgba(30,40,120,.7),rgba(10,15,45,.65))}
 .cz.day .czl,.cz.day .czt,.cz.day .czd,.cz.day .czwx{color:#1a2036}
 .cz.dawn .czl,.cz.dawn .czt,.cz.dawn .czd,.cz.dawn .czwx{color:#3a2218}
-.cz.day{background:linear-gradient(160deg,rgba(255,205,90,.55),rgba(255,140,60,.40));box-shadow:inset 0 0 0 1px rgba(255,210,120,.45)}
-.cz.night{background:linear-gradient(160deg,rgba(40,46,110,.75),rgba(8,10,35,.70));box-shadow:inset 0 0 0 1px rgba(120,140,255,.30)}
 .cz .czhead{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:5px}
 .cz .czicon{font-size:15px}
 .cz .czl{font-size:11.5px;opacity:.92;font-weight:700;letter-spacing:.4px}
@@ -379,8 +377,8 @@ function initFirebase(){
           <div class="czd" id="czGreg">—</div>
           <div class="czwx" id="wxH"></div>
         </div>
-        <div class="cz" id="czT">
-          <div class="czhead"><span class="czicon" id="iconT">☀️</span><span class="czl" id="czLabelT">Tehran</span></div>
+        <div class="cz" id="czT" style="cursor:pointer" onclick="cityPickerSheet()" title="Change city">
+          <div class="czhead"><span class="czicon" id="iconT">☀️</span><span class="czl" id="czLabelT">Tehran</span> <span style="opacity:.55;font-size:10px">✎</span></div>
           <div class="czt" id="clockT">—</div>
           <div class="czd" id="czJal" dir="rtl">—</div>
           <div class="czwx" id="wxT"></div>
@@ -649,7 +647,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v52';                 // bump on each deploy; used for update detection
+const APP_VERSION='v55';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -752,12 +750,18 @@ function makeRestorePoint(){
   try{ localStorage.setItem(RESTORE_KEY,JSON.stringify(DB)); return true; }catch(e){ return false; }
 }
 // Cache the user's coarse location once, to bias address search around them
-let _userGeo=null, _userGeoTried=false;
+let _userGeo=null, _userGeoTried=false, _userCC=null;
 function ensureUserGeo(cb){
   if(_userGeo||_userGeoTried){cb(_userGeo);return;}
   if(!navigator.geolocation){_userGeoTried=true;cb(null);return;}
   navigator.geolocation.getCurrentPosition(
-    p=>{_userGeo={lat:p.coords.latitude,lon:p.coords.longitude};_userGeoTried=true;cb(_userGeo);},
+    p=>{
+      _userGeo={lat:p.coords.latitude,lon:p.coords.longitude};_userGeoTried=true;
+      // resolve country code once so we can restrict results to the user's country
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${_userGeo.lat}&lon=${_userGeo.lon}`)
+        .then(r=>r.json()).then(d=>{try{_userCC=(d.address&&d.address.country_code)||null;}catch(e){}cb(_userGeo);})
+        .catch(()=>cb(_userGeo));
+    },
     ()=>{_userGeoTried=true;cb(null);},
     {enableHighAccuracy:false,timeout:6000,maximumAge:600000}
   );
@@ -781,14 +785,30 @@ function attachLocationAutocomplete(inputId){
   const list=box.querySelector('.ac-list');
   let timer=null, lastQ='';
   function hide(){list.style.display='none';list.innerHTML='';}
+  function gmapsRow(){
+    const q=inp.value.trim();
+    return `<div class="ac-gmaps" style="padding:12px 14px;cursor:pointer;font-size:13px;line-height:1.4;color:var(--brand)">🗺️ ${L==='fa'?'جستجوی':'Search'} "${esc(q)}" ${L==='fa'?'در گوگل‌مپ':'in Google Maps'}</div>`;
+  }
+  function wireGmaps(){
+    const g=list.querySelector('.ac-gmaps');
+    if(g)g.onclick=()=>{const q=inp.value.trim();if(q)window.open(mapsLink(q),'_blank');hide();};
+  }
   function show(items){
-    if(!items.length){hide();return;}
-    list.innerHTML=items.map((p,i)=>`<div class="ac-item" data-i="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line2);font-size:13px;line-height:1.4">📍 ${esc(p.display_name)}</div>`).join('');
+    items=items||[];
+    if(!items.length){
+      // No OSM match → offer Google Maps (its database is far more complete for businesses/clinics)
+      list.innerHTML=gmapsRow();
+      list.style.display='block';
+      wireGmaps();
+      return;
+    }
+    list.innerHTML=items.map((p,i)=>`<div class="ac-item" data-i="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line2);font-size:13px;line-height:1.4">📍 ${esc(p.display_name)}</div>`).join('')+gmapsRow();
     list.style.display='block';
     list.querySelectorAll('.ac-item').forEach(el=>el.onclick=()=>{
       inp.value=items[+el.dataset.i].display_name;
       hide();
     });
+    wireGmaps();
   }
   inp.addEventListener('input',()=>{
     const q=inp.value.trim();
@@ -799,14 +819,15 @@ function attachLocationAutocomplete(inputId){
       lastQ=q;
       ensureUserGeo(geo=>{
         if(inp.value.trim()!==q)return;
-        const base='https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=6&q='+encodeURIComponent(q);
+        const cc=_userCC?('&countrycodes='+_userCC):'';
+        const base='https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=6&q='+encodeURIComponent(q)+cc;
         let near='', wide='';
         if(geo){
           // ~0.6° box (~60km) around the user → local results first
           const d=0.6;
           const vb=`&viewbox=${geo.lon-d},${geo.lat-d},${geo.lon+d},${geo.lat+d}`;
           near=vb+'&bounded=1';   // strictly nearby
-          wide=vb+'&bounded=0';   // nearby preferred, but allow others
+          wide=vb+'&bounded=0';   // nearby preferred, but allow others (same country)
         }
         // Stage 1: strictly near the user
         fetch(base+near,{headers:{'Accept':'application/json'}})
@@ -814,7 +835,7 @@ function attachLocationAutocomplete(inputId){
           .then(d=>{
             if(inp.value.trim()!==q)return;
             if(d&&d.length){ show(d); return; }
-            // Stage 2: widen (nearby preferred, else anywhere)
+            // Stage 2: widen within the same country
             return fetch(base+wide,{headers:{'Accept':'application/json'}})
               .then(r=>r.json())
               .then(d2=>{ if(inp.value.trim()===q) show(d2||[]); });
@@ -1124,9 +1145,8 @@ function renderHome(){
   const d=nowH();
   document.getElementById('heroDow').textContent=(L==='fa'?DAYf:DAYe)[d.getDay()];
   document.getElementById('heroDate').textContent=(L==='fa'?GMf:GM)[d.getMonth()]+' '+faNum(d.getDate());
-  document.getElementById('czLabelH').textContent=L==='fa'?'هوبارت':'Hobart';
-  document.getElementById('czLabelT').textContent=L==='fa'?'تهران':'Tehran';
   tick();renderWeather();fetchWeather();applyClockCollapse();
+  autoSetLeftCity(); // refresh left city from GPS (once per load if allowed)
 
   const ts=todayStr();
   const tasks=active('tasks').filter(t=>userMatch(t.user));
@@ -1410,26 +1430,101 @@ function wxEmoji(code,h){
 }
 function renderWeather(){
   const w=DB.meta.weather||{};
-  const H=tzParts('Australia/Hobart'),Tn=tzParts('Asia/Tehran');
+  const cities=getCities();
+  const H=tzParts(cities.left.tz),Tn=tzParts(cities.right.tz);
   const eh=document.getElementById('wxH'),et=document.getElementById('wxT');
   if(eh)eh.textContent=w.hobart?(wxEmoji(w.hobart.code,H.h)+' '+Math.round(w.hobart.temp)+'°'):'…';
   if(et)et.textContent=w.tehran?(wxEmoji(w.tehran.code,Tn.h)+' '+Math.round(w.tehran.temp)+'°'):'…';
+}
+// City picker for the RIGHT weather card
+function cityPickerSheet(){
+  openSheet(`<h3>🌍 ${L==='fa'?'انتخاب شهر دوم':'Choose second city'}</h3>
+    <div class="fld"><div style="display:flex;gap:8px">
+      <input id="city_q" autofocus placeholder="${L==='fa'?'مثلاً Dubai، London، Paris':'e.g. Dubai, London, Paris'}" style="flex:1">
+      <button type="button" id="city_go" class="bkbtn" style="flex:none;padding:8px 14px">🔍</button>
+    </div></div>
+    <div id="city_results" style="max-height:300px;overflow-y:auto"></div>
+    <button class="cancel" id="city_cancel">${tr('cancel')}</button>`);
+  const q=document.getElementById('city_q');
+  const res=document.getElementById('city_results');
+  const go=()=>{
+    const term=q.value.trim();if(!term)return;
+    res.innerHTML=`<div class="empty">${L==='fa'?'در حال جستجو…':'Searching…'}</div>`;
+    fetch('https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&name='+encodeURIComponent(term))
+      .then(r=>r.json())
+      .then(d=>{
+        const list=(d&&d.results)||[];
+        if(!list.length){res.innerHTML=`<div class="empty">${L==='fa'?'شهری یافت نشد':'No city found'}</div>`;return;}
+        res.innerHTML=list.map((c,i)=>{
+          const sub=[c.admin1,c.country].filter(Boolean).join(', ');
+          return `<div class="li cityopt" data-i="${i}" style="cursor:pointer">
+            <span style="font-size:18px">🏙️</span>
+            <div class="tx" style="font-size:14px;line-height:1.4">${esc(c.name)}<div class="meta">${esc(sub)}</div></div></div>`;
+        }).join('');
+        res.querySelectorAll('.cityopt').forEach(el=>el.onclick=()=>{
+          const c=list[+el.dataset.i];
+          const cities=getCities();
+          cities.right={
+            name:c.name,lat:c.latitude,lon:c.longitude,
+            tz:c.timezone||'auto',
+            jalali:(c.country_code==='IR')
+          };
+          saveLocalOnly();
+          closeSheet();
+          fetchWeather(true); tick();
+        });
+      })
+      .catch(()=>{res.innerHTML=`<div class="empty">${L==='fa'?'خطا در جستجو':'Search failed'}</div>`;});
+  };
+  document.getElementById('city_go').onclick=go;
+  q.addEventListener('keydown',e=>{if(e.key==='Enter')go();});
+  document.getElementById('city_cancel').onclick=closeSheet;
+}
+// ---- CITY STATE (left = auto/GPS, right = user-chosen) ----
+function defaultCities(){
+  return {
+    left:{name:'Hobart',lat:-42.88,lon:147.33,tz:'Australia/Hobart',auto:true},
+    right:{name:'Tehran',lat:35.69,lon:51.39,tz:'Asia/Tehran',jalali:true}
+  };
+}
+function getCities(){
+  if(!DB.meta.cities)DB.meta.cities=defaultCities();
+  // migrate: ensure both slots exist
+  if(!DB.meta.cities.left)DB.meta.cities.left=defaultCities().left;
+  if(!DB.meta.cities.right)DB.meta.cities.right=defaultCities().right;
+  return DB.meta.cities;
+}
+// Try to set the left city from GPS once (reverse geocode → name + tz)
+function autoSetLeftCity(){
+  const c=getCities();
+  if(c.left&&c.left.auto===false)return; // user pinned it manually
+  ensureUserGeo(geo=>{
+    if(!geo)return;
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${geo.lat}&lon=${geo.lon}`)
+      .then(r=>r.json()).then(d=>{
+        const a=d.address||{};
+        const nm=a.city||a.town||a.suburb||a.municipality||a.state||d.name||'My location';
+        c.left={name:nm,lat:geo.lat,lon:geo.lon,tz:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',auto:true};
+        saveLocalOnly();fetchWeather(true);
+      }).catch(()=>{});
+  });
 }
 function fetchWeather(force){
   // throttle: skip if fetched within last 45 minutes (unless forced)
   const last=(DB.meta.weather&&DB.meta.weather.at)||0;
   if(!force && Date.now()-last < 45*60*1000){ return; }
-  const url=c=>`https://api.open-meteo.com/v1/forecast?latitude=${c[0]}&longitude=${c[1]}&current=temperature_2m,weather_code,is_day&daily=sunrise,sunset&timezone=auto&forecast_days=1`;
+  const cities=getCities();
+  const url=c=>`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1`;
   Promise.all([
-    fetch(url([-42.88,147.33])).then(r=>r.json()).catch(()=>null),
-    fetch(url([35.69,51.39])).then(r=>r.json()).catch(()=>null)
+    fetch(url(cities.left)).then(r=>r.json()).catch(()=>null),
+    fetch(url(cities.right)).then(r=>r.json()).catch(()=>null)
   ]).then(([h,t])=>{
     DB.meta.weather=DB.meta.weather||{};
     let ok=false;
     if(h&&h.current){DB.meta.weather.hobart={temp:h.current.temperature_2m,code:h.current.weather_code,isDay:h.current.is_day};ok=true;}
     if(t&&t.current){DB.meta.weather.tehran={temp:t.current.temperature_2m,code:t.current.weather_code,isDay:t.current.is_day};ok=true;}
     if(ok){ DB.meta.weather.at=Date.now(); saveLocalOnly(); renderWeather(); tick(); }
-    else{ // internet blocked (common when opened as a downloaded file)
+    else{
       const eh=document.getElementById('wxH'),et=document.getElementById('wxT');
       if(eh&&!DB.meta.weather.hobart)eh.textContent=L==='fa'?'بدون نت':'no net';
       if(et&&!DB.meta.weather.tehran)et.textContent=L==='fa'?'بدون نت':'no net';
@@ -1450,28 +1545,40 @@ function dayPhase(h){
 function tick(){
  try{
   if(!document.getElementById('clockH'))return; // home not mounted
-  const H=tzParts('Australia/Hobart'), Tn=tzParts('Asia/Tehran');
-  // Hobart: clock + icon + Gregorian (follows language)
+  const cities=getCities();
+  const H=tzParts(cities.left.tz), Tn=tzParts(cities.right.tz);
+  // City labels
+  const lblH=document.getElementById('czLabelH'),lblT=document.getElementById('czLabelT');
+  if(lblH)lblH.textContent=cities.left.name;
+  if(lblT)lblT.textContent=cities.right.name;
+  // LEFT city: clock + icon + Gregorian date
   document.getElementById('clockH').textContent=faNum(String(H.h).padStart(2,'0')+':'+H.m);
   const wH=(DB.meta.weather||{}).hobart;
   document.getElementById('iconH').textContent=wxEmoji(wH&&wH.code,H.h);
   document.getElementById('czH').className='cz '+dayPhase(H.h);
   document.getElementById('czGreg').textContent=(L==='fa'?GMf:GM)[H.mo-1].slice(0,3)+' '+faNum(H.d);
-  // Tehran: clock follows language, but Jalali date ALWAYS Persian digits
-  const[jy,jm,jd]=toJalali(Tn.y,Tn.mo,Tn.d);
+  // RIGHT city: clock + icon; date is Jalali only if this city uses it, else Gregorian
   document.getElementById('clockT').textContent=faNum(String(Tn.h).padStart(2,'0')+':'+Tn.m);
   const wT=(DB.meta.weather||{}).tehran;
-  const isDayT=(wT&&wT.isDay!=null)?(wT.isDay===1):(Tn.h>=7&&Tn.h<19);
-  document.getElementById('iconT').textContent=wxEmoji(wT&&wT.code,isDayT);
+  document.getElementById('iconT').textContent=wxEmoji(wT&&wT.code,Tn.h);
   document.getElementById('czT').className='cz '+dayPhase(Tn.h);
-  document.getElementById('czJal').textContent=jNum(jd)+' '+JM[jm-1]+' '+jNum(jy);
-  // difference
-  const hobMin=H.h*60+(+H.m), tehMin=Tn.h*60+(+Tn.m);
-  let diff=(tehMin-hobMin)/60;
+  const czJalEl=document.getElementById('czJal');
+  if(cities.right.jalali){
+    const[jy,jm,jd]=toJalali(Tn.y,Tn.mo,Tn.d);
+    czJalEl.setAttribute('dir','rtl');
+    czJalEl.textContent=jNum(jd)+' '+JM[jm-1]+' '+jNum(jy);
+  }else{
+    czJalEl.setAttribute('dir','ltr');
+    czJalEl.textContent=(L==='fa'?GMf:GM)[Tn.mo-1].slice(0,3)+' '+faNum(Tn.d);
+  }
+  // time difference between the two cities
+  const lMin=H.h*60+(+H.m), rMin=Tn.h*60+(+Tn.m);
+  let diff=(rMin-lMin)/60;
   if(Tn.d<H.d||(Tn.d>H.d+20))diff-=24; else if(Tn.d>H.d)diff+=24;
   diff=Math.round(diff*2)/2;
   const sign=diff<0?'−':'+';const av=Math.abs(diff);
-  document.getElementById('czDiff').textContent=(L==='fa'?'اختلاف تهران با هوبارت: ':'Tehran vs Hobart: ')+sign+faNum(av)+(L==='fa'?' ساعت':'h');
+  const diffEl=document.getElementById('czDiff');
+  if(diffEl)diffEl.textContent=(L==='fa'?`اختلاف ${cities.right.name} با ${cities.left.name}: `:`${cities.right.name} vs ${cities.left.name}: `)+sign+faNum(av)+(L==='fa'?' ساعت':'h');
  }catch(e){/* never break the page over the clock */}
 }
 
