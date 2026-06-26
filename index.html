@@ -202,7 +202,13 @@ body.rtl .fab{right:auto;left:20px}
 .brief{margin-top:14px;padding-top:11px;border-top:1px solid rgba(255,255,255,.25);font-size:13px;opacity:.96;line-height:1.6}
 .herotop{margin-bottom:4px}
 .dualclock{display:flex;gap:10px;margin-top:14px}
-.cz{flex:1;background:rgba(255,255,255,.14);border-radius:16px;padding:13px 10px;text-align:center;backdrop-filter:blur(4px);transition:background .4s}
+.cz{flex:1;background:rgba(255,255,255,.14);border-radius:16px;padding:13px 10px;text-align:center;backdrop-filter:blur(4px);transition:background .6s ease}
+.cz.day{background:linear-gradient(160deg,rgba(255,236,179,.45),rgba(135,206,250,.35))}
+.cz.dawn{background:linear-gradient(160deg,rgba(255,183,140,.45),rgba(255,221,193,.35))}
+.cz.dusk{background:linear-gradient(160deg,rgba(255,138,101,.45),rgba(126,87,194,.4))}
+.cz.night{background:linear-gradient(160deg,rgba(26,35,110,.55),rgba(13,20,50,.5))}
+.cz.day .czl,.cz.day .czt,.cz.day .czd,.cz.day .czwx{color:#1a2036}
+.cz.dawn .czl,.cz.dawn .czt,.cz.dawn .czd,.cz.dawn .czwx{color:#3a2218}
 .cz.day{background:linear-gradient(160deg,rgba(255,205,90,.55),rgba(255,140,60,.40));box-shadow:inset 0 0 0 1px rgba(255,210,120,.45)}
 .cz.night{background:linear-gradient(160deg,rgba(40,46,110,.75),rgba(8,10,35,.70));box-shadow:inset 0 0 0 1px rgba(120,140,255,.30)}
 .cz .czhead{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:5px}
@@ -643,7 +649,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v49';                 // bump on each deploy; used for update detection
+const APP_VERSION='v52';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -745,8 +751,19 @@ function save(){
 function makeRestorePoint(){
   try{ localStorage.setItem(RESTORE_KEY,JSON.stringify(DB)); return true; }catch(e){ return false; }
 }
+// Cache the user's coarse location once, to bias address search around them
+let _userGeo=null, _userGeoTried=false;
+function ensureUserGeo(cb){
+  if(_userGeo||_userGeoTried){cb(_userGeo);return;}
+  if(!navigator.geolocation){_userGeoTried=true;cb(null);return;}
+  navigator.geolocation.getCurrentPosition(
+    p=>{_userGeo={lat:p.coords.latitude,lon:p.coords.longitude};_userGeoTried=true;cb(_userGeo);},
+    ()=>{_userGeoTried=true;cb(null);},
+    {enableHighAccuracy:false,timeout:6000,maximumAge:600000}
+  );
+}
 // Attach live address autocomplete to a location input.
-// Shows suggestions under the field as the user types (debounced).
+// Shows suggestions under the field as the user types (debounced), biased to the user's area.
 function attachLocationAutocomplete(inputId){
   const inp=document.getElementById(inputId);
   if(!inp)return;
@@ -780,15 +797,30 @@ function attachLocationAutocomplete(inputId){
     if(q===lastQ)return;
     timer=setTimeout(()=>{
       lastQ=q;
-      // Restrict to Australia + bias toward Tasmania/Hobart so local stores rank first
-      const url='https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=6'
-        +'&countrycodes=au'
-        +'&viewbox=144.5,-43.7,148.5,-40.5&bounded=0'  // Tasmania bounding box (soft bias)
-        +'&q='+encodeURIComponent(q);
-      fetch(url,{headers:{'Accept':'application/json'}})
-        .then(r=>r.json())
-        .then(d=>{ if(inp.value.trim()===q) show(d); })
-        .catch(()=>{});
+      ensureUserGeo(geo=>{
+        if(inp.value.trim()!==q)return;
+        const base='https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=6&q='+encodeURIComponent(q);
+        let near='', wide='';
+        if(geo){
+          // ~0.6° box (~60km) around the user → local results first
+          const d=0.6;
+          const vb=`&viewbox=${geo.lon-d},${geo.lat-d},${geo.lon+d},${geo.lat+d}`;
+          near=vb+'&bounded=1';   // strictly nearby
+          wide=vb+'&bounded=0';   // nearby preferred, but allow others
+        }
+        // Stage 1: strictly near the user
+        fetch(base+near,{headers:{'Accept':'application/json'}})
+          .then(r=>r.json())
+          .then(d=>{
+            if(inp.value.trim()!==q)return;
+            if(d&&d.length){ show(d); return; }
+            // Stage 2: widen (nearby preferred, else anywhere)
+            return fetch(base+wide,{headers:{'Accept':'application/json'}})
+              .then(r=>r.json())
+              .then(d2=>{ if(inp.value.trim()===q) show(d2||[]); });
+          })
+          .catch(()=>{});
+      });
     },600); // debounce: wait 600ms after typing stops
   });
   inp.addEventListener('blur',()=>setTimeout(hide,250));
@@ -1408,24 +1440,30 @@ function fetchWeather(force){
 function faNum(s){return L==='fa'?String(s).replace(/[0-9]/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]):String(s);}
 // jNum: Jalali date is ALWAYS Persian digits
 function jNum(s){return String(s).replace(/[0-9]/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]);}
+// Day phase from local hour → drives card gradient
+function dayPhase(h){
+  if(h>=5&&h<8)return'dawn';
+  if(h>=8&&h<17)return'day';
+  if(h>=17&&h<20)return'dusk';
+  return'night';
+}
 function tick(){
  try{
   if(!document.getElementById('clockH'))return; // home not mounted
   const H=tzParts('Australia/Hobart'), Tn=tzParts('Asia/Tehran');
   // Hobart: clock + icon + Gregorian (follows language)
   document.getElementById('clockH').textContent=faNum(String(H.h).padStart(2,'0')+':'+H.m);
-  document.getElementById('iconH').textContent=dayNight(H.h);
   const wH=(DB.meta.weather||{}).hobart;
-  const isDayH=(wH&&wH.isDay!=null)?(wH.isDay===1):(H.h>=7&&H.h<19);
-  document.getElementById('czH').className='cz '+(isDayH?'day':'night');
+  document.getElementById('iconH').textContent=wxEmoji(wH&&wH.code,H.h);
+  document.getElementById('czH').className='cz '+dayPhase(H.h);
   document.getElementById('czGreg').textContent=(L==='fa'?GMf:GM)[H.mo-1].slice(0,3)+' '+faNum(H.d);
   // Tehran: clock follows language, but Jalali date ALWAYS Persian digits
   const[jy,jm,jd]=toJalali(Tn.y,Tn.mo,Tn.d);
   document.getElementById('clockT').textContent=faNum(String(Tn.h).padStart(2,'0')+':'+Tn.m);
-  document.getElementById('iconT').textContent=dayNight(Tn.h);
   const wT=(DB.meta.weather||{}).tehran;
   const isDayT=(wT&&wT.isDay!=null)?(wT.isDay===1):(Tn.h>=7&&Tn.h<19);
-  document.getElementById('czT').className='cz '+(isDayT?'day':'night');
+  document.getElementById('iconT').textContent=wxEmoji(wT&&wT.code,isDayT);
+  document.getElementById('czT').className='cz '+dayPhase(Tn.h);
   document.getElementById('czJal').textContent=jNum(jd)+' '+JM[jm-1]+' '+jNum(jy);
   // difference
   const hobMin=H.h*60+(+H.m), tehMin=Tn.h*60+(+Tn.m);
