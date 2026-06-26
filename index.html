@@ -215,6 +215,37 @@ body.rtl .fab{right:auto;left:20px}
 .cz .czt{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05;letter-spacing:.5px}
 .cz .czd{font-size:11.5px;opacity:.9;margin-top:3px}
 .cz .czwx{font-size:13px;margin-top:6px;font-weight:700;opacity:.96}
+.cz .czhilo{font-size:11px;margin-top:3px;opacity:.85;font-weight:600}
+/* ===== Weather Details page ===== */
+.wx-hero{border-radius:20px;padding:26px 18px;text-align:center;margin-bottom:14px;color:#fff}
+.wx-hero.day{background:linear-gradient(160deg,#4a9eff,#2c6fd6)}
+.wx-hero.dawn{background:linear-gradient(160deg,#ff9e64,#ff7a8a)}
+.wx-hero.dusk{background:linear-gradient(160deg,#ff7a50,#7a52c0)}
+.wx-hero.night{background:linear-gradient(160deg,#1e2878,#0a0f2d)}
+.wx-emoji{font-size:54px;line-height:1}
+.wx-temp{font-size:62px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums}
+.wx-cond{font-size:16px;font-weight:600;opacity:.95;margin-top:2px}
+.wx-feels{font-size:13px;opacity:.9;margin-top:8px}
+.wx-sec{padding:14px}
+.wx-sec-t{font-size:13px;font-weight:700;opacity:.7;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.wx-hours{display:flex;gap:14px;overflow-x:auto;padding-bottom:4px}
+.wx-hr{flex:0 0 auto;text-align:center;min-width:46px}
+.wx-hr-t{font-size:12px;opacity:.7}
+.wx-hr-e{font-size:22px;margin:5px 0}
+.wx-hr-p{font-size:10px;color:#4a9eff;min-height:13px}
+.wx-hr-d{font-size:15px;font-weight:700;margin-top:2px}
+.wx-days{display:flex;flex-direction:column;gap:2px}
+.wx-day{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line2)}
+.wx-day:last-child{border-bottom:none}
+.wx-day-n{flex:0 0 46px;font-size:14px;font-weight:600}
+.wx-day-p{flex:0 0 52px;font-size:11px;color:#4a9eff}
+.wx-day-e{flex:0 0 30px;font-size:20px;text-align:center}
+.wx-day-t{flex:1;text-align:right;font-size:15px}
+.wx-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.wx-cell{background:var(--card2,rgba(125,125,160,.08));border-radius:14px;padding:12px 8px;text-align:center}
+.wx-cell-i{font-size:20px}
+.wx-cell-v{font-size:17px;font-weight:700;margin-top:4px}
+.wx-cell-l{font-size:11px;opacity:.65;margin-top:2px}
 .czdiff{text-align:center;font-size:11.5px;opacity:.9;margin-top:9px}
 .qcap{display:flex;gap:9px;margin-bottom:10px}
 .qcap input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:15px;color:var(--ink);padding:14px 16px;font-size:15px;outline:none;box-shadow:var(--shadow)}
@@ -371,17 +402,19 @@ function initFirebase(){
       </div>
       <div id="clockBlock">
       <div class="dualclock">
-        <div class="cz" id="czH">
+        <div class="cz" id="czH" style="cursor:pointer" onclick="openWeather('left')">
           <div class="czhead"><span class="czicon" id="iconH">🌙</span><span class="czl" id="czLabelH">Hobart</span></div>
           <div class="czt" id="clockH">—</div>
           <div class="czd" id="czGreg">—</div>
           <div class="czwx" id="wxH"></div>
+          <div class="czhilo" id="hiloH"></div>
         </div>
-        <div class="cz" id="czT" style="cursor:pointer" onclick="cityPickerSheet()" title="Change city">
-          <div class="czhead"><span class="czicon" id="iconT">☀️</span><span class="czl" id="czLabelT">Tehran</span> <span style="opacity:.55;font-size:10px">✎</span></div>
+        <div class="cz" id="czT" style="cursor:pointer" onclick="openWeather('right')">
+          <div class="czhead"><span class="czicon" id="iconT">☀️</span><span class="czl" id="czLabelT">Tehran</span></div>
           <div class="czt" id="clockT">—</div>
           <div class="czd" id="czJal" dir="rtl">—</div>
           <div class="czwx" id="wxT"></div>
+          <div class="czhilo" id="hiloT"></div>
         </div>
       </div>
       <div class="czdiff" id="czDiff"></div>
@@ -566,6 +599,10 @@ function initFirebase(){
   <section class="screen subscreen" id="sc-appts"><div class="appbar"><span class="ab-back" data-back="more">‹</span><span class="ab-title" id="appts-h">Appointments</span></div><div class="card" id="apptList"></div></section>
   <section class="screen subscreen" id="sc-bills"><div class="appbar"><span class="ab-back" data-back="more">‹</span><span class="ab-title" id="bills-h">Bills</span></div><div class="card" id="billList"></div></section>
   <section class="screen subscreen" id="sc-bdays"><div class="appbar"><span class="ab-back" data-back="more">‹</span><span class="ab-title" id="bdays-h">Birthdays</span></div><div class="card" id="bdayList"></div></section>
+  <section class="screen subscreen" id="sc-weather">
+    <div class="appbar"><span class="ab-back" data-back="home">‹</span><span class="ab-title" id="weather-h">Weather</span><span id="weatherCityBtn" style="margin-left:auto;cursor:pointer;font-size:13px;opacity:.85">🏙️</span></div>
+    <div id="weatherBody"></div>
+  </section>
   <section class="screen subscreen" id="sc-notes">
     <div class="appbar"><span class="ab-back" data-back="more">‹</span><span class="ab-title" id="notes-h">Notes</span></div>
     <div id="notesSyncBadge" style="font-size:12px;padding:6px 12px;margin-bottom:8px;border-radius:8px;display:none"></div>
@@ -647,7 +684,7 @@ function initFirebase(){
    ===================================================================== */
 const KEY='mbmlife_v1';
 const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v55';                 // bump on each deploy; used for update detection
+const APP_VERSION='v56';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
 function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
@@ -1135,7 +1172,7 @@ function render(){
     (['appts','bills','bdays','notes','archive','history','cats','reports','profile','settings'].includes(screen)&&b.dataset.s==='more')));
 
   ({home:renderHome,tasks:renderTasks,cal:renderCal,shop:renderShop,appts:renderAppts,
-    bills:renderBills,bdays:renderBdays,notes:renderNotes,archive:renderArchive,history:renderHistory,cats:renderCats,reports:renderReports,search:renderSearch}[screen]||(()=>{}))();
+    bills:renderBills,bdays:renderBdays,notes:renderNotes,archive:renderArchive,history:renderHistory,cats:renderCats,reports:renderReports,search:renderSearch,weather:()=>renderWeatherDetail(currentWeatherSide||'left')}[screen]||(()=>{}))();
   if(screen==='more'){ try{renderAbout();}catch(e){} }
 }
 
@@ -1433,51 +1470,155 @@ function renderWeather(){
   const cities=getCities();
   const H=tzParts(cities.left.tz),Tn=tzParts(cities.right.tz);
   const eh=document.getElementById('wxH'),et=document.getElementById('wxT');
+  const lh=document.getElementById('hiloH'),lt=document.getElementById('hiloT');
   if(eh)eh.textContent=w.hobart?(wxEmoji(w.hobart.code,H.h)+' '+Math.round(w.hobart.temp)+'°'):'…';
   if(et)et.textContent=w.tehran?(wxEmoji(w.tehran.code,Tn.h)+' '+Math.round(w.tehran.temp)+'°'):'…';
+  if(lh)lh.textContent=(w.hobart&&w.hobart.daily&&w.hobart.daily.tmax.length)?('↑'+Math.round(w.hobart.daily.tmax[0])+'° ↓'+Math.round(w.hobart.daily.tmin[0])+'°'):'';
+  if(lt)lt.textContent=(w.tehran&&w.tehran.daily&&w.tehran.daily.tmax.length)?('↑'+Math.round(w.tehran.daily.tmax[0])+'° ↓'+Math.round(w.tehran.daily.tmin[0])+'°'):'';
 }
 // City picker for the RIGHT weather card
+// Open the dedicated weather details page for a side ('left'|'right')
+function openWeather(side){
+  currentWeatherSide=side;
+  nav('weather');
+  renderWeatherDetail(side);
+  fetchWeather(); // refresh if stale
+}
+function weatherDataFor(side){
+  const w=DB.meta.weather||{};
+  return side==='right'?w.tehran:w.hobart;
+}
+function renderWeatherDetail(side){
+  side=side||currentWeatherSide||'left';
+  const body=document.getElementById('weatherBody');
+  if(!body)return;
+  const cities=getCities();
+  const city=side==='right'?cities.right:cities.left;
+  const d=weatherDataFor(side);
+  // header title + city button
+  const hEl=document.getElementById('weather-h'); if(hEl)hEl.textContent=city.name;
+  const cityBtn=document.getElementById('weatherCityBtn');
+  if(cityBtn)cityBtn.onclick=()=>{ if(side==='right')cityPickerSheet(); else toast(L==='fa'?'شهر اول از موقعیت شماست':'First city follows your location'); };
+  if(!d){ body.innerHTML=`<div class="card"><div class="empty">${L==='fa'?'در حال دریافت آب‌وهوا…':'Loading weather…'}</div></div>`; return; }
+
+  const P=tzParts(city.tz);
+  const phase=dayPhase(P.h);
+  const big=Math.round(d.temp);
+  const emoji=wxEmoji(d.code,P.h);
+  const cond=wxLabel(d.code);
+  const hi=d.daily&&d.daily.tmax.length?Math.round(d.daily.tmax[0]):null;
+  const lo=d.daily&&d.daily.tmin.length?Math.round(d.daily.tmin[0]):null;
+
+  // HERO
+  let h=`<div class="wx-hero ${phase}">
+    <div class="wx-emoji">${emoji}</div>
+    <div class="wx-temp">${big}°</div>
+    <div class="wx-cond">${cond}</div>
+    <div class="wx-feels">${L==='fa'?'احساس واقعی':'Feels like'} ${Math.round(d.feels)}°${hi!=null?` · ↑${hi}° ↓${lo}°`:''}</div>
+  </div>`;
+
+  // HOURLY (next 24h from current local hour of the city)
+  if(d.hourly&&d.hourly.time.length){
+    // find first hourly slot at/after the city's current hour today
+    const nowKey=`T${String(P.h).padStart(2,'0')}:00`;
+    let startIdx=d.hourly.time.findIndex(t=>String(t).slice(0,13)>=String(d.hourly.time[0]).slice(0,10)+nowKey);
+    if(startIdx<0)startIdx=0;
+    const slice=[];
+    for(let i=startIdx;i<startIdx+24&&i<d.hourly.time.length;i++)slice.push(i);
+    h+=`<div class="card wx-sec"><div class="wx-sec-t">${L==='fa'?'ساعتی':'Hourly'}</div>
+      <div class="wx-hours">${slice.map(i=>{
+        const dt=tzParts2(d.hourly.time[i],city.tz);
+        return `<div class="wx-hr"><div class="wx-hr-t">${faNum(String(dt.h).padStart(2,'0'))}</div>
+          <div class="wx-hr-e">${wxEmoji(d.hourly.code[i],dt.h)}</div>
+          <div class="wx-hr-p">${d.hourly.pop[i]!=null?faNum(d.hourly.pop[i])+'%':''}</div>
+          <div class="wx-hr-d">${faNum(Math.round(d.hourly.temp[i]))}°</div></div>`;
+      }).join('')}</div></div>`;
+  }
+
+  // DAILY (7-day)
+  if(d.daily&&d.daily.time.length){
+    h+=`<div class="card wx-sec"><div class="wx-sec-t">${L==='fa'?'۷ روز آینده':'7-day forecast'}</div>
+      <div class="wx-days">${d.daily.time.map((t,i)=>{
+        const dow=i===0?(L==='fa'?'امروز':'Today'):(L==='fa'?DAYf:DAYe)[new Date(t).getDay()].slice(0,3);
+        return `<div class="wx-day">
+          <div class="wx-day-n">${dow}</div>
+          <div class="wx-day-p">${d.daily.pop[i]!=null?'💧'+faNum(d.daily.pop[i])+'%':''}</div>
+          <div class="wx-day-e">${wxEmoji(d.daily.code[i],12)}</div>
+          <div class="wx-day-t"><b>${faNum(Math.round(d.daily.tmax[i]))}°</b> <span style="opacity:.6">${faNum(Math.round(d.daily.tmin[i]))}°</span></div>
+        </div>`;
+      }).join('')}</div></div>`;
+  }
+
+  // DETAILS GRID
+  const sr=d.daily&&d.daily.sunrise.length?tzParts2(d.daily.sunrise[0],city.tz):null;
+  const ss=d.daily&&d.daily.sunset.length?tzParts2(d.daily.sunset[0],city.tz):null;
+  const uv=d.daily&&d.daily.uv.length?Math.round(d.daily.uv[0]):null;
+  h+=`<div class="card wx-sec"><div class="wx-sec-t">${L==='fa'?'جزئیات':'Details'}</div>
+    <div class="wx-grid">
+      ${wxCell('💧',L==='fa'?'رطوبت':'Humidity',d.humidity!=null?faNum(d.humidity)+'%':'—')}
+      ${wxCell('🌧️',L==='fa'?'احتمال باران':'Rain chance',(d.daily&&d.daily.pop.length)?faNum(d.daily.pop[0])+'%':'—')}
+      ${wxCell('💨',L==='fa'?'باد':'Wind',d.wind!=null?faNum(Math.round(d.wind))+' km/h':'—')}
+      ${wxCell('☀️',L==='fa'?'شاخص UV':'UV index',uv!=null?faNum(uv):'—')}
+      ${wxCell('🌅',L==='fa'?'طلوع':'Sunrise',sr?faNum(String(sr.h).padStart(2,'0')+':'+sr.m):'—')}
+      ${wxCell('🌇',L==='fa'?'غروب':'Sunset',ss?faNum(String(ss.h).padStart(2,'0')+':'+ss.m):'—')}
+    </div></div>`;
+
+  if(side==='right'){
+    h+=`<button class="bkbtn" style="width:100%;margin-top:4px" onclick="cityPickerSheet()">🏙️ ${L==='fa'?'تغییر شهر':'Change city'}</button>`;
+  }
+
+  body.innerHTML=h;
+}
+function wxCell(icon,label,val){
+  return `<div class="wx-cell"><div class="wx-cell-i">${icon}</div><div class="wx-cell-v">${val}</div><div class="wx-cell-l">${label}</div></div>`;
+}
+// Parse an Open-Meteo local-time ISO string (e.g. "2026-06-26T15:00") directly.
+// These are already in the city's local timezone, so just read the fields.
+function tzParts2(iso,tz){
+  try{
+    const m=String(iso).match(/T(\d{2}):(\d{2})/);
+    if(m)return {h:parseInt(m[1],10),m:m[2]};
+  }catch(e){}
+  const dt=new Date(iso);return {h:dt.getHours(),m:String(dt.getMinutes()).padStart(2,'0')};
+}
 function cityPickerSheet(){
   openSheet(`<h3>🌍 ${L==='fa'?'انتخاب شهر دوم':'Choose second city'}</h3>
-    <div class="fld"><div style="display:flex;gap:8px">
-      <input id="city_q" autofocus placeholder="${L==='fa'?'مثلاً Dubai، London، Paris':'e.g. Dubai, London, Paris'}" style="flex:1">
-      <button type="button" id="city_go" class="bkbtn" style="flex:none;padding:8px 14px">🔍</button>
-    </div></div>
-    <div id="city_results" style="max-height:300px;overflow-y:auto"></div>
+    <div class="fld"><input id="city_q" autofocus placeholder="${L==='fa'?'اسم شهر را تایپ کنید…':'Type a city name…'}" autocomplete="off"></div>
+    <div id="city_results" style="max-height:320px;overflow-y:auto"></div>
     <button class="cancel" id="city_cancel">${tr('cancel')}</button>`);
   const q=document.getElementById('city_q');
   const res=document.getElementById('city_results');
-  const go=()=>{
-    const term=q.value.trim();if(!term)return;
+  let timer=null,lastQ='';
+  const pick=(c)=>{
+    const cities=getCities();
+    cities.right={name:c.name,lat:c.latitude,lon:c.longitude,tz:c.timezone||'auto',jalali:(c.country_code==='IR')};
+    saveLocalOnly();closeSheet();fetchWeather(true);tick();
+    currentWeatherSide='right';renderWeatherDetail('right');
+  };
+  const search=(term)=>{
     res.innerHTML=`<div class="empty">${L==='fa'?'در حال جستجو…':'Searching…'}</div>`;
-    fetch('https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&name='+encodeURIComponent(term))
+    fetch('https://geocoding-api.open-meteo.com/v1/search?count=10&language=en&name='+encodeURIComponent(term))
       .then(r=>r.json())
       .then(d=>{
         const list=(d&&d.results)||[];
-        if(!list.length){res.innerHTML=`<div class="empty">${L==='fa'?'شهری یافت نشد':'No city found'}</div>`;return;}
+        if(!list.length){res.innerHTML=`<div class="empty">${L==='fa'?'شهری پیدا نشد — املا را بررسی کنید':'No city — check spelling'}</div>`;return;}
         res.innerHTML=list.map((c,i)=>{
           const sub=[c.admin1,c.country].filter(Boolean).join(', ');
           return `<div class="li cityopt" data-i="${i}" style="cursor:pointer">
             <span style="font-size:18px">🏙️</span>
             <div class="tx" style="font-size:14px;line-height:1.4">${esc(c.name)}<div class="meta">${esc(sub)}</div></div></div>`;
         }).join('');
-        res.querySelectorAll('.cityopt').forEach(el=>el.onclick=()=>{
-          const c=list[+el.dataset.i];
-          const cities=getCities();
-          cities.right={
-            name:c.name,lat:c.latitude,lon:c.longitude,
-            tz:c.timezone||'auto',
-            jalali:(c.country_code==='IR')
-          };
-          saveLocalOnly();
-          closeSheet();
-          fetchWeather(true); tick();
-        });
+        res.querySelectorAll('.cityopt').forEach(el=>el.onclick=()=>pick(list[+el.dataset.i]));
       })
       .catch(()=>{res.innerHTML=`<div class="empty">${L==='fa'?'خطا در جستجو':'Search failed'}</div>`;});
   };
-  document.getElementById('city_go').onclick=go;
-  q.addEventListener('keydown',e=>{if(e.key==='Enter')go();});
+  q.addEventListener('input',()=>{
+    const term=q.value.trim();
+    if(timer)clearTimeout(timer);
+    if(term.length<2){res.innerHTML='';return;}
+    if(term===lastQ)return;
+    timer=setTimeout(()=>{lastQ=term;search(term);},400); // live suggestions, debounced
+  });
   document.getElementById('city_cancel').onclick=closeSheet;
 }
 // ---- CITY STATE (left = auto/GPS, right = user-chosen) ----
@@ -1509,27 +1650,53 @@ function autoSetLeftCity(){
       }).catch(()=>{});
   });
 }
+// WMO weather_code → human label (en/fa)
+function wxLabel(code){
+  const m={0:['Clear','صاف'],1:['Mainly clear','کمی ابری'],2:['Partly cloudy','نیمه‌ابری'],3:['Overcast','ابری'],
+    45:['Fog','مه'],48:['Rime fog','مه یخی'],51:['Light drizzle','نم‌نم باران'],53:['Drizzle','نم باران'],55:['Heavy drizzle','نم باران شدید'],
+    56:['Freezing drizzle','نم یخی'],57:['Freezing drizzle','نم یخی'],61:['Light rain','باران ملایم'],63:['Rain','باران'],65:['Heavy rain','باران شدید'],
+    66:['Freezing rain','باران یخی'],67:['Freezing rain','باران یخی'],71:['Light snow','برف ملایم'],73:['Snow','برف'],75:['Heavy snow','برف شدید'],
+    77:['Snow grains','دانه برف'],80:['Light showers','رگبار ملایم'],81:['Showers','رگبار'],82:['Heavy showers','رگبار شدید'],
+    85:['Snow showers','رگبار برف'],86:['Snow showers','رگبار برف'],95:['Thunderstorm','رعدوبرق'],96:['Thunderstorm','رعدوبرق'],99:['Severe storm','طوفان شدید']};
+  const e=m[code]||['—','—'];return L==='fa'?e[1]:e[0];
+}
+let currentWeatherSide=null; // 'left' | 'right' when the detail page is open
 function fetchWeather(force){
-  // throttle: skip if fetched within last 45 minutes (unless forced)
+  // throttle: skip if fetched within last 30 minutes (unless forced)
   const last=(DB.meta.weather&&DB.meta.weather.at)||0;
-  if(!force && Date.now()-last < 45*60*1000){ return; }
+  if(!force && Date.now()-last < 30*60*1000){ return; }
   const cities=getCities();
-  const url=c=>`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1`;
+  const url=c=>`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}`
+    +`&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,precipitation`
+    +`&hourly=temperature_2m,weather_code,precipitation_probability`
+    +`&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset`
+    +`&timezone=auto&forecast_days=7`;
   Promise.all([
     fetch(url(cities.left)).then(r=>r.json()).catch(()=>null),
     fetch(url(cities.right)).then(r=>r.json()).catch(()=>null)
   ]).then(([h,t])=>{
     DB.meta.weather=DB.meta.weather||{};
     let ok=false;
-    if(h&&h.current){DB.meta.weather.hobart={temp:h.current.temperature_2m,code:h.current.weather_code,isDay:h.current.is_day};ok=true;}
-    if(t&&t.current){DB.meta.weather.tehran={temp:t.current.temperature_2m,code:t.current.weather_code,isDay:t.current.is_day};ok=true;}
-    if(ok){ DB.meta.weather.at=Date.now(); saveLocalOnly(); renderWeather(); tick(); }
+    if(h&&h.current){DB.meta.weather.hobart=packWeather(h);ok=true;}
+    if(t&&t.current){DB.meta.weather.tehran=packWeather(t);ok=true;}
+    if(ok){ DB.meta.weather.at=Date.now(); saveLocalOnly(); renderWeather(); tick(); if(currentWeatherSide)renderWeatherDetail(currentWeatherSide); }
     else{
       const eh=document.getElementById('wxH'),et=document.getElementById('wxT');
       if(eh&&!DB.meta.weather.hobart)eh.textContent=L==='fa'?'بدون نت':'no net';
       if(et&&!DB.meta.weather.tehran)et.textContent=L==='fa'?'بدون نت':'no net';
     }
   }).catch(()=>{});
+}
+// Pack the Open-Meteo response into our compact weather object
+function packWeather(r){
+  const c=r.current||{}, hr=r.hourly||{}, dl=r.daily||{};
+  return {
+    temp:c.temperature_2m, feels:c.apparent_temperature, humidity:c.relative_humidity_2m,
+    code:c.weather_code, isDay:c.is_day, wind:c.wind_speed_10m, precip:c.precipitation,
+    hourly:{ time:hr.time||[], temp:hr.temperature_2m||[], code:hr.weather_code||[], pop:hr.precipitation_probability||[] },
+    daily:{ time:dl.time||[], code:dl.weather_code||[], tmax:dl.temperature_2m_max||[], tmin:dl.temperature_2m_min||[],
+            pop:dl.precipitation_probability_max||[], uv:dl.uv_index_max||[], sunrise:dl.sunrise||[], sunset:dl.sunset||[] }
+  };
 }
 // faNum: follows language (for clock, gregorian)
 function faNum(s){return L==='fa'?String(s).replace(/[0-9]/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]):String(s);}
@@ -2226,7 +2393,7 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{nav(b.dataset
      3. on a main tab     -> go Home
      4. already Home       -> allow exit (don't preventDefault)
 */
-const SUBSCREENS=['appts','bills','bdays','notes','archive','history','cats','reports','search','profile','settings'];
+const SUBSCREENS=['appts','bills','bdays','notes','archive','history','cats','reports','search','profile','settings','weather'];
 const TABS=['home','tasks','cal','shop','more'];
 function modalOpen(){const m=document.getElementById('modal');return m&&m.classList.contains('on');}
 
