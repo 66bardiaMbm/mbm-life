@@ -123,22 +123,74 @@ h2.sc .bk{color:var(--brand);cursor:pointer}
 .pill.u{background:rgba(91,108,255,.13);color:var(--brand)}
 .dotc{width:9px;height:9px;border-radius:50%;flex:none}
 .act{background:none;border:none;color:var(--soft);font-size:16px;cursor:pointer;padding:3px 4px;flex:none}
-/* ── Tasks screen: clean To Do style (scoped, does not affect other .li lists) ── */
-#taskList .tli{display:flex;align-items:flex-start;gap:13px;padding:14px 14px;margin-bottom:8px;
-  background:var(--card);border:1px solid var(--line);border-radius:13px;border-bottom:1px solid var(--line);cursor:pointer}
+/* ══════════════════════════════════════════════
+   TASKS PLATFORM — scoped styles
+   ══════════════════════════════════════════════ */
+
+/* ── List Browser ── */
+.tv-header{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+.tv-title{flex:1;font-size:22px;font-weight:800;letter-spacing:-.3px}
+.tv-back{background:none;border:none;font-size:26px;color:var(--brand);cursor:pointer;
+  padding:0 10px 0 0;line-height:1;font-weight:300}
+.tv-hbtn{width:38px;height:38px;border-radius:12px;background:var(--card);
+  border:1px solid var(--line);color:var(--ink);font-size:20px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+.tv-group-label{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--mut);margin-bottom:10px;padding:0 2px}
+
+/* Smart View tiles */
+.tv-smarts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tv-smart{display:flex;align-items:center;gap:13px;background:var(--card);
+  border:1px solid var(--line);border-radius:16px;padding:15px 16px;
+  cursor:pointer;text-align:left;transition:background .12s}
+.tv-smart:active{background:var(--line)}
+.tv-smart-ic{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:17px;color:#fff;flex:none}
+.tv-smart-tx{font-size:14px;font-weight:700;color:var(--ink)}
+
+/* User list rows */
+.tv-list-row{display:flex;align-items:center;gap:14px;background:var(--card);
+  border:1px solid var(--line);border-radius:14px;padding:14px 16px;
+  margin-bottom:8px;cursor:pointer;transition:background .12s}
+.tv-list-row:active{background:var(--line2)}
+.tv-list-icon{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;
+  justify-content:center;font-size:18px;color:#fff;flex:none}
+.tv-list-name{flex:1;font-size:16px;font-weight:600}
+.tv-list-count{font-size:13px;color:var(--mut);font-weight:600}
+.tv-list-arr{font-size:18px;color:var(--soft);margin-left:2px}
+
+/* Inline add bar */
+.tv-addinline{display:flex;align-items:center;gap:12px;margin-top:14px;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:12px 14px}
+.tv-addinline input{flex:1;background:none;border:none;outline:none;
+  font-size:15px;color:var(--ink)}
+.tv-addinline input::placeholder{color:var(--soft)}
+
+/* ── Task rows (detail view) ── */
+#taskList .tli{display:flex;align-items:center;gap:14px;padding:13px 12px 13px 14px;margin-bottom:6px;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;cursor:pointer;
+  transition:background .12s}
 #taskList .tli:active{background:var(--card2,var(--card))}
-#taskList .tli .check{margin-top:1px}
-#taskList .tli .tx{flex:1;min-width:0;font-size:15.5px;line-height:1.4}
-#taskList .tli.done .tx{text-decoration:line-through;color:var(--mut)}
-#taskList .tli .meta{font-size:11.5px;color:var(--mut);margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-#taskList .tli .meta .chip{display:inline-flex;align-items:center;gap:4px;background:var(--bg);
-  border:1px solid var(--line);border-radius:8px;padding:2px 8px;font-weight:600}
-#taskList .tli .meta .chip.over{color:var(--danger);border-color:rgba(255,92,114,.35)}
-#taskList .tstar{width:36px;height:36px;flex:none;background:none;border:none;cursor:pointer;
-  color:var(--soft);font-size:17px;display:flex;align-items:center;justify-content:center;margin:-6px -6px 0 0}
-#taskList .tstar.on{color:var(--star,#f5c451)}
-#taskList .tsec{font-size:12px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
-  color:var(--mut);padding:14px 4px 8px;cursor:pointer;display:flex;align-items:center;gap:6px}
+#taskList .tli .tcheck{width:24px;height:24px;border-radius:50%;border:2px solid var(--soft);
+  flex:none;display:flex;align-items:center;justify-content:center;transition:.18s;cursor:pointer}
+#taskList .tli .tcheck.on{background:var(--brand);border-color:var(--brand)}
+#taskList .tli .tcheck.on::after{content:'';display:block;width:6px;height:10px;
+  border:2.5px solid #fff;border-top:none;border-left:none;transform:rotate(42deg) translateY(-1px)}
+#taskList .tli .tx{flex:1;min-width:0;font-size:15px;line-height:1.45;font-weight:450}
+#taskList .tli.done .tx{text-decoration:line-through;opacity:.45;font-weight:400}
+#taskList .tli .meta{font-size:11.5px;color:var(--mut);margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#taskList .tli .meta .chip{display:inline-flex;align-items:center;gap:3px;background:transparent;
+  border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:600}
+#taskList .tli .meta .chip.over{color:var(--danger);border-color:rgba(255,92,114,.4);background:rgba(255,92,114,.07)}
+#taskList .tstar{width:40px;height:40px;flex:none;background:none;border:none;cursor:pointer;
+  color:var(--soft);font-size:18px;display:flex;align-items:center;justify-content:center;
+  margin:-4px -6px -4px 0;opacity:.55;transition:opacity .15s,color .15s}
+#taskList .tstar:hover{opacity:1}
+#taskList .tstar.on{color:var(--star,#f5c451);opacity:1}
+#taskList .tsec{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+  color:var(--mut);padding:16px 2px 8px;display:flex;align-items:center;gap:8px;opacity:.7}
+#taskList .tsec::after{content:'';flex:1;height:1px;background:var(--line)}
 .act.pinned{color:var(--brand)}
 .empty{text-align:center;color:var(--soft);padding:30px 10px;font-size:14px;line-height:1.6}
 .miniadd{display:flex;gap:9px;margin-top:14px}
@@ -414,13 +466,50 @@ function initFirebase(){
 
   <!-- TASKS -->
   <section class="screen" id="sc-tasks">
-    <h2 class="sc" id="tasksTitle">Tasks</h2>
-    <div class="seg" id="taskSeg">
-      <button data-f="open" class="on">Active</button>
-      <button data-f="today">Today</button>
-      <button data-f="done">Completed</button>
+    <!-- Tasks: list browser (default view) -->
+    <div id="tv-browser">
+      <div class="tv-header">
+        <span class="tv-title" id="tvBrowserTitle">My Lists</span>
+        <button class="tv-hbtn" id="tvNewList" title="New List">＋</button>
+      </div>
+      <!-- Smart Views -->
+      <div class="tv-group-label">Smart Views</div>
+      <div class="tv-smarts">
+        <button class="tv-smart" data-sv="myday">
+          <span class="tv-smart-ic" style="background:#ff9f43">☀</span>
+          <span class="tv-smart-tx">My Day</span>
+        </button>
+        <button class="tv-smart" data-sv="important">
+          <span class="tv-smart-ic" style="background:#ff5c72">★</span>
+          <span class="tv-smart-tx">Important</span>
+        </button>
+        <button class="tv-smart" data-sv="planned">
+          <span class="tv-smart-ic" style="background:#3aa0ff">📅</span>
+          <span class="tv-smart-tx">Planned</span>
+        </button>
+        <button class="tv-smart" data-sv="all">
+          <span class="tv-smart-ic" style="background:#5b6cff">≡</span>
+          <span class="tv-smart-tx">All Tasks</span>
+        </button>
+      </div>
+      <!-- User Lists -->
+      <div class="tv-group-label" style="margin-top:22px">My Lists</div>
+      <div id="tv-lists"></div>
     </div>
-    <div class="card" id="taskList"></div>
+
+    <!-- Tasks: list detail view -->
+    <div id="tv-detail" style="display:none">
+      <div class="tv-header">
+        <button class="tv-back" id="tvBack">‹</button>
+        <span class="tv-title" id="tvDetailTitle"></span>
+        <button class="tv-hbtn" id="tvListMenu" title="List options">⋯</button>
+      </div>
+      <div id="taskList"></div>
+      <div class="tv-addinline">
+        <div class="tcheck" style="border-color:var(--soft);flex:none;width:22px;height:22px;border-radius:50%;border:2px solid var(--soft)"></div>
+        <input id="tvInlineInput" placeholder="Add a task" autocomplete="off">
+      </div>
+    </div>
   </section>
 
   <!-- CALENDAR -->
@@ -569,7 +658,7 @@ function initFirebase(){
     <div class="set-section" id="set-about-h">About</div>
     <div class="card" id="aboutCard">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div><b id="aboutName">MBM Life</b> <span id="aboutVer" style="color:var(--mut);font-size:13px"></span> <span style="color:var(--brand);font-size:12px;font-weight:700">· Tasks Redesign 1</span><div id="aboutUpd" style="font-size:12px;color:var(--soft);margin-top:3px"></div><div id="aboutEmail" style="font-size:12px;color:var(--mut);margin-top:4px;word-break:break-all"></div></div>
+        <div><b id="aboutName">MBM Life</b> <span id="aboutVer" style="color:var(--mut);font-size:13px"></span> <span style="color:var(--brand);font-size:12px;font-weight:700">· Tasks Platform 2</span><div id="aboutUpd" style="font-size:12px;color:var(--soft);margin-top:3px"></div><div id="aboutEmail" style="font-size:12px;color:var(--mut);margin-top:4px;word-break:break-all"></div></div>
         <button class="bkbtn" id="checkUpdBtn" style="flex:none">🔄 <span id="checkUpdL">Check update</span></button>
       </div>
     </div>
@@ -658,11 +747,11 @@ function initFirebase(){
    Records gain: pinned(bool), archived(bool). Soft-delete = archived=true.
    ===================================================================== */
 const KEY='mbmlife_v1';
-const SCHEMA=9;                          // current data schema version
-const APP_VERSION='v49';                 // bump on each deploy; used for update detection
+const SCHEMA=10;                         // current data schema version
+const APP_VERSION='v52';                 // bump on each deploy; used for update detection
 const RESTORE_KEY='mbmlife_restore';     // auto restore point before risky ops
 let DB=load();
-function blank(){return{schema:SCHEMA,tasks:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
+function blank(){return{schema:SCHEMA,tasks:{},lists:{},appts:{},shop:{},shopLists:{},bills:{},bdays:{},notes:{},categories:{},history:[],meta:{theme:'auto',lang:'en',user:'all',backups:[]}};}
 
 // ---- validation: is this object a plausible MBM database? ----
 function isValidDB(d){
@@ -708,6 +797,11 @@ function migrate(d){
       if(t.created===undefined)t.created=null;
       if(t.assignedBy===undefined)t.assignedBy=null;}
     d.schema=9;}
+  if(d.schema<10){/* v10: introduce lists; assign existing tasks to inbox */
+    if(!d.lists)d.lists={};
+    if(!d.lists['inbox'])d.lists['inbox']={id:'inbox',name:{en:'Tasks',fa:'کارها'},icon:'✓',color:'#5b6cff',sortBy:'smart',created:new Date().toISOString()};
+    for(const id in d.tasks){if(!d.tasks[id].listId)d.tasks[id].listId='inbox';}
+    d.schema=10;}
   return d;
 }
 
@@ -1078,7 +1172,7 @@ function render(){
 
   document.querySelectorAll('#whoRow button').forEach(b=>{b.classList.toggle('on',b.dataset.u===USER);
     b.textContent=b.dataset.u==='all'?tr('all'):b.dataset.u==='behnam'?tr('behnam'):tr('mahsa');});
-  const ts=document.querySelectorAll('#taskSeg button');ts[0].textContent=tr('active');ts[1].textContent=tr('today');ts[2].textContent=tr('completed');
+  // taskSeg removed in v51
   const cs=document.querySelectorAll('#calSeg button');cs[0].textContent=tr('month');cs[1].textContent=tr('week');cs[2].textContent=tr('day');
 
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
@@ -1144,7 +1238,9 @@ function renderHome(){
    +lane('done',tr('completed'),doneToday.length?doneToday.length+(L==='fa'?' انجام شد':' done'):'—','',doneToday.length||'', 'go:tasks:done');
   cc.querySelectorAll('[data-lane]').forEach(el=>el.onclick=()=>{
     const v=el.dataset.lane;
-    if(v.startsWith('go:')){const[,sc,f]=v.split(':');screen=sc;if(f)taskFilter=f;render();}
+    if(v.startsWith('go:')){const[,sc,f]=v.split(':');screen=sc;
+      if(sc==='tasks'){tasksView='browser';tasksActiveList=null;tasksSmartView=null;}
+      render();}
     else{const[c,id]=v.split(':');showDetail(c,id);}
   });
 
@@ -1193,7 +1289,9 @@ function renderHome(){
    +counter('bills',billsDue,tr('billsH'),'bills')
    +counter('bday',bdays30,tr('bdaysH'),'bdays');
   cnt.querySelectorAll('[data-cnt]').forEach(el=>el.onclick=()=>{
-    const[sc,f]=el.dataset.cnt.split(':');screen=sc;if(f)taskFilter=f;render();
+    const[sc,f]=el.dataset.cnt.split(':');screen=sc;
+    if(sc==='tasks'){tasksView='browser';tasksActiveList=null;tasksSmartView=null;}
+    render();
   });
 
   /* ---- MORNING BRIEF (removed) ---- */
@@ -1214,7 +1312,7 @@ function renderHome(){
 function counter(cls,n,label,target){return `<div class="counter ${cls}" ${target?`data-cnt="${target}" style="cursor:pointer"`:''}><div class="cn">${n}</div><div class="cl">${label}</div></div>`;}
 /* generic detail sheet for any record */
 function bindDetail(scope){scope.querySelectorAll('[data-detail]').forEach(el=>el.addEventListener('click',e=>{
-  if(e.target.closest('.act')||e.target.closest('.check'))return; // ignore action buttons
+  if(e.target.closest('.act')||e.target.closest('.check')||e.target.closest('.tcheck'))return; // ignore action buttons
   const[c,id]=el.dataset.detail.split(':');showDetail(c,id);}));}
 function showDetail(c,id){
   const r=DB[c][id];if(!r)return;
@@ -1450,39 +1548,245 @@ function tick(){
 }
 
 /* ===================== TASKS ===================== */
+/* ── Tasks state ── */
+let tasksView='browser';
+let tasksActiveList=null;
+let tasksSmartView=null;
+
 function renderTasks(){
-  document.querySelectorAll('#taskSeg button').forEach(b=>b.classList.toggle('on',b.dataset.f===taskFilter));
-  const box=document.getElementById('taskList');const ts=todayStr();
-  let all=active('tasks').filter(t=>userMatch(t.user));
-  if(taskFilter==='open')all=all.filter(t=>!t.done);
-  else if(taskFilter==='today')all=all.filter(t=>!t.done&&(!t.date||t.date<=ts));
-  else all=all.filter(t=>t.done);
-  all=smartSort(all);
-  if(!all.length){box.innerHTML=`<div class="empty">${tr('noTasks')}</div>`;return;}
-  // split active vs completed for a clean To Do style section (only when not already filtered to done)
-  if(taskFilter==='done'){
-    box.innerHTML=all.map(t=>taskRowClean(t)).join('');
-  }else{
-    const openT=all.filter(t=>!t.done), doneT=all.filter(t=>t.done);
-    let html=openT.map(t=>taskRowClean(t)).join('');
-    if(doneT.length){
-      html+=`<div class="tsec">${tr('done')||'Completed'} · ${doneT.length}</div>`;
-      html+=doneT.map(t=>taskRowClean(t)).join('');
-    }
-    box.innerHTML=html;
-  }
-  bindRows(box);
+  if(tasksView==='browser') renderTasksBrowser();
+  else renderTasksDetail();
 }
+
+function renderTasksBrowser(){
+  const br=document.getElementById('tv-browser');
+  const dt=document.getElementById('tv-detail');
+  if(br)br.style.display='';
+  if(dt)dt.style.display='none';
+  const ts=todayStr();
+  const allActive=active('tasks');
+  const svCounts={
+    myday:allActive.filter(t=>!t.done&&t.date===ts).length,
+    important:allActive.filter(t=>!t.done&&t.pinned).length,
+    planned:allActive.filter(t=>!t.done&&t.date&&t.date>ts).length,
+    all:allActive.filter(t=>!t.done).length
+  };
+  document.querySelectorAll('.tv-smart').forEach(b=>{
+    const sv=b.dataset.sv;
+    let badge=b.querySelector('.tv-sv-badge');
+    if(!badge){badge=document.createElement('span');badge.className='tv-sv-badge';
+      badge.style.cssText='font-size:12px;font-weight:700;color:var(--mut);margin-left:auto';
+      b.appendChild(badge);}
+    badge.textContent=svCounts[sv]||'';
+  });
+  const listsEl=document.getElementById('tv-lists');
+  if(!listsEl)return;
+  const lists=DB.lists||{};
+  if(!Object.keys(lists).length){listsEl.innerHTML=`<div class="empty">No lists yet.</div>`;return;}
+  listsEl.innerHTML=Object.values(lists).map(l=>{
+    const count=allActive.filter(t=>t.listId===l.id&&!t.done).length;
+    const col=l.color||'#5b6cff';
+    return `<div class="tv-list-row" data-listid="${l.id}">
+      <div class="tv-list-icon" style="background:${col}">${l.icon||'✓'}</div>
+      <span class="tv-list-name">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</span>
+      ${count?`<span class="tv-list-count">${count}</span>`:''}
+      <span class="tv-list-arr">›</span>
+    </div>`;
+  }).join('');
+  listsEl.querySelectorAll('[data-listid]').forEach(r=>r.onclick=()=>{
+    tasksActiveList=r.dataset.listid;tasksSmartView=null;tasksView='detail';render();
+  });
+  document.querySelectorAll('.tv-smart').forEach(b=>b.onclick=()=>{
+    tasksSmartView=b.dataset.sv;tasksActiveList=null;tasksView='detail';render();
+  });
+  const nb=document.getElementById('tvNewList');
+  if(nb)nb.onclick=()=>openNewListSheet();
+}
+
+function renderTasksDetail(){
+  const br=document.getElementById('tv-browser');
+  const dt=document.getElementById('tv-detail');
+  if(br)br.style.display='none';
+  if(dt)dt.style.display='';
+  let title='';let accentColor=null;
+  if(tasksSmartView){
+    const names={myday:'My Day',important:'Important',planned:'Planned',all:'All Tasks'};
+    title=names[tasksSmartView]||'Tasks';
+  } else if(tasksActiveList){
+    const l=(DB.lists||{})[tasksActiveList];
+    title=l?(l.name&&(l.name[L]||l.name.en)||'List'):'List';
+    accentColor=l&&l.color;
+  }
+  const titleEl=document.getElementById('tvDetailTitle');
+  if(titleEl){titleEl.textContent=title;if(accentColor)titleEl.style.color=accentColor;else titleEl.style.color='';}
+  const ts=todayStr();
+  let all=active('tasks');
+  if(tasksSmartView==='myday') all=all.filter(t=>t.date===ts);
+  else if(tasksSmartView==='important') all=all.filter(t=>t.pinned);
+  else if(tasksSmartView==='planned') all=all.filter(t=>t.date&&t.date>ts);
+  else if(tasksActiveList) all=all.filter(t=>t.listId===tasksActiveList);
+  all=smartSort(all);
+  const box=document.getElementById('taskList');
+  if(!box)return;
+  const openT=all.filter(t=>!t.done), doneT=all.filter(t=>t.done);
+  let html=openT.length?openT.map(t=>taskRowClean(t)).join(''):`<div class="empty">No tasks here.</div>`;
+  if(doneT.length){html+=`<div class="tsec">Completed · ${doneT.length}</div>`;html+=doneT.map(t=>taskRowClean(t)).join('');}
+  box.innerHTML=html;
+  bindRows(box);
+  const inp=document.getElementById('tvInlineInput');
+  if(inp){inp.onkeydown=e=>{
+    if(e.key==='Enter'&&inp.value.trim()){
+      const text=inp.value.trim();inp.value='';
+      const id=uid();
+      DB.tasks[id]={id,text,listId:tasksActiveList||'inbox',date:null,time:null,
+        location:'',priority:'p2',user:'all',repeat:'none',category:'',status:'none',
+        created:new Date().toISOString(),assignedBy:null,done:false,pinned:false,archived:false};
+      save();renderTasksDetail();if(typeof tasksPush==='function')tasksPush();
+    }
+  };}
+}
+
+function openNewListSheet(){
+  const colors=['#5b6cff','#ff5c72','#1fc28a','#ff9f43','#9d7bff','#3aa0ff','#1fb6a8'];
+  let selColor=colors[Object.keys(DB.lists||{}).length%colors.length];
+  openSheet(`<h3>New List</h3>
+    <div class="fld"><label>Name</label><input id="nl_name" placeholder="List name" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--ink);font-size:15px;outline:none"></div>
+    <div class="fld" style="margin-top:14px"><label>Color</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px" id="nl_colors">${colors.map(c=>`<div data-c="${c}" style="width:32px;height:32px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${c===selColor?'var(--ink)':'transparent'}"></div>`).join('')}</div></div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="cancel" id="nl_cancel" style="flex:1">Cancel</button>
+      <button id="nl_save" style="flex:1;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:13px;font-weight:700;cursor:pointer">Create</button>
+    </div>`);
+  document.getElementById('nl_cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{
+    selColor=el.dataset.c;document.querySelectorAll('[data-c]').forEach(e=>e.style.borderColor=e.dataset.c===selColor?'var(--ink)':'transparent');
+  });
+  document.getElementById('nl_save').onclick=()=>{
+    const name=document.getElementById('nl_name').value.trim();if(!name)return;
+    const id=uid();if(!DB.lists)DB.lists={};
+    DB.lists[id]={id,name:{en:name,fa:name},icon:'✓',color:selColor,sortBy:'smart',created:new Date().toISOString()};
+    save();closeSheet();render();
+  };
+  setTimeout(()=>{const n=document.getElementById('nl_name');if(n)n.focus();},100);
+}
+
+function openListMenuSheet(listId){
+  const l=(DB.lists||{})[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||listId;
+  const curSort=l.sortBy||'smart';
+  const sortLabel={smart:'Smart',alpha:'Alphabetical',date:'Due date',priority:'Priority',created:'Creation date'};
+  const menuBtn=(icon,label,action,danger)=>
+    `<button data-lma="${action}" style="display:flex;align-items:center;gap:14px;width:100%;background:none;border:none;border-bottom:1px solid var(--line);padding:15px 4px;font-size:15px;color:${danger?'var(--danger)':'var(--ink)'};cursor:pointer;text-align:left"><span style="font-size:18px;width:24px;text-align:center">${icon}</span>${label}</button>`;
+  openSheet(`<h3 style="margin-bottom:4px">${esc(name)}</h3>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:14px">Sorted by ${sortLabel[curSort]||curSort}</div>
+    ${menuBtn('↕','Sort by','sort')}
+    ${menuBtn('⇅','Reorder tasks','reorder')}
+    ${menuBtn('🎨','Change theme','theme')}
+    ${menuBtn('📤','Share / Send a copy','share')}
+    ${menuBtn('⧉','Duplicate list','duplicate')}
+    ${menuBtn('🖨','Print list','print')}
+    ${menuBtn('💡','Suggestions','suggestions')}
+    ${menuBtn('✏️','Rename list','rename')}
+    ${menuBtn('🗑','Delete list','delete',true)}
+    <button class="cancel" id="lm_cancel" style="margin-top:8px">Cancel</button>`);
+  document.getElementById('lm_cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.lma;closeSheet();
+    if(a==='sort'){
+      const opts=['smart','alpha','date','priority','created'];
+      openSheet(`<h3>Sort by</h3>
+        ${opts.map(o=>`<button data-so="${o}" style="display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;border-bottom:1px solid var(--line);padding:15px 4px;font-size:15px;color:var(--ink);cursor:pointer">${sortLabel[o]}${o===curSort?' <span style="color:var(--brand)">✓</span>':''}</button>`).join('')}
+        <button class="cancel" id="so_cancel" style="margin-top:8px">Cancel</button>`);
+      document.getElementById('so_cancel').onclick=closeSheet;
+      document.querySelectorAll('[data-so]').forEach(b=>b.onclick=()=>{
+        DB.lists[listId].sortBy=b.dataset.so;save();closeSheet();render();
+      });
+    } else if(a==='reorder'){
+      // Sort tasks alphabetically as a simple manual-order seed
+      const tasks=Object.values(DB.tasks).filter(t=>t.listId===listId&&!t.archived);
+      openSheet(`<h3>Reorder Tasks</h3>
+        <p style="color:var(--mut);font-size:14px;margin-bottom:16px">Drag-and-drop reorder will be available in a future update. Apply alphabetical order now?</p>
+        <div style="display:flex;gap:10px">
+          <button class="cancel" id="ro_cancel" style="flex:1">Cancel</button>
+          <button id="ro_alpha" style="flex:1;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:13px;font-weight:700;cursor:pointer">Sort A–Z</button>
+        </div>`);
+      document.getElementById('ro_cancel').onclick=closeSheet;
+      document.getElementById('ro_alpha').onclick=()=>{
+        DB.lists[listId].sortBy='alpha';save();closeSheet();render();
+      };
+    } else if(a==='theme'){
+      const colors=['#5b6cff','#ff5c72','#1fc28a','#ff9f43','#9d7bff','#3aa0ff','#1fb6a8','#e67e22','#8e44ad'];
+      let selColor=l.color||colors[0];
+      openSheet(`<h3>Change Theme</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px" id="th_colors">
+          ${colors.map(c=>`<div data-tc="${c}" style="width:36px;height:36px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${c===selColor?'var(--ink)':'transparent'}"></div>`).join('')}
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="cancel" id="th_cancel" style="flex:1">Cancel</button>
+          <button id="th_save" style="flex:1;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:13px;font-weight:700;cursor:pointer">Apply</button>
+        </div>`);
+      document.getElementById('th_cancel').onclick=closeSheet;
+      document.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
+        selColor=el.dataset.tc;
+        document.querySelectorAll('[data-tc]').forEach(e=>e.style.borderColor=e.dataset.tc===selColor?'var(--ink)':'transparent');
+      });
+      document.getElementById('th_save').onclick=()=>{
+        DB.lists[listId].color=selColor;save();closeSheet();render();
+      };
+    } else if(a==='share'){
+      const tasks=Object.values(DB.tasks).filter(t=>t.listId===listId&&!t.archived);
+      const text=`${name}\n\n`+tasks.map(t=>`${t.done?'☑':'☐'} ${t.text}${t.date?' ('+t.date+')':''}`).join('\n');
+      if(navigator.share){navigator.share({title:name,text}).catch(()=>{});}
+      else{navigator.clipboard&&navigator.clipboard.writeText(text).then(()=>alert('Copied to clipboard')).catch(()=>alert(text));}
+    } else if(a==='duplicate'){
+      const newId=uid();
+      DB.lists[newId]={...l,id:newId,name:{en:name+' (copy)',fa:name+' (کپی)'},created:new Date().toISOString()};
+      const tasks=Object.values(DB.tasks).filter(t=>t.listId===listId&&!t.archived);
+      tasks.forEach(t=>{const nid=uid();DB.tasks[nid]={...t,id:nid,listId:newId,created:new Date().toISOString(),done:false,doneDate:null};});
+      save();render();
+    } else if(a==='print'){
+      const tasks=Object.values(DB.tasks).filter(t=>t.listId===listId&&!t.archived);
+      const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
+      const html=`<!DOCTYPE html><html><head><title>${name}</title><style>body{font-family:sans-serif;max-width:600px;margin:40px auto;color:#222}h1{font-size:22px}li{padding:6px 0;font-size:15px}.done{text-decoration:line-through;color:#999}h3{margin-top:24px;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#666}</style></head><body>
+        <h1>${name}</h1>
+        <ul>${open.map(t=>`<li>${t.text}${t.date?' — '+t.date:''}</li>`).join('')}</ul>
+        ${done.length?`<h3>Completed</h3><ul>${done.map(t=>`<li class="done">${t.text}</li>`).join('')}</ul>`:''}
+      </body></html>`;
+      const w=window.open('','_blank');if(w){w.document.write(html);w.document.close();w.print();}
+    } else if(a==='suggestions'){
+      const cur=l.suggestions!==false;
+      DB.lists[listId].suggestions=!cur;save();
+      alert(`Suggestions ${!cur?'enabled':'disabled'} for "${name}"`);
+    } else if(a==='rename'){
+      openSheet(`<h3>Rename List</h3>
+        <div class="fld"><input id="rn_name" value="${esc(name)}" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--ink);font-size:15px;outline:none"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="cancel" id="rn_cancel" style="flex:1">Cancel</button>
+          <button id="rn_save" style="flex:1;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:13px;font-weight:700;cursor:pointer">Save</button>
+        </div>`);
+      document.getElementById('rn_cancel').onclick=closeSheet;
+      document.getElementById('rn_save').onclick=()=>{
+        const v=document.getElementById('rn_name').value.trim();if(!v)return;
+        DB.lists[listId].name={en:v,fa:v};save();closeSheet();render();
+      };
+      setTimeout(()=>{const n=document.getElementById('rn_name');if(n){n.focus();n.select();}},100);
+    } else if(a==='delete'){
+      if(!confirm(`Delete "${name}" and all its tasks?`))return;
+      for(const id in DB.tasks){if(DB.tasks[id].listId===listId){DB.tasks[id].archived=true;DB.tasks[id].pinned=false;}}
+      delete DB.lists[listId];
+      save();tasksView='browser';tasksActiveList=null;render();
+    }
+  });
+}
+
 function taskRowClean(t){
   const ts=todayStr();const over=t.date&&t.date<ts&&!t.done;
   let meta='';
-  if(t.date)meta+=`<span class="chip${over?' over':''}">${over?'⚠ ':''}${shortDate(t.date)}${t.time?' '+t.time:''}</span>`;
-  if(t.user&&t.user!=='all')meta+=`<span class="chip">${t.user==='behnam'?tr('behnam'):tr('mahsa')}</span>`;
+  if(t.date)meta+=`<span class="chip${over?' over':''}">\${over?'⚠ ':''}${shortDate(t.date)}${t.time?' '+t.time:''}</span>`;
   if(t.category)meta+=`<span class="chip">${catLabel(t.category)}</span>`;
   if(t.status&&t.status!=='none'&&!t.done)meta+=`<span class="stpill st-${t.status}">${tr('st_'+t.status)}</span>`;
   const pr=t.priority&&t.priority!=='none'?`<span class="pill ${priClass(t.priority)}">${tr(t.priority)}</span>`:'';
   return `<div class="li tli ${t.done?'done':''}">
-    <div class="check ${t.done?'on':''}" data-check="${t.id}"></div>
+    <div class="tcheck ${t.done?'on':''}" data-check="${t.id}"></div>
     <div class="tx" data-edit="${t.id}">${esc(t.text)}${meta?`<div class="meta">${meta}</div>`:''}</div>
     ${pr}<button class="tstar ${t.pinned?'on':''}" data-tpin="${t.id}" aria-label="Important">${t.pinned?'★':'☆'}</button>
   </div>`;
@@ -1491,7 +1795,7 @@ function taskRow(t,compact,detail){
   const ts=todayStr();const over=t.date&&t.date<ts&&!t.done;
   let meta='';
   if(t.date)meta+=`<span style="${over?'color:var(--danger);font-weight:700':''}">${over?'⚠ ':''}${shortDate(t.date)}${t.time?' '+t.time:''}</span>`;
-  if(t.user&&t.user!=='all')meta+=`<span>${t.user==='behnam'?tr('behnam'):tr('mahsa')}</span>`;
+  if(t.user&&t.user!=='all')meta+=`<span>${esc(t.user)}</span>`;
   if(t.category)meta+=`<span>${catLabel(t.category)}</span>`;
   if(t.status&&t.status!=='none'&&!t.done)meta+=`<span class="stpill st-${t.status}">${tr('st_'+t.status)}</span>`;
   const pr=t.priority&&t.priority!=='none'?`<span class="pill ${priClass(t.priority)}">${tr(t.priority)}</span>`:'';
@@ -2203,7 +2507,13 @@ window.addEventListener('popstate',e=>{
 try{history.replaceState({t:'screen',stack:['home']},'');}catch(e){}
 document.querySelectorAll('[data-go]').forEach(c=>c.onclick=()=>{nav(c.dataset.go);});
 document.querySelectorAll('[data-back]').forEach(c=>c.onclick=()=>{navPop();});
-document.getElementById('taskSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{taskFilter=b.dataset.f;render();});
+// taskSeg removed — tasks now use list-based navigation
+
+// Tasks platform back button
+document.getElementById('tvBack').onclick=()=>{tasksView='browser';tasksActiveList=null;tasksSmartView=null;render();};
+// Tasks list menu (placeholder — expand later)
+document.getElementById('tvListMenu').onclick=()=>{if(tasksActiveList&&DB.lists&&DB.lists[tasksActiveList])openListMenuSheet(tasksActiveList);};
+
 document.getElementById('calSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{calView=b.dataset.v;render();});
 document.querySelectorAll('#whoRow button').forEach(b=>b.onclick=()=>{USER=b.dataset.u;DB.meta.user=USER;save();render();});
 document.getElementById('clockToggle').onclick=()=>{
@@ -2590,6 +2900,38 @@ let tasksUnsub=null;                   // detach handle for the listener
 let lastPushedJSON='';                 // avoid redundant pushes
 
 function tasksCol(){ return FB.db.collection('workspaces').doc(WS).collection('tasks'); }
+function listsCol(){ return FB.db.collection('workspaces').doc(WS).collection('lists'); }
+
+// Pull lists from cloud
+let listsUnsub=null;
+function listsListen(){
+  if(!FB.ready||!FB.user)return;
+  if(listsUnsub)listsUnsub();
+  listsUnsub=listsCol().onSnapshot(snap=>{
+    const cloud={};
+    snap.forEach(doc=>{ cloud[doc.id]=doc.data(); });
+    if(Object.keys(cloud).length===0 && Object.keys(DB.lists||{}).length>0){
+      listsPush(); return;
+    }
+    if(Object.keys(cloud).length>0){
+      DB.lists=cloud;
+      try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}
+      render();
+    }
+  },()=>{});
+}
+async function listsPush(){
+  if(!FB.ready||!FB.user)return;
+  try{
+    const snap=await listsCol().get();
+    const cloudIds=new Set();snap.forEach(d=>cloudIds.add(d.id));
+    const localIds=new Set(Object.keys(DB.lists||{}));
+    const batch=FB.db.batch();
+    for(const id of localIds){batch.set(listsCol().doc(id),DB.lists[id]);}
+    for(const id of cloudIds){if(!localIds.has(id))batch.delete(listsCol().doc(id));}
+    await batch.commit();
+  }catch(e){}
+}
 
 // Pull: listen to cloud tasks in real time and mirror into DB.tasks
 function tasksListen(){
@@ -2653,7 +2995,7 @@ async function tasksPush(){
 }
 
 // start/stop sync with auth state
-function startTasksSync(){ tasksListen(); notesListen(); }
+function startTasksSync(){ tasksListen(); listsListen(); notesListen(); }
 function stopTasksSync(){ 
   if(tasksUnsub){tasksUnsub();tasksUnsub=null;}
   if(notesUnsub){notesUnsub();notesUnsub=null;}
