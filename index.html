@@ -505,7 +505,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v66b';
+const APP_VERSION='v67';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1087,6 +1087,138 @@ function toast(msg,ms=2200){
 }
 
 /* ══════════════════════════════════════════
+   CORE TASK ACTIONS
+   ══════════════════════════════════════════ */
+function createTask(text,listId){
+  const id=uid();
+  DB.entities.tasks[id]={
+    id,text,listId:listId||'inbox',
+    dueDate:null,dueTime:null,priority:'p3',repeat:null,
+    assigneeId:null,creatorId:DB.meta.userId,
+    status:'open',pinned:false,done:false,doneAt:null,
+    placeId:null,expenseId:null,noteIds:[],tags:[],steps:[],notes:'',
+    createdAt:now(),updatedAt:now(),archivedAt:null
+  };
+  saveDB();
+}
+
+function completeTask(id){
+  const t=DB.entities.tasks[id];if(!t)return;
+  t.done=!t.done;
+  t.doneAt=t.done?now():null;
+  t.updatedAt=now();
+  saveDB();render();
+}
+
+/* ══════════════════════════════════════════
+   QUICK ADD (FAB)
+   ══════════════════════════════════════════ */
+function quickAdd(){
+  const lists=active('lists');
+  const defList=activeListId||'inbox';
+  openSheet(`
+    <h3>${L==='fa'?'کار جدید':'New Task'}</h3>
+    <div class="fld">
+      <input class="finput" id="qa-text" placeholder="${tr('addTask')}" autofocus></div>
+    <div class="fld"><label>${L==='fa'?'تاریخ':'Due date'}</label>
+      <input class="finput" id="qa-date" type="date"></div>
+    <div class="fld"><label>${L==='fa'?'اولویت':'Priority'}</label>
+      <div class="chipsel" id="qa-pri">
+        <button data-v="p1">${tr('high')}</button>
+        <button data-v="p2">${tr('medium')}</button>
+        <button data-v="p3" class="on">${tr('low')}</button>
+      </div></div>
+    <div class="fld"><label>${L==='fa'?'لیست':'List'}</label>
+      <div class="chipsel" id="qa-list">
+        ${lists.map(l=>`<button data-v="${l.id}" ${l.id===defList?'class="on"':''}>${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</button>`).join('')}
+      </div></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="qa-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary" id="qa-save">${tr('save')}</button>
+    </div>`);
+
+  bindChipsel('qa-pri','p3');
+  bindChipsel('qa-list',defList);
+  setTimeout(()=>document.getElementById('qa-text')?.focus(),100);
+  document.getElementById('qa-cancel').onclick=closeSheet;
+  document.getElementById('qa-save').onclick=()=>{
+    const text=document.getElementById('qa-text').value.trim();if(!text)return;
+    const id=uid();
+    DB.entities.tasks[id]={
+      id,text,
+      listId:chipVal('qa-list')||'inbox',
+      dueDate:document.getElementById('qa-date').value||null,
+      dueTime:null,priority:chipVal('qa-pri')||'p3',repeat:null,
+      assigneeId:null,creatorId:DB.meta.userId,
+      status:'open',pinned:false,done:false,doneAt:null,
+      placeId:null,expenseId:null,noteIds:[],tags:[],steps:[],notes:'',
+      createdAt:now(),updatedAt:now(),archivedAt:null
+    };
+    saveDB();closeSheet();render();toast(L==='fa'?'کار اضافه شد':'Task added');
+  };
+}
+
+/* ══════════════════════════════════════════
+   BIND SCREEN EVENTS
+   ══════════════════════════════════════════ */
+function bindScreen(){
+  // Checkboxes
+  document.querySelectorAll('[data-chk]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();completeTask(el.dataset.chk);});
+  // Star/pin
+  document.querySelectorAll('[data-pin]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();
+    const t=DB.entities.tasks[el.dataset.pin];if(!t)return;
+    t.pinned=!t.pinned;t.updatedAt=now();saveDB();render();});
+  // Task row → detail panel
+  document.querySelectorAll('.trow-flat').forEach(el=>el.onclick=()=>{
+    if(el.dataset.tid)openTaskDetail(el.dataset.tid);});
+  // List rows (hub)
+  document.querySelectorAll('[data-listid]').forEach(el=>el.onclick=()=>{
+    activeListId=el.dataset.listid;activeSmartView=null;tasksView='detail';render();});
+  // Smart view rows
+  document.querySelectorAll('[data-sv]').forEach(el=>el.onclick=()=>{
+    activeSmartView=el.dataset.sv;activeListId=null;tasksView='detail';render();});
+  // Counter nav
+  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{
+    const[sc,sv]=el.dataset.go.split(':');
+    if(sc==='lists'){screen='lists';activeSmartView=sv;activeListId=null;tasksView='detail';}
+    render();});
+  // Back button (list detail)
+  const back=document.getElementById('list-back');
+  if(back)back.onclick=()=>{tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();};
+  // List menu
+  const lmb=document.getElementById('list-menu-btn');
+  if(lmb)lmb.onclick=()=>openListMenu(activeListId);
+  // New list
+  const nlb=document.getElementById('btn-new-list');
+  if(nlb)nlb.onclick=()=>openNewListSheet();
+  // Hub search
+  const hsb=document.getElementById('btn-hub-search');
+  if(hsb)hsb.onclick=()=>openSearch();
+  // Done toggle
+  const dt=document.getElementById('done-toggle');
+  if(dt)dt.onclick=()=>{doneCollapsed=!doneCollapsed;render();};
+  // Inline add (list detail)
+  const ia=document.getElementById('inline-add-input');
+  if(ia)ia.onkeydown=e=>{
+    if(e.key==='Enter'&&ia.value.trim()){
+      createTask(ia.value.trim(),activeListId);ia.value='';render();}};
+  // Inline add (Today)
+  const ta=document.getElementById('today-add-input');
+  if(ta)ta.onkeydown=e=>{
+    if(e.key==='Enter'&&ta.value.trim()){
+      createTask(ta.value.trim(),'inbox');ta.value='';render();}};
+  // More screen actions
+  document.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>{
+    const a=el.dataset.action;
+    if(a==='toggle-lang'){DB.meta.lang=L==='en'?'fa':'en';saveDB();render();}
+    else if(a==='toggle-theme'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();render();}
+    else if(a==='sign-out'){DB.meta.userId=null;DB.meta.displayName=null;DB.meta.email=null;saveDB();location.reload();}
+  });
+}
+
+/* ══════════════════════════════════════════
    FIREBASE AUTH + SYNC (stub — ready to connect)
    ══════════════════════════════════════════ */
 // Firebase config goes here when backend is ready.
@@ -1110,9 +1242,10 @@ document.getElementById('auth-google').onclick=()=>{
 document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
 
 function startApp(displayName,email){
-  if(displayName&&displayName!=='Guest'){
-    DB.meta.displayName=displayName;DB.meta.email=email;saveDB();}
-  if(!DB.meta.displayName)DB.meta.displayName='Guest';
+  // Always persist so auto-start works next time
+  DB.meta.displayName=displayName||'Guest';
+  DB.meta.email=email||null;
+  saveDB();
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
   render();
