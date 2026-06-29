@@ -505,7 +505,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v68';
+const APP_VERSION='v69';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1464,6 +1464,8 @@ function quickAdd(){
       <input class="finput" id="qa-text" placeholder="${tr('addTask')}" autofocus></div>
     <div class="fld"><label>${L==='fa'?'تاریخ':'Due date'}</label>
       <input class="finput" id="qa-date" type="date"></div>
+    <div class="fld"><label>${L==='fa'?'ساعت':'Time'}</label>
+      <input class="finput" id="qa-time" type="time"></div>
     <div class="fld"><label>${L==='fa'?'اولویت':'Priority'}</label>
       <div class="chipsel" id="qa-pri">
         <button data-v="p1">${tr('high')}</button>
@@ -1490,7 +1492,7 @@ function quickAdd(){
       id,text,
       listId:chipVal('qa-list')||'inbox',
       dueDate:document.getElementById('qa-date').value||null,
-      dueTime:null,priority:chipVal('qa-pri')||'p3',repeat:null,
+      dueTime:document.getElementById('qa-time').value||null,priority:chipVal('qa-pri')||'p3',repeat:null,
       assigneeId:null,creatorId:DB.meta.userId,
       status:'open',pinned:false,done:false,doneAt:null,
       placeId:null,expenseId:null,noteIds:[],tags:[],steps:[],notes:'',
@@ -1577,9 +1579,8 @@ function syncPush(){/* stub */}
    ══════════════════════════════════════════ */
 // Auth screen
 document.getElementById('auth-google').onclick=()=>{
-  // Firebase Google sign-in goes here
-  // For now: skip
-  startApp('Guest','guest@mbmlife.app');
+  // Firebase Google sign-in goes here — for now skip
+  startApp('Guest',null);
 };
 document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
 
@@ -1611,6 +1612,21 @@ document.getElementById('fab').onclick=quickAdd;
 document.getElementById('sheet-bg').onclick=closeSheet;
 
 // Task detail panel
+// Prevent Android back button from leaving app
+window.addEventListener('popstate',()=>{
+  if(document.getElementById('task-detail').classList.contains('on')){
+    closeTaskDetail();render();
+  } else if(document.getElementById('search-screen').classList.contains('on')){
+    closeSearch();
+  } else if(document.getElementById('sheet').classList.contains('on')){
+    closeSheet();
+  } else if(tasksView==='detail'){
+    tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
+  }
+  history.pushState(null,'',location.href);
+});
+history.pushState(null,'',location.href);
+
 document.getElementById('td-back').onclick=()=>{closeTaskDetail();render();};
 document.getElementById('td-save').onclick=()=>{closeTaskDetail();render();};
 
