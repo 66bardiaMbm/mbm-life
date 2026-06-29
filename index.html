@@ -145,27 +145,142 @@ body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 #fab:active{transform:scale(.93);box-shadow:0 4px 12px rgba(110,86,248,.3)}
 
 /* ── Sheet (bottom drawer) ── */
-#sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
-  opacity:0;pointer-events:none;transition:opacity .2s;backdrop-filter:blur(4px)}
-#sheet-bg.on{opacity:1;pointer-events:all}
-#sheet{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
-  background:var(--s1);border-radius:24px 24px 0 0;border-top:1px solid var(--b2);
-  z-index:51;transform:translateY(100%);transition:transform .28s cubic-bezier(.32,0,.67,0);
-  max-height:92vh;overflow-y:auto;padding:0 0 env(safe-area-inset-bottom,0)}
-#sheet.on{transform:translateY(0)}
-.sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--b2);
-  margin:12px auto 4px}
-.sheet-body{padding:4px 20px 24px}
-.sheet-body h3{font-size:20px;font-weight:800;margin-bottom:16px;padding-top:8px}
+/* ══════════════════════════════════════════
+   PREMIUM SHEET COMPONENT
+   ══════════════════════════════════════════ */
+#sheet-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,0);z-index:50;
+  pointer-events:none;transition:background .25s;
+  backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px);
+  transition:background .25s,backdrop-filter .25s,-webkit-backdrop-filter .25s}
+#sheet-bg.on{background:rgba(0,0,0,.55);pointer-events:all;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 
-/* ── Sheet menu rows ── */
-.smrow{display:flex;align-items:center;gap:14px;padding:15px 0;
-  border-bottom:1px solid var(--b1);background:none;border-left:none;border-right:none;
-  border-top:none;width:100%;cursor:pointer;color:var(--ink);text-align:left}
-.smrow:last-of-type{border-bottom:none}
-.smrow-ic{font-size:20px;width:28px;text-align:center;flex:none}
-.smrow-tx{font-size:15px;font-weight:500}
-.smrow.danger .smrow-tx{color:var(--danger)}
+#sheet{
+  position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
+  background:var(--s1);
+  border-radius:28px 28px 0 0;
+  border-top:1px solid var(--b2);
+  z-index:51;
+  transform:translateY(100%);
+  transition:transform .32s cubic-bezier(0.22,1,0.36,1);
+  max-height:90vh;overflow-y:auto;overflow-x:hidden;
+  padding-bottom:env(safe-area-inset-bottom,0);
+  will-change:transform}
+#sheet.on{transform:translateY(0)}
+
+/* Drag handle */
+.sheet-handle{
+  width:40px;height:5px;border-radius:3px;
+  background:var(--b2);margin:14px auto 0;
+  flex-shrink:0}
+
+/* Sheet header */
+.sheet-header{
+  padding:16px 22px 0;
+  position:relative}
+.sheet-list-identity{
+  display:flex;align-items:center;gap:13px;margin-bottom:4px}
+.sheet-list-icon{
+  width:42px;height:42px;border-radius:13px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;flex:none;transition:transform .2s}
+.sheet-list-name{
+  font-size:19px;font-weight:800;letter-spacing:-.2px;line-height:1.2}
+.sheet-list-meta{
+  font-size:12px;color:var(--ink3);font-weight:500;margin-top:1px}
+
+/* Action groups */
+.sheet-group{
+  margin:14px 14px 0;
+  background:var(--s2);
+  border-radius:18px;
+  overflow:hidden;
+  border:1px solid var(--b1)}
+.sheet-group+.sheet-group{margin-top:10px}
+
+/* Individual action row */
+.sac{
+  display:flex;align-items:center;gap:0;
+  width:100%;background:none;border:none;
+  border-bottom:1px solid var(--b1);
+  cursor:pointer;text-align:left;
+  padding:0;
+  color:var(--ink);
+  position:relative;
+  overflow:hidden;
+  transition:background .12s}
+.sac:last-child{border-bottom:none}
+.sac:active{background:var(--s3)}
+
+/* Ripple on tap */
+.sac::after{
+  content:'';position:absolute;inset:0;
+  background:rgba(255,255,255,.06);
+  opacity:0;transition:opacity .15s}
+.sac:active::after{opacity:1}
+
+.sac-icon-wrap{
+  width:56px;height:54px;display:flex;
+  align-items:center;justify-content:center;flex:none}
+.sac-icon{
+  width:34px;height:34px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;transition:transform .15s}
+.sac:active .sac-icon{transform:scale(.92)}
+.sac-label{
+  flex:1;font-size:15.5px;font-weight:500;
+  letter-spacing:-.1px;padding:16px 0}
+.sac-right{
+  display:flex;align-items:center;gap:6px;
+  padding-right:16px;color:var(--ink3);
+  font-size:13px;font-weight:600}
+.sac-arr{font-size:16px;opacity:.4}
+
+/* Danger row */
+.sac.sac-danger .sac-label{color:var(--danger)}
+.sac.sac-danger .sac-icon{background:rgba(244,63,94,.12)}
+
+/* Cancel button */
+.sheet-cancel{
+  display:block;width:calc(100% - 28px);
+  margin:10px 14px 16px;
+  background:var(--s2);border:1px solid var(--b1);
+  border-radius:16px;padding:16px;
+  font-size:16px;font-weight:600;color:var(--ink2);
+  cursor:pointer;text-align:center;
+  transition:background .12s,color .12s}
+.sheet-cancel:active{background:var(--s3);color:var(--ink)}
+
+/* Sub-sheet: sort options */
+.sac-check{
+  width:22px;height:22px;border-radius:50%;
+  border:2px solid var(--b2);flex:none;
+  display:flex;align-items:center;justify-content:center;
+  margin-right:16px;transition:all .15s}
+.sac-check.on{background:var(--brand);border-color:var(--brand)}
+.sac-check.on::after{
+  content:'';width:5px;height:9px;
+  border:2.5px solid #fff;border-top:none;border-left:none;
+  transform:rotate(42deg) translateY(-1px);display:block}
+
+/* Sub-sheet: color picker */
+.color-picker-grid{
+  display:flex;gap:12px;flex-wrap:wrap;
+  padding:4px 0 8px}
+.cpick{
+  width:40px;height:40px;border-radius:50%;
+  cursor:pointer;position:relative;
+  transition:transform .15s;border:none;flex:none}
+.cpick:active{transform:scale(.9)}
+.cpick.on::after{
+  content:'✓';position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:16px;font-weight:800}
+.cpick.on{box-shadow:0 0 0 3px var(--s1),0 0 0 5px currentColor}
+
+/* Sheet body padding */
+.sheet-body{padding:0 0 4px}
 
 /* ── Form fields ── */
 .fld{margin-bottom:14px}
@@ -222,32 +337,94 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
 .trow.done .trow-text{text-decoration:line-through;opacity:.4}
 
 /* ── Lists screen ── */
-.smart-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;margin-bottom:6px}
-.smart-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);
-  padding:16px;cursor:pointer;transition:background .1s;display:flex;flex-direction:column;gap:10px}
-.smart-card:active{background:var(--s2)}
-.smart-card-ic{width:40px;height:40px;border-radius:12px;display:flex;
-  align-items:center;justify-content:center;font-size:20px}
-.smart-card-name{font-size:14px;font-weight:700}
-.smart-card-count{font-size:24px;font-weight:800;margin-top:auto}
+/* ── Lists Hub ── */
+.lists-hub-header{display:flex;align-items:center;gap:14px;padding:20px 20px 8px}
+.lists-hub-avatar{width:44px;height:44px;border-radius:50%;background:var(--brandg);
+  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;flex:none}
+.lists-hub-name{font-size:17px;font-weight:700;flex:1}
+.lists-hub-search{width:38px;height:38px;border-radius:12px;background:var(--s2);
+  border:1px solid var(--b1);display:flex;align-items:center;justify-content:center;
+  color:var(--ink2);font-size:16px;cursor:pointer;flex:none;border:none;background:none}
 
-/* ── Inline add ── */
-.inline-add{display:flex;align-items:center;gap:12px;padding:12px 16px;
-  border-top:1px solid var(--b1);margin-top:4px}
-.inline-add-dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--ink3);
-  flex:none;display:flex;align-items:center;justify-content:center;
-  font-size:14px;color:var(--ink3)}
+/* Smart view rows */
+.sv-row{display:flex;align-items:center;padding:0 16px;cursor:pointer;
+  transition:background .1s;border-radius:0}
+.sv-row:active{background:var(--s2)}
+.sv-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;flex:none}
+.sv-icon-inner{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:19px}
+.sv-name{flex:1;font-size:16px;font-weight:400;padding:16px 0;letter-spacing:-.1px}
+.sv-count{font-size:14px;font-weight:600;color:var(--ink2);padding-right:4px}
+
+/* Divider between sections */
+.hub-sep{height:1px;background:var(--b1);margin:10px 16px}
+.hub-sec-label{font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;
+  color:var(--ink3);padding:12px 20px 4px}
+
+/* User list rows */
+.ul-row{display:flex;align-items:center;padding:0 16px;cursor:pointer;transition:background .1s}
+.ul-row:active{background:var(--s2)}
+.ul-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;flex:none}
+.ul-icon-inner{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;
+  justify-content:center;font-size:16px;color:#fff;font-weight:700}
+.ul-name{flex:1;font-size:16px;font-weight:400;padding:15px 0;border-bottom:1px solid var(--b1);
+  letter-spacing:-.1px}
+.ul-row:last-child .ul-name{border-bottom:none}
+.ul-count{font-size:13px;font-weight:600;color:var(--ink3);padding-right:6px}
+
+/* New list footer row */
+.lists-footer{display:flex;align-items:center;padding:0 16px;margin-top:6px;cursor:pointer}
+.lists-footer:active{opacity:.7}
+.lf-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;flex:none}
+.lf-plus{width:34px;height:34px;border-radius:9px;border:2px solid var(--brand);
+  display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--brand);
+  font-weight:300}
+.lf-label{font-size:16px;font-weight:400;color:var(--brand);letter-spacing:-.1px}
+
+/* ── List Detail ── */
+.ld-topbar{display:flex;align-items:center;gap:4px;padding:12px 8px 0;position:relative;z-index:2}
+.ld-back{width:44px;height:44px;border-radius:50%;background:none;border:none;
+  color:var(--ink);font-size:24px;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.ld-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
+.ld-action-btn{width:44px;height:44px;border-radius:50%;background:none;border:none;
+  color:var(--ink2);font-size:20px;cursor:pointer;display:flex;align-items:center;
+  justify-content:center}
+.ld-title-area{padding:2px 20px 18px;position:relative;z-index:2}
+.ld-title{font-size:32px;font-weight:800;letter-spacing:-.6px;line-height:1.15}
+.ld-subtitle{font-size:13px;color:var(--ink2);margin-top:5px;font-weight:500}
+
+/* Task rows in detail — flat, borderless background */
+.trow-flat{display:flex;align-items:flex-start;padding:0 8px;
+  border-bottom:1px solid var(--b1);cursor:pointer;transition:background .1s;background:var(--s1)}
+.trow-flat:active{background:var(--s2)}
+.trow-flat:last-child{border-bottom:none}
+.trow-chk-wrap{width:52px;height:56px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.trow-content{flex:1;padding:15px 0 14px;min-width:0}
+.trow-title{font-size:16px;font-weight:400;line-height:1.35;letter-spacing:-.1px}
+.trow-meta-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;align-items:center}
+.trow-star-wrap{width:48px;height:56px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.trow-flat.done .trow-title{text-decoration:line-through;opacity:.35}
+
+/* Completed toggle */
+.done-toggle{display:flex;align-items:center;gap:10px;padding:12px 16px;
+  cursor:pointer;color:var(--ink2);font-size:14px;font-weight:600;user-select:none;
+  background:var(--s1)}
+.done-toggle-arrow{font-size:11px;transition:transform .2s;display:inline-block;
+  opacity:.6}
+.done-toggle-arrow.open{transform:rotate(90deg)}
+
+/* Inline add — sticky bottom bar */
+.inline-add{display:flex;align-items:center;padding:0 8px;background:var(--s1);
+  border-top:1px solid var(--b1)}
+.inline-add-chk{width:52px;height:54px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.inline-add-dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--ink3);flex:none}
 .inline-add input{flex:1;background:none;border:none;outline:none;
-  font-size:15px;color:var(--ink);font-family:inherit}
+  font-size:16px;color:var(--ink);font-family:inherit;padding:16px 0}
 .inline-add input::placeholder{color:var(--ink3)}
-
-/* ── List detail header ── */
-.list-head{padding:16px 20px 12px;display:flex;align-items:center;gap:10px}
-.list-back{background:none;border:none;color:var(--brand);font-size:26px;
-  cursor:pointer;padding:0 8px 0 0;line-height:1;flex:none}
-.list-title{font-size:24px;font-weight:800;flex:1;letter-spacing:-.3px}
-.list-menu-btn{background:none;border:none;color:var(--ink2);font-size:20px;
-  cursor:pointer;padding:4px 8px}
 
 /* ── People screen ── */
 .person-avatar{width:44px;height:44px;border-radius:50%;background:var(--brand);
@@ -337,7 +514,10 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
 </div>
 
 <div id="sheet-bg"></div>
-<div id="sheet"><div class="sheet-handle"></div><div class="sheet-body" id="sheet-body"></div></div>
+<div id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body" id="sheet-body"></div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -346,7 +526,7 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v60';
+const APP_VERSION='v62';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -601,6 +781,7 @@ function renderLists(){
   const ts=todayStr();
   const allT=activeTasks();
   const lists=active('lists');
+  const user=DB.meta;
 
   const svCounts={
     myday:allT.filter(t=>!t.done&&t.dueDate===ts).length,
@@ -609,49 +790,64 @@ function renderLists(){
     all:allT.filter(t=>!t.done).length,
   };
 
-  let html=`<div class="pg-head">
-    <div class="pg-title">${tr('lists')}</div>
-    <button class="hbtn" id="btn-new-list">＋</button>
-  </div>`;
+  const svDef=[
+    {sv:'myday',icon:'☀',color:'#f59e0b',name:tr('myday')},
+    {sv:'important',icon:'★',color:'#f43f5e',name:tr('important')},
+    {sv:'planned',icon:'◫',color:'#38bdf8',name:tr('planned')},
+    {sv:'all',icon:'≡',color:'#6e56f8',name:tr('allTasks')},
+  ];
 
-  // Smart views
-  html+=`<div class="sec-label">${L==='fa'?'نمایش‌های هوشمند':'Smart Views'}</div>
-  <div class="smart-grid">
-    ${smartCard('myday','☀','#f59e0b',tr('myday'),svCounts.myday)}
-    ${smartCard('important','★','#f43f5e',tr('important'),svCounts.important)}
-    ${smartCard('planned','◫','#38bdf8',tr('planned'),svCounts.planned)}
-    ${smartCard('all','≡','#6e56f8',tr('allTasks'),svCounts.all)}
-  </div>`;
+  let html=`
+    <div class="lists-hub-header">
+      <div class="lists-hub-avatar">${(user.displayName||'?').slice(0,1).toUpperCase()}</div>
+      <div style="flex:1">
+        <div class="lists-hub-name">${esc(user.displayName||'My Lists')}</div>
+        <div style="font-size:12px;color:var(--ink3);margin-top:1px">${esc(user.email||'')}</div>
+      </div>
+      <button class="lists-hub-search" id="btn-hub-search">🔍</button>
+    </div>
 
-  // User lists
+    <div style="margin-bottom:4px">
+      ${svDef.map(s=>`
+        <div class="sv-row" data-sv="${s.sv}">
+          <div class="sv-icon">
+            <div class="sv-icon-inner" style="background:${s.color}18;color:${s.color}">${s.icon}</div>
+          </div>
+          <span class="sv-name">${esc(s.name)}</span>
+          ${svCounts[s.sv]?`<span class="sv-count">${svCounts[s.sv]}</span>`:''}
+        </div>`).join('')}
+    </div>
+
+    <div class="hub-sep"></div>
+    <div class="hub-sec-label">${L==='fa'?'لیست‌های من':'My Lists'}</div>`;
+
   if(lists.length){
-    html+=`<div class="sec-label">${L==='fa'?'لیست‌های من':'My Lists'}</div>
-    <div class="card-flat">
+    html+=`<div style="margin-bottom:4px">
       ${lists.map(l=>{
         const count=allT.filter(t=>t.listId===l.id&&!t.done).length;
-        return `<div class="row" data-listid="${l.id}">
-          <div class="row-ic" style="background:${l.color||'#6e56f8'}">${l.icon||'✓'}</div>
-          <div class="row-body">
-            <div class="row-title">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</div>
+        return `<div class="ul-row" data-listid="${l.id}">
+          <div class="ul-icon">
+            <div class="ul-icon-inner" style="background:${l.color||'#6e56f8'}">${l.icon||'✓'}</div>
           </div>
-          <div class="row-right">${count||''}<span class="row-arr">›</span></div>
+          <span class="ul-name">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</span>
+          ${count?`<span class="ul-count">${count}</span>`:''}
         </div>`;
       }).join('')}
     </div>`;
-  } else {
-    html+=`<div class="empty"><div class="empty-ic">≡</div>
-      <div class="empty-tx">${L==='fa'?'لیستی وجود ندارد. روی ＋ ضربه بزنید.':'No lists yet. Tap ＋ to create one.'}</div></div>`;
   }
+
+  html+=`
+    <div class="hub-sep"></div>
+    <div class="lists-footer" id="btn-new-list">
+      <div class="lf-icon"><div class="lf-plus">＋</div></div>
+      <span class="lf-label">${tr('newList')}</span>
+    </div>`;
+
   return html;
 }
 
-function smartCard(sv,icon,color,name,count){
-  return `<div class="smart-card" data-sv="${sv}">
-    <div class="smart-card-ic" style="background:${color}20;color:${color};font-size:22px">${icon}</div>
-    <div class="smart-card-name">${esc(name)}</div>
-    <div class="smart-card-count" style="color:${color}">${count}</div>
-  </div>`;
-}
+/* collapsed state for done section in list detail */
+let doneCollapsed=true;
 
 function renderListDetail(){
   const ts=todayStr();
@@ -665,7 +861,6 @@ function renderListDetail(){
     if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
     else if(activeSmartView==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
-    // 'all' = all tasks
   } else if(activeListId){
     const l=(DB.entities.lists||{})[activeListId];
     title=l?(l.name&&(l.name[L]||l.name.en)||'List'):'List';
@@ -676,24 +871,68 @@ function renderListDetail(){
   tasks=smartSortTasks(tasks);
   const openT=tasks.filter(t=>!t.done);
   const doneT=tasks.filter(t=>t.done);
+  const openCount=openT.length, doneCount=doneT.length;
 
-  let html=`<div class="list-head">
-    <button class="list-back" id="list-back">‹</button>
-    <div class="list-title" style="color:${accentColor}">${esc(title)}</div>
-    ${activeListId?`<button class="list-menu-btn" id="list-menu-btn">⋯</button>`:''}
-  </div>
-  <div class="card-flat" id="task-list-body">
-    ${openT.length?openT.map(t=>taskRow(t)).join(''):'<div class="empty" style="padding:32px"><div class="empty-tx">'+tr('noTasks')+'</div></div>'}
-    ${doneT.length?`<div class="done-sec">${tr('done')} · ${doneT.length}</div>${doneT.map(t=>taskRow(t)).join('')}`:''}
-  </div>
-  ${activeListId?`<div class="inline-add">
-    <div class="inline-add-dot">+</div>
-    <input id="inline-add-input" placeholder="${tr('addTask')}" autocomplete="off">
-  </div>`:''}`;
+  let html=`
+    <div class="ld-topbar">
+      <button class="ld-back" id="list-back">‹</button>
+      <div class="ld-actions">
+        ${activeListId?`<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">⋯</button>`:''}
+      </div>
+    </div>
+
+    <div class="ld-title-area">
+      <div class="ld-title" style="color:${accentColor}">${esc(title)}</div>
+      <div class="ld-subtitle">${openCount} ${L==='fa'?'باقی‌مانده':'remaining'}</div>
+    </div>
+
+    <div style="background:var(--s1);border-radius:var(--r) var(--r) 0 0;overflow:hidden;
+      margin:0 0 0;border-top:1px solid var(--b1)" id="task-list-body">
+      ${openT.length
+        ? openT.map(t=>taskRowFlat(t)).join('')
+        : `<div class="done-toggle" style="color:var(--ink3);cursor:default;font-weight:400">${tr('noTasks')}</div>`}
+      ${doneCount?`
+        <div class="done-toggle" id="done-toggle">
+          <span class="done-toggle-arrow${doneCollapsed?'':' open'}">›</span>
+          ${tr('done')} (${doneCount})
+        </div>
+        ${doneCollapsed?'':doneT.map(t=>taskRowFlat(t)).join('')}
+      `:''}
+    </div>
+
+    ${activeListId?`
+    <div class="inline-add">
+      <div class="inline-add-chk"><div class="inline-add-dot"></div></div>
+      <input id="inline-add-input" placeholder="${tr('addTask')}" autocomplete="off">
+    </div>`:''}`;
 
   return html;
 }
 
+function taskRowFlat(t){
+  const ts=todayStr();
+  const over=t.dueDate&&t.dueDate<ts&&!t.done;
+  const pr=t.priority&&t.priority!=='p3'
+    ?`<span class="pill ${priClass(t.priority)}">${tr(t.priority==='p1'?'high':'medium')}</span>`:'';
+  let meta='';
+  if(t.dueDate)meta+=`<span class="chip${over?' over':''}">${over?'⚠ ':''}${shortDate(t.dueDate)}${t.dueTime?' '+t.dueTime:''}</span>`;
+  if(t.listId&&activeSmartView){
+    const l=(DB.entities.lists||{})[t.listId];
+    if(l)meta+=`<span class="chip">${l.icon||''} ${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`;
+  }
+  return `<div class="trow-flat ${t.done?'done':''}" data-tid="${t.id}">
+    <div class="trow-chk-wrap">
+      <div class="chk ${t.done?'on':''}" data-chk="${t.id}"></div>
+    </div>
+    <div class="trow-content">
+      <div class="trow-title">${esc(t.text)}</div>
+      ${meta||pr?`<div class="trow-meta-row">${meta}${pr}</div>`:''}
+    </div>
+    <div class="trow-star-wrap">
+      <button class="star ${t.pinned?'on':''}" data-pin="${t.id}">★</button>
+    </div>
+  </div>`;
+}
 /* ── Task row renderer ── */
 function taskRow(t){
   const ts=todayStr();
@@ -842,12 +1081,12 @@ function bindScreen(){
     e.stopPropagation();
     const t=DB.entities.tasks[el.dataset.pin];if(!t)return;
     t.pinned=!t.pinned;t.updatedAt=now();saveDB();render();});
-  // Task row tap → edit
-  document.querySelectorAll('.trow').forEach(el=>el.onclick=()=>openTaskEdit(el.dataset.tid));
-  // List rows
+  // Task row tap → edit (both .trow and .trow-flat)
+  document.querySelectorAll('.trow,.trow-flat').forEach(el=>el.onclick=()=>openTaskEdit(el.dataset.tid));
+  // List rows (hub)
   document.querySelectorAll('[data-listid]').forEach(el=>el.onclick=()=>{
     activeListId=el.dataset.listid;activeSmartView=null;tasksView='detail';render();});
-  // Smart view cards
+  // Smart view rows
   document.querySelectorAll('[data-sv]').forEach(el=>el.onclick=()=>{
     activeSmartView=el.dataset.sv;activeListId=null;tasksView='detail';render();});
   // Counter navigation
@@ -857,16 +1096,22 @@ function bindScreen(){
     render();});
   // Back button
   const back=document.getElementById('list-back');
-  if(back)back.onclick=()=>{tasksView='browser';activeListId=null;activeSmartView=null;render();};
+  if(back)back.onclick=()=>{tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();};
   // List menu
   const lmb=document.getElementById('list-menu-btn');
   if(lmb)lmb.onclick=()=>openListMenu(activeListId);
-  // New list
+  // New list (hub footer)
   const nlb=document.getElementById('btn-new-list');
   if(nlb)nlb.onclick=()=>openNewListSheet();
+  // Hub search button
+  const hsb=document.getElementById('btn-hub-search');
+  if(hsb)hsb.onclick=()=>{screen='more';render();/* TODO: open search */};
   // New person
   const npb=document.getElementById('btn-new-person');
   if(npb)npb.onclick=()=>openNewPersonSheet();
+  // Done toggle (collapsible completed section)
+  const dt=document.getElementById('done-toggle');
+  if(dt)dt.onclick=()=>{doneCollapsed=!doneCollapsed;render();};
   // Inline add
   const ia=document.getElementById('inline-add-input');
   if(ia)ia.onkeydown=e=>{
@@ -1040,92 +1285,170 @@ function openNewListSheet(){
   setTimeout(()=>document.getElementById('nl-name')?.focus(),100);
 }
 
+/* ══════════════════════════════════════════
+   LIST MENU — Premium Component
+   Reusable across all list entities.
+   Groups: primary actions / manage / danger
+   ══════════════════════════════════════════ */
+
+/* ── Shared action builders ── */
+function _sacRow(icon,iconBg,label,action,opts={}){
+  const rightHtml=opts.value
+    ?`<span style="font-size:13px;color:var(--ink3);font-weight:500">${opts.value}</span><span class="sac-arr">›</span>`
+    :`<span class="sac-arr">›</span>`;
+  return `<button class="sac${opts.danger?' sac-danger':''}" data-lma="${action}">
+    <div class="sac-icon-wrap">
+      <div class="sac-icon" style="background:${iconBg}">${icon}</div>
+    </div>
+    <span class="sac-label">${label}</span>
+    <div class="sac-right">${rightHtml}</div>
+  </button>`;
+}
+
 function openListMenu(listId){
   const l=(DB.entities.lists||{})[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||listId;
   const curSort=l.sortBy||'smart';
-  const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:L==='fa'?'الفبایی':'Alphabetical',
-    date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
+  const sortLabels={
+    smart:L==='fa'?'هوشمند':'Smart',
+    alpha:L==='fa'?'الفبایی':'A–Z',
+    date:L==='fa'?'تاریخ':'Due date',
+    priority:L==='fa'?'اولویت':'Priority'
+  };
+  const taskCount=activeTasks().filter(t=>t.listId===listId&&!t.done).length;
+  const sugOn=l.suggestions!==false;
 
-  const mi=(icon,label,action,danger)=>
-    `<button class="smrow${danger?' danger':''}" data-lma="${action}">
-      <span class="smrow-ic">${icon}</span>
-      <span class="smrow-tx">${label}</span>
-    </button>`;
+  const html=`
+    <div class="sheet-header">
+      <div class="sheet-list-identity">
+        <div class="sheet-list-icon" style="background:${l.color||'#6e56f8'}20;color:${l.color||'#6e56f8'}">${l.icon||'✓'}</div>
+        <div>
+          <div class="sheet-list-name">${esc(name)}</div>
+          <div class="sheet-list-meta">${taskCount} ${L==='fa'?'کار باقی‌مانده':'tasks remaining'}</div>
+        </div>
+      </div>
+    </div>
 
-  openSheet(`
-    <h3 style="margin-bottom:2px">${esc(name)}</h3>
-    <div style="font-size:12px;color:var(--ink3);margin-bottom:14px">${L==='fa'?'مرتب‌سازی:':'Sorted by:'} ${sortLabels[curSort]||curSort}</div>
-    ${mi('↕',tr('sortBy'),'sort')}
-    ${mi('⇅',tr('reorder'),'reorder')}
-    ${mi('🎨',tr('changeTheme'),'theme')}
-    ${mi('📤',tr('share'),'share')}
-    ${mi('⧉',tr('duplicate'),'duplicate')}
-    ${mi('🖨',tr('print'),'print')}
-    ${mi('💡',tr('suggestions'),'suggestions')}
-    ${mi('✏️',tr('rename'),'rename')}
-    ${mi('🗑',tr('delete'),'delete',true)}
-    <button class="btn-cancel" id="lm-cancel">${tr('cancel')}</button>`);
+    <div class="sheet-group">
+      ${_sacRow('↕','rgba(56,189,248,.15)',tr('sortBy'),'sort',{value:sortLabels[curSort]||curSort})}
+      ${_sacRow('⇅','rgba(110,86,248,.15)',tr('reorder'),'reorder')}
+      ${_sacRow('🎨','rgba(245,158,11,.15)',tr('changeTheme'),'theme')}
+    </div>
 
-  document.getElementById('lm-cancel').onclick=closeSheet;
+    <div class="sheet-group">
+      ${_sacRow('📤','rgba(34,211,160,.15)',tr('share'),'share')}
+      ${_sacRow('⧉','rgba(110,86,248,.15)',tr('duplicate'),'duplicate')}
+      ${_sacRow('🖨','rgba(96,96,128,.15)',tr('print'),'print')}
+      ${_sacRow('💡',sugOn?'rgba(245,158,11,.2)':'rgba(96,96,128,.15)',tr('suggestions'),'suggestions',
+        {value:sugOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')})}
+    </div>
+
+    <div class="sheet-group">
+      ${_sacRow('✏️','rgba(110,86,248,.15)',tr('rename'),'rename')}
+    </div>
+
+    <div class="sheet-group">
+      ${_sacRow('🗑','rgba(244,63,94,.12)',tr('delete'),'delete',{danger:true})}
+    </div>
+
+    <button class="sheet-cancel">${tr('cancel')}</button>`;
+
+  openSheet(html);
+
+  // Bind cancel
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
+
+  // Bind actions
   document.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
-    const a=b.dataset.lma;closeSheet();
-    if(a==='sort') openSortSheet(listId,curSort,sortLabels);
-    else if(a==='reorder'){l.sortBy='alpha';l.updatedAt=now();saveDB();render();}
-    else if(a==='theme') openThemeSheet(listId);
-    else if(a==='share') shareList(listId);
-    else if(a==='duplicate') duplicateList(listId);
-    else if(a==='print') printList(listId);
+    const a=b.dataset.lma;
+    if(a==='sort'){closeSheet();_openSortSheet(listId,curSort,sortLabels);}
+    else if(a==='reorder'){
+      l.sortBy='alpha';l.updatedAt=now();saveDB();closeSheet();render();
+      toast(L==='fa'?'مرتب‌سازی الفبایی اعمال شد':'Sorted A–Z');}
+    else if(a==='theme'){closeSheet();_openThemeSheet(listId);}
+    else if(a==='share'){closeSheet();_shareList(listId);}
+    else if(a==='duplicate'){closeSheet();_duplicateList(listId);}
+    else if(a==='print'){closeSheet();_printList(listId);}
     else if(a==='suggestions'){
-      l.suggestions=!(l.suggestions!==false);l.updatedAt=now();saveDB();
-      toast(name+': '+tr('suggestions')+' '+(l.suggestions?'ON':'OFF'));}
-    else if(a==='rename') openRenameSheet(listId);
-    else if(a==='delete') deleteList(listId);
+      l.suggestions=!sugOn;l.updatedAt=now();saveDB();closeSheet();
+      toast(name+' — '+tr('suggestions')+': '+(l.suggestions?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')));}
+    else if(a==='rename'){closeSheet();_openRenameSheet(listId);}
+    else if(a==='delete'){closeSheet();_deleteList(listId);}
   });
 }
 
-function openSortSheet(listId,cur,labels){
+/* ── Sub-sheets ── */
+function _openSortSheet(listId,cur,labels){
   const opts=Object.keys(labels);
-  openSheet(`<h3>${tr('sortBy')}</h3>
-    ${opts.map(o=>`<button class="smrow" data-so="${o}">
-      <span class="smrow-ic">${o===cur?'●':'○'}</span>
-      <span class="smrow-tx">${labels[o]}</span>
-    </button>`).join('')}
-    <button class="btn-cancel" id="so-cancel">${tr('cancel')}</button>`);
-  document.getElementById('so-cancel').onclick=closeSheet;
+  const html=`
+    <div class="sheet-header">
+      <div style="font-size:19px;font-weight:800;padding:16px 0 4px">${tr('sortBy')}</div>
+    </div>
+    <div class="sheet-group">
+      ${opts.map(o=>`<button class="sac" data-so="${o}">
+        <div class="sac-icon-wrap">
+          <div class="sac-check${o===cur?' on':''}"></div>
+        </div>
+        <span class="sac-label">${labels[o]}</span>
+      </button>`).join('')}
+    </div>
+    <button class="sheet-cancel">${tr('cancel')}</button>`;
+  openSheet(html);
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
   document.querySelectorAll('[data-so]').forEach(b=>b.onclick=()=>{
     const l=DB.entities.lists[listId];if(!l)return;
-    l.sortBy=b.dataset.so;l.updatedAt=now();saveDB();closeSheet();render();});
+    l.sortBy=b.dataset.so;l.updatedAt=now();saveDB();closeSheet();render();
+  });
 }
 
-function openThemeSheet(listId){
+function _openThemeSheet(listId){
   const l=DB.entities.lists[listId];if(!l)return;
   let selColor=l.color||LIST_COLORS[0];
-  openSheet(`<h3>${tr('changeTheme')}</h3>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px" id="th-colors">
-      ${LIST_COLORS.map(c=>`<div class="color-dot${c===selColor?' on':''}" data-tc="${c}" style="background:${c}"></div>`).join('')}
+  const html=`
+    <div class="sheet-header">
+      <div style="font-size:19px;font-weight:800;padding:16px 0 12px">${tr('changeTheme')}</div>
     </div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="th-cancel">${tr('cancel')}</button>
-      <button class="btn btn-primary" id="th-save">${tr('save')}</button>
-    </div>`);
+    <div style="padding:0 22px 8px">
+      <div class="color-picker-grid">
+        ${LIST_COLORS.map(c=>`<button class="cpick${c===selColor?' on':''}" data-tc="${c}"
+          style="background:${c};color:${c}" aria-label="${c}"></button>`).join('')}
+      </div>
+    </div>
+    <div style="padding:0 14px">
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="th-cancel">${tr('cancel')}</button>
+        <button class="btn btn-primary" id="th-save">${tr('save')}</button>
+      </div>
+    </div>
+    <div style="height:16px"></div>`;
+  openSheet(html);
   document.getElementById('th-cancel').onclick=closeSheet;
   document.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
     selColor=el.dataset.tc;
-    document.querySelectorAll('[data-tc]').forEach(e=>e.classList.toggle('on',e.dataset.tc===selColor));});
+    document.querySelectorAll('[data-tc]').forEach(e=>e.classList.toggle('on',e.dataset.tc===selColor));
+  });
   document.getElementById('th-save').onclick=()=>{
     l.color=selColor;l.updatedAt=now();saveDB();closeSheet();render();};
 }
 
-function openRenameSheet(listId){
+function _openRenameSheet(listId){
   const l=DB.entities.lists[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||'';
-  openSheet(`<h3>${tr('rename')}</h3>
-    <div class="fld"><input class="finput" id="rn-name" value="${esc(name)}"></div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="rn-cancel">${tr('cancel')}</button>
-      <button class="btn btn-primary" id="rn-save">${tr('save')}</button>
-    </div>`);
+  const html=`
+    <div class="sheet-header">
+      <div style="font-size:19px;font-weight:800;padding:16px 0 12px">${tr('rename')}</div>
+    </div>
+    <div style="padding:0 14px">
+      <div class="fld">
+        <input class="finput" id="rn-name" value="${esc(name)}">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="rn-cancel">${tr('cancel')}</button>
+        <button class="btn btn-primary" id="rn-save">${tr('save')}</button>
+      </div>
+    </div>
+    <div style="height:16px"></div>`;
+  openSheet(html);
   document.getElementById('rn-cancel').onclick=closeSheet;
   document.getElementById('rn-save').onclick=()=>{
     const v=document.getElementById('rn-name').value.trim();if(!v)return;
@@ -1133,25 +1456,24 @@ function openRenameSheet(listId){
   setTimeout(()=>{const n=document.getElementById('rn-name');if(n){n.focus();n.select();}},100);
 }
 
-function shareList(listId){
+function _shareList(listId){
   const l=DB.entities.lists[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||'';
   const tasks=activeTasks().filter(t=>t.listId===listId);
   const text=name+'\n\n'+tasks.map(t=>(t.done?'☑ ':'☐ ')+t.text+(t.dueDate?' ('+t.dueDate+')':'')).join('\n');
   if(navigator.share)navigator.share({title:name,text}).catch(()=>{});
-  else{navigator.clipboard&&navigator.clipboard.writeText(text)
-    .then(()=>toast(L==='fa'?'کپی شد':'Copied to clipboard')).catch(()=>{});}
+  else navigator.clipboard&&navigator.clipboard.writeText(text)
+    .then(()=>toast(L==='fa'?'در کلیپ‌بورد کپی شد':'Copied to clipboard')).catch(()=>{});
 }
 
-function duplicateList(listId){
+function _duplicateList(listId){
   const l=DB.entities.lists[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||'';
   const newId=uid();
   DB.entities.lists[newId]=Object.assign({},l,{
     id:newId,name:{en:name+' (copy)',fa:name+' (کپی)'},
     createdAt:now(),updatedAt:now()});
-  const tasks=activeTasks().filter(t=>t.listId===listId);
-  tasks.forEach(t=>{
+  activeTasks().filter(t=>t.listId===listId).forEach(t=>{
     const nid=uid();
     DB.entities.tasks[nid]=Object.assign({},t,{
       id:nid,listId:newId,done:false,doneAt:null,
@@ -1160,33 +1482,58 @@ function duplicateList(listId){
   saveDB();render();toast(L==='fa'?'لیست کپی شد':'List duplicated');
 }
 
-function printList(listId){
+function _printList(listId){
   const l=DB.entities.lists[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||'';
   const tasks=activeTasks().filter(t=>t.listId===listId);
   const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
-  const html=`<!DOCTYPE html><html><head><title>${name}</title>
-    <style>body{font-family:sans-serif;max-width:600px;margin:40px auto;color:#222}
-    h1{font-size:22px;margin-bottom:16px}
-    li{padding:6px 0;font-size:15px;list-style:none;display:flex;align-items:center;gap:10px}
-    li::before{content:'☐';font-size:18px}
-    li.done::before{content:'☑'}li.done span{text-decoration:line-through;color:#999}
-    h3{margin-top:24px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666}</style>
+  const w=window.open('','_blank');
+  if(!w)return;
+  w.document.write(`<!DOCTYPE html><html><head><title>${name}</title>
+    <style>body{font-family:-apple-system,sans-serif;max-width:600px;margin:48px auto;color:#111;font-size:15px}
+    h1{font-size:24px;font-weight:800;margin-bottom:20px}
+    ul{list-style:none;padding:0}
+    li{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid #f0f0f0}
+    li .cb{width:20px;height:20px;border:2px solid #999;border-radius:50%;flex:none;margin-top:1px}
+    li.done .cb{background:#333;border-color:#333}
+    li.done .tx{text-decoration:line-through;color:#aaa}
+    .dt{font-size:12px;color:#999;margin-top:2px}
+    h3{margin:24px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#999}</style>
     </head><body><h1>${name}</h1>
-    <ul>${open.map(t=>`<li><span>${t.text}${t.dueDate?' — '+t.dueDate:''}</span></li>`).join('')}</ul>
-    ${done.length?`<h3>Completed</h3><ul>${done.map(t=>`<li class="done"><span>${t.text}</span></li>`).join('')}</ul>`:''}</body></html>`;
-  const w=window.open('','_blank');if(w){w.document.write(html);w.document.close();w.print();}
+    <ul>${open.map(t=>`<li><div class="cb"></div><div><div class="tx">${t.text}</div>${t.dueDate?`<div class="dt">${t.dueDate}</div>`:''}</div></li>`).join('')}</ul>
+    ${done.length?`<h3>Completed</h3><ul>${done.map(t=>`<li class="done"><div class="cb"></div><div class="tx">${t.text}</div></li>`).join('')}</ul>`:''}</body></html>`);
+  w.document.close();w.print();
 }
 
-function deleteList(listId){
+function _deleteList(listId){
   const l=DB.entities.lists[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||'';
-  if(!confirm((L==='fa'?`لیست "${name}" و همه کارهایش حذف شود؟`:`Delete "${name}" and all its tasks?`)))return;
-  for(const id in DB.entities.tasks){
-    if(DB.entities.tasks[id].listId===listId)DB.entities.tasks[id].archivedAt=now();
-  }
-  l.archivedAt=now();l.updatedAt=now();
-  saveDB();tasksView='browser';activeListId=null;render();
+  // Confirm sheet instead of browser confirm
+  const html=`
+    <div class="sheet-header">
+      <div style="font-size:19px;font-weight:800;padding:16px 0 8px;color:var(--danger)">${L==='fa'?'حذف لیست':'Delete List'}</div>
+      <div style="font-size:14px;color:var(--ink2);padding-bottom:16px;line-height:1.5">
+        ${L==='fa'?`آیا مطمئنی که می‌خواهی لیست «${esc(name)}» و همه کارهایش را حذف کنی؟`
+          :`Are you sure you want to delete "${esc(name)}" and all its tasks? This cannot be undone.`}
+      </div>
+    </div>
+    <div style="padding:0 14px">
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="del-cancel">${tr('cancel')}</button>
+        <button class="btn btn-danger" id="del-confirm">${L==='fa'?'بله، حذف شود':'Delete'}</button>
+      </div>
+    </div>
+    <div style="height:16px"></div>`;
+  openSheet(html);
+  document.getElementById('del-cancel').onclick=closeSheet;
+  document.getElementById('del-confirm').onclick=()=>{
+    for(const id in DB.entities.tasks){
+      if(DB.entities.tasks[id].listId===listId)DB.entities.tasks[id].archivedAt=now();
+    }
+    l.archivedAt=now();l.updatedAt=now();
+    saveDB();closeSheet();tasksView='browser';activeListId=null;render();
+    toast(L==='fa'?'لیست حذف شد':'List deleted');
+  };
 }
 
 /* ══════════════════════════════════════════
@@ -1222,14 +1569,43 @@ function openNewPersonSheet(){
 /* ══════════════════════════════════════════
    SHEET (BOTTOM DRAWER)
    ══════════════════════════════════════════ */
-function openSheet(html){
-  document.getElementById('sheet-body').innerHTML=html;
-  document.getElementById('sheet').classList.add('on');
-  document.getElementById('sheet-bg').classList.add('on');
+/* ══════════════════════════════════════════
+   SHEET ENGINE
+   ══════════════════════════════════════════ */
+let _sheetStack=[];
+
+function openSheet(html,opts={}){
+  const body=document.getElementById('sheet-body');
+  const sheet=document.getElementById('sheet');
+  const bg=document.getElementById('sheet-bg');
+  // Push current content if stacking
+  if(opts.stack&&body.innerHTML){_sheetStack.push(body.innerHTML);}
+  body.innerHTML=html;
+  // Scroll to top on new content
+  sheet.scrollTop=0;
+  if(!sheet.classList.contains('on')){
+    sheet.classList.add('on');
+    bg.classList.add('on');
+  }
 }
-function closeSheet(){
-  document.getElementById('sheet').classList.remove('on');
-  document.getElementById('sheet-bg').classList.remove('on');
+
+function closeSheet(opts={}){
+  if(opts.back&&_sheetStack.length){
+    const prev=_sheetStack.pop();
+    document.getElementById('sheet-body').innerHTML=prev;
+    document.getElementById('sheet').scrollTop=0;
+    return;
+  }
+  _sheetStack=[];
+  const sheet=document.getElementById('sheet');
+  const bg=document.getElementById('sheet-bg');
+  sheet.classList.remove('on');
+  bg.classList.remove('on');
+  // Clear after animation
+  setTimeout(()=>{
+    if(!sheet.classList.contains('on'))
+      document.getElementById('sheet-body').innerHTML='';
+  },350);
 }
 
 /* ── Chipsel helpers ── */
