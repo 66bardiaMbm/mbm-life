@@ -458,7 +458,9 @@ textarea.finput{resize:vertical;min-height:80px}
     <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.96 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
     Continue with Google
   </button>
-  <button class="auth-skip" id="auth-skip">Continue without account</button>
+  <button class="auth-skip" id="auth-skip">Continue as Guest</button>
+  <div id="auth-error" style="display:none;margin-top:16px;padding:12px 14px;border-radius:12px;background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.35);color:#ff6b7a;font-size:13px;line-height:1.5;text-align:center;max-width:100%;word-break:break-word"></div>
+  <div style="margin-top:24px;font-size:12px;color:var(--ink3)" id="auth-ver"></div>
 </div>
 
 <div id="sync-badge"><div id="sync-bar" style="display:none" class="sync-bar"></div></div>
@@ -511,7 +513,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v84';
+const APP_VERSION='v85';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -634,7 +636,7 @@ const I18N={
     print:'Print list',suggestions:'Suggestions',reorder:'Reorder tasks',
     high:'High',medium:'Medium',low:'Low',
     search:'Search',noResults:'No results.',
-    signOut:'Sign out',settings:'Settings',about:'About',
+    signOut:'Sign out',exitGuest:'Exit Guest Mode',settings:'Settings',about:'About',
     version:'Version',language:'Language',theme:'Theme',
     offline:'Offline',synced:'Synced',syncing:'Syncing…',
     appts:'Appointments',newAppt:'New Appointment',apptTitle:'Title',
@@ -650,7 +652,7 @@ const I18N={
     print:'چاپ لیست',suggestions:'پیشنهادات',reorder:'مرتب کردن',
     high:'بالا',medium:'متوسط',low:'پایین',
     search:'جستجو',noResults:'نتیجه‌ای نیست.',
-    signOut:'خروج',settings:'تنظیمات',about:'درباره',
+    signOut:'خروج',exitGuest:'خروج از حالت مهمان',settings:'تنظیمات',about:'درباره',
     version:'نسخه',language:'زبان',theme:'رنگ‌بندی',
     offline:'آفلاین',synced:'همگام‌سازی شد',syncing:'در حال همگام‌سازی…',
     appts:'قرار ملاقات‌ها',newAppt:'قرار جدید',apptTitle:'عنوان',
@@ -965,12 +967,14 @@ function taskRowFlat(t,isOverdue){
 function renderMore(){
   const user=DB.meta;
   const initial=(user.displayName||'?').slice(0,1).toUpperCase();
+  const isGuest=!user.email;
+  const subtitle=user.email?esc(user.email):(L==='fa'?'حالت مهمان · وارد نشده':'Guest mode · not signed in');
   return `
     <div style="display:flex;align-items:center;gap:14px;padding:20px 20px 16px">
       <div class="lists-hub-avatar">${initial}</div>
       <div>
         <div style="font-size:17px;font-weight:700">${esc(user.displayName||'Guest')}</div>
-        <div style="font-size:13px;color:var(--ink3);margin-top:2px">${esc(user.email||(L==='fa'?'وارد نشده':'Not signed in'))}</div>
+        <div style="font-size:13px;color:var(--ink3);margin-top:2px">${subtitle}</div>
       </div>
     </div>
     <div class="hub-sec-label">${tr('settings')}</div>
@@ -994,7 +998,7 @@ function renderMore(){
         <span class="ul-count">${APP_VERSION}</span>
       </div>
     </div>
-    ${user.email?'<div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">'+tr('signOut')+'</button></div>':''}`;
+    <div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">${user.email?tr('signOut'):tr('exitGuest')}</button></div>`;
 }
 /* ══════════════════════════════════════════
    LIST MANAGEMENT
@@ -1781,7 +1785,7 @@ function bindScreen(){
     const a=el.dataset.action;
     if(a==='toggle-lang'){DB.meta.lang=L==='en'?'fa':'en';saveDB();render();}
     else if(a==='toggle-theme'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();render();}
-    else if(a==='sign-out'){DB.meta.userId=null;DB.meta.displayName=null;DB.meta.email=null;saveDB();location.reload();}
+    else if(a==='sign-out'){doSignOut();}
   });
 }
 
@@ -1841,30 +1845,83 @@ function initAuth(){
     } else {
       FB.user=null;
       stopListeners();
-      // If was Guest, keep them in app
-      if(DB.meta.displayName&&DB.meta.displayName!==''){
-        const as=document.getElementById('auth-screen');
-        if(as&&as.style.display!=='none'&&DB.meta.displayName==='Guest'){
-          startApp('Guest',null);
-        }
-      }
+      // Signed out: do not auto-open anything. Boot logic / doSignOut control the screen.
     }
   });
 }
 
-/* ── Google Sign-In ── */
+/* ── Google Sign-In (popup only — no redirect) ── */
+function authError(msg){
+  const el=document.getElementById('auth-error');
+  if(el){el.textContent=msg;el.style.display='block';}
+}
+function authClearError(){
+  const el=document.getElementById('auth-error');
+  if(el){el.textContent='';el.style.display='none';}
+}
 function signInWithGoogle(){
-  if(!FB.ready){toast('Firebase not available');return;}
+  if(!FB.ready){authError(L==='fa'?'سرویس ورود در دسترس نیست':'Sign-in service unavailable');return;}
+  authClearError();
+  const btn=document.getElementById('auth-google');
+  if(btn){btn.disabled=true;btn.style.opacity='.6';}
   const provider=new firebase.auth.GoogleAuthProvider();
-  FB.auth.signInWithRedirect(provider);
+  provider.setCustomParameters({prompt:'select_account'});
+  FB.auth.signInWithPopup(provider).then(result=>{
+    /* success handled by onAuthStateChanged */
+  }).catch(e=>{
+    if(btn){btn.disabled=false;btn.style.opacity='1';}
+    const code=e&&e.code?e.code:'';
+    if(code==='auth/popup-blocked'){
+      authError(L==='fa'?'پنجره ورود توسط مرورگر مسدود شد. اجازه باز شدن پنجره را بدهید و دوباره تلاش کنید.':'Sign-in popup was blocked by the browser. Allow popups and try again.');
+      return;
+    }
+    if(code==='auth/popup-closed-by-user'||code==='auth/cancelled-popup-request'){
+      authError(L==='fa'?'پنجره ورود بسته شد. دوباره تلاش کنید.':'Sign-in window closed. Please try again.');
+      return;
+    }
+    if(code==='auth/network-request-failed'){
+      authError(L==='fa'?'خطای شبکه. اتصال اینترنت را بررسی کنید.':'Network error. Check your connection.');
+      return;
+    }
+    if(code==='auth/operation-not-supported-in-this-environment'){
+      authError(L==='fa'?'ورود در این مرورگر پشتیبانی نمی‌شود. مرورگر دیگری امتحان کنید.':'Sign-in is not supported in this browser. Try another browser.');
+      return;
+    }
+    authError((L==='fa'?'ورود ناموفق بود: ':'Sign-in failed: ')+(e&&e.message?e.message:code||'unknown'));
+    console.warn('Sign-in error:',e);
+  });
 }
 
-/* ── Handle redirect result on load ── */
-function handleRedirectResult(){
-  if(!FB.ready)return;
-  FB.auth.getRedirectResult().then(result=>{
-    if(result&&result.user){/* handled by onAuthStateChanged */}
-  }).catch(e=>console.warn('Redirect result:',e));
+/* ── (Redirect path removed in v85 — popup only) ── */
+
+/* ── Reset auth screen to clean signed-out state ── */
+function showAuthScreen(){
+  const app=document.getElementById('app');
+  const as=document.getElementById('auth-screen');
+  if(app)app.style.display='none';
+  if(as)as.style.display='flex';
+  authClearError();
+  const googleBtn=document.getElementById('auth-google');
+  const skipBtn=document.getElementById('auth-skip');
+  if(googleBtn){googleBtn.style.display='flex';googleBtn.disabled=false;googleBtn.style.opacity='1';}
+  if(skipBtn){skipBtn.style.display='block';skipBtn.disabled=false;skipBtn.textContent=(L==='fa'?'ادامه به‌صورت مهمان':'Continue as Guest');}
+}
+
+/* ── Sign out (Google or Guest) without relying on reload ── */
+function doSignOut(){
+  stopListeners();
+  DB.meta.userId=null;
+  DB.meta.displayName=null;
+  DB.meta.email=null;
+  DB.meta.photoURL=null;
+  saveDB();
+  FB.user=null;
+  const finish=()=>showAuthScreen();
+  if(FB.ready&&FB.auth){
+    FB.auth.signOut().then(finish).catch(finish);
+  }else{
+    finish();
+  }
 }
 
 /* ── Firestore listeners ── */
@@ -2054,6 +2111,8 @@ async function checkForUpdate(){
 // Auth screen
 document.getElementById('auth-google').onclick=()=>signInWithGoogle();
 document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
+// Show version on auth screen
+(function(){var v=document.getElementById('auth-ver');if(v)v.textContent=APP_VERSION;})();
 
 function startApp(displayName,email){
   DB.meta.displayName=displayName||'Guest';
@@ -2065,23 +2124,27 @@ function startApp(displayName,email){
   setTimeout(checkForUpdate,3000);
 }
 
-// Boot Firebase
-handleRedirectResult();
+// Boot Firebase (popup-only; no redirect handler)
 initAuth();
 
-// Show loading state on auth screen while Firebase checks
+// Determine initial screen
 if(FB.ready){
-  // Firebase is checking auth state - show loading briefly
+  // Firebase present: onAuthStateChanged decides. Show brief checking state,
+  // then fall back to auth screen if no signed-in user appears.
   const authScreen=document.getElementById('auth-screen');
   const skipBtn=document.getElementById('auth-skip');
-  if(skipBtn)skipBtn.textContent='Checking...';
+  const googleBtn=document.getElementById('auth-google');
+  if(googleBtn)googleBtn.style.display='none';
+  if(skipBtn){skipBtn.textContent=(L==='fa'?'در حال بررسی...':'Checking...');skipBtn.disabled=true;}
   setTimeout(()=>{
-    // If still on auth screen after 3s, user is not signed in
-    if(authScreen&&authScreen.style.display!=='none'){
-      if(skipBtn)skipBtn.textContent='Continue without account';
+    // Still on auth screen after 2.5s → no signed-in Firebase user
+    if(authScreen&&authScreen.style.display!=='none'&&!FB.user){
+      if(googleBtn)googleBtn.style.display='flex';
+      if(skipBtn){skipBtn.textContent=(L==='fa'?'ادامه به‌صورت مهمان':'Continue as Guest');skipBtn.disabled=false;}
     }
-  },3000);
+  },2500);
 } else if(DB.meta.displayName){
+  // No Firebase but a prior local/Guest session exists
   startApp(DB.meta.displayName,DB.meta.email);
 }
 
