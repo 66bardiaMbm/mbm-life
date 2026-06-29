@@ -505,7 +505,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v69';
+const APP_VERSION='v70';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1622,6 +1622,11 @@ window.addEventListener('popstate',()=>{
     closeSheet();
   } else if(tasksView==='detail'){
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
+  } else {
+    // Nothing to close — confirm exit
+    if(confirm(L==='fa'?'از اپ خارج شوید؟':'Exit MBM Life?')){
+      history.back();return;
+    }
   }
   history.pushState(null,'',location.href);
 });
