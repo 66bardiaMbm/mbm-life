@@ -11,6 +11,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 /* ═══════════════════════════════════
    MBM LIFE — Design System v64
@@ -451,7 +455,8 @@ textarea.finput{resize:vertical;min-height:80px}
   <div class="auth-title">MBM Life</div>
   <div class="auth-sub">Your world, connected.<br>Tasks, people, time — all in one place.</div>
   <button class="auth-btn" id="auth-google">
-    <span>G</span> Continue with Google
+    <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.96 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+    Continue with Google
   </button>
   <button class="auth-skip" id="auth-skip">Continue without account</button>
 </div>
@@ -505,7 +510,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v70';
+const APP_VERSION='v74';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -903,6 +908,7 @@ function taskRowFlat(t,isOverdue){
   }
   if(t.dueDate&&!over)meta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
   if(over)meta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+  if(t.location)meta+=`<span class="chip">📍 ${esc(t.location.split(',')[0])}</span>`;
   // overdue row: subtle left border
   const overStyle=isOverdue?'border-left:2px solid var(--danger);':'';
   return `<div class="trow-flat ${t.done?'done':''}" data-tid="${t.id}" style="${overStyle}">
@@ -1006,6 +1012,7 @@ const _SVG={
   duplicate:`<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   print:`<svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`,
   suggest:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  shortcut:`<svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`,
   delete:`<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
 };
 
@@ -1029,6 +1036,7 @@ function openListMenu(listId){
     ${_sacRow('rename',L==='fa'?'تغییر نام':'Rename list','rename')}
     ${_sacRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort',{value:sortLabels[curSort]||curSort})}
     ${_sacRow('reorder',L==='fa'?'مرتب کردن':'Reorder','reorder')}
+    ${_sacRow('shortcut',L==='fa'?'میانبر به صفحه اصلی':'Add shortcut to homescreen','shortcut')}
     ${_sacRow('theme',L==='fa'?'تغییر رنگ':'Change theme','theme')}
     ${_sacRow('share',L==='fa'?'اشتراک‌گذاری':'Share','share')}
     ${_sacRow('duplicate',L==='fa'?'کپی لیست':'Duplicate','duplicate')}
@@ -1042,6 +1050,7 @@ function openListMenu(listId){
     const a=b.dataset.lma;
     if(a==='sort'){closeSheet();_openSortSheet(listId,curSort,sortLabels);}
     else if(a==='reorder'){l.sortBy='alpha';l.updatedAt=now();saveDB();closeSheet();render();}
+    else if(a==='shortcut'){closeSheet();_addShortcut(listId);}
     else if(a==='theme'){closeSheet();_openThemeSheet(listId);}
     else if(a==='share'){closeSheet();_shareList(listId);}
     else if(a==='duplicate'){closeSheet();_duplicateList(listId);}
@@ -1050,6 +1059,28 @@ function openListMenu(listId){
     else if(a==='rename'){closeSheet();_openRenameSheet(listId);}
     else if(a==='delete'){closeSheet();_deleteList(listId);}
   });
+}
+
+function _addShortcut(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||'List';
+  // PWA shortcut via Web Share or manual instructions
+  if(navigator.share){
+    navigator.share({
+      title:name+' — MBM Life',
+      url:location.href+'?list='+listId
+    }).catch(()=>{});
+  } else {
+    // Show instructions
+    openSheet(`<h3>${L==='fa'?'میانبر به صفحه اصلی':'Add to Home Screen'}</h3>
+      <div style="color:var(--ink2);font-size:14px;line-height:1.7;padding-bottom:16px">
+        ${L==='fa'?
+          `برای افزودن میانبر:<br>۱. منوی مرورگر (⋮) را باز کنید<br>۲. «افزودن به صفحه اصلی» را انتخاب کنید<br>۳. نام «${esc(name)}» را وارد کنید`:
+          `To add shortcut:<br>1. Open browser menu (⋮)<br>2. Tap "Add to Home screen"<br>3. Name it "${esc(name)}"`}
+      </div>
+      <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
+    document.querySelector('.sheet-cancel').onclick=closeSheet;
+  }
 }
 
 function _openSortSheet(listId,cur,labels){
@@ -1220,6 +1251,18 @@ function _renderTaskDetail(){
         <span class="td-row-arr">›</span>
       </div>
     </div>
+    <div class="td-section">
+      <div class="td-row" id="td-location-row" style="align-items:flex-start">
+        <div class="td-row-ic" style="padding-top:14px">📍</div>
+        <div class="fld" style="flex:1;margin:0;padding:10px 0">
+          <input class="finput" id="td-location-input" 
+            placeholder="${L==='fa'?'آدرس یا مکان':'Add location'}"
+            value="${esc(t.location||'')}"
+            style="border-radius:10px;padding:10px 12px;font-size:14px">
+        </div>
+        ${t.location?`<button style="background:none;border:none;color:var(--ink3);font-size:18px;cursor:pointer;padding:14px 8px 0" id="td-clear-loc">×</button>`:''}
+      </div>
+    </div>
     <div class="td-section" style="padding:0 8px">
       <div style="display:flex;align-items:flex-start;padding:0 4px;min-height:52px">
         <div class="td-row-ic" style="padding-top:14px">📝</div>
@@ -1300,6 +1343,17 @@ function _renderTaskDetail(){
   };
   const notesEl=document.getElementById('td-notes');
   notesEl.oninput=()=>{t.notes=notesEl.value;t.updatedAt=now();saveDB();};
+
+  // Location autocomplete
+  const locInput=document.getElementById('td-location-input');
+  if(locInput){
+    attachLocationAutocomplete(locInput,({name})=>{
+      t.location=name;t.updatedAt=now();saveDB();});
+    locInput.addEventListener('blur',()=>{
+      setTimeout(()=>{t.location=locInput.value;t.updatedAt=now();saveDB();},250);});
+  }
+  const cloc=document.getElementById('td-clear-loc');
+  if(cloc)cloc.onclick=()=>{t.location='';t.updatedAt=now();saveDB();_renderTaskDetail();};
   document.getElementById('td-delete').onclick=()=>{t.archivedAt=now();t.updatedAt=now();saveDB();closeTaskDetail();render();toast(L==='fa'?'حذف شد':'Deleted');};
 }
 
@@ -1563,41 +1617,231 @@ function bindScreen(){
 }
 
 /* ══════════════════════════════════════════
-   FIREBASE AUTH + SYNC (stub — ready to connect)
+   FIREBASE — Auth + Firestore Sync
    ══════════════════════════════════════════ */
-// Firebase config goes here when backend is ready.
-// Architecture: each entity type maps to a Firestore subcollection:
-//   /workspaces/{workspaceId}/tasks/{taskId}
-//   /workspaces/{workspaceId}/lists/{listId}
-//   /workspaces/{workspaceId}/people/{personId}
-//   etc.
-// Real-time listeners per collection, batch writes on save.
-function syncPush(){/* stub */}
+const firebaseConfig={
+  apiKey:"AIzaSyAxK4eI8L-SMkj4GWCUtcbuyrTF6UMKe8k",
+  authDomain:"mbm-life.firebaseapp.com",
+  projectId:"mbm-life",
+  storageBucket:"mbm-life.firebasestorage.app",
+  messagingSenderId:"541048775101",
+  appId:"1:541048775101:web:4c44c56ced0df0071c32d4",
+  measurementId:"G-YYBY4WV8LC"
+};
+
+let FB={app:null,auth:null,db:null,user:null,ready:false};
+let _syncUnsubs=[];
+
+try{
+  FB.app=firebase.initializeApp(firebaseConfig);
+  FB.auth=firebase.auth();
+  FB.db=firebase.firestore();
+  FB.ready=true;
+}catch(e){console.warn('Firebase init failed:',e);}
+
+/* ── Workspace ID per user ── */
+function wsId(uid){return 'user_'+uid;}
+
+/* ── Auth state ── */
+function initAuth(){
+  if(!FB.ready)return;
+  FB.auth.onAuthStateChanged(user=>{
+    if(user){
+      FB.user=user;
+      DB.meta.userId=user.uid;
+      DB.meta.displayName=user.displayName||user.email||'User';
+      DB.meta.email=user.email||null;
+      DB.meta.photoURL=user.photoURL||null;
+      saveDB();
+      startListeners();
+      // If auth screen still showing, hide it
+      const as=document.getElementById('auth-screen');
+      if(as&&as.style.display!=='none'){
+        as.style.display='none';
+        document.getElementById('app').style.display='flex';
+        render();
+        setTimeout(checkForUpdate,3000);
+      } else {
+        render();
+      }
+    } else {
+      FB.user=null;
+      stopListeners();
+    }
+  });
+}
+
+/* ── Google Sign-In ── */
+function signInWithGoogle(){
+  if(!FB.ready){toast('Firebase not available');return;}
+  const provider=new firebase.auth.GoogleAuthProvider();
+  FB.auth.signInWithPopup(provider).catch(e=>{
+    // Popup blocked on mobile — try redirect
+    FB.auth.signInWithRedirect(provider);
+  });
+}
+
+/* ── Handle redirect result on load ── */
+function handleRedirectResult(){
+  if(!FB.ready)return;
+  FB.auth.getRedirectResult().then(result=>{
+    if(result&&result.user){/* handled by onAuthStateChanged */}
+  }).catch(e=>console.warn('Redirect result:',e));
+}
+
+/* ── Firestore listeners ── */
+function startListeners(){
+  if(!FB.ready||!FB.user)return;
+  stopListeners();
+  const ws=wsId(FB.user.uid);
+  const db=FB.db;
+
+  // tasks
+  const u1=db.collection('workspaces').doc(ws).collection('tasks')
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(ch=>{
+        const d=ch.doc.data();
+        if(ch.type==='removed'){delete DB.entities.tasks[ch.doc.id];}
+        else DB.entities.tasks[ch.doc.id]=d;
+      });
+      localStorage.setItem(KEY,JSON.stringify(DB));
+      render();
+    },()=>{});
+
+  // lists
+  const u2=db.collection('workspaces').doc(ws).collection('lists')
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(ch=>{
+        const d=ch.doc.data();
+        if(ch.type==='removed'){delete DB.entities.lists[ch.doc.id];}
+        else DB.entities.lists[ch.doc.id]=d;
+      });
+      localStorage.setItem(KEY,JSON.stringify(DB));
+      render();
+    },()=>{});
+
+  _syncUnsubs=[u1,u2];
+}
+
+function stopListeners(){
+  _syncUnsubs.forEach(u=>{try{u();}catch(e){}});
+  _syncUnsubs=[];
+}
+
+/* ── Push local changes to Firestore ── */
+function syncPush(){
+  if(!FB.ready||!FB.user)return;
+  const ws=wsId(FB.user.uid);
+  const db=FB.db;
+  const batch=db.batch();
+
+  Object.values(DB.entities.tasks).forEach(t=>{
+    batch.set(db.collection('workspaces').doc(ws).collection('tasks').doc(t.id),t);
+  });
+  Object.values(DB.entities.lists).forEach(l=>{
+    batch.set(db.collection('workspaces').doc(ws).collection('lists').doc(l.id),l);
+  });
+  batch.commit().catch(()=>{});
+}
+
+/* ══════════════════════════════════════════
+   LOCATION AUTOCOMPLETE (Nominatim + GPS bias)
+   ══════════════════════════════════════════ */
+let _userGeo=null,_userGeoTried=false;
+function ensureUserGeo(cb){
+  if(_userGeo||_userGeoTried){cb(_userGeo);return;}
+  if(!navigator.geolocation){_userGeoTried=true;cb(null);return;}
+  navigator.geolocation.getCurrentPosition(
+    p=>{_userGeo={lat:p.coords.latitude,lon:p.coords.longitude};_userGeoTried=true;cb(_userGeo);},
+    ()=>{_userGeoTried=true;cb(null);},
+    {enableHighAccuracy:false,timeout:6000,maximumAge:600000});
+}
+
+function attachLocationAutocomplete(inputEl,onSelect){
+  let _timer=null,_drop=null;
+  function removeDrop(){if(_drop){_drop.remove();_drop=null;}}
+  function showDrop(results){
+    removeDrop();
+    if(!results.length)return;
+    _drop=document.createElement('div');
+    _drop.style.cssText=`position:absolute;z-index:999;left:0;right:0;
+      background:#1c1c24;border:1px solid rgba(255,255,255,.12);border-radius:12px;
+      margin-top:4px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.5)`;
+    results.slice(0,5).forEach(r=>{
+      const row=document.createElement('div');
+      row.style.cssText='padding:13px 14px;font-size:14px;color:#f0f0f8;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06)';
+      row.textContent=r.display_name;
+      row.onclick=()=>{
+        inputEl.value=r.display_name;
+        onSelect({name:r.display_name,lat:parseFloat(r.lat),lon:parseFloat(r.lon)});
+        removeDrop();};
+      _drop.appendChild(row);
+    });
+    // Position relative to input
+    const wrap=inputEl.closest('.fld')||inputEl.parentElement;
+    wrap.style.position='relative';
+    wrap.appendChild(_drop);
+  }
+  inputEl.oninput=()=>{
+    clearTimeout(_timer);
+    const q=inputEl.value.trim();
+    if(q.length<2){removeDrop();return;}
+    _timer=setTimeout(()=>{
+      ensureUserGeo(geo=>{
+        let url=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
+        if(geo)url+=`&viewbox=${geo.lon-1},${geo.lat-1},${geo.lon+1},${geo.lat+1}&bounded=0`;
+        fetch(url,{headers:{'Accept-Language':'en','User-Agent':'MBMLife/1.0'}})
+          .then(r=>r.json()).then(showDrop).catch(()=>{});
+      });
+    },400);
+  };
+  inputEl.addEventListener('blur',()=>setTimeout(removeDrop,200));
+}
+
+/* ── Auto update check ── */
+async function checkForUpdate(){
+  try{
+    const res=await fetch(location.href+'?nocache='+Date.now(),{cache:'no-store'});
+    const text=await res.text();
+    const match=text.match(/APP_VERSION='([^']+)'/);
+    if(match&&match[1]&&match[1]!==APP_VERSION){
+      // New version available
+      const msg=L==='fa'
+        ?`نسخه جدید (${match[1]}) موجود است. آپدیت شود؟`
+        :`New version available (${match[1]}). Update now?`;
+      if(confirm(msg))location.reload(true);
+    }
+  }catch(e){}
+}
 
 /* ══════════════════════════════════════════
    BOOT
    ══════════════════════════════════════════ */
 // Auth screen
-document.getElementById('auth-google').onclick=()=>{
-  // Firebase Google sign-in goes here — for now skip
-  startApp('Guest',null);
-};
+document.getElementById('auth-google').onclick=()=>signInWithGoogle();
 document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
 
 function startApp(displayName,email){
-  // Always persist so auto-start works next time
   DB.meta.displayName=displayName||'Guest';
   DB.meta.email=email||null;
   saveDB();
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
   render();
+  setTimeout(checkForUpdate,3000);
 }
 
-// Auto-start if previously authenticated
-if(DB.meta.displayName){
+// Boot Firebase
+handleRedirectResult();
+initAuth();
+
+// Auto-start if previously used as Guest (no Firebase user)
+if(DB.meta.displayName&&!FB.ready){
   startApp(DB.meta.displayName,DB.meta.email);
+} else if(DB.meta.displayName==='Guest'){
+  startApp('Guest',null);
 }
+
 
 // Nav
 document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
