@@ -468,6 +468,7 @@ textarea.finput{resize:vertical;min-height:80px}
   <nav id="nav">
     <button class="nv on" data-s="today"><span class="nv-ic">☀</span><span class="nv-lb">Today</span></button>
     <button class="nv" data-s="lists"><span class="nv-ic">≡</span><span class="nv-lb">Lists</span></button>
+    <button class="nv" data-s="appts"><span class="nv-ic">◷</span><span class="nv-lb">Appointments</span></button>
     <button class="nv" data-s="search"><span class="nv-ic">⌕</span><span class="nv-lb">Search</span></button>
     <button class="nv" data-s="more"><span class="nv-ic">⋯</span><span class="nv-lb">More</span></button>
   </nav>
@@ -510,7 +511,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v77';
+const APP_VERSION='v79';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -528,6 +529,8 @@ function blankDB(){
                     //  placeId,expenseId,noteIds[],tags[],
                     //  createdAt,updatedAt,archivedAt}
       lists:{},     // {id,name,icon,color,sortBy,shared,memberIds[],
+                    //  createdAt,updatedAt,archivedAt}
+      appts:{},     // {id,title,date,time,endTime,location,notes,
                     //  createdAt,updatedAt,archivedAt}
       people:{},    // {id,name,avatar,email,phone,role,
                     //  taskIds[],noteIds[],
@@ -633,7 +636,10 @@ const I18N={
     search:'Search',noResults:'No results.',
     signOut:'Sign out',settings:'Settings',about:'About',
     version:'Version',language:'Language',theme:'Theme',
-    offline:'Offline',synced:'Synced',syncing:'Syncing…'},
+    offline:'Offline',synced:'Synced',syncing:'Syncing…',
+    appts:'Appointments',newAppt:'New Appointment',apptTitle:'Title',
+    apptDate:'Date',apptTime:'Time',apptLocation:'Location',apptNotes:'Notes',
+    noAppts:'No appointments yet.'},
   fa:{today:'امروز',lists:'لیست‌ها',calendar:'تقویم',people:'افراد',more:'بیشتر',
     noTasks:'هنوز چیزی نیست.',addTask:'کار جدید',tasks:'کارها',important:'مهم',
     planned:'برنامه‌ریزی شده',allTasks:'همه کارها',myday:'روز من',
@@ -646,7 +652,10 @@ const I18N={
     search:'جستجو',noResults:'نتیجه‌ای نیست.',
     signOut:'خروج',settings:'تنظیمات',about:'درباره',
     version:'نسخه',language:'زبان',theme:'رنگ‌بندی',
-    offline:'آفلاین',synced:'همگام‌سازی شد',syncing:'در حال همگام‌سازی…'},
+    offline:'آفلاین',synced:'همگام‌سازی شد',syncing:'در حال همگام‌سازی…',
+    appts:'قرار ملاقات‌ها',newAppt:'قرار جدید',apptTitle:'عنوان',
+    apptDate:'تاریخ',apptTime:'ساعت',apptLocation:'مکان',apptNotes:'یادداشت',
+    noAppts:'هنوز قراری ثبت نشده.'},
 };
 function tr(k){return (I18N[L]||I18N.en)[k]||k;}
 
@@ -665,6 +674,7 @@ function render(){
   const el=document.getElementById('screen');
   if(screen==='today')el.innerHTML=renderToday();
   else if(screen==='lists')el.innerHTML=renderLists();
+  else if(screen==='appts')el.innerHTML=renderAppts();
   else if(screen==='search'){openSearch();screen='today';el.innerHTML=renderToday();}
   else if(screen==='more')el.innerHTML=renderMore();
   bindScreen();
@@ -682,6 +692,7 @@ function applyLang(){
     const lb=b.querySelector('.nv-lb');
     if(!lb)return;
     if(k==='search')lb.textContent=tr('search');
+    else if(k==='appts')lb.textContent=tr('appts');
     else lb.textContent=tr(k)||k;
   });
 }
@@ -696,6 +707,10 @@ function renderToday(){
   const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
   const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts);
+  // Today's appointments
+  const todayAppts=Object.values(DB.entities.appts||{})
+    .filter(a=>!a.archivedAt&&a.date===ts)
+    .sort((a,b)=>(a.time||'')>(b.time||'')?1:-1);
 
   const dayName=new Date().toLocaleDateString(L==='fa'?'fa-IR':'en-US',{weekday:'long'});
   const dateStr=new Date().toLocaleDateString(L==='fa'?'fa-IR':'en-US',{month:'long',day:'numeric'});
@@ -705,6 +720,18 @@ function renderToday(){
     <div class="today-title">${tr('today')}</div>
     ${overdue.length?`<div class="today-overdue-pill">⚠ ${overdue.length} ${tr('overdue')}</div>`:''}
   </div>`;
+
+  // Today's appointments
+  if(todayAppts.length){
+    html+=`<div class="ts-label">◷ ${tr('appts')}</div>
+    <div style="background:var(--s1);border-top:1px solid var(--b1)">
+      ${todayAppts.map(a=>`<div class="ul-row" data-apptid="${a.id}" style="padding:0 16px;cursor:pointer">
+        <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:var(--brand)20;color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:18px">◷</div></div>
+        <span class="ul-name">${esc(a.title)}</span>
+        <span class="ul-count">${a.time||''}</span>
+      </div>`).join('')}
+    </div>`;
+  }
 
   // Overdue — first, no label, red checkbox tint
   if(overdue.length){
@@ -1011,8 +1038,8 @@ const _SVG={
   share:`<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
   duplicate:`<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   print:`<svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`,
-  suggest:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
-  shortcut:`<svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`,
+  suggest:`<svg viewBox="0 0 24 24"><path d="M9 21h6m-6-4h6m-3-14a7 7 0 0 1 4 12.7V17H8v-2.3A7 7 0 0 1 12 3z"/></svg>`,
+  shortcut:`<svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
   delete:`<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
 };
 
@@ -1359,6 +1386,123 @@ function _renderTaskDetail(){
 
 function openTaskEdit(id){openTaskDetail(id);}
 
+/* ══════════════════════════════════════════
+   APPOINTMENTS SCREEN
+   ══════════════════════════════════════════ */
+function renderAppts(){
+  const ts=todayStr();
+  const all=Object.values(DB.entities.appts||{})
+    .filter(a=>!a.archivedAt)
+    .sort((a,b)=>{
+      if(a.date!==b.date)return a.date<b.date?-1:1;
+      return (a.time||'')< (b.time||'')?-1:1;
+    });
+
+  const upcoming=all.filter(a=>a.date>=ts);
+  const past=all.filter(a=>a.date<ts);
+
+  let html=`<div class="pg-head" style="display:flex;align-items:center;padding:20px 20px 8px">
+    <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${tr('appts')}</div>
+    <button class="hbtn" id="btn-new-appt" style="width:40px;height:40px;border-radius:12px;background:var(--s2);border:1px solid var(--b1);color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">＋</button>
+  </div>`;
+
+  if(!all.length){
+    html+=`<div class="empty"><div class="empty-ic">◷</div>
+      <div class="empty-tx">${tr('noAppts')}</div></div>`;
+  } else {
+    if(upcoming.length){
+      html+=`<div class="hub-sec-label">${L==='fa'?'آینده':'Upcoming'}</div>
+      <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+        ${upcoming.map(a=>apptRow(a)).join('')}
+      </div>`;
+    }
+    if(past.length){
+      html+=`<div class="hub-sec-label">${L==='fa'?'گذشته':'Past'}</div>
+      <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px;opacity:.65">
+        ${past.map(a=>apptRow(a)).join('')}
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function apptRow(a){
+  const ts=todayStr();
+  const isToday=a.date===ts;
+  const dateLabel=isToday?(L==='fa'?'امروز':'Today'):shortDate(a.date);
+  return `<div class="ul-row" data-apptid="${a.id}" style="padding:0 16px;align-items:flex-start">
+    <div class="ul-icon" style="padding-top:14px">
+      <div style="width:42px;height:42px;border-radius:12px;background:${isToday?'var(--brand)':'var(--s2)'};display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <div style="font-size:10px;font-weight:700;color:${isToday?'rgba(255,255,255,.8)':'var(--ink3)'};">${new Date(a.date+'T12:00').toLocaleDateString('en',{month:'short'}).toUpperCase()}</div>
+        <div style="font-size:18px;font-weight:800;color:${isToday?'#fff':'var(--ink)'};line-height:1">${new Date(a.date+'T12:00').getDate()}</div>
+      </div>
+    </div>
+    <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
+      <div style="font-size:16px;font-weight:500">${esc(a.title)}</div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
+        ${a.time?`<span>⏰ ${a.time}${a.endTime?' – '+a.endTime:''}</span>`:''}
+        ${a.location?`<span>📍 ${esc(a.location.split(',')[0])}</span>`:''}
+      </div>
+      ${a.notes?`<div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(a.notes)}</div>`:''}
+    </div>
+    <div style="padding-top:16px;color:var(--ink3);font-size:16px;opacity:.4">›</div>
+  </div>`;
+}
+
+function openNewApptSheet(id){
+  const a=id?(DB.entities.appts||{})[id]:null;
+  const isEdit=!!a;
+  openSheet(`<h3>${isEdit?(L==='fa'?'ویرایش قرار':'Edit Appointment'):tr('newAppt')}</h3>
+    <div class="fld"><label>${tr('apptTitle')}</label>
+      <input class="finput" id="ap-title" value="${esc(a?.title||'')}" placeholder="${tr('apptTitle')}"></div>
+    <div class="fld"><label>${tr('apptDate')}</label>
+      <input class="finput" id="ap-date" type="date" value="${a?.date||''}"></div>
+    <div style="display:flex;gap:10px">
+      <div class="fld" style="flex:1"><label>${L==='fa'?'شروع':'Start'}</label>
+        <input class="finput" id="ap-time" type="time" value="${a?.time||''}"></div>
+      <div class="fld" style="flex:1"><label>${L==='fa'?'پایان':'End'}</label>
+        <input class="finput" id="ap-endtime" type="time" value="${a?.endTime||''}"></div>
+    </div>
+    <div class="fld"><label>${tr('apptLocation')}</label>
+      <input class="finput" id="ap-location" value="${esc(a?.location||'')}" placeholder="${L==='fa'?'آدرس یا مکان':'Address or place'}"></div>
+    <div class="fld"><label>${tr('apptNotes')}</label>
+      <textarea class="finput" id="ap-notes" rows="2">${esc(a?.notes||'')}</textarea></div>
+    <div class="btn-row">
+      ${isEdit?`<button class="btn btn-danger" id="ap-delete">${L==='fa'?'حذف':'Delete'}</button>`:''}
+      <button class="btn btn-ghost" id="ap-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary" id="ap-save">${tr('save')}</button>
+    </div>`);
+
+  // Location autocomplete
+  const locInput=document.getElementById('ap-location');
+  if(locInput)attachLocationAutocomplete(locInput,({name})=>{locInput.value=name;});
+
+  document.getElementById('ap-cancel').onclick=closeSheet;
+  if(isEdit){
+    document.getElementById('ap-delete').onclick=()=>{
+      if(!DB.entities.appts)DB.entities.appts={};
+      DB.entities.appts[id].archivedAt=now();
+      saveDB();closeSheet();render();toast(L==='fa'?'قرار حذف شد':'Deleted');
+    };
+  }
+  document.getElementById('ap-save').onclick=()=>{
+    const title=document.getElementById('ap-title').value.trim();if(!title)return;
+    const date=document.getElementById('ap-date').value;if(!date)return;
+    if(!DB.entities.appts)DB.entities.appts={};
+    const aid=id||uid();
+    DB.entities.appts[aid]={
+      id:aid,title,date,
+      time:document.getElementById('ap-time').value||null,
+      endTime:document.getElementById('ap-endtime').value||null,
+      location:document.getElementById('ap-location').value.trim()||null,
+      notes:document.getElementById('ap-notes').value.trim()||null,
+      createdAt:a?.createdAt||now(),updatedAt:now(),archivedAt:null
+    };
+    saveDB();closeSheet();render();
+  };
+  setTimeout(()=>document.getElementById('ap-title')?.focus(),100);
+}
+
 function openSearch(){
   const s=document.getElementById('search-screen');
   s.classList.add('on');
@@ -1520,6 +1664,8 @@ function quickAdd(){
       <input class="finput" id="qa-date" type="date"></div>
     <div class="fld"><label>${L==='fa'?'ساعت':'Time'}</label>
       <input class="finput" id="qa-time" type="time"></div>
+    <div class="fld"><label>${L==='fa'?'مکان':'Location'}</label>
+      <input class="finput" id="qa-location" placeholder="${L==='fa'?'آدرس یا مکان':'Address or place'}"></div>
     <div class="fld"><label>${L==='fa'?'اولویت':'Priority'}</label>
       <div class="chipsel" id="qa-pri">
         <button data-v="p1">${tr('high')}</button>
@@ -1538,6 +1684,9 @@ function quickAdd(){
   bindChipsel('qa-pri','p3');
   bindChipsel('qa-list',defList);
   setTimeout(()=>document.getElementById('qa-text')?.focus(),100);
+  // Location autocomplete
+  const qaLoc=document.getElementById('qa-location');
+  if(qaLoc)attachLocationAutocomplete(qaLoc,({name})=>{qaLoc.value=name;});
   document.getElementById('qa-cancel').onclick=closeSheet;
   document.getElementById('qa-save').onclick=()=>{
     const text=document.getElementById('qa-text').value.trim();if(!text)return;
@@ -1546,7 +1695,8 @@ function quickAdd(){
       id,text,
       listId:chipVal('qa-list')||'inbox',
       dueDate:document.getElementById('qa-date').value||null,
-      dueTime:document.getElementById('qa-time').value||null,priority:chipVal('qa-pri')||'p3',repeat:null,
+      dueTime:document.getElementById('qa-time').value||null,
+      location:document.getElementById('qa-location').value.trim()||null,priority:chipVal('qa-pri')||'p3',repeat:null,
       assigneeId:null,creatorId:DB.meta.userId,
       status:'open',pinned:false,done:false,doneAt:null,
       placeId:null,expenseId:null,noteIds:[],tags:[],steps:[],notes:'',
@@ -1591,6 +1741,11 @@ function bindScreen(){
   // New list
   const nlb=document.getElementById('btn-new-list');
   if(nlb)nlb.onclick=()=>openNewListSheet();
+  // New appointment button
+  const nab=document.getElementById('btn-new-appt');
+  if(nab)nab.onclick=()=>openNewApptSheet(null);
+  // Appointment rows
+  document.querySelectorAll('[data-apptid]').forEach(el=>el.onclick=()=>openNewApptSheet(el.dataset.apptid));
   // Hub search
   const hsb=document.getElementById('btn-hub-search');
   if(hsb)hsb.onclick=()=>openSearch();
@@ -1810,15 +1965,19 @@ function attachLocationAutocomplete(inputEl,onSelect){
 /* ── Auto update check ── */
 async function checkForUpdate(){
   try{
-    const res=await fetch(location.href+'?nocache='+Date.now(),{cache:'no-store'});
+    const res=await fetch(location.href.split('?')[0]+'?v='+Date.now(),{cache:'no-store'});
     const text=await res.text();
     const match=text.match(/APP_VERSION='([^']+)'/);
     if(match&&match[1]&&match[1]!==APP_VERSION){
-      // New version available
-      const msg=L==='fa'
-        ?`نسخه جدید (${match[1]}) موجود است. آپدیت شود؟`
-        :`New version available (${match[1]}). Update now?`;
-      if(confirm(msg))location.reload(true);
+      // Show update banner
+      const bar=document.getElementById('sync-bar');
+      if(bar){
+        bar.style.display='block';
+        bar.className='sync-bar syncing';
+        bar.style.cursor='pointer';
+        bar.textContent=(L==='fa'?`نسخه جدید ${match[1]} موجود است — برای آپدیت لمس کنید`:`New version ${match[1]} available — tap to update`);
+        bar.onclick=()=>location.reload(true);
+      }
     }
   }catch(e){}
 }
@@ -1893,6 +2052,11 @@ window.addEventListener('popstate',()=>{
   history.pushState(null,'',location.href);
 });
 history.pushState(null,'',location.href);
+
+// Re-check for updates when user returns to app
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible')setTimeout(checkForUpdate,1000);
+});
 
 document.getElementById('td-back').onclick=()=>{closeTaskDetail();render();};
 document.getElementById('td-save').onclick=()=>{closeTaskDetail();render();};
