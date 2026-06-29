@@ -511,7 +511,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v80';
+const APP_VERSION='v81';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1978,18 +1978,22 @@ function attachLocationAutocomplete(inputEl,onSelect){
 /* ── Auto update check ── */
 async function checkForUpdate(){
   try{
-    const res=await fetch(location.href.split('?')[0]+'?v='+Date.now(),{cache:'no-store'});
+    const base=location.href.split('?')[0].split('#')[0];
+    const res=await fetch(base+'?_='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache'}});
+    if(!res.ok)return;
     const text=await res.text();
     const match=text.match(/APP_VERSION='([^']+)'/);
     if(match&&match[1]&&match[1]!==APP_VERSION){
-      // Show update banner
       const bar=document.getElementById('sync-bar');
       if(bar){
-        bar.style.display='block';
-        bar.className='sync-bar syncing';
-        bar.style.cursor='pointer';
-        bar.textContent=(L==='fa'?`نسخه جدید ${match[1]} موجود است — برای آپدیت لمس کنید`:`New version ${match[1]} available — tap to update`);
-        bar.onclick=()=>location.reload(true);
+        bar.style.cssText='display:block;cursor:pointer;font-size:13px;font-weight:700;padding:10px 16px;text-align:center;background:rgba(110,86,248,.95);color:#fff;position:fixed;top:0;left:0;right:0;max-width:480px;margin:0 auto;z-index:200;box-shadow:0 2px 12px rgba(0,0,0,.4)';
+        bar.textContent=(L==='fa'?'🔄 نسخه جدید موجود است — لمس کنید':'🔄 New version available — tap to update');
+        bar.onclick=()=>{
+          bar.textContent=L==='fa'?'در حال آپدیت...':'Updating...';
+          if('caches' in window){
+            caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(()=>location.reload(true));
+          }else{location.reload(true);}
+        };
       }
     }
   }catch(e){}
@@ -2058,9 +2062,17 @@ window.addEventListener('popstate',()=>{
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
   } else {
     // Nothing to close — confirm exit
-    if(confirm(L==='fa'?'از اپ خارج شوید؟':'Exit MBM Life?')){
-      history.back();return;
-    }
+    // Show in-app exit confirmation instead of browser confirm
+    openSheet(`<div style="padding:8px 0 0">
+      <div style="padding:16px 20px 8px;font-size:18px;font-weight:700">${L==='fa'?'خروج از اپ؟':'Exit MBM Life?'}</div>
+      <div style="padding:0 20px 16px;font-size:14px;color:var(--ink2)">${L==='fa'?'مطمئنی می‌خوای بری؟':'Are you sure you want to exit?'}</div>
+      <div style="display:flex;gap:10px;padding:0 14px 16px">
+        <button class="btn btn-ghost" id="exit-cancel" style="flex:1">${L==='fa'?'نه':'Cancel'}</button>
+        <button class="btn btn-danger" id="exit-ok" style="flex:1">${L==='fa'?'خروج':'Exit'}</button>
+      </div>
+    </div>`);
+    document.getElementById('exit-cancel').onclick=closeSheet;
+    document.getElementById('exit-ok').onclick=()=>{closeSheet();history.back();};
   }
   history.pushState(null,'',location.href);
 });
