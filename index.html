@@ -9,36 +9,18 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
-/* ═══════════════════════════════════════════
-   MBM LIFE v60 — Platform Edition
-   Design System: Obsidian Dark + Indigo
-   ═══════════════════════════════════════════ */
+/* ═══════════════════════════════════
+   MBM LIFE — Design System v64
+   ═══════════════════════════════════ */
 :root{
-  /* Surface */
-  --s0:#0f0f14;      /* page bg */
-  --s1:#16161e;      /* card */
-  --s2:#1e1e2a;      /* card raised */
-  --s3:#26263a;      /* hover/active */
-  /* Ink */
-  --ink:#f0f0f8;
-  --ink2:#a0a0c0;
-  --ink3:#606080;
-  /* Brand */
-  --brand:#6e56f8;
-  --brand2:#9d7bff;
+  --s0:#0f0f14; --s1:#16161e; --s2:#1e1e2a; --s3:#26263a;
+  --ink:#f0f0f8; --ink2:#a0a0c0; --ink3:#606080;
+  --brand:#6e56f8; --brand2:#9d7bff;
   --brandg:linear-gradient(135deg,#6e56f8,#9d7bff);
-  /* Semantic */
-  --ok:#22d3a0;
-  --warn:#f59e0b;
-  --danger:#f43f5e;
-  --info:#38bdf8;
-  /* Border */
-  --b1:rgba(255,255,255,.07);
-  --b2:rgba(255,255,255,.12);
-  /* Shadow */
+  --ok:#22d3a0; --warn:#f59e0b; --danger:#f43f5e; --info:#38bdf8;
+  --b1:rgba(255,255,255,.07); --b2:rgba(255,255,255,.12);
   --sh:0 8px 32px rgba(0,0,0,.5);
-  /* Radius */
-  --r:16px;--r2:12px;--r3:8px;
+  --r:16px; --r2:12px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
 html,body{height:100%;background:var(--s0);color:var(--ink);
@@ -46,94 +28,26 @@ html,body{height:100%;background:var(--s0);color:var(--ink);
   overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 
-/* ── Layout ── */
-#app{display:flex;flex-direction:column;height:100vh;max-width:480px;margin:0 auto;
-  position:relative;overflow:hidden}
-#screen{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
-  padding:0 0 90px}
+/* ── App shell ── */
+#app{display:flex;flex-direction:column;height:100vh;max-width:480px;
+  margin:0 auto;position:relative;overflow:hidden}
+#screen{flex:1;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;padding:0 0 82px}
 #screen::-webkit-scrollbar{display:none}
 
-/* ── Nav Bar ── */
+/* ── Nav bar ── */
 #nav{position:absolute;bottom:0;left:0;right:0;height:82px;
   background:var(--s1);border-top:1px solid var(--b1);
-  display:flex;align-items:stretch;padding:0 4px;padding-bottom:env(safe-area-inset-bottom,0)}
-.nv{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:4px;border:none;background:none;cursor:pointer;color:var(--ink3);
-  font-size:10px;font-weight:600;letter-spacing:.3px;padding:8px 4px;
-  transition:color .15s}
+  display:flex;align-items:stretch;padding:0 4px;
+  padding-bottom:env(safe-area-inset-bottom,0)}
+.nv{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:4px;border:none;background:none;
+  cursor:pointer;color:var(--ink3);font-size:10px;font-weight:600;
+  letter-spacing:.3px;padding:8px 4px;transition:color .15s}
 .nv.on{color:var(--brand)}
 .nv-ic{font-size:22px;line-height:1;transition:transform .15s}
+.nv-lb{font-size:10px;font-weight:600;letter-spacing:.2px;line-height:1}
 .nv.on .nv-ic{transform:scale(1.1)}
-
-/* ── Page Header ── */
-.pg-head{padding:20px 20px 8px;display:flex;align-items:center;gap:12px}
-.pg-title{font-size:28px;font-weight:800;letter-spacing:-.5px;flex:1}
-.pg-sub{font-size:13px;color:var(--ink2);margin-top:2px}
-.hbtn{width:40px;height:40px;border-radius:var(--r2);background:var(--s2);
-  border:1px solid var(--b1);color:var(--ink);font-size:18px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;flex:none}
-
-/* ── Cards ── */
-.card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);
-  padding:16px;margin:0 16px 10px}
-.card-flat{background:var(--s1);border-radius:var(--r);margin:0 16px 10px;
-  overflow:hidden;border:1px solid var(--b1)}
-
-/* ── Section Label ── */
-.sec-label{font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
-  color:var(--ink3);padding:16px 20px 8px;display:flex;align-items:center;gap:8px}
-.sec-label::after{content:'';flex:1;height:1px;background:var(--b1)}
-
-/* ── Row Item ── */
-.row{display:flex;align-items:center;gap:14px;padding:14px 16px;
-  cursor:pointer;transition:background .1s;border-bottom:1px solid var(--b1)}
-.row:last-child{border-bottom:none}
-.row:active{background:var(--s3)}
-.row-ic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;
-  justify-content:center;font-size:18px;flex:none}
-.row-body{flex:1;min-width:0}
-.row-title{font-size:15px;font-weight:600;line-height:1.3}
-.row-sub{font-size:12px;color:var(--ink2);margin-top:2px}
-.row-right{color:var(--ink3);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
-.row-arr{color:var(--ink3);font-size:16px;opacity:.5}
-
-/* ── Checkbox (scoped) ── */
-.chk{width:24px;height:24px;border-radius:50%;border:2px solid var(--ink3);
-  flex:none;display:flex;align-items:center;justify-content:center;
-  cursor:pointer;transition:all .18s}
-.chk.on{background:var(--brand);border-color:var(--brand)}
-.chk.on::after{content:'';width:6px;height:10px;border:2.5px solid #fff;
-  border-top:none;border-left:none;transform:rotate(42deg) translateY(-1px);display:block}
-
-/* ── Star / Pin ── */
-.star{width:36px;height:36px;flex:none;background:none;border:none;
-  cursor:pointer;color:var(--ink3);font-size:18px;display:flex;
-  align-items:center;justify-content:center;opacity:.5;transition:all .15s}
-.star.on{color:#f59e0b;opacity:1}
-.star:hover{opacity:1}
-
-/* ── Chips ── */
-.chip{display:inline-flex;align-items:center;gap:4px;background:var(--s2);
-  border:1px solid var(--b1);border-radius:6px;padding:2px 8px;
-  font-size:11px;font-weight:600;color:var(--ink2)}
-.chip.over{color:var(--danger);border-color:rgba(244,63,94,.3);background:rgba(244,63,94,.08)}
-.chip.ok{color:var(--ok);border-color:rgba(34,211,160,.3);background:rgba(34,211,160,.08)}
-
-/* ── Pill ── */
-.pill{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;flex:none}
-.pill.p1{background:rgba(244,63,94,.15);color:var(--danger)}
-.pill.p2{background:rgba(245,158,11,.15);color:var(--warn)}
-.pill.p3{background:rgba(56,189,248,.15);color:var(--info)}
-
-/* ── Completed section ── */
-.done-sec{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
-  color:var(--ink3);padding:14px 16px 8px;display:flex;align-items:center;gap:8px}
-.done-sec::after{content:'';flex:1;height:1px;background:var(--b1)}
-
-/* ── Empty state ── */
-.empty{text-align:center;padding:48px 24px;color:var(--ink3)}
-.empty-ic{font-size:40px;margin-bottom:12px;opacity:.4}
-.empty-tx{font-size:14px;line-height:1.6}
 
 /* ── FAB ── */
 #fab{position:fixed;bottom:calc(82px + 16px + env(safe-area-inset-bottom,0));
@@ -142,156 +56,50 @@ body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   cursor:pointer;box-shadow:0 8px 24px rgba(110,86,248,.45);
   display:flex;align-items:center;justify-content:center;
   transition:transform .15s,box-shadow .15s;z-index:40}
-#fab:active{transform:scale(.93);box-shadow:0 4px 12px rgba(110,86,248,.3)}
+#fab:active{transform:scale(.93)}
 
-/* ── Sheet (bottom drawer) ── */
-/* ══════════════════════════════════════════
-   PREMIUM SHEET COMPONENT
-   ══════════════════════════════════════════ */
-#sheet-bg{
-  position:fixed;inset:0;background:rgba(0,0,0,0);z-index:50;
-  pointer-events:none;transition:background .25s;
-  backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px);
-  transition:background .25s,backdrop-filter .25s,-webkit-backdrop-filter .25s}
-#sheet-bg.on{background:rgba(0,0,0,.55);pointer-events:all;
-  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+/* ── Typography helpers ── */
+.sec-label{font-size:12px;font-weight:600;color:var(--ink3);
+  padding:14px 20px 6px;letter-spacing:.1px}
+.empty{text-align:center;padding:48px 24px;color:var(--ink3)}
+.empty-ic{font-size:36px;margin-bottom:12px;opacity:.4}
+.empty-tx{font-size:14px;line-height:1.6}
 
-#sheet{
-  position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
-  background:var(--s1);
-  border-radius:28px 28px 0 0;
-  border-top:1px solid var(--b2);
-  z-index:51;
-  transform:translateY(100%);
-  transition:transform .32s cubic-bezier(0.22,1,0.36,1);
-  max-height:90vh;overflow-y:auto;overflow-x:hidden;
-  padding-bottom:env(safe-area-inset-bottom,0);
-  will-change:transform}
-#sheet.on{transform:translateY(0)}
+/* ── Checkbox ── */
+.chk{width:24px;height:24px;border-radius:50%;border:2px solid var(--ink3);
+  flex:none;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .18s}
+.chk.on{background:var(--brand);border-color:var(--brand)}
+.chk.on::after{content:'';width:6px;height:10px;border:2.5px solid #fff;
+  border-top:none;border-left:none;transform:rotate(42deg) translateY(-1px);display:block}
 
-/* Drag handle */
-.sheet-handle{
-  width:40px;height:5px;border-radius:3px;
-  background:var(--b2);margin:14px auto 0;
-  flex-shrink:0}
-
-/* Sheet header */
-.sheet-header{
-  padding:16px 22px 0;
-  position:relative}
-.sheet-list-identity{
-  display:flex;align-items:center;gap:13px;margin-bottom:4px}
-.sheet-list-icon{
-  width:42px;height:42px;border-radius:13px;
+/* ── Star ── */
+.star{width:36px;height:36px;flex:none;background:none;border:none;
+  cursor:pointer;color:var(--ink3);font-size:18px;
   display:flex;align-items:center;justify-content:center;
-  font-size:20px;flex:none;transition:transform .2s}
-.sheet-list-name{
-  font-size:19px;font-weight:800;letter-spacing:-.2px;line-height:1.2}
-.sheet-list-meta{
-  font-size:12px;color:var(--ink3);font-weight:500;margin-top:1px}
+  opacity:.45;transition:all .15s}
+.star.on{color:#f59e0b;opacity:1}
 
-/* Action groups */
-.sheet-group{
-  margin:14px 14px 0;
-  background:var(--s2);
-  border-radius:18px;
-  overflow:hidden;
-  border:1px solid var(--b1)}
-.sheet-group+.sheet-group{margin-top:10px}
+/* ── Chips / pills ── */
+.chip{display:inline-flex;align-items:center;gap:3px;background:var(--s2);
+  border:1px solid var(--b1);border-radius:6px;padding:2px 7px;
+  font-size:11px;font-weight:600;color:var(--ink2)}
+.chip.over{color:var(--danger);border-color:rgba(244,63,94,.3);
+  background:rgba(244,63,94,.08)}
+.pill{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;flex:none}
+.pill.p1{background:rgba(244,63,94,.15);color:var(--danger)}
+.pill.p2{background:rgba(245,158,11,.15);color:var(--warn)}
 
-/* Individual action row */
-.sac{
-  display:flex;align-items:center;gap:0;
-  width:100%;background:none;border:none;
-  border-bottom:1px solid var(--b1);
-  cursor:pointer;text-align:left;
-  padding:0;
-  color:var(--ink);
-  position:relative;
-  overflow:hidden;
-  transition:background .12s}
-.sac:last-child{border-bottom:none}
-.sac:active{background:var(--s3)}
-
-/* Ripple on tap */
-.sac::after{
-  content:'';position:absolute;inset:0;
-  background:rgba(255,255,255,.06);
-  opacity:0;transition:opacity .15s}
-.sac:active::after{opacity:1}
-
-.sac-icon-wrap{
-  width:56px;height:54px;display:flex;
-  align-items:center;justify-content:center;flex:none}
-.sac-icon{
-  width:34px;height:34px;border-radius:9px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:16px;transition:transform .15s}
-.sac:active .sac-icon{transform:scale(.92)}
-.sac-label{
-  flex:1;font-size:15.5px;font-weight:500;
-  letter-spacing:-.1px;padding:16px 0}
-.sac-right{
-  display:flex;align-items:center;gap:6px;
-  padding-right:16px;color:var(--ink3);
-  font-size:13px;font-weight:600}
-.sac-arr{font-size:16px;opacity:.4}
-
-/* Danger row */
-.sac.sac-danger .sac-label{color:var(--danger)}
-.sac.sac-danger .sac-icon{background:rgba(244,63,94,.12)}
-
-/* Cancel button */
-.sheet-cancel{
-  display:block;width:calc(100% - 28px);
-  margin:10px 14px 16px;
-  background:var(--s2);border:1px solid var(--b1);
-  border-radius:16px;padding:16px;
-  font-size:16px;font-weight:600;color:var(--ink2);
-  cursor:pointer;text-align:center;
-  transition:background .12s,color .12s}
-.sheet-cancel:active{background:var(--s3);color:var(--ink)}
-
-/* Sub-sheet: sort options */
-.sac-check{
-  width:22px;height:22px;border-radius:50%;
-  border:2px solid var(--b2);flex:none;
-  display:flex;align-items:center;justify-content:center;
-  margin-right:16px;transition:all .15s}
-.sac-check.on{background:var(--brand);border-color:var(--brand)}
-.sac-check.on::after{
-  content:'';width:5px;height:9px;
-  border:2.5px solid #fff;border-top:none;border-left:none;
-  transform:rotate(42deg) translateY(-1px);display:block}
-
-/* Sub-sheet: color picker */
-.color-picker-grid{
-  display:flex;gap:12px;flex-wrap:wrap;
-  padding:4px 0 8px}
-.cpick{
-  width:40px;height:40px;border-radius:50%;
-  cursor:pointer;position:relative;
-  transition:transform .15s;border:none;flex:none}
-.cpick:active{transform:scale(.9)}
-.cpick.on::after{
-  content:'✓';position:absolute;inset:0;
-  display:flex;align-items:center;justify-content:center;
-  color:#fff;font-size:16px;font-weight:800}
-.cpick.on{box-shadow:0 0 0 3px var(--s1),0 0 0 5px currentColor}
-
-/* Sheet body padding */
-.sheet-body{padding:0 0 4px}
-
-/* ── Form fields ── */
+/* ── Form elements ── */
 .fld{margin-bottom:14px}
 .fld label{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;
   text-transform:uppercase;color:var(--ink2);margin-bottom:6px}
 .finput{width:100%;background:var(--s2);border:1px solid var(--b1);
-  border-radius:var(--r2);padding:13px 14px;color:var(--ink);font-size:15px;
-  outline:none;transition:border-color .15s}
+  border-radius:var(--r2);padding:13px 14px;color:var(--ink);
+  font-size:15px;outline:none;transition:border-color .15s;font-family:inherit}
 .finput:focus{border-color:var(--brand)}
 .finput::placeholder{color:var(--ink3)}
-textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
+textarea.finput{resize:vertical;min-height:80px}
 
 /* ── Chipsel ── */
 .chipsel{display:flex;gap:6px;flex-wrap:wrap}
@@ -299,104 +107,49 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
   padding:7px 13px;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer}
 .chipsel button.on{background:var(--brand);border-color:var(--brand);color:#fff}
 
-/* ── Action buttons ── */
+/* ── Buttons ── */
 .btn{border:none;border-radius:var(--r2);padding:14px;font-size:15px;
-  font-weight:700;cursor:pointer;width:100%;transition:opacity .15s}
+  font-weight:700;cursor:pointer;width:100%;transition:opacity .15s;font-family:inherit}
 .btn:active{opacity:.8}
 .btn-primary{background:var(--brandg);color:#fff}
 .btn-ghost{background:var(--s2);color:var(--ink);border:1px solid var(--b1)}
-.btn-danger{background:rgba(244,63,94,.15);color:var(--danger);border:1px solid rgba(244,63,94,.2)}
+.btn-danger{background:rgba(244,63,94,.15);color:var(--danger);
+  border:1px solid rgba(244,63,94,.2)}
 .btn-row{display:flex;gap:10px;margin-top:16px}
 .btn-row .btn{flex:1}
 .btn-cancel{background:none;border:none;color:var(--ink2);font-size:15px;
-  font-weight:600;cursor:pointer;padding:14px;width:100%;text-align:center;margin-top:4px}
+  font-weight:600;cursor:pointer;padding:14px;width:100%;
+  text-align:center;margin-top:4px;font-family:inherit}
 
-/* ── Today screen ── */
-.today-date{font-size:13px;color:var(--ink2);font-weight:500;
-  padding:0 20px;margin-bottom:4px}
-.today-hero{padding:4px 20px 16px}
-.today-hero-title{font-size:32px;font-weight:800;letter-spacing:-.5px}
-.today-hero-sub{font-size:14px;color:var(--ink2);margin-top:4px}
-.counter-row{display:flex;gap:10px;padding:0 16px;margin-bottom:10px}
-.counter{flex:1;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);
-  padding:14px;cursor:pointer;transition:background .1s}
-.counter:active{background:var(--s2)}
-.counter-n{font-size:26px;font-weight:800}
-.counter-l{font-size:11px;color:var(--ink2);font-weight:600;margin-top:2px}
-.counter.over .counter-n{color:var(--danger)}
-.counter.ok .counter-n{color:var(--ok)}
+/* ════════════════════════════
+   TODAY SCREEN
+   ════════════════════════════ */
+.today-head{padding:20px 20px 8px}
+.today-date{font-size:13px;color:var(--ink3);font-weight:500;margin-bottom:6px}
+.today-title{font-size:30px;font-weight:800;letter-spacing:-.5px}
+.today-overdue-pill{display:inline-flex;align-items:center;gap:5px;
+  background:rgba(244,63,94,.12);border-radius:6px;padding:3px 9px;
+  font-size:12px;font-weight:700;color:var(--danger);margin-top:8px}
+.ts-label{font-size:12px;font-weight:600;color:var(--ink3);
+  padding:14px 20px 6px}
 
-/* ── Task row (Today / Lists) ── */
-.trow{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;
-  border-bottom:1px solid var(--b1);cursor:pointer;transition:background .1s}
-.trow:last-child{border-bottom:none}
-.trow:active{background:var(--s2)}
-.trow-body{flex:1;min-width:0;padding-top:1px}
-.trow-text{font-size:15px;font-weight:500;line-height:1.4}
-.trow-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px;align-items:center}
-.trow.done .trow-text{text-decoration:line-through;opacity:.4}
-
-/* ── Lists screen ── */
-/* ── Lists Hub ── */
-.lists-hub-header{display:flex;align-items:center;gap:14px;padding:20px 20px 8px}
-.lists-hub-avatar{width:44px;height:44px;border-radius:50%;background:var(--brandg);
-  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;flex:none}
-.lists-hub-name{font-size:17px;font-weight:700;flex:1}
-.lists-hub-search{width:38px;height:38px;border-radius:12px;background:var(--s2);
-  border:1px solid var(--b1);display:flex;align-items:center;justify-content:center;
-  color:var(--ink2);font-size:16px;cursor:pointer;flex:none;border:none;background:none}
-
-/* Smart view rows */
-.sv-row{display:flex;align-items:center;padding:0 16px;cursor:pointer;
-  transition:background .1s;border-radius:0}
-.sv-row:active{background:var(--s2)}
-.sv-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;flex:none}
-.sv-icon-inner{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
-  justify-content:center;font-size:19px}
-.sv-name{flex:1;font-size:16px;font-weight:400;padding:16px 0;letter-spacing:-.1px}
-.sv-count{font-size:14px;font-weight:600;color:var(--ink2);padding-right:4px}
-
-/* Divider between sections */
-.hub-sep{height:1px;background:var(--b1);margin:10px 16px}
-.hub-sec-label{font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;
-  color:var(--ink3);padding:12px 20px 4px}
-
-/* User list rows */
-.ul-row{display:flex;align-items:center;padding:0 16px;cursor:pointer;transition:background .1s}
-.ul-row:active{background:var(--s2)}
-.ul-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;flex:none}
-.ul-icon-inner{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;
-  justify-content:center;font-size:16px;color:#fff;font-weight:700}
-.ul-name{flex:1;font-size:16px;font-weight:400;padding:15px 0;border-bottom:1px solid var(--b1);
-  letter-spacing:-.1px}
-.ul-row:last-child .ul-name{border-bottom:none}
-.ul-count{font-size:13px;font-weight:600;color:var(--ink3);padding-right:6px}
-
-/* New list footer row */
-.lists-footer{display:flex;align-items:center;padding:0 16px;margin-top:6px;cursor:pointer}
-.lists-footer:active{opacity:.7}
-.lf-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;flex:none}
-.lf-plus{width:34px;height:34px;border-radius:9px;border:2px solid var(--brand);
-  display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--brand);
-  font-weight:300}
-.lf-label{font-size:16px;font-weight:400;color:var(--brand);letter-spacing:-.1px}
-
-/* ── List Detail ── */
-.ld-topbar{display:flex;align-items:center;gap:4px;padding:12px 8px 0;position:relative;z-index:2}
-.ld-back{width:44px;height:44px;border-radius:50%;background:none;border:none;
-  color:var(--ink);font-size:24px;cursor:pointer;display:flex;align-items:center;
+/* ── Inline add bar ── */
+.inline-add{display:flex;align-items:center;padding:0 8px;
+  background:var(--s1);border-top:1px solid var(--b1)}
+.inline-add-chk{width:52px;height:54px;display:flex;align-items:center;
   justify-content:center;flex:none}
-.ld-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
-.ld-action-btn{width:44px;height:44px;border-radius:50%;background:none;border:none;
-  color:var(--ink2);font-size:20px;cursor:pointer;display:flex;align-items:center;
-  justify-content:center}
-.ld-title-area{padding:2px 20px 18px;position:relative;z-index:2}
-.ld-title{font-size:32px;font-weight:800;letter-spacing:-.6px;line-height:1.15}
-.ld-subtitle{font-size:13px;color:var(--ink2);margin-top:5px;font-weight:500}
+.inline-add-dot{width:22px;height:22px;border-radius:50%;
+  border:2px solid var(--ink3);flex:none}
+.inline-add input{flex:1;background:none;border:none;outline:none;
+  font-size:16px;color:var(--ink);font-family:inherit;padding:16px 0}
+.inline-add input::placeholder{color:var(--ink3)}
 
-/* Task rows in detail — flat, borderless background */
+/* ════════════════════════════
+   FLAT TASK ROW (Lists + Today)
+   ════════════════════════════ */
 .trow-flat{display:flex;align-items:flex-start;padding:0 8px;
-  border-bottom:1px solid var(--b1);cursor:pointer;transition:background .1s;background:var(--s1)}
+  border-bottom:1px solid var(--b1);cursor:pointer;
+  transition:background .1s;background:var(--s1)}
 .trow-flat:active{background:var(--s2)}
 .trow-flat:last-child{border-bottom:none}
 .trow-chk-wrap{width:52px;height:56px;display:flex;align-items:center;
@@ -408,83 +161,284 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
   justify-content:center;flex:none}
 .trow-flat.done .trow-title{text-decoration:line-through;opacity:.35}
 
-/* Completed toggle */
+/* Completed section toggle */
 .done-toggle{display:flex;align-items:center;gap:10px;padding:12px 16px;
-  cursor:pointer;color:var(--ink2);font-size:14px;font-weight:600;user-select:none;
-  background:var(--s1)}
-.done-toggle-arrow{font-size:11px;transition:transform .2s;display:inline-block;
-  opacity:.6}
+  cursor:pointer;color:var(--ink2);font-size:14px;font-weight:600;
+  user-select:none;background:var(--s1)}
+.done-toggle-arrow{font-size:11px;transition:transform .2s;
+  display:inline-block;opacity:.6}
 .done-toggle-arrow.open{transform:rotate(90deg)}
 
-/* Inline add — sticky bottom bar */
-.inline-add{display:flex;align-items:center;padding:0 8px;background:var(--s1);
-  border-top:1px solid var(--b1)}
-.inline-add-chk{width:52px;height:54px;display:flex;align-items:center;
+/* ════════════════════════════
+   LISTS HUB
+   ════════════════════════════ */
+.lists-hub-header{display:flex;align-items:center;gap:14px;padding:20px 20px 8px}
+.lists-hub-avatar{width:44px;height:44px;border-radius:50%;background:var(--brandg);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;font-weight:800;color:#fff;flex:none}
+.lists-hub-name{font-size:17px;font-weight:700;flex:1}
+
+/* Smart view rows */
+.sv-row{display:flex;align-items:center;padding:0 16px;
+  cursor:pointer;transition:background .1s}
+.sv-row:active{background:var(--s2)}
+.sv-icon{width:52px;height:52px;display:flex;align-items:center;
   justify-content:center;flex:none}
-.inline-add-dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--ink3);flex:none}
-.inline-add input{flex:1;background:none;border:none;outline:none;
-  font-size:16px;color:var(--ink);font-family:inherit;padding:16px 0}
-.inline-add input::placeholder{color:var(--ink3)}
+.sv-icon-inner{width:36px;height:36px;border-radius:10px;display:flex;
+  align-items:center;justify-content:center;font-size:19px}
+.sv-name{flex:1;font-size:16px;font-weight:400;padding:16px 0;letter-spacing:-.1px}
+.sv-count{font-size:14px;font-weight:600;color:var(--ink2);padding-right:4px}
 
-/* ── People screen ── */
-.person-avatar{width:44px;height:44px;border-radius:50%;background:var(--brand);
-  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;
-  color:#fff;flex:none}
+/* Hub dividers */
+.hub-sep{height:1px;background:var(--b1);margin:6px 0}
+.hub-sec-label{font-size:12px;font-weight:600;color:var(--ink3);padding:10px 20px 4px}
 
-/* ── Search ── */
-.search-bar{display:flex;align-items:center;gap:10px;margin:8px 16px 0;
-  background:var(--s2);border:1px solid var(--b1);border-radius:var(--r2);
+/* User list rows */
+.ul-row{display:flex;align-items:center;padding:0 16px;
+  cursor:pointer;transition:background .1s}
+.ul-row:active{background:var(--s2)}
+.ul-icon{width:52px;height:52px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.ul-icon-inner{width:34px;height:34px;border-radius:9px;display:flex;
+  align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700}
+.ul-name{flex:1;font-size:16px;font-weight:400;padding:15px 0;
+  border-bottom:1px solid var(--b1);letter-spacing:-.1px}
+.ul-row:last-child .ul-name{border-bottom:none}
+.ul-count{font-size:13px;font-weight:600;color:var(--ink3);padding-right:6px}
+
+/* New list footer */
+.lists-footer{display:flex;align-items:center;padding:0 16px;
+  margin-top:6px;cursor:pointer}
+.lists-footer:active{opacity:.7}
+.lf-icon{width:52px;height:52px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.lf-plus{width:34px;height:34px;border-radius:9px;border:2px solid var(--brand);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;color:var(--brand);font-weight:300}
+.lf-label{font-size:16px;font-weight:400;color:var(--brand);letter-spacing:-.1px}
+
+/* ════════════════════════════
+   LIST DETAIL
+   ════════════════════════════ */
+.ld-bg{position:relative;overflow:hidden;min-height:152px}
+.ld-bg-layer{position:absolute;inset:0;z-index:0}
+.ld-topbar{display:flex;align-items:center;gap:4px;padding:12px 8px 0;
+  position:relative;z-index:2}
+.ld-back{width:44px;height:44px;border-radius:50%;background:none;border:none;
+  color:#fff;font-size:24px;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.ld-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
+.ld-action-btn{width:44px;height:44px;border-radius:50%;background:none;border:none;
+  color:rgba(255,255,255,.8);font-size:20px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+.ld-title-area{padding:2px 20px 18px;position:relative;z-index:2}
+.ld-title{font-size:32px;font-weight:800;letter-spacing:-.6px;
+  line-height:1.15;color:#fff}
+.ld-subtitle{font-size:13px;color:rgba(255,255,255,.7);margin-top:5px;font-weight:500}
+
+
+
+
+
+/* ════════════════════════════
+   PREMIUM SHEET
+   ════════════════════════════ */
+#sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,0);z-index:50;
+  pointer-events:none;
+  transition:background .25s,backdrop-filter .25s,-webkit-backdrop-filter .25s;
+  backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px)}
+#sheet-bg.on{background:rgba(0,0,0,.55);pointer-events:all;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#sheet{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
+  background:#1c1c24;border-radius:28px 28px 0 0;
+  border-top:1px solid rgba(255,255,255,.1);z-index:51;
+  transform:translateY(100%);
+  transition:transform .32s cubic-bezier(0.22,1,0.36,1);
+  max-height:90vh;overflow-y:auto;overflow-x:hidden;
+  padding-bottom:env(safe-area-inset-bottom,0);will-change:transform}
+#sheet.on{transform:translateY(0)}
+.sheet-handle{width:40px;height:5px;border-radius:3px;background:var(--b2);
+  margin:14px auto 0;flex-shrink:0}
+.sheet-body{padding:0 0 4px}
+.sheet-body h3{font-size:20px;font-weight:800;margin:0 22px 16px;padding-top:16px}
+
+/* Sheet action rows (list menu) */
+.sac{display:flex;align-items:center;width:100%;background:none;border:none;
+  border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;
+  text-align:left;padding:0;color:var(--ink);
+  position:relative;overflow:hidden;transition:background .1s}
+.sac:last-child{border-bottom:none}
+.sac:active{background:rgba(255,255,255,.06)}
+.sac-icon-wrap{width:58px;height:58px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.sac-icon{width:26px;height:26px;display:flex;align-items:center;
+  justify-content:center;flex:none;opacity:.85}
+.sac-icon svg{width:22px;height:22px;stroke:currentColor;stroke-width:1.6;
+  fill:none;stroke-linecap:round;stroke-linejoin:round}
+.sac-label{flex:1;font-size:17px;font-weight:400;letter-spacing:-.1px;padding:18px 0}
+.sac-right{display:flex;align-items:center;gap:6px;
+  padding-right:18px;color:var(--ink3);font-size:13px;font-weight:500}
+.sac-arr{font-size:16px;opacity:.35}
+.sac.sac-danger .sac-label{color:var(--danger)}
+.sac.sac-danger .sac-icon{color:var(--danger)}
+
+/* Sub-sheet: radio check */
+.sac-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--b2);
+  flex:none;display:flex;align-items:center;justify-content:center;
+  transition:all .15s}
+.sac-check.on{background:var(--brand);border-color:var(--brand)}
+.sac-check.on::after{content:'';width:5px;height:9px;border:2.5px solid #fff;
+  border-top:none;border-left:none;
+  transform:rotate(42deg) translateY(-1px);display:block}
+
+/* Sheet action groups */
+.sheet-group{margin:14px 14px 0;background:var(--s2);border-radius:18px;
+  overflow:hidden;border:1px solid var(--b1)}
+.sheet-group+.sheet-group{margin-top:10px}
+
+/* Cancel */
+.sheet-cancel{display:block;width:calc(100% - 28px);margin:8px 14px 16px;
+  background:var(--s2);border:1px solid var(--b1);border-radius:16px;padding:16px;
+  font-size:16px;font-weight:600;color:var(--ink2);cursor:pointer;
+  text-align:center;transition:background .12s;font-family:inherit}
+.sheet-cancel:active{background:var(--s3);color:var(--ink)}
+
+/* Color picker */
+.cpick{width:40px;height:40px;border-radius:50%;cursor:pointer;
+  position:relative;transition:transform .15s;border:none;flex:none}
+.cpick:active{transform:scale(.9)}
+.cpick.on::after{content:'✓';position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:16px;font-weight:800}
+.cpick.on{box-shadow:0 0 0 3px var(--s1),0 0 0 5px currentColor}
+
+/* ════════════════════════════
+   TASK DETAIL PANEL
+   ════════════════════════════ */
+#task-detail{position:fixed;inset:0;max-width:480px;margin:0 auto;
+  background:var(--s0);z-index:45;
+  transform:translateX(100%);
+  transition:transform .3s cubic-bezier(0.22,1,0.36,1);
+  display:flex;flex-direction:column;overflow:hidden}
+#task-detail.on{transform:translateX(0)}
+.td-topbar{display:flex;align-items:center;gap:4px;padding:14px 8px 0;
+  flex:none;border-bottom:1px solid var(--b1)}
+.td-back{width:44px;height:44px;border-radius:50%;background:none;border:none;
+  color:var(--ink);font-size:24px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.td-save{margin-left:auto;background:none;border:none;color:var(--brand);
+  font-size:15px;font-weight:700;cursor:pointer;padding:10px 14px;font-family:inherit}
+.td-body{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:24px}
+.td-body::-webkit-scrollbar{display:none}
+.td-title-wrap{padding:16px 20px 0;display:flex;align-items:flex-start;gap:12px}
+.td-chk{width:28px;height:28px;border-radius:50%;border:2px solid var(--ink3);
+  flex:none;margin-top:4px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .18s}
+.td-chk.on{background:var(--brand);border-color:var(--brand)}
+.td-chk.on::after{content:'';width:7px;height:11px;border:2.5px solid #fff;
+  border-top:none;border-left:none;
+  transform:rotate(42deg) translateY(-1px);display:block}
+.td-title-input{flex:1;background:none;border:none;outline:none;
+  font-size:22px;font-weight:600;color:var(--ink);font-family:inherit;
+  line-height:1.3;padding:0;resize:none;min-height:36px}
+.td-title-input.done{text-decoration:line-through;opacity:.4}
+.td-section{border-top:1px solid var(--b1);margin-top:6px}
+.td-row{display:flex;align-items:center;padding:0 8px;
+  cursor:pointer;transition:background .1s;min-height:52px}
+.td-row:active{background:var(--s1)}
+.td-row-ic{width:44px;height:52px;display:flex;align-items:center;
+  justify-content:center;flex:none;font-size:18px;color:var(--ink2)}
+.td-row-body{flex:1;padding:14px 0;min-width:0}
+.td-row-label{font-size:15px;color:var(--ink3)}
+.td-row-value{font-size:15px;color:var(--ink);font-weight:500}
+.td-row-arr{color:var(--ink3);font-size:14px;opacity:.5;padding-right:8px}
+.td-row-active .td-row-label,.td-row-active .td-row-ic{color:var(--brand)}
+.td-row-over{color:var(--danger)!important}
+.td-step{display:flex;align-items:center;padding:0 8px;
+  border-bottom:1px solid var(--b1);min-height:48px}
+.td-step-chk{width:44px;height:48px;display:flex;align-items:center;
+  justify-content:center;flex:none}
+.td-step-chk-box{width:20px;height:20px;border-radius:50%;border:2px solid var(--ink3);
+  cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center;
+  transition:all .15s}
+.td-step-chk-box.on{background:var(--ok);border-color:var(--ok)}
+.td-step-chk-box.on::after{content:'';width:5px;height:8px;border:2px solid #fff;
+  border-top:none;border-left:none;
+  transform:rotate(42deg) translateY(-1px);display:block}
+.td-step-text{flex:1;font-size:15px;color:var(--ink);padding:13px 0}
+.td-step.done .td-step-text{text-decoration:line-through;opacity:.38}
+.td-step-del{width:36px;height:48px;display:flex;align-items:center;
+  justify-content:center;background:none;border:none;
+  color:var(--ink3);font-size:18px;cursor:pointer;opacity:.5}
+.td-notes{width:100%;background:none;border:none;outline:none;resize:none;
+  font-family:inherit;font-size:15px;color:var(--ink);
+  padding:14px 0;min-height:60px;line-height:1.5}
+.td-notes::placeholder{color:var(--ink3)}
+.td-delete{display:flex;align-items:center;padding:0 8px;
+  cursor:pointer;min-height:52px;border-top:1px solid var(--b1);margin-top:8px}
+.td-delete-ic{width:44px;height:52px;display:flex;align-items:center;
+  justify-content:center;flex:none;font-size:18px;color:var(--danger);opacity:.7}
+.td-delete-tx{font-size:15px;color:var(--danger);opacity:.7}
+
+/* ════════════════════════════
+   SEARCH SCREEN
+   ════════════════════════════ */
+#search-screen{position:fixed;inset:0;max-width:480px;margin:0 auto;
+  background:var(--s0);z-index:44;
+  transform:translateY(-8px);opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .2s}
+#search-screen.on{transform:translateY(0);opacity:1;pointer-events:all}
+.srch-top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px}
+.srch-input-wrap{flex:1;display:flex;align-items:center;gap:8px;
+  background:var(--s2);border:1px solid var(--b1);border-radius:14px;
   padding:11px 14px}
-.search-bar input{flex:1;background:none;border:none;outline:none;
-  color:var(--ink);font-size:15px;font-family:inherit}
-.search-bar input::placeholder{color:var(--ink3)}
-.search-ic{color:var(--ink3);font-size:16px}
+.srch-input-wrap input{flex:1;background:none;border:none;outline:none;
+  font-size:16px;color:var(--ink);font-family:inherit}
+.srch-input-wrap input::placeholder{color:var(--ink3)}
+.srch-cancel{background:none;border:none;color:var(--brand);font-size:15px;
+  font-weight:600;cursor:pointer;white-space:nowrap;flex:none;
+  padding:0 4px;font-family:inherit}
+.srch-results{padding:0 0 80px}
+.srch-hint{text-align:center;padding:40px 24px;color:var(--ink3);
+  font-size:14px;line-height:1.6}
+.srch-empty{text-align:center;padding:60px 24px;color:var(--ink3);font-size:15px}
 
-/* ── More / Settings ── */
-.more-profile{display:flex;align-items:center;gap:14px;padding:20px}
-.more-avatar{width:54px;height:54px;border-radius:50%;background:var(--brandg);
-  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff}
-.more-name{font-size:18px;font-weight:700}
-.more-email{font-size:13px;color:var(--ink2);margin-top:2px}
-
-/* ── Sync badge ── */
+/* ════════════════════════════
+   SYNC / TOAST / AUTH
+   ════════════════════════════ */
 #sync-badge{position:fixed;top:env(safe-area-inset-top,0);right:0;left:0;
   max-width:480px;margin:0 auto;z-index:60;pointer-events:none}
-.sync-bar{font-size:12px;font-weight:700;padding:6px 16px;text-align:center;
-  transition:opacity .3s}
+.sync-bar{font-size:12px;font-weight:700;padding:6px 16px;
+  text-align:center;transition:opacity .3s}
 .sync-bar.synced{background:rgba(34,211,160,.15);color:var(--ok)}
 .sync-bar.syncing{background:rgba(110,86,248,.15);color:var(--brand2)}
 .sync-bar.error{background:rgba(244,63,94,.15);color:var(--danger)}
 
-/* ── Color picker dots ── */
-.color-dot{width:34px;height:34px;border-radius:50%;cursor:pointer;
-  border:3px solid transparent;transition:border-color .15s,transform .15s}
-.color-dot.on{border-color:var(--ink);transform:scale(1.15)}
-
-/* ── Toast ── */
-#toast{position:fixed;bottom:calc(90px + 12px);left:50%;transform:translateX(-50%) translateY(20px);
+#toast{position:fixed;bottom:calc(90px + 12px);left:50%;
+  transform:translateX(-50%) translateY(20px);
   background:var(--s2);border:1px solid var(--b2);border-radius:12px;
   padding:10px 18px;font-size:13px;font-weight:600;color:var(--ink);
-  box-shadow:var(--sh);opacity:0;transition:all .25s;z-index:70;white-space:nowrap;
-  pointer-events:none}
+  box-shadow:var(--sh);opacity:0;transition:all .25s;z-index:70;
+  white-space:nowrap;pointer-events:none}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
-/* ── Auth screen ── */
 #auth-screen{position:fixed;inset:0;background:var(--s0);z-index:100;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:40px 32px}
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:40px 32px}
 .auth-logo{width:72px;height:72px;border-radius:22px;background:var(--brandg);
-  display:flex;align-items:center;justify-content:center;font-size:32px;
-  font-weight:900;color:#fff;margin-bottom:24px;box-shadow:0 12px 40px rgba(110,86,248,.4)}
+  display:flex;align-items:center;justify-content:center;
+  font-size:32px;font-weight:900;color:#fff;margin-bottom:24px;
+  box-shadow:0 12px 40px rgba(110,86,248,.4)}
 .auth-title{font-size:28px;font-weight:800;text-align:center;margin-bottom:8px}
-.auth-sub{font-size:15px;color:var(--ink2);text-align:center;margin-bottom:40px;line-height:1.5}
+.auth-sub{font-size:15px;color:var(--ink2);text-align:center;
+  margin-bottom:40px;line-height:1.5}
 .auth-btn{display:flex;align-items:center;justify-content:center;gap:12px;
   background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);
-  padding:16px;width:100%;cursor:pointer;font-size:16px;font-weight:600;color:var(--ink);
-  margin-bottom:12px;transition:background .15s}
+  padding:16px;width:100%;cursor:pointer;font-size:16px;font-weight:600;
+  color:var(--ink);margin-bottom:12px;transition:background .15s;font-family:inherit}
 .auth-btn:active{background:var(--s3)}
 .auth-skip{color:var(--ink2);font-size:14px;cursor:pointer;margin-top:8px;
-  background:none;border:none;text-decoration:underline}
+  background:none;border:none;text-decoration:underline;font-family:inherit}
 </style>
 </head>
 <body>
@@ -504,13 +458,35 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
 <div id="app" style="display:none">
   <div id="screen"></div>
   <nav id="nav">
-    <button class="nv on" data-s="today"><span class="nv-ic">☀</span>Today</button>
-    <button class="nv" data-s="lists"><span class="nv-ic">≡</span>Lists</button>
-    <button class="nv" data-s="calendar"><span class="nv-ic">◫</span>Calendar</button>
-    <button class="nv" data-s="people"><span class="nv-ic">◎</span>People</button>
-    <button class="nv" data-s="more"><span class="nv-ic">⋯</span>More</button>
+    <button class="nv on" data-s="today"><span class="nv-ic">☀</span><span class="nv-lb">Today</span></button>
+    <button class="nv" data-s="lists"><span class="nv-ic">≡</span><span class="nv-lb">Lists</span></button>
+    <button class="nv" data-s="search"><span class="nv-ic">⌕</span><span class="nv-lb">Search</span></button>
+    <button class="nv" data-s="more"><span class="nv-ic">⋯</span><span class="nv-lb">More</span></button>
   </nav>
   <button id="fab">＋</button>
+</div>
+
+<!-- Task Detail Panel -->
+<div id="task-detail">
+  <div class="td-topbar">
+    <button class="td-back" id="td-back">‹</button>
+    <button class="td-save" id="td-save">Done</button>
+  </div>
+  <div class="td-body" id="td-body"></div>
+</div>
+
+<!-- Search Screen -->
+<div id="search-screen">
+  <div class="srch-top">
+    <div class="srch-input-wrap">
+      <span class="srch-ic">🔍</span>
+      <input id="srch-input" placeholder="Search tasks and lists" autocomplete="off">
+    </div>
+    <button class="srch-cancel" id="srch-cancel">Cancel</button>
+  </div>
+  <div class="srch-results" id="srch-results">
+    <div class="srch-hint">Search tasks, lists, and notes</div>
+  </div>
 </div>
 
 <div id="sheet-bg"></div>
@@ -526,7 +502,7 @@ textarea.finput{resize:vertical;min-height:80px;font-family:inherit}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v62';
+const APP_VERSION='v66';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -647,7 +623,6 @@ const I18N={
     print:'Print list',suggestions:'Suggestions',reorder:'Reorder tasks',
     high:'High',medium:'Medium',low:'Low',
     search:'Search',noResults:'No results.',
-    people_empty:'No people added yet.',
     signOut:'Sign out',settings:'Settings',about:'About',
     version:'Version',language:'Language',theme:'Theme',
     offline:'Offline',synced:'Synced',syncing:'Syncing…'},
@@ -661,7 +636,6 @@ const I18N={
     print:'چاپ لیست',suggestions:'پیشنهادات',reorder:'مرتب کردن',
     high:'بالا',medium:'متوسط',low:'پایین',
     search:'جستجو',noResults:'نتیجه‌ای نیست.',
-    people_empty:'هنوز کسی اضافه نشده.',
     signOut:'خروج',settings:'تنظیمات',about:'درباره',
     version:'نسخه',language:'زبان',theme:'رنگ‌بندی',
     offline:'آفلاین',synced:'همگام‌سازی شد',syncing:'در حال همگام‌سازی…'},
@@ -683,8 +657,7 @@ function render(){
   const el=document.getElementById('screen');
   if(screen==='today')el.innerHTML=renderToday();
   else if(screen==='lists')el.innerHTML=renderLists();
-  else if(screen==='calendar')el.innerHTML=renderCalendar();
-  else if(screen==='people')el.innerHTML=renderPeople();
+  else if(screen==='search'){openSearch();screen='today';el.innerHTML=renderToday();}
   else if(screen==='more')el.innerHTML=renderMore();
   bindScreen();
 }
@@ -698,7 +671,10 @@ function applyLang(){
   document.documentElement.lang=L;
   document.querySelectorAll('.nv').forEach(b=>{
     const k=b.dataset.s;
-    b.querySelector('span:last-child').textContent=tr(k)||k;
+    const lb=b.querySelector('.nv-lb');
+    if(!lb)return;
+    if(k==='search')lb.textContent=tr('search');
+    else lb.textContent=tr(k)||k;
   });
 }
 
@@ -709,69 +685,70 @@ function renderToday(){
   const ts=todayStr();
   const allT=activeTasks();
   const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts);
-  const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||(!t.dueDate&&!t.done)));
+  const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
-  const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).slice(0,5);
+  const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).slice(0,3);
 
   const dayName=new Date().toLocaleDateString(L==='fa'?'fa-IR':'en-US',{weekday:'long'});
   const dateStr=new Date().toLocaleDateString(L==='fa'?'fa-IR':'en-US',{month:'long',day:'numeric'});
 
-  let html=`
+  let html=`<div class="today-head">
     <div class="today-date">${dayName}, ${dateStr}</div>
-    <div class="today-hero">
-      <div class="today-hero-title">${tr('today')}</div>
-      <div class="today-hero-sub">${todayT.length+overdue.length} ${L==='fa'?'کار باقی‌مانده':'tasks remaining'}</div>
-    </div>`;
-
-  // Counters
-  html+=`<div class="counter-row">
-    <div class="counter ${overdue.length?'over':''}" data-go="lists:overdue">
-      <div class="counter-n">${overdue.length}</div>
-      <div class="counter-l">${tr('overdue')}</div>
-    </div>
-    <div class="counter" data-go="lists:myday">
-      <div class="counter-n">${todayT.length}</div>
-      <div class="counter-l">${tr('today')}</div>
-    </div>
-    <div class="counter ok" data-go="lists:done">
-      <div class="counter-n">${doneToday.length}</div>
-      <div class="counter-l">${tr('done')}</div>
-    </div>
+    <div class="today-title">${tr('today')}</div>
+    ${overdue.length?`<div class="today-overdue-pill">⚠ ${overdue.length} ${tr('overdue')}</div>`:''}
   </div>`;
 
-  // Overdue tasks
+  // Overdue — first, no label, red checkbox tint
   if(overdue.length){
-    html+=`<div class="sec-label">${tr('overdue')}</div>
-      <div class="card-flat">${smartSortTasks(overdue).map(t=>taskRow(t)).join('')}</div>`;
+    html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">
+      ${smartSortTasks(overdue).map(t=>taskRowFlat(t,true)).join('')}
+    </div>`;
   }
 
-  // Today's tasks
-  const focusTasks=todayT.filter(t=>!t.dueDate||t.dueDate===ts);
+  // Today's tasks — main focus
+  const focusTasks=todayT.filter(t=>!overdue.includes(t));
   if(focusTasks.length){
-    html+=`<div class="sec-label">${tr('today')}</div>
-      <div class="card-flat">${smartSortTasks(focusTasks).map(t=>taskRow(t)).join('')}</div>`;
+    if(overdue.length)html+=`<div class="ts-label">${L==='fa'?'امروز':'Today'}</div>`;
+    html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">
+      ${smartSortTasks(focusTasks).map(t=>taskRowFlat(t)).join('')}
+    </div>`;
   }
 
-  // Done today
+  // Done today — collapsed by default
   if(doneToday.length){
-    html+=`<div class="sec-label">${tr('done')}</div>
-      <div class="card-flat">${doneToday.map(t=>taskRow(t)).join('')}</div>`;
+    html+=`<div class="done-toggle" id="done-toggle" style="padding-left:20px">
+      <span class="done-toggle-arrow${doneCollapsed?'':' open'}">›</span>
+      ${tr('done')} (${doneToday.length})
+    </div>
+    ${doneCollapsed?'':
+      `<div style="background:var(--s1);border-top:1px solid var(--b1)">
+        ${doneToday.map(t=>taskRowFlat(t)).join('')}
+      </div>`}`;
   }
 
-  // Upcoming
+  // Upcoming — minimal, just 3
   if(upcoming.length){
-    html+=`<div class="sec-label">${L==='fa'?'آینده':'Upcoming'}</div>
-      <div class="card-flat">${smartSortTasks(upcoming).map(t=>taskRow(t)).join('')}</div>`;
+    html+=`<div class="ts-label">${L==='fa'?'آینده نزدیک':'Coming up'}</div>
+    <div style="background:var(--s1);border-top:1px solid var(--b1);opacity:.75">
+      ${smartSortTasks(upcoming).map(t=>taskRowFlat(t)).join('')}
+    </div>`;
   }
 
   if(!overdue.length&&!focusTasks.length&&!doneToday.length){
-    html+=`<div class="empty"><div class="empty-ic">✓</div>
-      <div class="empty-tx">${L==='fa'?'همه چیز انجام شده!':'All clear for today!'}</div></div>`;
+    html+=`<div class="empty" style="padding-top:60px">
+      <div class="empty-ic" style="font-size:32px">✓</div>
+      <div class="empty-tx">${L==='fa'?'همه چیز انجام شده!':'All clear for today!'}</div>
+    </div>`;
   }
+
+  // Inline add at bottom of today
+  html+=`<div class="inline-add" style="margin-top:12px;border-radius:14px;margin:12px 16px 0;border:1px solid var(--b1)">
+    <div class="inline-add-chk"><div class="inline-add-dot"></div></div>
+    <input id="today-add-input" placeholder="${tr('addTask')}" autocomplete="off">
+  </div>`;
 
   return html;
 }
-
 /* ══════════════════════════════════════════
    LISTS SCREEN
    ══════════════════════════════════════════ */
@@ -849,15 +826,21 @@ function renderLists(){
 /* collapsed state for done section in list detail */
 let doneCollapsed=true;
 
+/* gradient bg per list */
+function listBgGradient(color){
+  return `linear-gradient(160deg,${color}ee 0%,${color}88 55%,${color}33 100%)`;
+}
+
 function renderListDetail(){
   const ts=todayStr();
-  let title='',accentColor='#6e56f8',tasks=activeTasks();
+  let title='',accentColor='#6e56f8',tasks=activeTasks(),bgGradient=null;
 
   if(activeSmartView){
     const svMap={myday:tr('myday'),important:tr('important'),planned:tr('planned'),all:tr('allTasks')};
     const svColors={myday:'#f59e0b',important:'#f43f5e',planned:'#38bdf8',all:'#6e56f8'};
     title=svMap[activeSmartView]||'';
     accentColor=svColors[activeSmartView]||'#6e56f8';
+    bgGradient=listBgGradient(accentColor);
     if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
     else if(activeSmartView==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
@@ -865,62 +848,61 @@ function renderListDetail(){
     const l=(DB.entities.lists||{})[activeListId];
     title=l?(l.name&&(l.name[L]||l.name.en)||'List'):'List';
     accentColor=l&&l.color||'#6e56f8';
+    bgGradient=listBgGradient(accentColor);
     tasks=tasks.filter(t=>t.listId===activeListId);
   }
 
   tasks=smartSortTasks(tasks);
-  const openT=tasks.filter(t=>!t.done);
-  const doneT=tasks.filter(t=>t.done);
-  const openCount=openT.length, doneCount=doneT.length;
+  const openT=tasks.filter(t=>!t.done),doneT=tasks.filter(t=>t.done);
+  const openCount=openT.length,doneCount=doneT.length;
 
-  let html=`
-    <div class="ld-topbar">
-      <button class="ld-back" id="list-back">‹</button>
-      <div class="ld-actions">
-        ${activeListId?`<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">⋯</button>`:''}
+  return `
+    <div class="ld-bg">
+      <div class="ld-bg-layer" style="background:${bgGradient||'var(--s2)'}"></div>
+      <div class="ld-topbar">
+        <button class="ld-back" id="list-back">&#8249;</button>
+        <div class="ld-actions">
+          ${activeListId?'<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">&#8943;</button>':''}
+        </div>
+      </div>
+      <div class="ld-title-area">
+        <div class="ld-title">${esc(title)}</div>
+        <div class="ld-subtitle">${openCount} ${L==='fa'?'باقی‌مانده':'remaining'}</div>
       </div>
     </div>
-
-    <div class="ld-title-area">
-      <div class="ld-title" style="color:${accentColor}">${esc(title)}</div>
-      <div class="ld-subtitle">${openCount} ${L==='fa'?'باقی‌مانده':'remaining'}</div>
-    </div>
-
-    <div style="background:var(--s1);border-radius:var(--r) var(--r) 0 0;overflow:hidden;
-      margin:0 0 0;border-top:1px solid var(--b1)" id="task-list-body">
+    <div style="background:var(--s1);overflow:hidden;border-top:1px solid var(--b1)" id="task-list-body">
       ${openT.length
         ? openT.map(t=>taskRowFlat(t)).join('')
-        : `<div class="done-toggle" style="color:var(--ink3);cursor:default;font-weight:400">${tr('noTasks')}</div>`}
+        : '<div class="done-toggle" style="color:var(--ink3);cursor:default;font-weight:400;background:var(--s1)">'+tr('noTasks')+'</div>'}
       ${doneCount?`
         <div class="done-toggle" id="done-toggle">
-          <span class="done-toggle-arrow${doneCollapsed?'':' open'}">›</span>
+          <span class="done-toggle-arrow${doneCollapsed?'':' open'}">&#8250;</span>
           ${tr('done')} (${doneCount})
         </div>
         ${doneCollapsed?'':doneT.map(t=>taskRowFlat(t)).join('')}
       `:''}
     </div>
-
     ${activeListId?`
     <div class="inline-add">
       <div class="inline-add-chk"><div class="inline-add-dot"></div></div>
       <input id="inline-add-input" placeholder="${tr('addTask')}" autocomplete="off">
     </div>`:''}`;
-
-  return html;
 }
-
-function taskRowFlat(t){
+function taskRowFlat(t,isOverdue){
   const ts=todayStr();
   const over=t.dueDate&&t.dueDate<ts&&!t.done;
-  const pr=t.priority&&t.priority!=='p3'
-    ?`<span class="pill ${priClass(t.priority)}">${tr(t.priority==='p1'?'high':'medium')}</span>`:'';
+  const pr=t.priority==='p1'?`<span class="pill p1">${tr('high')}</span>`:'';
   let meta='';
-  if(t.dueDate)meta+=`<span class="chip${over?' over':''}">${over?'⚠ ':''}${shortDate(t.dueDate)}${t.dueTime?' '+t.dueTime:''}</span>`;
-  if(t.listId&&activeSmartView){
+  // In smart views or Today, show list name for context
+  if(activeSmartView||screen==='today'){
     const l=(DB.entities.lists||{})[t.listId];
-    if(l)meta+=`<span class="chip">${l.icon||''} ${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`;
+    if(l)meta+=`<span class="chip">${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`;
   }
-  return `<div class="trow-flat ${t.done?'done':''}" data-tid="${t.id}">
+  if(t.dueDate&&!over)meta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
+  if(over)meta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+  // overdue row: subtle left border
+  const overStyle=isOverdue?'border-left:2px solid var(--danger);':'';
+  return `<div class="trow-flat ${t.done?'done':''}" data-tid="${t.id}" style="${overStyle}">
     <div class="trow-chk-wrap">
       <div class="chk ${t.done?'on':''}" data-chk="${t.id}"></div>
     </div>
@@ -934,641 +916,114 @@ function taskRowFlat(t){
   </div>`;
 }
 /* ── Task row renderer ── */
-function taskRow(t){
-  const ts=todayStr();
-  const over=t.dueDate&&t.dueDate<ts&&!t.done;
-  const pr=t.priority&&t.priority!=='p3'?`<span class="pill ${priClass(t.priority)}">${tr(t.priority==='p1'?'high':'medium')}</span>`:'';
-  let meta='';
-  if(t.dueDate)meta+=`<span class="chip${over?' over':''}">${over?'⚠ ':''}${shortDate(t.dueDate)}${t.dueTime?' '+t.dueTime:''}</span>`;
-  if(t.listId&&activeSmartView){
-    const l=(DB.entities.lists||{})[t.listId];
-    if(l)meta+=`<span class="chip">${l.icon||''} ${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`;
-  }
-  return `<div class="trow ${t.done?'done':''}" data-tid="${t.id}">
-    <div class="chk ${t.done?'on':''}" data-chk="${t.id}"></div>
-    <div class="trow-body">
-      <div class="trow-text">${esc(t.text)}</div>
-      ${meta||pr?`<div class="trow-meta">${meta}${pr}</div>`:'' }
-    </div>
-    <button class="star ${t.pinned?'on':''}" data-pin="${t.id}">★</button>
-  </div>`;
-}
 
 /* ══════════════════════════════════════════
-   CALENDAR SCREEN
+   SHEET (BOTTOM DRAWER)
    ══════════════════════════════════════════ */
-function renderCalendar(){
-  // Phase 1: month grid with task dots
-  const now2=new Date();
-  const year=now2.getFullYear(),month=now2.getMonth();
-  const firstDay=new Date(year,month,1).getDay();
-  const daysInMonth=new Date(year,month+1,0).getDate();
-  const ts=todayStr();
-  const allT=activeTasks();
-
-  const monthName=new Date(year,month).toLocaleDateString(L==='fa'?'fa-IR':'en-US',{month:'long',year:'numeric'});
-  const dayNames=(L==='fa'?['ش','ی','د','س','چ','پ','ج']:['Su','Mo','Tu','We','Th','Fr','Sa']);
-
-  let grid='';
-  let day=1;
-  // header
-  grid+=dayNames.map(d=>`<div style="text-align:center;font-size:11px;font-weight:700;color:var(--ink3);padding:6px 0">${d}</div>`).join('');
-  // empty cells
-  for(let i=0;i<firstDay;i++)grid+=`<div></div>`;
-  for(let d=1;d<=daysInMonth;d++){
-    const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const hasTasks=allT.some(t=>t.dueDate===ds&&!t.done);
-    const isToday=ds===ts;
-    grid+=`<div style="text-align:center;padding:6px 0;position:relative;cursor:pointer" data-day="${ds}">
-      <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto;
-        ${isToday?'background:var(--brand);color:#fff;font-weight:700':''}
-        font-size:14px">${d}</div>
-      ${hasTasks?`<div style="width:5px;height:5px;border-radius:50%;background:var(--brand);margin:2px auto 0"></div>`:'<div style="height:7px"></div>'}
-    </div>`;
-  }
-
-  // Tasks for today
-  const todayTasks=smartSortTasks(allT.filter(t=>t.dueDate===ts&&!t.done));
-
-  return `<div class="pg-head"><div class="pg-title">${tr('calendar')}</div></div>
-    <div class="card">
-      <div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:12px">${monthName}</div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">${grid}</div>
-    </div>
-    ${todayTasks.length?`
-      <div class="sec-label">${tr('today')}</div>
-      <div class="card-flat">${todayTasks.map(t=>taskRow(t)).join('')}</div>`
-    :''}`;
-}
-
 /* ══════════════════════════════════════════
-   PEOPLE SCREEN
+   SEARCH ENGINE
    ══════════════════════════════════════════ */
-function renderPeople(){
-  const people=active('people');
-  let html=`<div class="pg-head">
-    <div class="pg-title">${tr('people')}</div>
-    <button class="hbtn" id="btn-new-person">＋</button>
-  </div>`;
-  if(!people.length){
-    html+=`<div class="empty"><div class="empty-ic">◎</div>
-      <div class="empty-tx">${tr('people_empty')}</div></div>`;
-  } else {
-    html+=`<div class="card-flat">${people.map(p=>{
-      const taskCount=activeTasks().filter(t=>t.assigneeId===p.id&&!t.done).length;
-      return `<div class="row" data-personid="${p.id}">
-        <div class="person-avatar">${(p.name||'?').slice(0,1).toUpperCase()}</div>
-        <div class="row-body">
-          <div class="row-title">${esc(p.name)}</div>
-          ${p.role?`<div class="row-sub">${esc(p.role)}</div>`:''}
-        </div>
-        <div class="row-right">${taskCount?taskCount+' tasks':''}<span class="row-arr">›</span></div>
-      </div>`;
-    }).join('')}</div>`;
-  }
-  return html;
-}
-
 /* ══════════════════════════════════════════
    MORE / SETTINGS SCREEN
    ══════════════════════════════════════════ */
 function renderMore(){
   const user=DB.meta;
+  const initial=(user.displayName||'?').slice(0,1).toUpperCase();
   return `
-    <div class="more-profile">
-      <div class="more-avatar">${(user.displayName||'?').slice(0,1).toUpperCase()}</div>
+    <div style="display:flex;align-items:center;gap:14px;padding:20px 20px 16px">
+      <div class="lists-hub-avatar">${initial}</div>
       <div>
-        <div class="more-name">${esc(user.displayName||'Guest')}</div>
-        <div class="more-email">${esc(user.email||'Not signed in')}</div>
+        <div style="font-size:17px;font-weight:700">${esc(user.displayName||'Guest')}</div>
+        <div style="font-size:13px;color:var(--ink3);margin-top:2px">${esc(user.email||(L==='fa'?'وارد نشده':'Not signed in'))}</div>
       </div>
     </div>
-    <div class="sec-label">${tr('settings')}</div>
-    <div class="card-flat">
-      <div class="row" data-action="toggle-lang">
-        <div class="row-ic" style="background:#6e56f820;font-size:20px">🌐</div>
-        <div class="row-body"><div class="row-title">${tr('language')}</div></div>
-        <div class="row-right">${L==='fa'?'فارسی':'English'}<span class="row-arr">›</span></div>
+    <div class="hub-sec-label">${tr('settings')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+      <div class="ul-row" data-action="toggle-lang" style="padding:0 16px">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#127760;</div></div>
+        <span class="ul-name">${tr('language')}</span>
+        <span class="ul-count">${L==='fa'?'فارسی':'English'}</span>
       </div>
-      <div class="row" data-action="toggle-theme">
-        <div class="row-ic" style="background:#6e56f820;font-size:20px">${DB.meta.theme==='dark'?'🌙':'☀️'}</div>
-        <div class="row-body"><div class="row-title">${tr('theme')}</div></div>
-        <div class="row-right">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}<span class="row-arr">›</span></div>
-      </div>
-    </div>
-    <div class="sec-label">${tr('about')}</div>
-    <div class="card-flat">
-      <div class="row">
-        <div class="row-ic" style="background:#6e56f820;font-size:20px">ℹ</div>
-        <div class="row-body"><div class="row-title">MBM Life</div></div>
-        <div class="row-right" style="font-size:12px">${APP_VERSION}</div>
+      <div class="ul-row" data-action="toggle-theme" style="padding:0 16px">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${DB.meta.theme==='dark'?'&#127769;':'&#9728;'}</div></div>
+        <span class="ul-name">${tr('theme')}</span>
+        <span class="ul-count">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}</span>
       </div>
     </div>
-    ${user.email?`
-    <div style="padding:16px">
-      <button class="btn btn-ghost" data-action="sign-out">${tr('signOut')}</button>
-    </div>`:''}`;
-}
-
-/* ══════════════════════════════════════════
-   BIND EVENTS
-   ══════════════════════════════════════════ */
-function bindScreen(){
-  // Checkboxes
-  document.querySelectorAll('[data-chk]').forEach(el=>el.onclick=e=>{
-    e.stopPropagation();completeTask(el.dataset.chk);});
-  // Star/pin
-  document.querySelectorAll('[data-pin]').forEach(el=>el.onclick=e=>{
-    e.stopPropagation();
-    const t=DB.entities.tasks[el.dataset.pin];if(!t)return;
-    t.pinned=!t.pinned;t.updatedAt=now();saveDB();render();});
-  // Task row tap → edit (both .trow and .trow-flat)
-  document.querySelectorAll('.trow,.trow-flat').forEach(el=>el.onclick=()=>openTaskEdit(el.dataset.tid));
-  // List rows (hub)
-  document.querySelectorAll('[data-listid]').forEach(el=>el.onclick=()=>{
-    activeListId=el.dataset.listid;activeSmartView=null;tasksView='detail';render();});
-  // Smart view rows
-  document.querySelectorAll('[data-sv]').forEach(el=>el.onclick=()=>{
-    activeSmartView=el.dataset.sv;activeListId=null;tasksView='detail';render();});
-  // Counter navigation
-  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{
-    const[sc,sv]=el.dataset.go.split(':');
-    if(sc==='lists'){screen='lists';activeSmartView=sv;activeListId=null;tasksView='detail';}
-    render();});
-  // Back button
-  const back=document.getElementById('list-back');
-  if(back)back.onclick=()=>{tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();};
-  // List menu
-  const lmb=document.getElementById('list-menu-btn');
-  if(lmb)lmb.onclick=()=>openListMenu(activeListId);
-  // New list (hub footer)
-  const nlb=document.getElementById('btn-new-list');
-  if(nlb)nlb.onclick=()=>openNewListSheet();
-  // Hub search button
-  const hsb=document.getElementById('btn-hub-search');
-  if(hsb)hsb.onclick=()=>{screen='more';render();/* TODO: open search */};
-  // New person
-  const npb=document.getElementById('btn-new-person');
-  if(npb)npb.onclick=()=>openNewPersonSheet();
-  // Done toggle (collapsible completed section)
-  const dt=document.getElementById('done-toggle');
-  if(dt)dt.onclick=()=>{doneCollapsed=!doneCollapsed;render();};
-  // Inline add
-  const ia=document.getElementById('inline-add-input');
-  if(ia)ia.onkeydown=e=>{
-    if(e.key==='Enter'&&ia.value.trim()){
-      createTask(ia.value.trim(),activeListId);ia.value='';render();
-    }};
-  // Calendar day
-  document.querySelectorAll('[data-day]').forEach(el=>el.onclick=()=>{
-    // future: open day detail
-  });
-  // Person row
-  document.querySelectorAll('[data-personid]').forEach(el=>el.onclick=()=>{
-    // future: open person detail
-  });
-  // More actions
-  document.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>{
-    const a=el.dataset.action;
-    if(a==='toggle-lang'){DB.meta.lang=L==='en'?'fa':'en';saveDB();render();}
-    else if(a==='toggle-theme'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();render();}
-    else if(a==='sign-out'){DB.meta.userId=null;DB.meta.displayName=null;DB.meta.email=null;saveDB();location.reload();}
-  });
-}
-
-/* ══════════════════════════════════════════
-   TASK ACTIONS
-   ══════════════════════════════════════════ */
-function createTask(text,listId){
-  const id=uid();
-  DB.entities.tasks[id]={
-    id,text,listId:listId||'inbox',
-    dueDate:null,dueTime:null,priority:'p3',repeat:null,
-    assigneeId:null,creatorId:DB.meta.userId,
-    status:'open',pinned:false,done:false,doneAt:null,
-    placeId:null,expenseId:null,noteIds:[],tags:[],
-    createdAt:now(),updatedAt:now(),archivedAt:null
-  };
-  saveDB();
-}
-
-function completeTask(id){
-  const t=DB.entities.tasks[id];if(!t)return;
-  t.done=!t.done;
-  t.doneAt=t.done?now():null;
-  t.updatedAt=now();
-  saveDB();render();
-}
-
-function openTaskEdit(id){
-  const t=DB.entities.tasks[id];if(!t)return;
-  const lists=active('lists');
-  openSheet(`
-    <h3>${L==='fa'?'ویرایش کار':'Edit Task'}</h3>
-    <div class="fld"><label>${L==='fa'?'متن':'Title'}</label>
-      <input class="finput" id="te-text" value="${esc(t.text)}" placeholder="${tr('addTask')}"></div>
-    <div class="fld"><label>${L==='fa'?'تاریخ':'Due date'}</label>
-      <input class="finput" id="te-date" type="date" value="${t.dueDate||''}"></div>
-    <div class="fld"><label>${L==='fa'?'اولویت':'Priority'}</label>
-      <div class="chipsel" id="te-pri">
-        <button data-v="p1" ${t.priority==='p1'?'class="on"':''}>${tr('high')}</button>
-        <button data-v="p2" ${t.priority==='p2'?'class="on"':''}>${tr('medium')}</button>
-        <button data-v="p3" ${t.priority==='p3'?'class="on"':''}>${tr('low')}</button>
-      </div></div>
-    <div class="fld"><label>${L==='fa'?'لیست':'List'}</label>
-      <div class="chipsel" id="te-list">
-        ${lists.map(l=>`<button data-v="${l.id}" ${t.listId===l.id?'class="on"':''}>${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</button>`).join('')}
-      </div></div>
-    <div class="btn-row">
-      <button class="btn btn-danger" id="te-delete">${L==='fa'?'حذف':'Delete'}</button>
-      <button class="btn btn-primary" id="te-save">${tr('save')}</button>
-    </div>
-    <button class="btn-cancel" id="te-cancel">${tr('cancel')}</button>`);
-
-  bindChipsel('te-pri',t.priority);
-  bindChipsel('te-list',t.listId);
-  document.getElementById('te-cancel').onclick=closeSheet;
-  document.getElementById('te-delete').onclick=()=>{
-    t.archivedAt=now();saveDB();closeSheet();render();};
-  document.getElementById('te-save').onclick=()=>{
-    const text=document.getElementById('te-text').value.trim();if(!text)return;
-    t.text=text;
-    t.dueDate=document.getElementById('te-date').value||null;
-    t.priority=chipVal('te-pri')||'p3';
-    t.listId=chipVal('te-list')||'inbox';
-    t.updatedAt=now();
-    saveDB();closeSheet();render();
-  };
-}
-
-/* ══════════════════════════════════════════
-   QUICK ADD (FAB)
-   ══════════════════════════════════════════ */
-function quickAdd(){
-  const lists=active('lists');
-  const defList=activeListId||'inbox';
-  openSheet(`
-    <h3>${L==='fa'?'کار جدید':'New Task'}</h3>
-    <div class="fld">
-      <input class="finput" id="qa-text" placeholder="${tr('addTask')}" autofocus></div>
-    <div class="fld"><label>${L==='fa'?'تاریخ':'Due date'}</label>
-      <input class="finput" id="qa-date" type="date"></div>
-    <div class="fld"><label>${L==='fa'?'اولویت':'Priority'}</label>
-      <div class="chipsel" id="qa-pri">
-        <button data-v="p1">${tr('high')}</button>
-        <button data-v="p2">${tr('medium')}</button>
-        <button data-v="p3" class="on">${tr('low')}</button>
-      </div></div>
-    <div class="fld"><label>${L==='fa'?'لیست':'List'}</label>
-      <div class="chipsel" id="qa-list">
-        ${lists.map(l=>`<button data-v="${l.id}" ${l.id===defList?'class="on"':''}>${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</button>`).join('')}
-      </div></div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="qa-cancel">${tr('cancel')}</button>
-      <button class="btn btn-primary" id="qa-save">${tr('save')}</button>
-    </div>`);
-
-  bindChipsel('qa-pri','p3');
-  bindChipsel('qa-list',defList);
-  setTimeout(()=>document.getElementById('qa-text')?.focus(),100);
-  document.getElementById('qa-cancel').onclick=closeSheet;
-  document.getElementById('qa-save').onclick=()=>{
-    const text=document.getElementById('qa-text').value.trim();if(!text)return;
-    const id=uid();
-    DB.entities.tasks[id]={
-      id,text,
-      listId:chipVal('qa-list')||'inbox',
-      dueDate:document.getElementById('qa-date').value||null,
-      dueTime:null,priority:chipVal('qa-pri')||'p3',repeat:null,
-      assigneeId:null,creatorId:DB.meta.userId,
-      status:'open',pinned:false,done:false,doneAt:null,
-      placeId:null,expenseId:null,noteIds:[],tags:[],
-      createdAt:now(),updatedAt:now(),archivedAt:null
-    };
-    saveDB();closeSheet();render();toast(L==='fa'?'کار اضافه شد':'Task added');
-  };
-}
-
-/* ══════════════════════════════════════════
-   LIST MANAGEMENT
-   ══════════════════════════════════════════ */
-const LIST_COLORS=['#6e56f8','#f43f5e','#22d3a0','#f59e0b','#9d7bff','#38bdf8','#1fb6a8','#e67e22'];
-
-function openNewListSheet(){
-  let selColor=LIST_COLORS[Object.keys(DB.entities.lists).length%LIST_COLORS.length];
-  openSheet(`
-    <h3>${tr('newList')}</h3>
-    <div class="fld"><label>${tr('listName')}</label>
-      <input class="finput" id="nl-name" placeholder="${tr('listName')}"></div>
-    <div class="fld"><label>${L==='fa'?'رنگ':'Color'}</label>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px" id="nl-colors">
-        ${LIST_COLORS.map(c=>`<div class="color-dot${c===selColor?' on':''}" data-c="${c}" style="background:${c}"></div>`).join('')}
-      </div></div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="nl-cancel">${tr('cancel')}</button>
-      <button class="btn btn-primary" id="nl-save">${tr('save')}</button>
-    </div>`);
-  document.getElementById('nl-cancel').onclick=closeSheet;
-  document.querySelectorAll('.color-dot').forEach(el=>el.onclick=()=>{
-    selColor=el.dataset.c;
-    document.querySelectorAll('.color-dot').forEach(e=>e.classList.toggle('on',e.dataset.c===selColor));
-  });
-  document.getElementById('nl-save').onclick=()=>{
-    const name=document.getElementById('nl-name').value.trim();if(!name)return;
-    const id=uid();
-    DB.entities.lists[id]={
-      id,name:{en:name,fa:name},icon:'✓',color:selColor,
-      sortBy:'smart',shared:false,memberIds:[],
-      createdAt:now(),updatedAt:now(),archivedAt:null
-    };
-    saveDB();closeSheet();render();
-  };
-  setTimeout(()=>document.getElementById('nl-name')?.focus(),100);
-}
-
-/* ══════════════════════════════════════════
-   LIST MENU — Premium Component
-   Reusable across all list entities.
-   Groups: primary actions / manage / danger
-   ══════════════════════════════════════════ */
-
-/* ── Shared action builders ── */
-function _sacRow(icon,iconBg,label,action,opts={}){
-  const rightHtml=opts.value
-    ?`<span style="font-size:13px;color:var(--ink3);font-weight:500">${opts.value}</span><span class="sac-arr">›</span>`
-    :`<span class="sac-arr">›</span>`;
-  return `<button class="sac${opts.danger?' sac-danger':''}" data-lma="${action}">
-    <div class="sac-icon-wrap">
-      <div class="sac-icon" style="background:${iconBg}">${icon}</div>
-    </div>
-    <span class="sac-label">${label}</span>
-    <div class="sac-right">${rightHtml}</div>
-  </button>`;
-}
-
-function openListMenu(listId){
-  const l=(DB.entities.lists||{})[listId];if(!l)return;
-  const name=l.name&&(l.name[L]||l.name.en)||listId;
-  const curSort=l.sortBy||'smart';
-  const sortLabels={
-    smart:L==='fa'?'هوشمند':'Smart',
-    alpha:L==='fa'?'الفبایی':'A–Z',
-    date:L==='fa'?'تاریخ':'Due date',
-    priority:L==='fa'?'اولویت':'Priority'
-  };
-  const taskCount=activeTasks().filter(t=>t.listId===listId&&!t.done).length;
-  const sugOn=l.suggestions!==false;
-
-  const html=`
-    <div class="sheet-header">
-      <div class="sheet-list-identity">
-        <div class="sheet-list-icon" style="background:${l.color||'#6e56f8'}20;color:${l.color||'#6e56f8'}">${l.icon||'✓'}</div>
-        <div>
-          <div class="sheet-list-name">${esc(name)}</div>
-          <div class="sheet-list-meta">${taskCount} ${L==='fa'?'کار باقی‌مانده':'tasks remaining'}</div>
-        </div>
+    <div class="hub-sec-label">${tr('about')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+      <div class="ul-row" style="padding:0 16px;cursor:default">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:16px">i</div></div>
+        <span class="ul-name">MBM Life</span>
+        <span class="ul-count">${APP_VERSION}</span>
       </div>
     </div>
+    ${user.email?'<div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">'+tr('signOut')+'</button></div>':''}`;
+}
+function openSearch(){
+  const s=document.getElementById('search-screen');
+  s.classList.add('on');
+  setTimeout(()=>{const i=document.getElementById('srch-input');if(i){i.focus();i.value='';}},80);
+  _renderSearch('');
+}
+function closeSearch(){
+  document.getElementById('search-screen').classList.remove('on');
+}
+function _renderSearch(q){
+  const el=document.getElementById('srch-results');if(!el)return;
+  if(!q.trim()){
+    el.innerHTML='<div class="srch-hint">Search tasks, lists, and notes</div>';return;}
+  const ql=q.toLowerCase();
+  const tasks=activeTasks().filter(t=>t.text.toLowerCase().includes(ql)||(t.notes||'').toLowerCase().includes(ql));
+  const lists=active('lists').filter(l=>{const n=l.name&&(l.name[L]||l.name.en)||'';return n.toLowerCase().includes(ql);});
+  if(!tasks.length&&!lists.length){
+    el.innerHTML=`<div class="srch-empty">${tr('noResults')}</div>`;return;}
+  const ts=todayStr();
+  let html='';
+  if(lists.length){
+    html+=`<div class="hub-sec-label">${tr('lists')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
+      ${lists.map(l=>`<div class="ul-row" data-srch-list="${l.id}">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:${l.color||'#6e56f8'}">${l.icon||'✓'}</div></div>
+        <span class="ul-name">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</span>
+      </div>`).join('')}
+    </div>`;}
+  if(tasks.length){
+    html+=`<div class="hub-sec-label">${tr('tasks')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
+      ${tasks.map(t=>{
+        const over=t.dueDate&&t.dueDate<ts&&!t.done;
+        const l=active('lists').find(l=>l.id===t.listId);
+        return `<div class="trow-flat${t.done?' done':''}" data-srch-tid="${t.id}">
+          <div class="trow-chk-wrap">
+            <div class="chk${t.done?' on':''}" data-chk="${t.id}"></div>
+          </div>
+          <div class="trow-content">
+            <div class="trow-title">${esc(t.text)}</div>
+            <div class="trow-meta-row">
+              ${l?`<span class="chip">${l.icon||'✓'} ${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`:''}
+              ${t.dueDate?`<span class="chip${over?' over':''}">${shortDate(t.dueDate)}</span>`:''}
+            </div>
+          </div>
+          <div class="trow-star-wrap">
+            <button class="star${t.pinned?' on':''}" data-pin="${t.id}">★</button>
+          </div>
+        </div>`;}).join('')}
+    </div>`;}
+  el.innerHTML=html;
 
-    <div class="sheet-group">
-      ${_sacRow('↕','rgba(56,189,248,.15)',tr('sortBy'),'sort',{value:sortLabels[curSort]||curSort})}
-      ${_sacRow('⇅','rgba(110,86,248,.15)',tr('reorder'),'reorder')}
-      ${_sacRow('🎨','rgba(245,158,11,.15)',tr('changeTheme'),'theme')}
-    </div>
-
-    <div class="sheet-group">
-      ${_sacRow('📤','rgba(34,211,160,.15)',tr('share'),'share')}
-      ${_sacRow('⧉','rgba(110,86,248,.15)',tr('duplicate'),'duplicate')}
-      ${_sacRow('🖨','rgba(96,96,128,.15)',tr('print'),'print')}
-      ${_sacRow('💡',sugOn?'rgba(245,158,11,.2)':'rgba(96,96,128,.15)',tr('suggestions'),'suggestions',
-        {value:sugOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')})}
-    </div>
-
-    <div class="sheet-group">
-      ${_sacRow('✏️','rgba(110,86,248,.15)',tr('rename'),'rename')}
-    </div>
-
-    <div class="sheet-group">
-      ${_sacRow('🗑','rgba(244,63,94,.12)',tr('delete'),'delete',{danger:true})}
-    </div>
-
-    <button class="sheet-cancel">${tr('cancel')}</button>`;
-
-  openSheet(html);
-
-  // Bind cancel
-  document.querySelector('.sheet-cancel').onclick=closeSheet;
-
-  // Bind actions
-  document.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
-    const a=b.dataset.lma;
-    if(a==='sort'){closeSheet();_openSortSheet(listId,curSort,sortLabels);}
-    else if(a==='reorder'){
-      l.sortBy='alpha';l.updatedAt=now();saveDB();closeSheet();render();
-      toast(L==='fa'?'مرتب‌سازی الفبایی اعمال شد':'Sorted A–Z');}
-    else if(a==='theme'){closeSheet();_openThemeSheet(listId);}
-    else if(a==='share'){closeSheet();_shareList(listId);}
-    else if(a==='duplicate'){closeSheet();_duplicateList(listId);}
-    else if(a==='print'){closeSheet();_printList(listId);}
-    else if(a==='suggestions'){
-      l.suggestions=!sugOn;l.updatedAt=now();saveDB();closeSheet();
-      toast(name+' — '+tr('suggestions')+': '+(l.suggestions?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')));}
-    else if(a==='rename'){closeSheet();_openRenameSheet(listId);}
-    else if(a==='delete'){closeSheet();_deleteList(listId);}
-  });
+  // Bind search results
+  el.querySelectorAll('[data-chk]').forEach(e=>e.onclick=ev=>{
+    ev.stopPropagation();completeTask(e.dataset.chk);_renderSearch(q);});
+  el.querySelectorAll('[data-pin]').forEach(e=>e.onclick=ev=>{
+    ev.stopPropagation();const t=DB.entities.tasks[e.dataset.pin];if(!t)return;
+    t.pinned=!t.pinned;t.updatedAt=now();saveDB();_renderSearch(q);});
+  el.querySelectorAll('[data-srch-tid]').forEach(e=>e.onclick=()=>openTaskDetail(e.dataset.srchTid));
+  el.querySelectorAll('[data-srch-list]').forEach(e=>e.onclick=()=>{
+    closeSearch();screen='lists';activeListId=e.dataset.srchList;
+    activeSmartView=null;tasksView='detail';render();});
 }
 
-/* ── Sub-sheets ── */
-function _openSortSheet(listId,cur,labels){
-  const opts=Object.keys(labels);
-  const html=`
-    <div class="sheet-header">
-      <div style="font-size:19px;font-weight:800;padding:16px 0 4px">${tr('sortBy')}</div>
-    </div>
-    <div class="sheet-group">
-      ${opts.map(o=>`<button class="sac" data-so="${o}">
-        <div class="sac-icon-wrap">
-          <div class="sac-check${o===cur?' on':''}"></div>
-        </div>
-        <span class="sac-label">${labels[o]}</span>
-      </button>`).join('')}
-    </div>
-    <button class="sheet-cancel">${tr('cancel')}</button>`;
-  openSheet(html);
-  document.querySelector('.sheet-cancel').onclick=closeSheet;
-  document.querySelectorAll('[data-so]').forEach(b=>b.onclick=()=>{
-    const l=DB.entities.lists[listId];if(!l)return;
-    l.sortBy=b.dataset.so;l.updatedAt=now();saveDB();closeSheet();render();
-  });
-}
-
-function _openThemeSheet(listId){
-  const l=DB.entities.lists[listId];if(!l)return;
-  let selColor=l.color||LIST_COLORS[0];
-  const html=`
-    <div class="sheet-header">
-      <div style="font-size:19px;font-weight:800;padding:16px 0 12px">${tr('changeTheme')}</div>
-    </div>
-    <div style="padding:0 22px 8px">
-      <div class="color-picker-grid">
-        ${LIST_COLORS.map(c=>`<button class="cpick${c===selColor?' on':''}" data-tc="${c}"
-          style="background:${c};color:${c}" aria-label="${c}"></button>`).join('')}
-      </div>
-    </div>
-    <div style="padding:0 14px">
-      <div class="btn-row">
-        <button class="btn btn-ghost" id="th-cancel">${tr('cancel')}</button>
-        <button class="btn btn-primary" id="th-save">${tr('save')}</button>
-      </div>
-    </div>
-    <div style="height:16px"></div>`;
-  openSheet(html);
-  document.getElementById('th-cancel').onclick=closeSheet;
-  document.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
-    selColor=el.dataset.tc;
-    document.querySelectorAll('[data-tc]').forEach(e=>e.classList.toggle('on',e.dataset.tc===selColor));
-  });
-  document.getElementById('th-save').onclick=()=>{
-    l.color=selColor;l.updatedAt=now();saveDB();closeSheet();render();};
-}
-
-function _openRenameSheet(listId){
-  const l=DB.entities.lists[listId];if(!l)return;
-  const name=l.name&&(l.name[L]||l.name.en)||'';
-  const html=`
-    <div class="sheet-header">
-      <div style="font-size:19px;font-weight:800;padding:16px 0 12px">${tr('rename')}</div>
-    </div>
-    <div style="padding:0 14px">
-      <div class="fld">
-        <input class="finput" id="rn-name" value="${esc(name)}">
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" id="rn-cancel">${tr('cancel')}</button>
-        <button class="btn btn-primary" id="rn-save">${tr('save')}</button>
-      </div>
-    </div>
-    <div style="height:16px"></div>`;
-  openSheet(html);
-  document.getElementById('rn-cancel').onclick=closeSheet;
-  document.getElementById('rn-save').onclick=()=>{
-    const v=document.getElementById('rn-name').value.trim();if(!v)return;
-    l.name={en:v,fa:v};l.updatedAt=now();saveDB();closeSheet();render();};
-  setTimeout(()=>{const n=document.getElementById('rn-name');if(n){n.focus();n.select();}},100);
-}
-
-function _shareList(listId){
-  const l=DB.entities.lists[listId];if(!l)return;
-  const name=l.name&&(l.name[L]||l.name.en)||'';
-  const tasks=activeTasks().filter(t=>t.listId===listId);
-  const text=name+'\n\n'+tasks.map(t=>(t.done?'☑ ':'☐ ')+t.text+(t.dueDate?' ('+t.dueDate+')':'')).join('\n');
-  if(navigator.share)navigator.share({title:name,text}).catch(()=>{});
-  else navigator.clipboard&&navigator.clipboard.writeText(text)
-    .then(()=>toast(L==='fa'?'در کلیپ‌بورد کپی شد':'Copied to clipboard')).catch(()=>{});
-}
-
-function _duplicateList(listId){
-  const l=DB.entities.lists[listId];if(!l)return;
-  const name=l.name&&(l.name[L]||l.name.en)||'';
-  const newId=uid();
-  DB.entities.lists[newId]=Object.assign({},l,{
-    id:newId,name:{en:name+' (copy)',fa:name+' (کپی)'},
-    createdAt:now(),updatedAt:now()});
-  activeTasks().filter(t=>t.listId===listId).forEach(t=>{
-    const nid=uid();
-    DB.entities.tasks[nid]=Object.assign({},t,{
-      id:nid,listId:newId,done:false,doneAt:null,
-      createdAt:now(),updatedAt:now()});
-  });
-  saveDB();render();toast(L==='fa'?'لیست کپی شد':'List duplicated');
-}
-
-function _printList(listId){
-  const l=DB.entities.lists[listId];if(!l)return;
-  const name=l.name&&(l.name[L]||l.name.en)||'';
-  const tasks=activeTasks().filter(t=>t.listId===listId);
-  const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
-  const w=window.open('','_blank');
-  if(!w)return;
-  w.document.write(`<!DOCTYPE html><html><head><title>${name}</title>
-    <style>body{font-family:-apple-system,sans-serif;max-width:600px;margin:48px auto;color:#111;font-size:15px}
-    h1{font-size:24px;font-weight:800;margin-bottom:20px}
-    ul{list-style:none;padding:0}
-    li{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid #f0f0f0}
-    li .cb{width:20px;height:20px;border:2px solid #999;border-radius:50%;flex:none;margin-top:1px}
-    li.done .cb{background:#333;border-color:#333}
-    li.done .tx{text-decoration:line-through;color:#aaa}
-    .dt{font-size:12px;color:#999;margin-top:2px}
-    h3{margin:24px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#999}</style>
-    </head><body><h1>${name}</h1>
-    <ul>${open.map(t=>`<li><div class="cb"></div><div><div class="tx">${t.text}</div>${t.dueDate?`<div class="dt">${t.dueDate}</div>`:''}</div></li>`).join('')}</ul>
-    ${done.length?`<h3>Completed</h3><ul>${done.map(t=>`<li class="done"><div class="cb"></div><div class="tx">${t.text}</div></li>`).join('')}</ul>`:''}</body></html>`);
-  w.document.close();w.print();
-}
-
-function _deleteList(listId){
-  const l=DB.entities.lists[listId];if(!l)return;
-  const name=l.name&&(l.name[L]||l.name.en)||'';
-  // Confirm sheet instead of browser confirm
-  const html=`
-    <div class="sheet-header">
-      <div style="font-size:19px;font-weight:800;padding:16px 0 8px;color:var(--danger)">${L==='fa'?'حذف لیست':'Delete List'}</div>
-      <div style="font-size:14px;color:var(--ink2);padding-bottom:16px;line-height:1.5">
-        ${L==='fa'?`آیا مطمئنی که می‌خواهی لیست «${esc(name)}» و همه کارهایش را حذف کنی؟`
-          :`Are you sure you want to delete "${esc(name)}" and all its tasks? This cannot be undone.`}
-      </div>
-    </div>
-    <div style="padding:0 14px">
-      <div class="btn-row">
-        <button class="btn btn-ghost" id="del-cancel">${tr('cancel')}</button>
-        <button class="btn btn-danger" id="del-confirm">${L==='fa'?'بله، حذف شود':'Delete'}</button>
-      </div>
-    </div>
-    <div style="height:16px"></div>`;
-  openSheet(html);
-  document.getElementById('del-cancel').onclick=closeSheet;
-  document.getElementById('del-confirm').onclick=()=>{
-    for(const id in DB.entities.tasks){
-      if(DB.entities.tasks[id].listId===listId)DB.entities.tasks[id].archivedAt=now();
-    }
-    l.archivedAt=now();l.updatedAt=now();
-    saveDB();closeSheet();tasksView='browser';activeListId=null;render();
-    toast(L==='fa'?'لیست حذف شد':'List deleted');
-  };
-}
-
-/* ══════════════════════════════════════════
-   PEOPLE MANAGEMENT
-   ══════════════════════════════════════════ */
-function openNewPersonSheet(){
-  openSheet(`
-    <h3>${L==='fa'?'شخص جدید':'New Person'}</h3>
-    <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
-      <input class="finput" id="np-name" placeholder="${L==='fa'?'نام کامل':'Full name'}"></div>
-    <div class="fld"><label>${L==='fa'?'نقش':'Role'}</label>
-      <input class="finput" id="np-role" placeholder="${L==='fa'?'مثلاً: همسر، همکار':'e.g. Partner, Colleague'}"></div>
-    <div class="fld"><label>${L==='fa'?'ایمیل':'Email'}</label>
-      <input class="finput" id="np-email" type="email" placeholder="email@example.com"></div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="np-cancel">${tr('cancel')}</button>
-      <button class="btn btn-primary" id="np-save">${tr('save')}</button>
-    </div>`);
-  document.getElementById('np-cancel').onclick=closeSheet;
-  document.getElementById('np-save').onclick=()=>{
-    const name=document.getElementById('np-name').value.trim();if(!name)return;
-    const id=uid();
-    DB.entities.people[id]={
-      id,name,role:document.getElementById('np-role').value.trim(),
-      email:document.getElementById('np-email').value.trim(),
-      avatar:null,phone:null,taskIds:[],noteIds:[],
-      createdAt:now(),updatedAt:now(),archivedAt:null};
-    saveDB();closeSheet();render();
-  };
-  setTimeout(()=>document.getElementById('np-name')?.focus(),100);
-}
-
-/* ══════════════════════════════════════════
-   SHEET (BOTTOM DRAWER)
-   ══════════════════════════════════════════ */
 /* ══════════════════════════════════════════
    SHEET ENGINE
    ══════════════════════════════════════════ */
@@ -1676,6 +1131,16 @@ document.getElementById('fab').onclick=quickAdd;
 
 // Sheet dismiss
 document.getElementById('sheet-bg').onclick=closeSheet;
+
+// Task detail panel
+document.getElementById('td-back').onclick=()=>{closeTaskDetail();render();};
+document.getElementById('td-save').onclick=()=>{closeTaskDetail();render();};
+
+// Search screen
+document.getElementById('srch-cancel').onclick=closeSearch;
+document.getElementById('srch-input').oninput=function(){_renderSearch(this.value);};
+document.getElementById('srch-input').addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeSearch();});
 </script>
 </body>
 </html>
