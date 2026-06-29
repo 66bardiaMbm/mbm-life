@@ -511,7 +511,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v79';
+const APP_VERSION='v80';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1913,12 +1913,22 @@ function syncPush(){
    ══════════════════════════════════════════ */
 let _userGeo=null,_userGeoTried=false;
 function ensureUserGeo(cb){
-  if(_userGeo||_userGeoTried){cb(_userGeo);return;}
+  if(_userGeo){cb(_userGeo);return;}
+  if(_userGeoTried){cb(null);return;}
   if(!navigator.geolocation){_userGeoTried=true;cb(null);return;}
   navigator.geolocation.getCurrentPosition(
-    p=>{_userGeo={lat:p.coords.latitude,lon:p.coords.longitude};_userGeoTried=true;cb(_userGeo);},
-    ()=>{_userGeoTried=true;cb(null);},
-    {enableHighAccuracy:false,timeout:6000,maximumAge:600000});
+    p=>{
+      _userGeo={lat:p.coords.latitude,lon:p.coords.longitude};
+      _userGeoTried=true;
+      cb(_userGeo);
+    },
+    err=>{
+      _userGeoTried=true;
+      // Fallback: use Hobart if permission denied
+      _userGeo={lat:-42.8821,lon:147.3272};
+      cb(_userGeo);
+    },
+    {enableHighAccuracy:false,timeout:8000,maximumAge:300000});
 }
 
 function attachLocationAutocomplete(inputEl,onSelect){
@@ -1953,8 +1963,11 @@ function attachLocationAutocomplete(inputEl,onSelect){
     _timer=setTimeout(()=>{
       ensureUserGeo(geo=>{
         let url=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
-        if(geo)url+=`&viewbox=${geo.lon-1},${geo.lat-1},${geo.lon+1},${geo.lat+1}&bounded=0`;
-        fetch(url,{headers:{'Accept-Language':'en','User-Agent':'MBMLife/1.0'}})
+        if(geo){
+          const d=0.5;
+          url+=`&viewbox=${geo.lon-d},${geo.lat-d},${geo.lon+d},${geo.lat+d}&bounded=0`;
+        }
+        fetch(url,{headers:{'Accept-Language':L==='fa'?'fa,en':'en','User-Agent':'MBMLife/1.0 contact@mbmlife.app'}})
           .then(r=>r.json()).then(showDrop).catch(()=>{});
       });
     },400);
@@ -2057,6 +2070,9 @@ history.pushState(null,'',location.href);
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible')setTimeout(checkForUpdate,1000);
 });
+
+// Pre-fetch GPS so location autocomplete is ready
+setTimeout(()=>ensureUserGeo(()=>{}),2000);
 
 document.getElementById('td-back').onclick=()=>{closeTaskDetail();render();};
 document.getElementById('td-save').onclick=()=>{closeTaskDetail();render();};
