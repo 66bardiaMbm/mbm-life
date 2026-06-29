@@ -511,7 +511,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v81';
+const APP_VERSION='v84';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1515,14 +1515,33 @@ function closeSearch(){
 function _renderSearch(q){
   const el=document.getElementById('srch-results');if(!el)return;
   if(!q.trim()){
-    el.innerHTML='<div class="srch-hint">Search tasks, lists, and notes</div>';return;}
+    el.innerHTML='<div class="srch-hint">'+(L==='fa'?'جستجوی کارها، لیست‌ها و قرارها':'Search tasks, lists and appointments')+'</div>';return;}
   const ql=q.toLowerCase();
-  const tasks=activeTasks().filter(t=>t.text.toLowerCase().includes(ql)||(t.notes||'').toLowerCase().includes(ql));
+  const tasks=activeTasks().filter(t=>
+    t.text.toLowerCase().includes(ql)||
+    (t.notes||'').toLowerCase().includes(ql)||
+    (t.location||'').toLowerCase().includes(ql));
   const lists=active('lists').filter(l=>{const n=l.name&&(l.name[L]||l.name.en)||'';return n.toLowerCase().includes(ql);});
-  if(!tasks.length&&!lists.length){
+  const appts=Object.values(DB.entities.appts||{}).filter(a=>!a.archivedAt&&(
+    (a.title||'').toLowerCase().includes(ql)||
+    (a.location||'').toLowerCase().includes(ql)||
+    (a.notes||'').toLowerCase().includes(ql)));
+  if(!tasks.length&&!lists.length&&!appts.length){
     el.innerHTML=`<div class="srch-empty">${tr('noResults')}</div>`;return;}
   const ts=todayStr();
   let html='';
+  if(appts.length){
+    html+=`<div class="hub-sec-label">◷ ${tr('appts')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
+      ${appts.map(a=>`<div class="ul-row" data-srch-appt="${a.id}" style="cursor:pointer">
+        <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:rgba(110,86,248,.15);color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:18px">◷</div></div>
+        <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
+          <div style="font-size:15px;font-weight:500">${esc(a.title)}</div>
+          ${(a.date||a.location)?`<div style="font-size:12px;color:var(--ink3);margin-top:2px">${[a.date?shortDate(a.date):null,a.time,a.location?'📍 '+a.location.split(',')[0]:null].filter(Boolean).join(' · ')}</div>`:''}
+        </div>
+        <span style="color:var(--ink3);opacity:.4;padding-right:4px">›</span>
+      </div>`).join('')}
+    </div>`;}
   if(lists.length){
     html+=`<div class="hub-sec-label">${tr('lists')}</div>
     <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
@@ -1538,35 +1557,30 @@ function _renderSearch(q){
         const over=t.dueDate&&t.dueDate<ts&&!t.done;
         const l=active('lists').find(l=>l.id===t.listId);
         return `<div class="trow-flat${t.done?' done':''}" data-srch-tid="${t.id}">
-          <div class="trow-chk-wrap">
-            <div class="chk${t.done?' on':''}" data-chk="${t.id}"></div>
-          </div>
+          <div class="trow-chk-wrap"><div class="chk${t.done?' on':''}" data-chk="${t.id}"></div></div>
           <div class="trow-content">
             <div class="trow-title">${esc(t.text)}</div>
             <div class="trow-meta-row">
               ${l?`<span class="chip">${l.icon||'✓'} ${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`:''}
               ${t.dueDate?`<span class="chip${over?' over':''}">${shortDate(t.dueDate)}</span>`:''}
+              ${t.location?`<span class="chip">📍 ${esc(t.location.split(',')[0])}</span>`:''}
             </div>
           </div>
-          <div class="trow-star-wrap">
-            <button class="star${t.pinned?' on':''}" data-pin="${t.id}">★</button>
-          </div>
+          <div class="trow-star-wrap"><button class="star${t.pinned?' on':''}" data-pin="${t.id}">★</button></div>
         </div>`;}).join('')}
     </div>`;}
   el.innerHTML=html;
-
-  // Bind search results
-  el.querySelectorAll('[data-chk]').forEach(e=>e.onclick=ev=>{
-    ev.stopPropagation();completeTask(e.dataset.chk);_renderSearch(q);});
+  el.querySelectorAll('[data-chk]').forEach(e=>e.onclick=ev=>{ev.stopPropagation();completeTask(e.dataset.chk);_renderSearch(q);});
   el.querySelectorAll('[data-pin]').forEach(e=>e.onclick=ev=>{
     ev.stopPropagation();const t=DB.entities.tasks[e.dataset.pin];if(!t)return;
     t.pinned=!t.pinned;t.updatedAt=now();saveDB();_renderSearch(q);});
   el.querySelectorAll('[data-srch-tid]').forEach(e=>e.onclick=()=>openTaskDetail(e.dataset.srchTid));
   el.querySelectorAll('[data-srch-list]').forEach(e=>e.onclick=()=>{
-    closeSearch();screen='lists';activeListId=e.dataset.srchList;
-    activeSmartView=null;tasksView='detail';render();});
+    closeSearch();screen='lists';activeListId=e.dataset.srchList;activeSmartView=null;tasksView='detail';render();});
+  el.querySelectorAll('[data-srch-appt]').forEach(e=>e.onclick=()=>{
+    closeSearch();screen='appts';render();
+    setTimeout(()=>openNewApptSheet(e.dataset.srchAppt),100);});
 }
-
 /* ══════════════════════════════════════════
    SHEET ENGINE
    ══════════════════════════════════════════ */
@@ -1860,31 +1874,21 @@ function startListeners(){
   const ws=wsId(FB.user.uid);
   const db=FB.db;
 
-  // tasks
-  const u1=db.collection('workspaces').doc(ws).collection('tasks')
+  const sync=(col,entity)=>db.collection('workspaces').doc(ws).collection(col)
     .onSnapshot(snap=>{
       snap.docChanges().forEach(ch=>{
         const d=ch.doc.data();
-        if(ch.type==='removed'){delete DB.entities.tasks[ch.doc.id];}
-        else DB.entities.tasks[ch.doc.id]=d;
+        if(ch.type==='removed')delete DB.entities[entity][ch.doc.id];
+        else DB.entities[entity][ch.doc.id]=d;
       });
       localStorage.setItem(KEY,JSON.stringify(DB));
       render();
     },()=>{});
 
-  // lists
-  const u2=db.collection('workspaces').doc(ws).collection('lists')
-    .onSnapshot(snap=>{
-      snap.docChanges().forEach(ch=>{
-        const d=ch.doc.data();
-        if(ch.type==='removed'){delete DB.entities.lists[ch.doc.id];}
-        else DB.entities.lists[ch.doc.id]=d;
-      });
-      localStorage.setItem(KEY,JSON.stringify(DB));
-      render();
-    },()=>{});
-
-  _syncUnsubs=[u1,u2];
+  const u1=sync('tasks','tasks');
+  const u2=sync('lists','lists');
+  const u3=sync('appts','appts');
+  _syncUnsubs=[u1,u2,u3];
 }
 
 function stopListeners(){
@@ -1892,19 +1896,15 @@ function stopListeners(){
   _syncUnsubs=[];
 }
 
-/* ── Push local changes to Firestore ── */
 function syncPush(){
   if(!FB.ready||!FB.user)return;
   const ws=wsId(FB.user.uid);
   const db=FB.db;
   const batch=db.batch();
-
-  Object.values(DB.entities.tasks).forEach(t=>{
-    batch.set(db.collection('workspaces').doc(ws).collection('tasks').doc(t.id),t);
-  });
-  Object.values(DB.entities.lists).forEach(l=>{
-    batch.set(db.collection('workspaces').doc(ws).collection('lists').doc(l.id),l);
-  });
+  const col=(name)=>db.collection('workspaces').doc(ws).collection(name);
+  Object.values(DB.entities.tasks||{}).forEach(t=>batch.set(col('tasks').doc(t.id),t));
+  Object.values(DB.entities.lists||{}).forEach(l=>batch.set(col('lists').doc(l.id),l));
+  Object.values(DB.entities.appts||{}).forEach(a=>batch.set(col('appts').doc(a.id),a));
   batch.commit().catch(()=>{});
 }
 
@@ -1933,14 +1933,40 @@ function ensureUserGeo(cb){
 
 function attachLocationAutocomplete(inputEl,onSelect){
   let _timer=null,_drop=null;
+  const dropStyle=`position:absolute;z-index:999;left:0;right:0;
+    background:#1c1c24;border:1px solid rgba(255,255,255,.12);border-radius:12px;
+    margin-top:4px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.5)`;
   function removeDrop(){if(_drop){_drop.remove();_drop=null;}}
+  function showLoading(){
+    removeDrop();
+    _drop=document.createElement('div');
+    _drop.style.cssText=dropStyle;
+    _drop.innerHTML=`<div style="padding:12px 14px;font-size:13px;color:var(--ink3)">🔍 ${L==='fa'?'در حال جستجو...':'Searching...'}</div>`;
+    const wrap=inputEl.closest('.fld')||inputEl.parentElement;
+    wrap.style.position='relative';wrap.appendChild(_drop);
+  }
+  function showError(){
+    removeDrop();
+    _drop=document.createElement('div');
+    _drop.style.cssText=dropStyle;
+    _drop.innerHTML=`<div style="padding:12px 14px;font-size:13px;color:var(--danger)">⚠ ${L==='fa'?'خطا در جستجو':'Search failed'}</div>`;
+    const wrap=inputEl.closest('.fld')||inputEl.parentElement;
+    wrap.style.position='relative';wrap.appendChild(_drop);
+    setTimeout(removeDrop,2000);
+  }
   function showDrop(results){
     removeDrop();
-    if(!results.length)return;
+    if(!results||!results.length){
+      _drop=document.createElement('div');
+      _drop.style.cssText=dropStyle;
+      _drop.innerHTML=`<div style="padding:12px 14px;font-size:13px;color:var(--ink3)">${L==='fa'?'نتیجه‌ای یافت نشد':'No results found'}</div>`;
+      const wrap=inputEl.closest('.fld')||inputEl.parentElement;
+      wrap.style.position='relative';wrap.appendChild(_drop);
+      setTimeout(removeDrop,2000);
+      return;
+    }
     _drop=document.createElement('div');
-    _drop.style.cssText=`position:absolute;z-index:999;left:0;right:0;
-      background:#1c1c24;border:1px solid rgba(255,255,255,.12);border-radius:12px;
-      margin-top:4px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.5)`;
+    _drop.style.cssText=dropStyle;
     results.slice(0,5).forEach(r=>{
       const row=document.createElement('div');
       row.style.cssText='padding:13px 14px;font-size:14px;color:#f0f0f8;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06)';
@@ -1961,16 +1987,39 @@ function attachLocationAutocomplete(inputEl,onSelect){
     const q=inputEl.value.trim();
     if(q.length<2){removeDrop();return;}
     _timer=setTimeout(()=>{
-      ensureUserGeo(geo=>{
-        let url=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
-        if(geo){
-          const d=0.5;
-          url+=`&viewbox=${geo.lon-d},${geo.lat-d},${geo.lon+d},${geo.lat+d}&bounded=0`;
-        }
-        fetch(url,{headers:{'Accept-Language':L==='fa'?'fa,en':'en','User-Agent':'MBMLife/1.0 contact@mbmlife.app'}})
-          .then(r=>r.json()).then(showDrop).catch(()=>{});
-      });
-    },400);
+      showLoading();
+      function doSearch(geo){
+        let url=`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7`;
+        if(geo)url+=`&lat=${geo.lat}&lon=${geo.lon}`;
+        fetch(url)
+          .then(r=>r.json())
+          .then(data=>{
+            const results=(data.features||[]).map(f=>{
+              const p=f.properties;
+              const parts=[p.name,p.street&&p.housenumber?p.street+' '+p.housenumber:p.street,p.city||p.town||p.village,p.state,p.country].filter(Boolean);
+              return {display_name:parts.join(', '),lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]};
+            });
+            if(results.length){showDrop(results);}
+            else{
+              // Fallback to Nominatim
+              let url2=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
+              if(geo)url2+=`&viewbox=${geo.lon-.5},${geo.lat-.5},${geo.lon+.5},${geo.lat+.5}&bounded=0`;
+              fetch(url2,{headers:{'User-Agent':'MBMLife/1.0'}})
+                .then(r=>r.json()).then(r=>showDrop(r)).catch(()=>showError());
+            }
+          }).catch(()=>{
+            // Fallback to Nominatim
+            let url2=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
+            fetch(url2,{headers:{'User-Agent':'MBMLife/1.0'}})
+              .then(r=>r.json()).then(r=>showDrop(r)).catch(()=>showError());
+          });
+      }
+      if(_userGeo){doSearch(_userGeo);}
+      else{
+        doSearch(null);
+        ensureUserGeo(geo=>{if(geo&&q===inputEl.value.trim())doSearch(geo);});
+      }
+    },300);
   };
   inputEl.addEventListener('blur',()=>setTimeout(removeDrop,200));
 }
