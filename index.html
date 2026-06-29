@@ -505,7 +505,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v67';
+const APP_VERSION='v68';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -963,6 +963,348 @@ function renderMore(){
     </div>
     ${user.email?'<div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">'+tr('signOut')+'</button></div>':''}`;
 }
+/* ══════════════════════════════════════════
+   LIST MANAGEMENT
+   ══════════════════════════════════════════ */
+const LIST_COLORS=['#6e56f8','#f43f5e','#22d3a0','#f59e0b','#9d7bff','#38bdf8','#1fb6a8','#e67e22'];
+
+function openNewListSheet(){
+  let selColor=LIST_COLORS[Object.keys(DB.entities.lists).length%LIST_COLORS.length];
+  openSheet(`
+    <h3>${L==='fa'?'لیست جدید':'New List'}</h3>
+    <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
+      <input class="finput" id="nl-name" placeholder="${L==='fa'?'نام لیست':'List name'}"></div>
+    <div class="fld"><label>${L==='fa'?'رنگ':'Color'}</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px" id="nl-colors">
+        ${LIST_COLORS.map(c=>`<button class="cpick${c===selColor?' on':''}" data-tc="${c}" style="background:${c};color:${c}"></button>`).join('')}
+      </div></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="nl-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+      <button class="btn btn-primary" id="nl-save">${L==='fa'?'ذخیره':'Save'}</button>
+    </div>`);
+  document.getElementById('nl-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
+    selColor=el.dataset.tc;
+    document.querySelectorAll('[data-tc]').forEach(e=>e.classList.toggle('on',e.dataset.tc===selColor));});
+  document.getElementById('nl-save').onclick=()=>{
+    const name=document.getElementById('nl-name').value.trim();if(!name)return;
+    const id=uid();
+    DB.entities.lists[id]={id,name:{en:name,fa:name},icon:'✓',color:selColor,
+      sortBy:'smart',shared:false,memberIds:[],
+      createdAt:now(),updatedAt:now(),archivedAt:null};
+    saveDB();closeSheet();render();};
+  setTimeout(()=>document.getElementById('nl-name')?.focus(),100);
+}
+
+/* SVG icons for list menu */
+const _SVG={
+  rename:`<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+  sort:`<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
+  reorder:`<svg viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>`,
+  theme:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2v20M2 12h20" stroke-width="1.2"/></svg>`,
+  share:`<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+  duplicate:`<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+  print:`<svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`,
+  suggest:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  delete:`<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
+};
+
+function _sacRow(svgKey,label,action,opts={}){
+  const icon=_SVG[svgKey]||_SVG.suggest;
+  const right=opts.value?`<span style="font-size:13px;color:var(--ink3)">${opts.value}</span><span class="sac-arr"> ›</span>`:'';
+  return `<button class="sac${opts.danger?' sac-danger':''}" data-lma="${action}">
+    <div class="sac-icon-wrap"><div class="sac-icon">${icon}</div></div>
+    <span class="sac-label">${label}</span>
+    ${right?`<div class="sac-right">${right}</div>`:''}
+  </button>`;
+}
+
+function openListMenu(listId){
+  const l=(DB.entities.lists||{})[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||listId;
+  const curSort=l.sortBy||'smart';
+  const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
+  const sugOn=l.suggestions!==false;
+  openSheet(`<div style="padding:8px 0 0">
+    ${_sacRow('rename',L==='fa'?'تغییر نام':'Rename list','rename')}
+    ${_sacRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort',{value:sortLabels[curSort]||curSort})}
+    ${_sacRow('reorder',L==='fa'?'مرتب کردن':'Reorder','reorder')}
+    ${_sacRow('theme',L==='fa'?'تغییر رنگ':'Change theme','theme')}
+    ${_sacRow('share',L==='fa'?'اشتراک‌گذاری':'Share','share')}
+    ${_sacRow('duplicate',L==='fa'?'کپی لیست':'Duplicate','duplicate')}
+    ${_sacRow('print',L==='fa'?'چاپ':'Print','print')}
+    ${_sacRow('suggest',L==='fa'?'پیشنهادات':'Suggestions','suggestions',{value:sugOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')})}
+    ${_sacRow('delete',L==='fa'?'حذف لیست':'Delete list','delete',{danger:true})}
+  </div>
+  <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.lma;
+    if(a==='sort'){closeSheet();_openSortSheet(listId,curSort,sortLabels);}
+    else if(a==='reorder'){l.sortBy='alpha';l.updatedAt=now();saveDB();closeSheet();render();}
+    else if(a==='theme'){closeSheet();_openThemeSheet(listId);}
+    else if(a==='share'){closeSheet();_shareList(listId);}
+    else if(a==='duplicate'){closeSheet();_duplicateList(listId);}
+    else if(a==='print'){closeSheet();_printList(listId);}
+    else if(a==='suggestions'){l.suggestions=!sugOn;l.updatedAt=now();saveDB();closeSheet();toast(name+': '+(l.suggestions?'On':'Off'));}
+    else if(a==='rename'){closeSheet();_openRenameSheet(listId);}
+    else if(a==='delete'){closeSheet();_deleteList(listId);}
+  });
+}
+
+function _openSortSheet(listId,cur,labels){
+  const opts=Object.keys(labels);
+  openSheet(`<h3>${L==='fa'?'مرتب‌سازی':'Sort by'}</h3>
+    <div class="sheet-group">
+      ${opts.map(o=>`<button class="sac" data-so="${o}">
+        <div class="sac-icon-wrap"><div class="sac-check${o===cur?' on':''}"></div></div>
+        <span class="sac-label">${labels[o]}</span>
+      </button>`).join('')}
+    </div>
+    <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-so]').forEach(b=>b.onclick=()=>{
+    const l=DB.entities.lists[listId];if(!l)return;
+    l.sortBy=b.dataset.so;l.updatedAt=now();saveDB();closeSheet();render();});
+}
+
+function _openThemeSheet(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  let selColor=l.color||LIST_COLORS[0];
+  openSheet(`<h3>${L==='fa'?'تغییر رنگ':'Change theme'}</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 0 16px">
+      ${LIST_COLORS.map(c=>`<button class="cpick${c===selColor?' on':''}" data-tc="${c}" style="background:${c};color:${c}"></button>`).join('')}
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="th-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+      <button class="btn btn-primary" id="th-save">${L==='fa'?'ذخیره':'Save'}</button>
+    </div>`);
+  document.getElementById('th-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
+    selColor=el.dataset.tc;document.querySelectorAll('[data-tc]').forEach(e=>e.classList.toggle('on',e.dataset.tc===selColor));});
+  document.getElementById('th-save').onclick=()=>{l.color=selColor;l.updatedAt=now();saveDB();closeSheet();render();};
+}
+
+function _openRenameSheet(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||'';
+  openSheet(`<h3>${L==='fa'?'تغییر نام':'Rename'}</h3>
+    <div class="fld"><input class="finput" id="rn-name" value="${esc(name)}"></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="rn-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+      <button class="btn btn-primary" id="rn-save">${L==='fa'?'ذخیره':'Save'}</button>
+    </div>`);
+  document.getElementById('rn-cancel').onclick=closeSheet;
+  document.getElementById('rn-save').onclick=()=>{
+    const v=document.getElementById('rn-name').value.trim();if(!v)return;
+    l.name={en:v,fa:v};l.updatedAt=now();saveDB();closeSheet();render();};
+  setTimeout(()=>{const n=document.getElementById('rn-name');if(n){n.focus();n.select();}},100);
+}
+
+function _shareList(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||'';
+  const tasks=activeTasks().filter(t=>t.listId===listId);
+  const text=name+'\n\n'+tasks.map(t=>(t.done?'☑ ':'☐ ')+t.text+(t.dueDate?' ('+t.dueDate+')':'')).join('\n');
+  if(navigator.share)navigator.share({title:name,text}).catch(()=>{});
+  else navigator.clipboard&&navigator.clipboard.writeText(text).then(()=>toast(L==='fa'?'کپی شد':'Copied')).catch(()=>{});
+}
+
+function _duplicateList(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||'';
+  const newId=uid();
+  DB.entities.lists[newId]=Object.assign({},l,{id:newId,name:{en:name+' (copy)',fa:name+' (کپی)'},createdAt:now(),updatedAt:now()});
+  activeTasks().filter(t=>t.listId===listId).forEach(t=>{
+    const nid=uid();DB.entities.tasks[nid]=Object.assign({},t,{id:nid,listId:newId,done:false,doneAt:null,createdAt:now(),updatedAt:now()});});
+  saveDB();render();toast(L==='fa'?'لیست کپی شد':'Duplicated');
+}
+
+function _printList(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||'';
+  const tasks=activeTasks().filter(t=>t.listId===listId);
+  const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
+  const w=window.open('','_blank');if(!w)return;
+  w.document.write(`<!DOCTYPE html><html><head><title>${name}</title>
+    <style>body{font-family:sans-serif;max-width:600px;margin:48px auto;font-size:15px}
+    h1{font-size:22px;margin-bottom:16px}ul{list-style:none;padding:0}
+    li{padding:8px 0;border-bottom:1px solid #eee}
+    li.done{text-decoration:line-through;color:#999}</style></head><body>
+    <h1>${name}</h1><ul>${open.map(t=>`<li>${t.text}</li>`).join('')}</ul>
+    ${done.length?`<h3>Completed</h3><ul>${done.map(t=>`<li class="done">${t.text}</li>`).join('')}</ul>`:''}</body></html>`);
+  w.document.close();w.print();
+}
+
+function _deleteList(listId){
+  const l=DB.entities.lists[listId];if(!l)return;
+  const name=l.name&&(l.name[L]||l.name.en)||'';
+  openSheet(`<h3 style="color:var(--danger)">${L==='fa'?'حذف لیست':'Delete List'}</h3>
+    <p style="color:var(--ink2);font-size:14px;padding-bottom:16px">${L==='fa'?`لیست «${esc(name)}» حذف شود؟`:`Delete "${esc(name)}"?`}</p>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="del-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+      <button class="btn btn-danger" id="del-confirm">${L==='fa'?'حذف':'Delete'}</button>
+    </div>`);
+  document.getElementById('del-cancel').onclick=closeSheet;
+  document.getElementById('del-confirm').onclick=()=>{
+    for(const id in DB.entities.tasks){if(DB.entities.tasks[id].listId===listId)DB.entities.tasks[id].archivedAt=now();}
+    l.archivedAt=now();l.updatedAt=now();
+    saveDB();closeSheet();tasksView='browser';activeListId=null;render();
+    toast(L==='fa'?'لیست حذف شد':'Deleted');};
+}
+
+/* ══════════════════════════════════════════
+   TASK DETAIL PANEL
+   ══════════════════════════════════════════ */
+let _tdId=null;
+
+function openTaskDetail(id){
+  const t=DB.entities.tasks[id];if(!t)return;
+  _tdId=id;_renderTaskDetail();
+  document.getElementById('task-detail').classList.add('on');
+}
+
+function closeTaskDetail(){
+  document.getElementById('task-detail').classList.remove('on');
+  _tdId=null;
+}
+
+function _renderTaskDetail(){
+  const t=DB.entities.tasks[_tdId];if(!t)return;
+  const lists=active('lists');
+  const ts=todayStr();
+  const inMyDay=t.dueDate===ts;
+  const listObj=lists.find(l=>l.id===t.listId);
+  const listName=listObj?(listObj.name&&(listObj.name[L]||listObj.name.en)||''):'';
+  const steps=t.steps||[];
+  const repeatLabels={none:L==='fa'?'هرگز':'Never',daily:L==='fa'?'روزانه':'Daily',
+    weekly:L==='fa'?'هفتگی':'Weekly',monthly:L==='fa'?'ماهانه':'Monthly',yearly:L==='fa'?'سالانه':'Yearly'};
+
+  const body=document.getElementById('td-body');
+  body.innerHTML=`
+    <div class="td-title-wrap">
+      <div class="td-chk${t.done?' on':''}" id="td-chk"></div>
+      <textarea class="td-title-input${t.done?' done':''}" id="td-title" rows="2">${esc(t.text)}</textarea>
+    </div>
+    <div class="td-section">
+      ${steps.map((s,i)=>`<div class="td-step${s.done?' done':''}">
+        <div class="td-step-chk"><div class="td-step-chk-box${s.done?' on':''}" data-si="${i}"></div></div>
+        <span class="td-step-text" contenteditable="true" data-step-text="${i}">${esc(s.text)}</span>
+        <button class="td-step-del" data-step-del="${i}">×</button>
+      </div>`).join('')}
+      <div class="td-row" id="td-add-step">
+        <div class="td-row-ic">＋</div>
+        <div class="td-row-body"><div class="td-row-label">${L==='fa'?'افزودن قدم':'Add step'}</div></div>
+      </div>
+    </div>
+    <div class="td-section">
+      <div class="td-row${inMyDay?' td-row-active':''}" id="td-myday">
+        <div class="td-row-ic">☀</div>
+        <div class="td-row-body"><div class="${inMyDay?'td-row-value':'td-row-label'}">${inMyDay?(L==='fa'?'در روز من':'In My Day'):(L==='fa'?'افزودن به روز من':'Add to My Day')}</div></div>
+      </div>
+      <div class="td-row" id="td-duedate">
+        <div class="td-row-ic">📅</div>
+        <div class="td-row-body">${t.dueDate?`<div class="td-row-value${t.dueDate<ts&&!t.done?' td-row-over':''}">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</div>`:`<div class="td-row-label">${L==='fa'?'سررسید':'Due date'}</div>`}</div>
+        ${t.dueDate?`<button style="background:none;border:none;color:var(--ink3);font-size:18px;cursor:pointer;padding:8px" id="td-clear-date">×</button>`:''}
+      </div>
+      <div class="td-row" id="td-repeat">
+        <div class="td-row-ic">🔁</div>
+        <div class="td-row-body">${t.repeat&&t.repeat!=='none'?`<div class="td-row-value">${repeatLabels[t.repeat]||t.repeat}</div>`:`<div class="td-row-label">${L==='fa'?'تکرار':'Repeat'}</div>`}</div>
+        <span class="td-row-arr">›</span>
+      </div>
+    </div>
+    <div class="td-section">
+      <div class="td-row" id="td-list">
+        <div class="td-row-ic">≡</div>
+        <div class="td-row-body"><div class="td-row-value">${esc(listName)||'Tasks'}</div></div>
+        <span class="td-row-arr">›</span>
+      </div>
+    </div>
+    <div class="td-section" style="padding:0 8px">
+      <div style="display:flex;align-items:flex-start;padding:0 4px;min-height:52px">
+        <div class="td-row-ic" style="padding-top:14px">📝</div>
+        <textarea class="td-notes" id="td-notes" placeholder="${L==='fa'?'یادداشت':'Note'}">${esc(t.notes||'')}</textarea>
+      </div>
+    </div>
+    <div class="td-delete" id="td-delete">
+      <div class="td-delete-ic">🗑</div>
+      <div class="td-delete-tx">${L==='fa'?'حذف کار':'Delete task'}</div>
+    </div>`;
+
+  document.getElementById('td-chk').onclick=()=>{t.done=!t.done;t.doneAt=t.done?now():null;t.updatedAt=now();saveDB();_renderTaskDetail();render();};
+  const titleEl=document.getElementById('td-title');
+  titleEl.oninput=()=>{const v=titleEl.value.trim();if(!v)return;t.text=v;t.updatedAt=now();saveDB();};
+  titleEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();titleEl.blur();}});
+  document.querySelectorAll('[data-si]').forEach(el=>el.onclick=()=>{
+    if(!t.steps)t.steps=[];t.steps[+el.dataset.si].done=!t.steps[+el.dataset.si].done;t.updatedAt=now();saveDB();_renderTaskDetail();});
+  document.querySelectorAll('[data-step-del]').forEach(el=>el.onclick=()=>{
+    if(!t.steps)return;t.steps.splice(+el.dataset.stepDel,1);t.updatedAt=now();saveDB();_renderTaskDetail();});
+  document.querySelectorAll('[data-step-text]').forEach(el=>{
+    el.addEventListener('blur',()=>{const v=el.textContent.trim();if(!v||!t.steps)return;t.steps[+el.dataset.stepText].text=v;t.updatedAt=now();saveDB();});});
+  document.getElementById('td-add-step').onclick=()=>{
+    openSheet(`<h3>${L==='fa'?'قدم جدید':'New Step'}</h3>
+      <div class="fld"><input class="finput" id="step-input" placeholder="${L==='fa'?'عنوان':'Title'}"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="step-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+        <button class="btn btn-primary" id="step-save">${L==='fa'?'ذخیره':'Save'}</button>
+      </div>`);
+    setTimeout(()=>document.getElementById('step-input')?.focus(),100);
+    document.getElementById('step-cancel').onclick=closeSheet;
+    document.getElementById('step-save').onclick=()=>{
+      const v=document.getElementById('step-input').value.trim();if(!v)return;
+      if(!t.steps)t.steps=[];t.steps.push({text:v,done:false});t.updatedAt=now();saveDB();closeSheet();_renderTaskDetail();};
+  };
+  document.getElementById('td-myday').onclick=()=>{t.dueDate=inMyDay?null:ts;t.updatedAt=now();saveDB();_renderTaskDetail();render();};
+  document.getElementById('td-duedate').onclick=()=>{
+    openSheet(`<h3>${L==='fa'?'سررسید':'Due date'}</h3>
+      <div class="fld"><input class="finput" id="dd-date" type="date" value="${t.dueDate||''}"></div>
+      <div class="fld"><input class="finput" id="dd-time" type="time" value="${t.dueTime||''}"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="dd-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+        <button class="btn btn-primary" id="dd-save">${L==='fa'?'ذخیره':'Save'}</button>
+      </div>`);
+    document.getElementById('dd-cancel').onclick=closeSheet;
+    document.getElementById('dd-save').onclick=()=>{
+      t.dueDate=document.getElementById('dd-date').value||null;t.dueTime=document.getElementById('dd-time').value||null;
+      t.updatedAt=now();saveDB();closeSheet();_renderTaskDetail();render();};
+  };
+  const cdb=document.getElementById('td-clear-date');
+  if(cdb)cdb.onclick=e=>{e.stopPropagation();t.dueDate=null;t.dueTime=null;t.updatedAt=now();saveDB();_renderTaskDetail();render();};
+  document.getElementById('td-repeat').onclick=()=>{
+    const opts=['none','daily','weekly','monthly','yearly'];
+    const labels={none:L==='fa'?'هرگز':'Never',daily:L==='fa'?'روزانه':'Daily',weekly:L==='fa'?'هفتگی':'Weekly',monthly:L==='fa'?'ماهانه':'Monthly',yearly:L==='fa'?'سالانه':'Yearly'};
+    const cur=t.repeat||'none';
+    openSheet(`<h3>${L==='fa'?'تکرار':'Repeat'}</h3>
+      <div class="sheet-group">
+        ${opts.map(o=>`<button class="sac" data-rp="${o}">
+          <div class="sac-icon-wrap"><div class="sac-check${o===cur?' on':''}"></div></div>
+          <span class="sac-label">${labels[o]}</span>
+        </button>`).join('')}
+      </div>
+      <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
+    document.querySelector('.sheet-cancel').onclick=closeSheet;
+    document.querySelectorAll('[data-rp]').forEach(b=>b.onclick=()=>{t.repeat=b.dataset.rp;t.updatedAt=now();saveDB();closeSheet();_renderTaskDetail();});
+  };
+  document.getElementById('td-list').onclick=()=>{
+    openSheet(`<h3>${L==='fa'?'انتقال به لیست':'Move to list'}</h3>
+      <div class="sheet-group">
+        ${lists.map(l=>`<button class="sac" data-mv="${l.id}">
+          <div class="sac-icon-wrap"><div class="sac-icon" style="background:${l.color||'#6e56f8'}22;color:${l.color||'#6e56f8'}">${l.icon||'✓'}</div></div>
+          <span class="sac-label">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</span>
+          ${l.id===t.listId?'<div class="sac-right">✓</div>':''}
+        </button>`).join('')}
+      </div>
+      <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
+    document.querySelector('.sheet-cancel').onclick=closeSheet;
+    document.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{t.listId=b.dataset.mv;t.updatedAt=now();saveDB();closeSheet();_renderTaskDetail();render();});
+  };
+  const notesEl=document.getElementById('td-notes');
+  notesEl.oninput=()=>{t.notes=notesEl.value;t.updatedAt=now();saveDB();};
+  document.getElementById('td-delete').onclick=()=>{t.archivedAt=now();t.updatedAt=now();saveDB();closeTaskDetail();render();toast(L==='fa'?'حذف شد':'Deleted');};
+}
+
+function openTaskEdit(id){openTaskDetail(id);}
+
 function openSearch(){
   const s=document.getElementById('search-screen');
   s.classList.add('on');
