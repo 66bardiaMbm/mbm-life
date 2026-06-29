@@ -510,7 +510,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v74';
+const APP_VERSION='v77';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -695,7 +695,7 @@ function renderToday(){
   const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts);
   const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
-  const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).slice(0,3);
+  const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts);
 
   const dayName=new Date().toLocaleDateString(L==='fa'?'fa-IR':'en-US',{weekday:'long'});
   const dateStr=new Date().toLocaleDateString(L==='fa'?'fa-IR':'en-US',{month:'long',day:'numeric'});
@@ -1644,7 +1644,13 @@ function wsId(uid){return 'user_'+uid;}
 
 /* ── Auth state ── */
 function initAuth(){
-  if(!FB.ready)return;
+  if(!FB.ready){
+    // No Firebase - use local state
+    if(DB.meta.displayName){
+      startApp(DB.meta.displayName,DB.meta.email);
+    }
+    return;
+  }
   FB.auth.onAuthStateChanged(user=>{
     if(user){
       FB.user=user;
@@ -1654,7 +1660,6 @@ function initAuth(){
       DB.meta.photoURL=user.photoURL||null;
       saveDB();
       startListeners();
-      // If auth screen still showing, hide it
       const as=document.getElementById('auth-screen');
       if(as&&as.style.display!=='none'){
         as.style.display='none';
@@ -1667,6 +1672,13 @@ function initAuth(){
     } else {
       FB.user=null;
       stopListeners();
+      // If was Guest, keep them in app
+      if(DB.meta.displayName&&DB.meta.displayName!==''){
+        const as=document.getElementById('auth-screen');
+        if(as&&as.style.display!=='none'&&DB.meta.displayName==='Guest'){
+          startApp('Guest',null);
+        }
+      }
     }
   });
 }
@@ -1675,10 +1687,7 @@ function initAuth(){
 function signInWithGoogle(){
   if(!FB.ready){toast('Firebase not available');return;}
   const provider=new firebase.auth.GoogleAuthProvider();
-  FB.auth.signInWithPopup(provider).catch(e=>{
-    // Popup blocked on mobile — try redirect
-    FB.auth.signInWithRedirect(provider);
-  });
+  FB.auth.signInWithRedirect(provider);
 }
 
 /* ── Handle redirect result on load ── */
@@ -1835,11 +1844,20 @@ function startApp(displayName,email){
 handleRedirectResult();
 initAuth();
 
-// Auto-start if previously used as Guest (no Firebase user)
-if(DB.meta.displayName&&!FB.ready){
+// Show loading state on auth screen while Firebase checks
+if(FB.ready){
+  // Firebase is checking auth state - show loading briefly
+  const authScreen=document.getElementById('auth-screen');
+  const skipBtn=document.getElementById('auth-skip');
+  if(skipBtn)skipBtn.textContent='Checking...';
+  setTimeout(()=>{
+    // If still on auth screen after 3s, user is not signed in
+    if(authScreen&&authScreen.style.display!=='none'){
+      if(skipBtn)skipBtn.textContent='Continue without account';
+    }
+  },3000);
+} else if(DB.meta.displayName){
   startApp(DB.meta.displayName,DB.meta.email);
-} else if(DB.meta.displayName==='Guest'){
-  startApp('Guest',null);
 }
 
 
