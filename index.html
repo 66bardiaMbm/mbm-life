@@ -421,6 +421,35 @@ textarea.finput{resize:vertical;min-height:80px}
 .sync-bar.syncing{background:rgba(110,86,248,.15);color:var(--brand2)}
 .sync-bar.error{background:rgba(244,63,94,.15);color:var(--danger)}
 
+/* ── Update banner ── */
+#update-banner{position:fixed;top:0;left:0;right:0;z-index:300;
+  max-width:480px;margin:0 auto;
+  padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;
+  animation:ubDrop .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes ubDrop{from{transform:translateY(-120%);opacity:0}to{transform:translateY(0);opacity:1}}
+#update-banner.out{animation:ubUp .3s ease forwards}
+@keyframes ubUp{to{transform:translateY(-120%);opacity:0}}
+.ub-inner{display:flex;align-items:center;gap:12px;
+  background:linear-gradient(135deg,rgba(28,28,40,.98),rgba(20,20,30,.98));
+  border:1px solid rgba(110,86,248,.5);border-radius:16px;
+  padding:12px 14px;box-shadow:0 10px 34px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.03) inset;
+  backdrop-filter:blur(12px)}
+.ub-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--brand);
+  box-shadow:0 0 0 4px rgba(110,86,248,.18);animation:ubPulse 1.8s infinite}
+@keyframes ubPulse{0%,100%{box-shadow:0 0 0 4px rgba(110,86,248,.18)}50%{box-shadow:0 0 0 7px rgba(110,86,248,.05)}}
+.ub-text{flex:1;min-width:0}
+.ub-title{font-size:14px;font-weight:800;color:#fff;line-height:1.2}
+.ub-sub{font-size:11.5px;color:rgba(255,255,255,.55);margin-top:2px;line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ub-actions{flex:none;display:flex;align-items:center;gap:6px}
+.ub-later{background:transparent;border:none;color:rgba(255,255,255,.6);
+  font-size:13px;font-weight:600;padding:8px 10px;border-radius:10px;cursor:pointer}
+.ub-later:active{background:rgba(255,255,255,.08)}
+.ub-update{background:var(--brand);border:none;color:#fff;
+  font-size:13px;font-weight:800;padding:8px 14px;border-radius:10px;cursor:pointer;
+  box-shadow:0 4px 14px rgba(110,86,248,.4);white-space:nowrap}
+.ub-update:active{transform:scale(.96)}
+
 #toast{position:fixed;bottom:calc(90px + 12px);left:50%;
   transform:translateX(-50%) translateY(20px);
   background:var(--s2);border:1px solid var(--b2);border-radius:12px;
@@ -464,6 +493,19 @@ textarea.finput{resize:vertical;min-height:80px}
 </div>
 
 <div id="sync-badge"><div id="sync-bar" style="display:none" class="sync-bar"></div></div>
+<div id="update-banner" style="display:none">
+  <div class="ub-inner">
+    <div class="ub-dot"></div>
+    <div class="ub-text">
+      <div class="ub-title" id="ub-title">New version available</div>
+      <div class="ub-sub" id="ub-sub">A newer version of MBM Life is ready.</div>
+    </div>
+    <div class="ub-actions">
+      <button class="ub-later" id="ub-later">Later</button>
+      <button class="ub-update" id="ub-update">Update now</button>
+    </div>
+  </div>
+</div>
 
 <div id="app" style="display:none">
   <div id="screen"></div>
@@ -513,7 +555,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v85';
+const APP_VERSION='v87';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -524,7 +566,7 @@ const KEY='mbmlife_platform_v1';
 function blankDB(){
   return {
     schema:SCHEMA,
-    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null},
+    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null},
     entities:{
       tasks:{},     // {id,text,listId,dueDate,dueTime,priority,repeat,
                     //  assigneeId,creatorId,status,pinned,done,doneAt,
@@ -641,6 +683,12 @@ const I18N={
     offline:'Offline',synced:'Synced',syncing:'Syncing…',
     appts:'Appointments',newAppt:'New Appointment',apptTitle:'Title',
     apptDate:'Date',apptTime:'Time',apptLocation:'Location',apptNotes:'Notes',
+    account:'Account',profilePhoto:'Profile photo',displayName:'Display name',email:'Email',
+    loginMethod:'Login method',accountStatus:'Status',
+    providerGoogle:'Google',providerEmail:'Email',providerGuest:'Guest',
+    statusSignedIn:'Signed in',statusGuest:'Guest mode',
+    changePhoto:'Change photo',uploadPhoto:'Upload a photo',chooseAvatar:'Choose an avatar',
+    removePhoto:'Remove photo',checkUpdate:'Check for updates',
     noAppts:'No appointments yet.'},
   fa:{today:'امروز',lists:'لیست‌ها',calendar:'تقویم',people:'افراد',more:'بیشتر',
     noTasks:'هنوز چیزی نیست.',addTask:'کار جدید',tasks:'کارها',important:'مهم',
@@ -657,6 +705,12 @@ const I18N={
     offline:'آفلاین',synced:'همگام‌سازی شد',syncing:'در حال همگام‌سازی…',
     appts:'قرار ملاقات‌ها',newAppt:'قرار جدید',apptTitle:'عنوان',
     apptDate:'تاریخ',apptTime:'ساعت',apptLocation:'مکان',apptNotes:'یادداشت',
+    account:'حساب کاربری',profilePhoto:'عکس پروفایل',displayName:'نام نمایشی',email:'ایمیل',
+    loginMethod:'روش ورود',accountStatus:'وضعیت',
+    providerGoogle:'گوگل',providerEmail:'ایمیل',providerGuest:'مهمان',
+    statusSignedIn:'وارد شده',statusGuest:'حالت مهمان',
+    changePhoto:'تغییر عکس',uploadPhoto:'آپلود عکس',chooseAvatar:'انتخاب آواتار',
+    removePhoto:'حذف عکس',checkUpdate:'بررسی به‌روزرسانی',
     noAppts:'هنوز قراری ثبت نشده.'},
 };
 function tr(k){return (I18N[L]||I18N.en)[k]||k;}
@@ -962,21 +1016,77 @@ function taskRowFlat(t,isOverdue){
    SEARCH ENGINE
    ══════════════════════════════════════════ */
 /* ══════════════════════════════════════════
-   MORE / SETTINGS SCREEN
+   MORE / ACCOUNT SCREEN
    ══════════════════════════════════════════ */
+/* Built-in offline avatars: emoji + gradient background (no external files) */
+const AVATARS=[
+  {id:'a1',emoji:'🦊',bg:'linear-gradient(135deg,#6d5efc,#a78bfa)'},
+  {id:'a2',emoji:'🐼',bg:'linear-gradient(135deg,#22d3ee,#0ea5e9)'},
+  {id:'a3',emoji:'🦁',bg:'linear-gradient(135deg,#f59e0b,#ef4444)'},
+  {id:'a4',emoji:'🐧',bg:'linear-gradient(135deg,#334155,#64748b)'},
+  {id:'a5',emoji:'🐸',bg:'linear-gradient(135deg,#22c55e,#16a34a)'},
+  {id:'a6',emoji:'🦉',bg:'linear-gradient(135deg,#a16207,#ca8a04)'},
+  {id:'a7',emoji:'🐙',bg:'linear-gradient(135deg,#ec4899,#db2777)'},
+  {id:'a8',emoji:'🦄',bg:'linear-gradient(135deg,#8b5cf6,#ec4899)'},
+  {id:'a9',emoji:'🐝',bg:'linear-gradient(135deg,#eab308,#f59e0b)'},
+  {id:'a10',emoji:'🐬',bg:'linear-gradient(135deg,#0ea5e9,#6366f1)'},
+  {id:'a11',emoji:'🌸',bg:'linear-gradient(135deg,#f472b6,#fb7185)'},
+  {id:'a12',emoji:'🚀',bg:'linear-gradient(135deg,#6366f1,#06b6d4)'}
+];
+function avatarById(id){return AVATARS.find(a=>a.id===id)||null;}
+/* Returns inner HTML for an avatar circle given user meta; size in px */
+function avatarInner(user,size){
+  if(user.photo){
+    return `<img src="${user.photo}" alt="" style="width:100%;height:100%;object-fit:cover;display:block">`;
+  }
+  const av=avatarById(user.avatar);
+  if(av){
+    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${av.bg};font-size:${Math.round(size*0.5)}px">${av.emoji}</div>`;
+  }
+  if(user.photoURL){
+    return `<img src="${user.photoURL}" alt="" referrerpolicy="no-referrer" style="width:100%;height:100%;object-fit:cover;display:block">`;
+  }
+  const initial=(user.displayName||'?').slice(0,1).toUpperCase();
+  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--brandg);color:#fff;font-weight:800;font-size:${Math.round(size*0.42)}px">${esc(initial)}</div>`;
+}
+
 function renderMore(){
   const user=DB.meta;
-  const initial=(user.displayName||'?').slice(0,1).toUpperCase();
   const isGuest=!user.email;
-  const subtitle=user.email?esc(user.email):(L==='fa'?'حالت مهمان · وارد نشده':'Guest mode · not signed in');
+  const provider=isGuest?'guest':(user.provider||'google');
+  const providerLabel=provider==='google'?tr('providerGoogle'):provider==='email'?tr('providerEmail'):tr('providerGuest');
+  const statusLabel=isGuest?tr('statusGuest'):tr('statusSignedIn');
+  const hasCustom=!!(user.photo||user.avatar);
   return `
-    <div style="display:flex;align-items:center;gap:14px;padding:20px 20px 16px">
-      <div class="lists-hub-avatar">${initial}</div>
-      <div>
-        <div style="font-size:17px;font-weight:700">${esc(user.displayName||'Guest')}</div>
-        <div style="font-size:13px;color:var(--ink3);margin-top:2px">${subtitle}</div>
+    <div class="hub-sec-label">${tr('account')}</div>
+    <div style="display:flex;flex-direction:column;align-items:center;padding:8px 20px 18px">
+      <div id="acct-photo" data-action="change-photo" style="width:96px;height:96px;border-radius:50%;overflow:hidden;cursor:pointer;position:relative;border:2px solid var(--b2);box-shadow:0 6px 20px rgba(0,0,0,.35)">
+        ${avatarInner(user,96)}
+        <div style="position:absolute;right:-2px;bottom:-2px;width:32px;height:32px;border-radius:50%;background:var(--brand);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:15px">✏️</div>
+      </div>
+      <div style="font-size:19px;font-weight:800;margin-top:14px">${esc(user.displayName||'Guest')}</div>
+      <div style="font-size:13px;color:var(--ink3);margin-top:3px">${isGuest?tr('statusGuest'):esc(user.email)}</div>
+    </div>
+
+    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+      <div class="ul-row" style="padding:0 16px;cursor:default">
+        <span class="ul-name">${tr('displayName')}</span>
+        <span class="ul-count">${esc(user.displayName||'Guest')}</span>
+      </div>
+      <div class="ul-row" style="padding:0 16px;cursor:default">
+        <span class="ul-name">${tr('email')}</span>
+        <span class="ul-count">${isGuest?'—':esc(user.email)}</span>
+      </div>
+      <div class="ul-row" style="padding:0 16px;cursor:default">
+        <span class="ul-name">${tr('loginMethod')}</span>
+        <span class="ul-count">${providerLabel}</span>
+      </div>
+      <div class="ul-row" style="padding:0 16px;cursor:default">
+        <span class="ul-name">${tr('accountStatus')}</span>
+        <span class="ul-count">${statusLabel}</span>
       </div>
     </div>
+
     <div class="hub-sec-label">${tr('settings')}</div>
     <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
       <div class="ul-row" data-action="toggle-lang" style="padding:0 16px">
@@ -990,6 +1100,7 @@ function renderMore(){
         <span class="ul-count">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}</span>
       </div>
     </div>
+
     <div class="hub-sec-label">${tr('about')}</div>
     <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
       <div class="ul-row" style="padding:0 16px;cursor:default">
@@ -997,8 +1108,14 @@ function renderMore(){
         <span class="ul-name">MBM Life</span>
         <span class="ul-count">${APP_VERSION}</span>
       </div>
+      <div class="ul-row" data-action="check-update" style="padding:0 16px">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#8635;</div></div>
+        <span class="ul-name">${tr('checkUpdate')}</span>
+      </div>
     </div>
-    <div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">${user.email?tr('signOut'):tr('exitGuest')}</button></div>`;
+
+    <div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">${user.email?tr('signOut'):tr('exitGuest')}</button></div>
+    <input type="file" id="acct-file" accept="image/*" style="display:none">`;
 }
 /* ══════════════════════════════════════════
    LIST MANAGEMENT
@@ -1785,8 +1902,16 @@ function bindScreen(){
     const a=el.dataset.action;
     if(a==='toggle-lang'){DB.meta.lang=L==='en'?'fa':'en';saveDB();render();}
     else if(a==='toggle-theme'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();render();}
+    else if(a==='change-photo'){openPhotoSheet();}
+    else if(a==='check-update'){manualCheckForUpdate();}
     else if(a==='sign-out'){doSignOut();}
   });
+  const acctFile=document.getElementById('acct-file');
+  if(acctFile)acctFile.onchange=e=>{
+    const f=e.target.files&&e.target.files[0];
+    if(f)setPhotoFromFile(f);
+    e.target.value='';
+  };
 }
 
 /* ══════════════════════════════════════════
@@ -1831,8 +1956,10 @@ function initAuth(){
       DB.meta.displayName=user.displayName||user.email||'User';
       DB.meta.email=user.email||null;
       DB.meta.photoURL=user.photoURL||null;
+      DB.meta.provider='google';
       saveDB();
       startListeners();
+      pullProfile();
       const as=document.getElementById('auth-screen');
       if(as&&as.style.display!=='none'){
         as.style.display='none';
@@ -1914,6 +2041,9 @@ function doSignOut(){
   DB.meta.displayName=null;
   DB.meta.email=null;
   DB.meta.photoURL=null;
+  DB.meta.photo=null;
+  DB.meta.avatar=null;
+  DB.meta.provider=null;
   saveDB();
   FB.user=null;
   const finish=()=>showAuthScreen();
@@ -1963,6 +2093,115 @@ function syncPush(){
   Object.values(DB.entities.lists||{}).forEach(l=>batch.set(col('lists').doc(l.id),l));
   Object.values(DB.entities.appts||{}).forEach(a=>batch.set(col('appts').doc(a.id),a));
   batch.commit().catch(()=>{});
+}
+
+/* ── Profile sync (name + photo/avatar) — separate doc, small payload ── */
+function pushProfile(){
+  if(!FB.ready||!FB.user)return;
+  const ws=wsId(FB.user.uid);
+  const data={
+    displayName:DB.meta.displayName||null,
+    photo:DB.meta.photo||null,
+    avatar:DB.meta.avatar||null,
+    _savedAt:new Date().toISOString()
+  };
+  FB.db.collection('workspaces').doc(ws).collection('profile').doc('main')
+    .set(data,{merge:true}).catch(()=>{});
+}
+function pullProfile(){
+  if(!FB.ready||!FB.user)return;
+  const ws=wsId(FB.user.uid);
+  FB.db.collection('workspaces').doc(ws).collection('profile').doc('main')
+    .onSnapshot(snap=>{
+      if(!snap.exists)return;
+      const d=snap.data()||{};
+      let changed=false;
+      if('photo' in d && d.photo!==DB.meta.photo){DB.meta.photo=d.photo||null;changed=true;}
+      if('avatar' in d && d.avatar!==DB.meta.avatar){DB.meta.avatar=d.avatar||null;changed=true;}
+      if(d.displayName && d.displayName!==DB.meta.displayName){DB.meta.displayName=d.displayName;changed=true;}
+      if(changed){
+        try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}
+        render();
+      }
+    },()=>{});
+}
+
+/* ── Profile photo: compress, set, choose avatar, remove ── */
+function compressImage(file,cb){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const max=256;
+      let w=img.width,h=img.height;
+      if(w>h){if(w>max){h=Math.round(h*max/w);w=max;}}
+      else{if(h>max){w=Math.round(w*max/h);h=max;}}
+      const cv=document.createElement('canvas');
+      cv.width=w;cv.height=h;
+      const ctx=cv.getContext('2d');
+      ctx.drawImage(img,0,0,w,h);
+      let q=0.7,out=cv.toDataURL('image/jpeg',q);
+      // Keep well under Firestore 1MB doc limit; target < ~120KB
+      while(out.length>120000&&q>0.4){q-=0.1;out=cv.toDataURL('image/jpeg',q);}
+      cb(out);
+    };
+    img.onerror=()=>cb(null);
+    img.src=e.target.result;
+  };
+  reader.onerror=()=>cb(null);
+  reader.readAsDataURL(file);
+}
+function setPhotoFromFile(file){
+  if(!file)return;
+  compressImage(file,dataUrl=>{
+    if(!dataUrl){toast(L==='fa'?'خطا در پردازش عکس':'Could not process image');return;}
+    DB.meta.photo=dataUrl;
+    DB.meta.avatar=null;
+    saveDB();
+    pushProfile();
+    closeSheet();
+    render();
+  });
+}
+function setAvatar(id){
+  DB.meta.avatar=id;
+  DB.meta.photo=null;
+  saveDB();
+  pushProfile();
+  closeSheet();
+  render();
+}
+function removeProfilePhoto(){
+  DB.meta.photo=null;
+  DB.meta.avatar=null;
+  saveDB();
+  pushProfile();
+  closeSheet();
+  render();
+}
+function openPhotoSheet(){
+  const hasCustom=!!(DB.meta.photo||DB.meta.avatar);
+  const avGrid=AVATARS.map(a=>
+    `<div data-av="${a.id}" style="width:56px;height:56px;border-radius:50%;background:${a.bg};display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;border:2px solid ${DB.meta.avatar===a.id?'var(--brand)':'transparent'}">${a.emoji}</div>`
+  ).join('');
+  openSheet(`
+    <div style="padding:8px 16px 4px;font-size:17px;font-weight:800">${tr('changePhoto')}</div>
+    <div style="padding:8px 14px">
+      <button class="sheet-cancel" id="pp-upload" style="margin:0 0 8px;border-radius:var(--r)">📷 ${tr('uploadPhoto')}</button>
+    </div>
+    <div style="padding:4px 16px 6px;font-size:13px;color:var(--ink3)">${tr('chooseAvatar')}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;padding:6px 16px 14px">${avGrid}</div>
+    ${hasCustom?`<div style="padding:0 14px"><button class="sheet-cancel" id="pp-remove" style="margin:0 0 8px;border-radius:var(--r);color:var(--danger)">🗑 ${tr('removePhoto')}</button></div>`:''}
+    <button class="sheet-cancel">${tr('cancel')}</button>`);
+  document.querySelectorAll('.sheet-cancel').forEach(b=>{if(!b.id)b.onclick=()=>closeSheet();});
+  const up=document.getElementById('pp-upload');
+  if(up)up.onclick=()=>{
+    const inp=document.getElementById('acct-file');
+    if(inp)inp.click();
+  };
+  const rm=document.getElementById('pp-remove');
+  if(rm)rm.onclick=()=>removeProfilePhoto();
+  document.querySelectorAll('[data-av]').forEach(el=>el.onclick=()=>setAvatar(el.dataset.av));
 }
 
 /* ══════════════════════════════════════════
@@ -2082,27 +2321,92 @@ function attachLocationAutocomplete(inputEl,onSelect){
 }
 
 /* ── Auto update check ── */
+const UPD_DISMISS_KEY='mbmlife_update_dismissed';
+let _latestRemoteVer=null;
+
+async function fetchRemoteVersion(){
+  const base=location.href.split('?')[0].split('#')[0];
+  const res=await fetch(base+'?_='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache'}});
+  if(!res.ok)return null;
+  const text=await res.text();
+  const match=text.match(/APP_VERSION='([^']+)'/);
+  return match&&match[1]?match[1]:null;
+}
+
+function showUpdateBanner(ver){
+  _latestRemoteVer=ver;
+  const banner=document.getElementById('update-banner');
+  if(!banner)return;
+  const title=document.getElementById('ub-title');
+  const sub=document.getElementById('ub-sub');
+  const later=document.getElementById('ub-later');
+  const update=document.getElementById('ub-update');
+  if(title)title.textContent=(L==='fa'?'نسخه جدید موجود است':'New version available');
+  if(sub)sub.textContent=(L==='fa'?('نسخه '+ver+' آماده نصب است.'):('Version '+ver+' is ready to install.'));
+  if(later)later.textContent=(L==='fa'?'بعداً':'Later');
+  if(update)update.textContent=(L==='fa'?'به‌روزرسانی':'Update now');
+  banner.classList.remove('out');
+  banner.style.display='block';
+}
+
+function hideUpdateBanner(){
+  const banner=document.getElementById('update-banner');
+  if(!banner)return;
+  banner.classList.add('out');
+  setTimeout(()=>{banner.style.display='none';banner.classList.remove('out');},300);
+}
+
+function dismissUpdate(){
+  if(_latestRemoteVer){
+    try{localStorage.setItem(UPD_DISMISS_KEY,_latestRemoteVer);}catch(e){}
+  }
+  hideUpdateBanner();
+}
+
+function applyUpdate(){
+  const update=document.getElementById('ub-update');
+  if(update)update.textContent=(L==='fa'?'در حال نصب...':'Updating...');
+  // Clear dismissed marker so the new version is treated as current after reload
+  try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
+  const reload=()=>{
+    const base=location.href.split('?')[0].split('#')[0];
+    location.replace(base+'?v='+Date.now());
+  };
+  if('caches' in window){
+    caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(reload).catch(reload);
+  }else{
+    reload();
+  }
+}
+
+// Automatic background check
 async function checkForUpdate(){
   try{
-    const base=location.href.split('?')[0].split('#')[0];
-    const res=await fetch(base+'?_='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache'}});
-    if(!res.ok)return;
-    const text=await res.text();
-    const match=text.match(/APP_VERSION='([^']+)'/);
-    if(match&&match[1]&&match[1]!==APP_VERSION){
-      const bar=document.getElementById('sync-bar');
-      if(bar){
-        bar.style.cssText='display:block;cursor:pointer;font-size:13px;font-weight:700;padding:10px 16px;text-align:center;background:rgba(110,86,248,.95);color:#fff;position:fixed;top:0;left:0;right:0;max-width:480px;margin:0 auto;z-index:200;box-shadow:0 2px 12px rgba(0,0,0,.4)';
-        bar.textContent=(L==='fa'?'🔄 نسخه جدید موجود است — لمس کنید':'🔄 New version available — tap to update');
-        bar.onclick=()=>{
-          bar.textContent=L==='fa'?'در حال آپدیت...':'Updating...';
-          if('caches' in window){
-            caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(()=>location.reload(true));
-          }else{location.reload(true);}
-        };
-      }
-    }
+    const ver=await fetchRemoteVersion();
+    if(!ver||ver===APP_VERSION)return;
+    let dismissed=null;
+    try{dismissed=localStorage.getItem(UPD_DISMISS_KEY);}catch(e){}
+    // Only show if this exact newer version hasn't been dismissed
+    if(dismissed===ver)return;
+    showUpdateBanner(ver);
   }catch(e){}
+}
+
+// Manual check from More > About
+async function manualCheckForUpdate(){
+  toast(L==='fa'?'در حال بررسی...':'Checking…',1500);
+  try{
+    const ver=await fetchRemoteVersion();
+    if(ver&&ver!==APP_VERSION){
+      // Manual check overrides a prior dismissal for this version
+      try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
+      showUpdateBanner(ver);
+    }else{
+      toast(L==='fa'?'برنامه به‌روز است ✓':'You’re up to date ✓');
+    }
+  }catch(e){
+    toast(L==='fa'?'بررسی ناموفق بود':'Check failed');
+  }
 }
 
 /* ══════════════════════════════════════════
@@ -2111,6 +2415,13 @@ async function checkForUpdate(){
 // Auth screen
 document.getElementById('auth-google').onclick=()=>signInWithGoogle();
 document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
+// Update banner buttons
+(function(){
+  const later=document.getElementById('ub-later');
+  const update=document.getElementById('ub-update');
+  if(later)later.onclick=dismissUpdate;
+  if(update)update.onclick=applyUpdate;
+})();
 // Show version on auth screen
 (function(){var v=document.getElementById('auth-ver');if(v)v.textContent=APP_VERSION;})();
 
