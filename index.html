@@ -586,7 +586,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v92';
+const APP_VERSION='v93';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -987,7 +987,7 @@ function renderListDetail(){
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
         <div class="ld-actions">
-          ${activeListId?'<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">&#8942;</button>':''}
+          ${(activeListId||activeSmartView)?'<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">&#8942;</button>':''}
         </div>
       </div>
       <div class="ld-title-area">
@@ -1245,18 +1245,43 @@ function closeCtxMenu(){
   if(m)setTimeout(()=>{if(m&&!m.classList.contains('on'))m.style.display='none';},160);
 }
 
+function _showCtxMenu(innerHTML,anchorEl,bindFn){
+  const menu=document.getElementById('ctxmenu');
+  const bg=document.getElementById('ctxmenu-bg');
+  if(!menu||!bg)return;
+  menu.innerHTML=innerHTML;
+  menu.style.display='block';
+  menu.style.visibility='hidden';
+  menu.classList.remove('on');
+  const pad=8;
+  const vw=window.innerWidth, vh=window.innerHeight;
+  const mw=menu.offsetWidth||260, mh=menu.offsetHeight||320;
+  let top=pad+44, left=vw-mw-pad;
+  if(anchorEl&&anchorEl.getBoundingClientRect){
+    const r=anchorEl.getBoundingClientRect();
+    top=r.bottom+6;
+    left=r.right-mw;
+    if(left<pad)left=pad;
+    if(left+mw>vw-pad)left=vw-mw-pad;
+    if(top+mh>vh-pad){top=r.top-mh-6;if(top<pad)top=pad;}
+  }
+  menu.style.top=top+'px';
+  menu.style.left=left+'px';
+  menu.style.visibility='visible';
+  bg.style.display='block';
+  bg.classList.add('on');
+  requestAnimationFrame(()=>menu.classList.add('on'));
+  bg.onclick=closeCtxMenu;
+  if(bindFn)bindFn(menu);
+}
+
 function openListMenu(listId,anchorEl){
   const l=(DB.entities.lists||{})[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||listId;
   const curSort=l.sortBy||'smart';
   const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
   const sugOn=l.suggestions!==false;
-
-  const menu=document.getElementById('ctxmenu');
-  const bg=document.getElementById('ctxmenu-bg');
-  if(!menu||!bg)return;
-
-  menu.innerHTML=`
+  const html=`
     ${_cmiRow('rename',L==='fa'?'تغییر نام':'Rename list','rename')}
     ${_cmiRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort',{value:sortLabels[curSort]||curSort})}
     ${_cmiRow('reorder',L==='fa'?'مرتب کردن':'Reorder tasks','reorder')}
@@ -1269,53 +1294,40 @@ function openListMenu(listId,anchorEl){
     ${_cmiRow('delete',L==='fa'?'حذف لیست':'Delete list','delete',{danger:true})}
     ${_cmiRow('suggest',(sugOn?(L==='fa'?'خاموش کردن پیشنهادات':'Turn off suggestions'):(L==='fa'?'روشن کردن پیشنهادات':'Turn on suggestions')),'suggestions')}
   `;
+  _showCtxMenu(html,anchorEl,menu=>{
+    menu.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
+      const a=b.dataset.lma;
+      closeCtxMenu();
+      if(a==='sort'){_openSortSheet(listId,curSort,sortLabels);}
+      else if(a==='reorder'){toast(L==='fa'?'مرتب‌سازی دستی به‌زودی':'Manual reorder coming soon');}
+      else if(a==='shortcut'){_addShortcut(listId);}
+      else if(a==='theme'){_openThemeSheet(listId);}
+      else if(a==='share'){_shareList(listId);}
+      else if(a==='duplicate'){_duplicateList(listId);}
+      else if(a==='print'){_printList(listId);}
+      else if(a==='suggestions'){l.suggestions=!sugOn;l.updatedAt=now();saveDB();toast(name+': '+(l.suggestions?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')));}
+      else if(a==='rename'){_openRenameSheet(listId);}
+      else if(a==='delete'){_deleteList(listId);}
+    });
+  });
+}
 
-  // Show first (display:block) so we can measure, then position
-  menu.style.display='block';
-  menu.style.visibility='hidden';
-  menu.classList.remove('on');
-
-  // Position anchored to the three-dot button
-  const pad=8;
-  const vw=window.innerWidth, vh=window.innerHeight;
-  const mw=menu.offsetWidth||260, mh=menu.offsetHeight||320;
-  let top=pad+44, left=vw-mw-pad; // sensible default: top-right
-  if(anchorEl&&anchorEl.getBoundingClientRect){
-    const r=anchorEl.getBoundingClientRect();
-    // Prefer below the button, right-aligned to it
-    top=r.bottom+6;
-    left=r.right-mw;
-    if(left<pad)left=pad;
-    if(left+mw>vw-pad)left=vw-mw-pad;
-    // If it would overflow bottom, open upward from the button
-    if(top+mh>vh-pad){
-      top=r.top-mh-6;
-      if(top<pad)top=pad;
-    }
-  }
-  menu.style.top=top+'px';
-  menu.style.left=left+'px';
-  menu.style.visibility='visible';
-
-  bg.style.display='block';
-  bg.classList.add('on');
-  requestAnimationFrame(()=>menu.classList.add('on'));
-
-  bg.onclick=closeCtxMenu;
-
-  menu.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
-    const a=b.dataset.lma;
-    closeCtxMenu();
-    if(a==='sort'){_openSortSheet(listId,curSort,sortLabels);}
-    else if(a==='reorder'){toast(L==='fa'?'مرتب‌سازی دستی به‌زودی':'Manual reorder coming soon');}
-    else if(a==='shortcut'){_addShortcut(listId);}
-    else if(a==='theme'){_openThemeSheet(listId);}
-    else if(a==='share'){_shareList(listId);}
-    else if(a==='duplicate'){_duplicateList(listId);}
-    else if(a==='print'){_printList(listId);}
-    else if(a==='suggestions'){l.suggestions=!sugOn;l.updatedAt=now();saveDB();toast(name+': '+(l.suggestions?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')));}
-    else if(a==='rename'){_openRenameSheet(listId);}
-    else if(a==='delete'){_deleteList(listId);}
+function openSmartMenu(sv,anchorEl){
+  const curSort='smart';
+  const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
+  const html=`
+    ${_cmiRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort')}
+    ${_cmiRow('reorder',L==='fa'?'مرتب کردن':'Reorder tasks','reorder')}
+    ${_cmiRow('print',L==='fa'?'چاپ':'Print list','print')}
+  `;
+  _showCtxMenu(html,anchorEl,menu=>{
+    menu.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
+      const a=b.dataset.lma;
+      closeCtxMenu();
+      if(a==='sort'){toast(L==='fa'?'مرتب‌سازی این نما به‌زودی':'Sort for this view coming soon');}
+      else if(a==='reorder'){toast(L==='fa'?'مرتب‌سازی دستی به‌زودی':'Manual reorder coming soon');}
+      else if(a==='print'){_printSmart(sv);}
+    });
   });
 }
 
@@ -1412,6 +1424,26 @@ function _duplicateList(listId){
   activeTasks().filter(t=>t.listId===listId).forEach(t=>{
     const nid=uid();DB.entities.tasks[nid]=Object.assign({},t,{id:nid,listId:newId,done:false,doneAt:null,createdAt:now(),updatedAt:now()});});
   saveDB();render();toast(L==='fa'?'لیست کپی شد':'Duplicated');
+}
+
+function _printSmart(sv){
+  const svMap={myday:tr('myday'),important:tr('important'),planned:tr('planned'),all:tr('allTasks')};
+  const name=svMap[sv]||'';
+  const ts=todayStr();
+  let tasks=activeTasks();
+  if(sv==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+  else if(sv==='important')tasks=tasks.filter(t=>t.pinned);
+  else if(sv==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
+  const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
+  const w=window.open('','_blank');if(!w){toast(L==='fa'?'پنجره چاپ مسدود شد':'Print window blocked');return;}
+  w.document.write(`<!DOCTYPE html><html><head><title>${name}</title>
+    <style>body{font-family:sans-serif;max-width:600px;margin:48px auto;font-size:15px}
+    h1{font-size:22px;margin-bottom:16px}ul{list-style:none;padding:0}
+    li{padding:8px 0;border-bottom:1px solid #eee}
+    li.done{text-decoration:line-through;color:#999}</style></head><body>
+    <h1>${name}</h1><ul>${open.map(t=>`<li>${t.text}</li>`).join('')}</ul>
+    ${done.length?`<h3>Completed</h3><ul>${done.map(t=>`<li class="done">${t.text}</li>`).join('')}</ul>`:''}</body></html>`);
+  w.document.close();w.print();
 }
 
 function _printList(listId){
@@ -1987,7 +2019,11 @@ function bindScreen(){
   if(back)back.onclick=()=>{tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();};
   // List menu
   const lmb=document.getElementById('list-menu-btn');
-  if(lmb)lmb.onclick=(e)=>{e.stopPropagation();openListMenu(activeListId,lmb);};
+  if(lmb)lmb.onclick=(e)=>{
+    e.stopPropagation();
+    if(activeListId)openListMenu(activeListId,lmb);
+    else if(activeSmartView)openSmartMenu(activeSmartView,lmb);
+  };
   // New list
   const nlb=document.getElementById('btn-new-list');
   if(nlb)nlb.onclick=()=>openNewListSheet();
