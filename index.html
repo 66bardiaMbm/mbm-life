@@ -555,7 +555,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v87';
+const APP_VERSION='v88';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2365,18 +2365,34 @@ function dismissUpdate(){
 
 function applyUpdate(){
   const update=document.getElementById('ub-update');
-  if(update)update.textContent=(L==='fa'?'در حال نصب...':'Updating...');
-  // Clear dismissed marker so the new version is treated as current after reload
+  if(update){update.textContent=(L==='fa'?'در حال نصب...':'Updating...');update.disabled=true;}
+  const later=document.getElementById('ub-later');
+  if(later)later.style.display='none';
+  // Treat the new version as current after reload
   try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
+
   const reload=()=>{
     const base=location.href.split('?')[0].split('#')[0];
+    // Unique query defeats HTTP cache for the HTML document on GitHub Pages
     location.replace(base+'?v='+Date.now());
   };
+
+  // Run cleanup steps best-effort, then reload no matter what.
+  const tasks=[];
+  // 1) Clear Cache Storage (old PWA caches)
   if('caches' in window){
-    caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(reload).catch(reload);
-  }else{
-    reload();
+    tasks.push(caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).catch(()=>{}));
   }
+  // 2) Unregister any stale service workers that could serve old HTML
+  if('serviceWorker' in navigator){
+    tasks.push(navigator.serviceWorker.getRegistrations()
+      .then(regs=>Promise.all(regs.map(r=>r.unregister()))).catch(()=>{}));
+  }
+  // Safety: never let cleanup hang the update — reload after 1.5s regardless
+  let done=false;
+  const go=()=>{if(done)return;done=true;reload();};
+  Promise.all(tasks).then(go).catch(go);
+  setTimeout(go,1500);
 }
 
 // Automatic background check
@@ -2474,18 +2490,27 @@ document.getElementById('sheet-bg').onclick=closeSheet;
 
 // Task detail panel
 // Prevent Android back button from leaving app
+let _exitDialogOpen=false;
 window.addEventListener('popstate',()=>{
   if(document.getElementById('task-detail').classList.contains('on')){
     closeTaskDetail();render();
+    history.pushState(null,'',location.href);
   } else if(document.getElementById('search-screen').classList.contains('on')){
     closeSearch();
+    history.pushState(null,'',location.href);
   } else if(document.getElementById('sheet').classList.contains('on')){
+    // If the exit dialog itself is open, a back press just closes it
     closeSheet();
+    _exitDialogOpen=false;
+    history.pushState(null,'',location.href);
   } else if(tasksView==='detail'){
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
+    history.pushState(null,'',location.href);
   } else {
-    // Nothing to close — confirm exit
-    // Show in-app exit confirmation instead of browser confirm
+    // Nothing to close — show in-app exit confirmation
+    history.pushState(null,'',location.href);
+    if(_exitDialogOpen)return;
+    _exitDialogOpen=true;
     openSheet(`<div style="padding:8px 0 0">
       <div style="padding:16px 20px 8px;font-size:18px;font-weight:700">${L==='fa'?'خروج از اپ؟':'Exit MBM Life?'}</div>
       <div style="padding:0 20px 16px;font-size:14px;color:var(--ink2)">${L==='fa'?'مطمئنی می‌خوای بری؟':'Are you sure you want to exit?'}</div>
@@ -2494,10 +2519,15 @@ window.addEventListener('popstate',()=>{
         <button class="btn btn-danger" id="exit-ok" style="flex:1">${L==='fa'?'خروج':'Exit'}</button>
       </div>
     </div>`);
-    document.getElementById('exit-cancel').onclick=closeSheet;
-    document.getElementById('exit-ok').onclick=()=>{closeSheet();history.back();};
+    document.getElementById('exit-cancel').onclick=()=>{_exitDialogOpen=false;closeSheet();};
+    document.getElementById('exit-ok').onclick=()=>{
+      _exitDialogOpen=false;
+      closeSheet();
+      // Best-effort exit; PWAs usually can't close programmatically.
+      // Never freeze — if close() is blocked, the user simply stays in the app.
+      try{window.close();}catch(e){}
+    };
   }
-  history.pushState(null,'',location.href);
 });
 history.pushState(null,'',location.href);
 
