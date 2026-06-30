@@ -586,7 +586,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v90';
+const APP_VERSION='v91';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -720,6 +720,7 @@ const I18N={
     statusSignedIn:'Signed in',statusGuest:'Guest mode',
     changePhoto:'Change photo',uploadPhoto:'Upload a photo',chooseAvatar:'Choose an avatar',
     removePhoto:'Remove photo',checkUpdate:'Check for updates',
+    profile:'Profile',appearance:'Appearance',notifications:'Notifications',comingSoon:'Coming soon',back:'Back',
     noAppts:'No appointments yet.'},
   fa:{today:'امروز',lists:'لیست‌ها',calendar:'تقویم',people:'افراد',more:'بیشتر',
     noTasks:'هنوز چیزی نیست.',addTask:'کار جدید',tasks:'کارها',important:'مهم',
@@ -742,6 +743,7 @@ const I18N={
     statusSignedIn:'وارد شده',statusGuest:'حالت مهمان',
     changePhoto:'تغییر عکس',uploadPhoto:'آپلود عکس',chooseAvatar:'انتخاب آواتار',
     removePhoto:'حذف عکس',checkUpdate:'بررسی به‌روزرسانی',
+    profile:'پروفایل',appearance:'ظاهر',notifications:'اعلان‌ها',comingSoon:'به‌زودی',back:'بازگشت',
     noAppts:'هنوز قراری ثبت نشده.'},
 };
 function tr(k){return (I18N[L]||I18N.en)[k]||k;}
@@ -757,13 +759,14 @@ let searchQuery='';
 function render(){
   applyTheme();
   applyLang();
-  document.querySelectorAll('.nv').forEach(b=>b.classList.toggle('on',b.dataset.s===screen));
+  document.querySelectorAll('.nv').forEach(b=>b.classList.toggle('on',b.dataset.s===screen||(screen==='profile'&&b.dataset.s==='more')));
   const el=document.getElementById('screen');
   if(screen==='today')el.innerHTML=renderToday();
   else if(screen==='lists')el.innerHTML=renderLists();
   else if(screen==='appts')el.innerHTML=renderAppts();
   else if(screen==='search'){openSearch();screen='today';el.innerHTML=renderToday();}
   else if(screen==='more')el.innerHTML=renderMore();
+  else if(screen==='profile')el.innerHTML=renderProfile();
   bindScreen();
 }
 
@@ -1081,15 +1084,61 @@ function avatarInner(user,size){
   return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--brandg);color:#fff;font-weight:800;font-size:${Math.round(size*0.42)}px">${esc(initial)}</div>`;
 }
 
+function _hubRow(icon,label,action,opts={}){
+  const right=opts.value?`<span class="ul-count">${opts.value}</span>`:'<span class="ul-count" style="font-size:18px;opacity:.4">›</span>';
+  return `<div class="ul-row" data-hub="${action}" style="padding:0 16px">
+    <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${icon}</div></div>
+    <span class="ul-name">${label}</span>
+    ${right}
+  </div>`;
+}
+
 function renderMore(){
+  const user=DB.meta;
+  const isGuest=!user.email;
+  return `
+    <div class="hub-sec-label" style="margin-top:14px">${tr('account')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+      <div class="ul-row" data-hub="profile" style="padding:8px 16px">
+        <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none;margin-right:12px;border:1px solid var(--b2)">${avatarInner(user,44)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="ul-name" style="font-weight:700">${esc(user.displayName||'Guest')}</div>
+          <div style="font-size:12.5px;color:var(--ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isGuest?tr('statusGuest'):esc(user.email)}</div>
+        </div>
+        <span class="ul-count" style="font-size:18px;opacity:.4">›</span>
+      </div>
+    </div>
+
+    <div class="hub-sec-label">${tr('settings')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+      ${_hubRow('&#127760;',tr('language'),'language',{value:L==='fa'?'فارسی':'English'})}
+      ${_hubRow(DB.meta.theme==='dark'?'&#127769;':'&#9728;',tr('appearance'),'appearance',{value:DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')})}
+      ${_hubRow('&#128276;',tr('notifications'),'notifications')}
+    </div>
+
+    <div class="hub-sec-label">${tr('about')}</div>
+    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
+      <div class="ul-row" style="padding:0 16px;cursor:default">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:16px">i</div></div>
+        <span class="ul-name">MBM Life</span>
+        <span class="ul-count">${APP_VERSION}</span>
+      </div>
+      ${_hubRow('&#8635;',tr('checkUpdate'),'check-update')}
+    </div>`;
+}
+
+function renderProfile(){
   const user=DB.meta;
   const isGuest=!user.email;
   const provider=isGuest?'guest':(user.provider||'google');
   const providerLabel=provider==='google'?tr('providerGoogle'):provider==='email'?tr('providerEmail'):tr('providerGuest');
   const statusLabel=isGuest?tr('statusGuest'):tr('statusSignedIn');
-  const hasCustom=!!(user.photo||user.avatar);
   return `
-    <div class="hub-sec-label">${tr('account')}</div>
+    <div style="display:flex;align-items:center;gap:6px;padding:8px 4px 4px">
+      <button class="ld-action-btn" data-hub="back-more" aria-label="Back" style="font-size:22px">&#8592;</button>
+      <div style="font-size:20px;font-weight:800">${tr('profile')}</div>
+    </div>
+
     <div style="display:flex;flex-direction:column;align-items:center;padding:8px 20px 18px">
       <div id="acct-photo" data-action="change-photo" style="width:96px;height:96px;border-radius:50%;overflow:hidden;cursor:pointer;position:relative;border:2px solid var(--b2);box-shadow:0 6px 20px rgba(0,0,0,.35)">
         ${avatarInner(user,96)}
@@ -1115,33 +1164,6 @@ function renderMore(){
       <div class="ul-row" style="padding:0 16px;cursor:default">
         <span class="ul-name">${tr('accountStatus')}</span>
         <span class="ul-count">${statusLabel}</span>
-      </div>
-    </div>
-
-    <div class="hub-sec-label">${tr('settings')}</div>
-    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
-      <div class="ul-row" data-action="toggle-lang" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#127760;</div></div>
-        <span class="ul-name">${tr('language')}</span>
-        <span class="ul-count">${L==='fa'?'فارسی':'English'}</span>
-      </div>
-      <div class="ul-row" data-action="toggle-theme" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${DB.meta.theme==='dark'?'&#127769;':'&#9728;'}</div></div>
-        <span class="ul-name">${tr('theme')}</span>
-        <span class="ul-count">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}</span>
-      </div>
-    </div>
-
-    <div class="hub-sec-label">${tr('about')}</div>
-    <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
-      <div class="ul-row" style="padding:0 16px;cursor:default">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:16px">i</div></div>
-        <span class="ul-name">MBM Life</span>
-        <span class="ul-count">${APP_VERSION}</span>
-      </div>
-      <div class="ul-row" data-action="check-update" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#8635;</div></div>
-        <span class="ul-name">${tr('checkUpdate')}</span>
       </div>
     </div>
 
@@ -1998,6 +2020,15 @@ function bindScreen(){
     else if(a==='check-update'){manualCheckForUpdate();}
     else if(a==='sign-out'){doSignOut();}
   });
+  document.querySelectorAll('[data-hub]').forEach(el=>el.onclick=()=>{
+    const h=el.dataset.hub;
+    if(h==='profile'){screen='profile';render();window.scrollTo(0,0);}
+    else if(h==='back-more'){screen='more';render();window.scrollTo(0,0);}
+    else if(h==='language'){DB.meta.lang=L==='en'?'fa':'en';saveDB();render();}
+    else if(h==='appearance'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();render();}
+    else if(h==='notifications'){toast(tr('comingSoon'));}
+    else if(h==='check-update'){manualCheckForUpdate();}
+  });
   const acctFile=document.getElementById('acct-file');
   if(acctFile)acctFile.onchange=e=>{
     const f=e.target.files&&e.target.files[0];
@@ -2600,6 +2631,9 @@ window.addEventListener('popstate',()=>{
     history.pushState(null,'',location.href);
   } else if(tasksView==='detail'){
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
+    history.pushState(null,'',location.href);
+  } else if(screen==='profile'){
+    screen='more';render();
     history.pushState(null,'',location.href);
   } else {
     // Nothing to close — show in-app exit confirmation
