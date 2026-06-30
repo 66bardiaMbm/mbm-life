@@ -290,7 +290,7 @@ textarea.finput{resize:vertical;min-height:80px}
 .sac.sac-danger .sac-icon{color:var(--danger)}
 
 /* ── Floating anchored context menu (Microsoft To Do style) ── */
-#ctxmenu-bg{position:fixed;inset:0;z-index:260;display:none}
+#ctxmenu-bg{position:fixed;inset:0;z-index:260;display:none;background:rgba(0,0,0,.45)}
 #ctxmenu-bg.on{display:block}
 #ctxmenu{position:fixed;z-index:261;display:none;
   min-width:248px;max-width:300px;
@@ -317,6 +317,18 @@ textarea.finput{resize:vertical;min-height:80px}
 #ctxmenu .cmi.cmi-danger{color:var(--danger)}
 #ctxmenu .cmi.cmi-danger .cmi-ic{color:var(--danger)}
 #ctxmenu .cm-sep{height:1px;background:rgba(255,255,255,.07);margin:5px 8px}
+
+/* ── Reorder mode ── */
+.reorder-bar{display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;background:var(--brand);color:#fff;font-weight:700;font-size:14px}
+.reorder-bar button{background:rgba(255,255,255,.2);border:none;color:#fff;
+  font-weight:800;font-size:14px;padding:7px 16px;border-radius:10px;cursor:pointer}
+.trow-flat.reordering{padding-left:6px}
+.trow-handle{flex:none;width:34px;height:34px;display:flex;align-items:center;
+  justify-content:center;color:var(--ink3);font-size:20px;cursor:grab;touch-action:none}
+.trow-flat.drag-ghost{opacity:.4}
+.trow-flat.drag-active{background:var(--s3);box-shadow:0 8px 24px rgba(0,0,0,.5);
+  border-radius:10px;position:relative;z-index:5}
 
 /* Sub-sheet: radio check */
 .sac-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--b2);
@@ -586,7 +598,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v93';
+const APP_VERSION='v95';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -597,7 +609,7 @@ const KEY='mbmlife_platform_v1';
 function blankDB(){
   return {
     schema:SCHEMA,
-    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null},
+    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{}},
     entities:{
       tasks:{},     // {id,text,listId,dueDate,dueTime,priority,repeat,
                     //  assigneeId,creatorId,status,pinned,done,doneAt,
@@ -643,6 +655,9 @@ function loadDB(){
     // ensure all entity collections exist
     ['tasks','lists','people','events','expenses','notes','places']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
+    if(!d.meta)d.meta={};
+    if(!d.meta.viewSort)d.meta.viewSort={};
+    if(!d.meta.viewOrder)d.meta.viewOrder={};
     if(!Object.keys(d.entities.lists).length)seedDB(d);
     return d;
   }catch(e){return seedDB(blankDB());}
@@ -678,22 +693,80 @@ function active(type){
 }
 function activeTasks(){return active('tasks');}
 function activeTasksForList(listId){return activeTasks().filter(t=>t.listId===listId);}
-function smartSortTasks(tasks){
+/* ── Per-view sort & manual order architecture ──
+   viewKey: 'list:<id>' for real lists, 'smart:<sv>' for smart views.
+   DB.meta.viewSort[viewKey]  = 'smart'|'alpha'|'date'|'priority'|'manual'
+   DB.meta.viewOrder[viewKey] = [taskId, taskId, ...] (manual order)
+*/
+function viewKeyFor(){
+  if(activeListId)return 'list:'+activeListId;
+  if(activeSmartView)return 'smart:'+activeSmartView;
+  return 'today';
+}
+function getViewSort(viewKey){
+  return (DB.meta.viewSort&&DB.meta.viewSort[viewKey])||'smart';
+}
+function setViewSort(viewKey,mode){
+  if(!DB.meta.viewSort)DB.meta.viewSort={};
+  DB.meta.viewSort[viewKey]=mode;
+  saveDB();
+}
+function getViewOrder(viewKey){
+  return (DB.meta.viewOrder&&DB.meta.viewOrder[viewKey])||[];
+}
+function setViewOrder(viewKey,ids){
+  if(!DB.meta.viewOrder)DB.meta.viewOrder={};
+  DB.meta.viewOrder[viewKey]=ids;
+  saveDB();
+}
+
+function _cmpSmart(a,b){
+  if(a.pinned!==b.pinned)return a.pinned?-1:1;
+  const ts=todayStr();
+  const ao=a.dueDate&&a.dueDate<ts&&!a.done;
+  const bo=b.dueDate&&b.dueDate<ts&&!b.done;
+  if(ao!==bo)return ao?-1:1;
+  if(a.dueDate&&b.dueDate)return a.dueDate<b.dueDate?-1:1;
+  if(a.dueDate)return -1;if(b.dueDate)return 1;
+  const po={p1:0,p2:1,p3:2};
+  return (po[a.priority]||1)-(po[b.priority]||1);
+}
+function _cmpAlpha(a,b){return (a.text||'').localeCompare(b.text||'');}
+function _cmpDate(a,b){
+  if(a.dueDate&&b.dueDate)return a.dueDate<b.dueDate?-1:(a.dueDate>b.dueDate?1:0);
+  if(a.dueDate)return -1;if(b.dueDate)return 1;return 0;
+}
+function _cmpPriority(a,b){
+  const po={p1:0,p2:1,p3:2};
+  return (po[a.priority]||1)-(po[b.priority]||1);
+}
+
+// Sort a task array according to the view's selected mode.
+function sortTasksForView(tasks,viewKey){
+  const mode=getViewSort(viewKey);
+  if(mode==='manual'){
+    const order=getViewOrder(viewKey);
+    const idx=id=>{const i=order.indexOf(id);return i===-1?9999:i;};
+    return [...tasks].sort((a,b)=>{
+      if(a.done!==b.done)return a.done?1:-1;
+      const d=idx(a.id)-idx(b.id);
+      if(d!==0)return d;
+      return _cmpSmart(a,b); // stable fallback for items not yet ordered
+    });
+  }
+  let cmp=_cmpSmart;
+  if(mode==='alpha')cmp=_cmpAlpha;
+  else if(mode==='date')cmp=_cmpDate;
+  else if(mode==='priority')cmp=_cmpPriority;
   return [...tasks].sort((a,b)=>{
-    // pinned first
-    if(a.pinned!==b.pinned)return a.pinned?-1:1;
-    // overdue before future
-    const ts=todayStr();
-    const ao=a.dueDate&&a.dueDate<ts&&!a.done;
-    const bo=b.dueDate&&b.dueDate<ts&&!b.done;
-    if(ao!==bo)return ao?-1:1;
-    // by due date
-    if(a.dueDate&&b.dueDate)return a.dueDate<b.dueDate?-1:1;
-    if(a.dueDate)return -1;if(b.dueDate)return 1;
-    // priority
-    const po={p1:0,p2:1,p3:2};
-    return (po[a.priority]||1)-(po[b.priority]||1);
+    if(a.done!==b.done)return a.done?1:-1;
+    return cmp(a,b);
   });
+}
+
+// Backward-compatible helper used elsewhere (Today/search) → smart order.
+function smartSortTasks(tasks){
+  return [...tasks].sort(_cmpSmart);
 }
 
 /* ── Language ── */
@@ -950,6 +1023,7 @@ function renderLists(){
 
 /* collapsed state for done section in list detail */
 let doneCollapsed=true;
+let reorderMode=false;
 
 /* gradient bg per list */
 function listBgGradient(color){
@@ -977,9 +1051,37 @@ function renderListDetail(){
     tasks=tasks.filter(t=>t.listId===activeListId);
   }
 
-  tasks=smartSortTasks(tasks);
+  const _vk=viewKeyFor();
+  tasks=sortTasksForView(tasks,_vk);
   const openT=tasks.filter(t=>!t.done),doneT=tasks.filter(t=>t.done);
   const openCount=openT.length,doneCount=doneT.length;
+
+  // Reorder mode: only open tasks, ordered by current manual order, draggable
+  if(reorderMode){
+    const ordered=openT; // already in view order from sortTasksForView
+    return `
+    <div class="ld-bg">
+      <div class="ld-bg-layer" style="background:${bgGradient||'var(--s2)'}"></div>
+      <div class="ld-topbar">
+        <button class="ld-back" id="list-back">&#8249;</button>
+      </div>
+      <div class="ld-title-area">
+        <div class="ld-title">${esc(title)}</div>
+        <div class="ld-subtitle">${L==='fa'?'جابه‌جا کردن کارها':'Drag to reorder'}</div>
+      </div>
+    </div>
+    <div class="reorder-bar">
+      <span>${L==='fa'?'حالت مرتب‌سازی':'Reorder mode'}</span>
+      <button id="reorder-done">${L==='fa'?'تمام':'Done'}</button>
+    </div>
+    <div style="background:var(--s1);overflow:hidden" id="reorder-list">
+      ${ordered.map(t=>`
+        <div class="trow-flat reordering" data-tid="${t.id}" data-reorder="1">
+          <div class="trow-handle" data-handle="1">&#9776;</div>
+          <div class="trow-content"><div class="trow-title">${esc(t.text)}</div></div>
+        </div>`).join('')}
+    </div>`;
+  }
 
   return `
     <div class="ld-bg">
@@ -1278,8 +1380,9 @@ function _showCtxMenu(innerHTML,anchorEl,bindFn){
 function openListMenu(listId,anchorEl){
   const l=(DB.entities.lists||{})[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||listId;
-  const curSort=l.sortBy||'smart';
-  const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
+  const vk='list:'+listId;
+  const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority',manual:L==='fa'?'دستی':'Manual'};
+  const curSort=getViewSort(vk);
   const sugOn=l.suggestions!==false;
   const html=`
     ${_cmiRow('rename',L==='fa'?'تغییر نام':'Rename list','rename')}
@@ -1298,8 +1401,8 @@ function openListMenu(listId,anchorEl){
     menu.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
       const a=b.dataset.lma;
       closeCtxMenu();
-      if(a==='sort'){_openSortSheet(listId,curSort,sortLabels);}
-      else if(a==='reorder'){toast(L==='fa'?'مرتب‌سازی دستی به‌زودی':'Manual reorder coming soon');}
+      if(a==='sort'){_openViewSortSheet(vk);}
+      else if(a==='reorder'){enterReorder();}
       else if(a==='shortcut'){_addShortcut(listId);}
       else if(a==='theme'){_openThemeSheet(listId);}
       else if(a==='share'){_shareList(listId);}
@@ -1313,21 +1416,147 @@ function openListMenu(listId,anchorEl){
 }
 
 function openSmartMenu(sv,anchorEl){
-  const curSort='smart';
-  const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
   const html=`
     ${_cmiRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort')}
     ${_cmiRow('reorder',L==='fa'?'مرتب کردن':'Reorder tasks','reorder')}
+    ${_cmiRow('share',L==='fa'?'اشتراک‌گذاری':'Send a copy','share')}
     ${_cmiRow('print',L==='fa'?'چاپ':'Print list','print')}
   `;
   _showCtxMenu(html,anchorEl,menu=>{
     menu.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
       const a=b.dataset.lma;
       closeCtxMenu();
-      if(a==='sort'){toast(L==='fa'?'مرتب‌سازی این نما به‌زودی':'Sort for this view coming soon');}
-      else if(a==='reorder'){toast(L==='fa'?'مرتب‌سازی دستی به‌زودی':'Manual reorder coming soon');}
+      if(a==='sort'){_openViewSortSheet('smart:'+sv);}
+      else if(a==='reorder'){enterReorder();}
+      else if(a==='share'){_shareSmart(sv);}
       else if(a==='print'){_printSmart(sv);}
     });
+  });
+}
+
+function _smartTasks(sv){
+  const ts=todayStr();
+  let tasks=activeTasks();
+  if(sv==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+  else if(sv==='important')tasks=tasks.filter(t=>t.pinned);
+  else if(sv==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
+  return tasks;
+}
+function _smartName(sv){
+  const m={myday:tr('myday'),important:tr('important'),planned:tr('planned'),all:tr('allTasks')};
+  return m[sv]||'';
+}
+function _openViewSortSheet(viewKey){
+  const labels={
+    smart:L==='fa'?'هوشمند':'Smart',
+    alpha:'A–Z',
+    date:L==='fa'?'تاریخ سررسید':'Due date',
+    priority:L==='fa'?'اولویت':'Priority',
+    manual:L==='fa'?'دستی':'Manual'
+  };
+  const cur=getViewSort(viewKey);
+  openSheet(`<h3>${L==='fa'?'مرتب‌سازی':'Sort by'}</h3>
+    <div class="sheet-group">
+      ${Object.keys(labels).map(o=>`<button class="sac" data-so="${o}">
+        <div class="sac-icon-wrap"><div class="sac-check${o===cur?' on':''}"></div></div>
+        <span class="sac-label">${labels[o]}</span>
+      </button>`).join('')}
+    </div>
+    <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-so]').forEach(b=>b.onclick=()=>{
+    const mode=b.dataset.so;
+    if(mode==='manual'){
+      closeSheet();
+      // Manual chosen from sort sheet → seed order and enter reorder
+      setViewSort(viewKey,'manual');
+      enterReorder();
+    } else {
+      setViewSort(viewKey,mode);
+      closeSheet();render();
+    }
+  });
+}
+function _shareSmart(sv){
+  const name=_smartName(sv);
+  const tasks=_smartTasks(sv);
+  const text=name+'\n\n'+tasks.map(t=>(t.done?'☑ ':'☐ ')+t.text+(t.dueDate?' ('+t.dueDate+')':'')).join('\n');
+  if(navigator.share){navigator.share({title:name,text}).catch(()=>{});}
+  else if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast(L==='fa'?'در کلیپ‌بورد کپی شد':'Copied to clipboard')).catch(()=>toast(L==='fa'?'کپی ناموفق بود':'Could not copy'));
+  } else {toast(L==='fa'?'اشتراک‌گذاری پشتیبانی نمی‌شود':'Sharing not supported');}
+}
+
+function enterReorder(){
+  const vk=viewKeyFor();
+  // Seed manual order from current displayed order if not set yet
+  let tasks=activeTasks();
+  const ts=todayStr();
+  if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+  else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
+  else if(activeSmartView==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
+  else if(activeListId)tasks=tasks.filter(t=>t.listId===activeListId);
+  const current=sortTasksForView(tasks.filter(t=>!t.done),vk);
+  setViewOrder(vk,current.map(t=>t.id));
+  setViewSort(vk,'manual');
+  reorderMode=true;render();
+}
+function exitReorder(){reorderMode=false;render();}
+
+function bindReorder(){
+  const back=document.getElementById('list-back');
+  if(back)back.onclick=()=>exitReorder();
+  const doneBtn=document.getElementById('reorder-done');
+  if(doneBtn)doneBtn.onclick=()=>exitReorder();
+  const listEl=document.getElementById('reorder-list');
+  if(!listEl)return;
+
+  let dragEl=null, startY=0;
+  function rowsArr(){return Array.from(listEl.querySelectorAll('[data-reorder]'));}
+
+  listEl.querySelectorAll('[data-handle]').forEach(handle=>{
+    handle.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      dragEl=handle.closest('[data-reorder]');
+      if(!dragEl)return;
+      const r=dragEl.getBoundingClientRect();
+      startY=e.clientY;
+      dragEl.classList.add('drag-active');
+      dragEl.style.width=r.width+'px';
+      try{handle.setPointerCapture(e.pointerId);}catch(_){}
+    });
+    handle.addEventListener('pointermove',e=>{
+      if(!dragEl)return;
+      e.preventDefault();
+      const dy=e.clientY-startY;
+      dragEl.style.transform='translateY('+dy+'px)';
+      const others=rowsArr().filter(r=>r!==dragEl);
+      for(const other of others){
+        const rect=other.getBoundingClientRect();
+        const mid=rect.top+rect.height/2;
+        const dragFollowsOther=other.compareDocumentPosition(dragEl)&Node.DOCUMENT_POSITION_FOLLOWING;
+        const dragPrecedesOther=other.compareDocumentPosition(dragEl)&Node.DOCUMENT_POSITION_PRECEDING;
+        if(e.clientY<mid && dragFollowsOther){
+          listEl.insertBefore(dragEl,other);
+          startY=e.clientY;dragEl.style.transform='translateY(0px)';break;
+        }
+        if(e.clientY>mid && dragPrecedesOther){
+          listEl.insertBefore(dragEl,other.nextSibling);
+          startY=e.clientY;dragEl.style.transform='translateY(0px)';break;
+        }
+      }
+    });
+    const endDrag=()=>{
+      if(!dragEl)return;
+      dragEl.classList.remove('drag-active');
+      dragEl.style.transform='';
+      dragEl.style.width='';
+      const ids=rowsArr().map(row=>row.dataset.tid);
+      setViewOrder(viewKeyFor(),ids);
+      dragEl=null;
+    };
+    handle.addEventListener('pointerup',endDrag);
+    handle.addEventListener('pointercancel',endDrag);
   });
 }
 
@@ -1351,22 +1580,6 @@ function _addShortcut(listId){
       <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
     document.querySelector('.sheet-cancel').onclick=closeSheet;
   }
-}
-
-function _openSortSheet(listId,cur,labels){
-  const opts=Object.keys(labels);
-  openSheet(`<h3>${L==='fa'?'مرتب‌سازی':'Sort by'}</h3>
-    <div class="sheet-group">
-      ${opts.map(o=>`<button class="sac" data-so="${o}">
-        <div class="sac-icon-wrap"><div class="sac-check${o===cur?' on':''}"></div></div>
-        <span class="sac-label">${labels[o]}</span>
-      </button>`).join('')}
-    </div>
-    <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
-  document.querySelector('.sheet-cancel').onclick=closeSheet;
-  document.querySelectorAll('[data-so]').forEach(b=>b.onclick=()=>{
-    const l=DB.entities.lists[listId];if(!l)return;
-    l.sortBy=b.dataset.so;l.updatedAt=now();saveDB();closeSheet();render();});
 }
 
 function _openThemeSheet(listId){
@@ -1992,6 +2205,7 @@ function quickAdd(){
    BIND SCREEN EVENTS
    ══════════════════════════════════════════ */
 function bindScreen(){
+  if(reorderMode){bindReorder();return;}
   // Checkboxes
   document.querySelectorAll('[data-chk]').forEach(el=>el.onclick=e=>{
     e.stopPropagation();completeTask(el.dataset.chk);});
@@ -2652,7 +2866,10 @@ document.getElementById('sheet-bg').onclick=()=>{_exitDialogOpen=false;closeShee
 // Task detail panel
 // Prevent Android back button from leaving app
 window.addEventListener('popstate',()=>{
-  if(document.getElementById('ctxmenu').classList.contains('on')){
+  if(reorderMode){
+    exitReorder();
+    history.pushState(null,'',location.href);
+  } else if(document.getElementById('ctxmenu').classList.contains('on')){
     closeCtxMenu();
     history.pushState(null,'',location.href);
   } else if(document.getElementById('task-detail').classList.contains('on')){
