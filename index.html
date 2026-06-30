@@ -345,6 +345,22 @@ textarea.finput{resize:vertical;min-height:80px}
   background:var(--s2);color:var(--ink2);font-size:14px;font-weight:700;cursor:pointer}
 .rep-day.on{background:var(--brand);color:#fff;border-color:var(--brand)}
 
+/* ── Theme picker (To Do style) ── */
+.thm-tabs{display:flex;gap:8px;padding:4px 16px 14px}
+.thm-tab{padding:9px 18px;border-radius:999px;border:1px solid var(--b2);
+  background:none;color:var(--ink2);font-size:14px;font-weight:700;cursor:pointer}
+.thm-tab.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.thm-colors{display:flex;flex-wrap:wrap;gap:16px;padding:6px 20px 8px;justify-content:flex-start}
+.thm-swatch{width:52px;height:52px;border-radius:50%;cursor:pointer;border:3px solid transparent;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.thm-swatch.on{border-color:#fff;box-shadow:0 0 0 2px var(--brand)}
+.thm-swatch .chk{color:#fff;font-size:20px;font-weight:900;line-height:1}
+.thm-photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:6px 18px 8px}
+.thm-photo{aspect-ratio:1;border-radius:14px;cursor:pointer;border:3px solid transparent;
+  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center}
+.thm-photo.on{border-color:#fff;box-shadow:0 0 0 2px var(--brand)}
+.thm-photo.add{background:var(--s3);border:2px dashed var(--b2);color:var(--ink3);font-size:28px}
+
 /* Sub-sheet: radio check */
 .sac-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--b2);
   flex:none;display:flex;align-items:center;justify-content:center;
@@ -458,6 +474,7 @@ textarea.finput{resize:vertical;min-height:80px}
 .srch-input-wrap input{flex:1;background:none;border:none;outline:none;
   font-size:16px;color:var(--ink);font-family:inherit}
 .srch-input-wrap input::placeholder{color:var(--ink3)}
+.srch-ic{display:flex;align-items:center;color:var(--ink3);flex:none}
 .srch-cancel{background:none;border:none;color:var(--brand);font-size:15px;
   font-weight:600;cursor:pointer;white-space:nowrap;flex:none;
   padding:0 4px;font-family:inherit}
@@ -585,7 +602,7 @@ textarea.finput{resize:vertical;min-height:80px}
 <div id="search-screen">
   <div class="srch-top">
     <div class="srch-input-wrap">
-      <span class="srch-ic">🔍</span>
+      <span class="srch-ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg></span>
       <input id="srch-input" placeholder="Search tasks and lists" autocomplete="off">
     </div>
     <button class="srch-cancel" id="srch-cancel">Cancel</button>
@@ -621,7 +638,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v99';
+const APP_VERSION='v100';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1013,9 +1030,8 @@ function renderLists(){
       <div class="lists-hub-avatar">${avatarInner(user,40)}</div>
       <div style="flex:1">
         <div class="lists-hub-name">${esc(user.displayName||'My Lists')} <span style="font-size:12px;opacity:.6">▾</span></div>
-        <div style="font-size:12px;color:var(--ink3);margin-top:1px">${esc(user.email||(L==='fa'?'حالت مهمان':'Guest mode'))}</div>
       </div>
-      <button class="lists-hub-search" id="btn-hub-search">🔍</button>
+      <button class="lists-hub-search" id="btn-hub-search" aria-label="Search"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg></button>
     </div>
 
     <div style="margin-bottom:4px">
@@ -1027,6 +1043,12 @@ function renderLists(){
           <span class="sv-name">${esc(s.name)}</span>
           ${svCounts[s.sv]?`<span class="sv-count">${svCounts[s.sv]}</span>`:''}
         </div>`).join('')}
+      <div class="sv-row" data-sv="assigned">
+        <div class="sv-icon">
+          <div class="sv-icon-inner" style="background:#34d39918;color:#34d399">&#128100;</div>
+        </div>
+        <span class="sv-name">${L==='fa'?'محول‌شده به من':'Assigned to me'}</span>
+      </div>
       <div class="sv-row" data-go-appts="1">
         <div class="sv-icon">
           <div class="sv-icon-inner" style="background:#22d3a818;color:#22d3a8">◷</div>
@@ -1082,22 +1104,25 @@ function listBgGradient(color){
 
 function renderListDetail(){
   const ts=todayStr();
-  let title='',accentColor='#6e56f8',tasks=activeTasks(),bgGradient=null;
+  let title='',accentColor='#6e56f8',tasks=activeTasks(),bgGradient=null,bgPhoto=null;
 
   if(activeSmartView){
-    const svMap={myday:tr('myday'),important:tr('important'),planned:tr('planned'),all:tr('allTasks')};
-    const svColors={myday:'#f59e0b',important:'#f43f5e',planned:'#38bdf8',all:'#6e56f8'};
+    const svMap={myday:tr('myday'),important:tr('important'),planned:tr('planned'),all:tr('allTasks'),assigned:(L==='fa'?'محول‌شده به من':'Assigned to me')};
+    const svColors={myday:'#f59e0b',important:'#f43f5e',planned:'#38bdf8',all:'#6e56f8',assigned:'#34d399'};
     title=svMap[activeSmartView]||'';
     accentColor=(DB.meta.smartColor&&DB.meta.smartColor[activeSmartView])||svColors[activeSmartView]||'#6e56f8';
     bgGradient=listBgGradient(accentColor);
+    bgPhoto=(DB.meta.smartPhoto&&DB.meta.smartPhoto[activeSmartView])||null;
     if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
     else if(activeSmartView==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
+    else if(activeSmartView==='assigned')tasks=tasks.filter(t=>t.assigneeId&&t.assigneeId===DB.meta.userId);
   } else if(activeListId){
     const l=(DB.entities.lists||{})[activeListId];
     title=l?(l.name&&(l.name[L]||l.name.en)||'List'):'List';
     accentColor=l&&l.color||'#6e56f8';
     bgGradient=listBgGradient(accentColor);
+    bgPhoto=l&&l.photo||null;
     tasks=tasks.filter(t=>t.listId===activeListId);
   }
 
@@ -1111,7 +1136,7 @@ function renderListDetail(){
     const ordered=openT; // already in view order from sortTasksForView
     return `
     <div class="ld-bg">
-      <div class="ld-bg-layer" style="background:${bgGradient||'var(--s2)'}"></div>
+      <div class="ld-bg-layer" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
       </div>
@@ -1135,7 +1160,7 @@ function renderListDetail(){
 
   return `
     <div class="ld-bg">
-      <div class="ld-bg-layer" style="background:${bgGradient||'var(--s2)'}"></div>
+      <div class="ld-bg-layer" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
         <div class="ld-actions">
@@ -1566,24 +1591,97 @@ function _addShortcutSmart(sv){
   }
 }
 
-function _openThemeSmart(sv){
-  if(!DB.meta.smartColor)DB.meta.smartColor={};
-  let selColor=DB.meta.smartColor[sv]||_smartDefaultColor(sv);
-  openSheet(`<h3>${L==='fa'?'تغییر رنگ':'Change theme'}</h3>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 0 16px">
-      ${LIST_COLORS.map(c=>`<button class="cpick${c===selColor?' on':''}" data-tc="${c}" style="background:${c};color:${c}"></button>`).join('')}
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="th-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
-      <button class="btn btn-primary" id="th-save">${L==='fa'?'ذخیره':'Save'}</button>
-    </div>`);
-  document.getElementById('th-cancel').onclick=closeSheet;
-  document.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
-    selColor=el.dataset.tc;document.querySelectorAll('[data-tc]').forEach(e=>e.classList.toggle('on',e.dataset.tc===selColor));});
-  document.getElementById('th-save').onclick=()=>{
-    if(!DB.meta.smartColor)DB.meta.smartColor={};
-    DB.meta.smartColor[sv]=selColor;saveDB();closeSheet();render();};
+const THEME_COLORS=['#6e56f8','#7c8cff','#f43f5e','#ec4899','#f59e0b','#f97316','#22c55e','#34d399','#14b8a6','#38bdf8','#8b5cf6','#94a3b8'];
+const THEME_PHOTOS=[
+  'linear-gradient(135deg,#667eea,#764ba2)',
+  'linear-gradient(135deg,#f093fb,#f5576c)',
+  'linear-gradient(135deg,#4facfe,#00f2fe)',
+  'linear-gradient(135deg,#43e97b,#38f9d7)',
+  'linear-gradient(135deg,#fa709a,#fee140)',
+  'linear-gradient(135deg,#30cfd0,#330867)',
+  'linear-gradient(135deg,#a8edea,#fed6e3)',
+  'linear-gradient(135deg,#ff9a9e,#fecfef)'
+];
+
+function _themeGet(target){
+  if(target.type==='smart'){
+    return {
+      color:(DB.meta.smartColor&&DB.meta.smartColor[target.sv])||_smartDefaultColor(target.sv),
+      photo:(DB.meta.smartPhoto&&DB.meta.smartPhoto[target.sv])||null
+    };
+  }
+  const l=DB.entities.lists[target.id]||{};
+  return {color:l.color||'#6e56f8',photo:l.photo||null};
 }
+function _themeSet(target,color,photo){
+  if(target.type==='smart'){
+    if(!DB.meta.smartColor)DB.meta.smartColor={};
+    if(!DB.meta.smartPhoto)DB.meta.smartPhoto={};
+    if(color)DB.meta.smartColor[target.sv]=color;
+    DB.meta.smartPhoto[target.sv]=photo||null;
+  } else {
+    const l=DB.entities.lists[target.id];if(!l)return;
+    if(color)l.color=color;
+    l.photo=photo||null;l.updatedAt=now();
+  }
+  saveDB();
+}
+
+function _openThemeFor(target){
+  const init=_themeGet(target);
+  let sel={tab:init.photo?'photo':'colour',color:init.color,photo:init.photo};
+
+  function body(){
+    let inner='';
+    if(sel.tab==='colour'){
+      inner=`<div class="thm-colors">
+        ${THEME_COLORS.map(c=>`<button class="thm-swatch${(!sel.photo&&c===sel.color)?' on':''}" data-tc="${c}" style="background:${c}">${(!sel.photo&&c===sel.color)?'<span class="chk">✓</span>':''}</button>`).join('')}
+      </div>`;
+    } else if(sel.tab==='photo'){
+      inner=`<div class="thm-photo-grid">
+        <button class="thm-photo add" data-photo-add="1">＋</button>
+        ${THEME_PHOTOS.map((p,i)=>`<button class="thm-photo${sel.photo===p?' on':''}" data-photo="${p}" style="background-image:${p}"></button>`).join('')}
+        ${(sel.photo&&sel.photo.startsWith('url'))?`<button class="thm-photo on" data-photo="${sel.photo}" style="background-image:${sel.photo}"></button>`:''}
+      </div>`;
+    } else {
+      inner=`<div style="padding:24px 20px;text-align:center;color:var(--ink3);font-size:14px">${tr('comingSoon')}</div>`;
+    }
+    return `<h3 style="padding:4px 16px 10px">${L==='fa'?'انتخاب تم':'Pick a theme'}</h3>
+      <div class="thm-tabs">
+        <button class="thm-tab${sel.tab==='colour'?' on':''}" data-tab="colour">${L==='fa'?'رنگ':'Colour'}</button>
+        <button class="thm-tab${sel.tab==='photo'?' on':''}" data-tab="photo">${L==='fa'?'عکس':'Photo'}</button>
+        <button class="thm-tab${sel.tab==='custom'?' on':''}" data-tab="custom">${L==='fa'?'سفارشی':'Customised'}</button>
+      </div>
+      ${inner}
+      <div class="btn-row" style="padding:14px">
+        <button class="btn btn-ghost" id="thm-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+        <button class="btn btn-primary" id="thm-save">${L==='fa'?'ذخیره':'Save'}</button>
+      </div>
+      <input type="file" id="thm-file" accept="image/*" style="display:none">`;
+  }
+  function rerender(){document.getElementById('sheet-body').innerHTML=body();bind();}
+  function bind(){
+    document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{sel.tab=b.dataset.tab;rerender();});
+    document.querySelectorAll('[data-tc]').forEach(b=>b.onclick=()=>{sel.color=b.dataset.tc;sel.photo=null;rerender();});
+    document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>{sel.photo=b.dataset.photo;rerender();});
+    const add=document.querySelector('[data-photo-add]');
+    if(add)add.onclick=()=>document.getElementById('thm-file').click();
+    const file=document.getElementById('thm-file');
+    if(file)file.onchange=e=>{
+      const f=e.target.files&&e.target.files[0];if(!f)return;
+      compressImage(f,1000,dataUrl=>{sel.photo='url('+dataUrl+')';rerender();});
+      e.target.value='';
+    };
+    const c=document.getElementById('thm-cancel');if(c)c.onclick=closeSheet;
+    const s=document.getElementById('thm-save');if(s)s.onclick=()=>{
+      _themeSet(target,sel.color,sel.photo);closeSheet();render();
+    };
+  }
+  openSheet(body());
+  bind();
+}
+
+function _openThemeSmart(sv){_openThemeFor({type:'smart',sv});}
 function _smartDefaultColor(sv){
   return {myday:'#f59e0b',important:'#f43f5e',planned:'#38bdf8',all:'#6e56f8'}[sv]||'#6e56f8';
 }
