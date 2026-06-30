@@ -586,7 +586,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v91';
+const APP_VERSION='v92';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -987,7 +987,7 @@ function renderListDetail(){
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
         <div class="ld-actions">
-          ${activeListId?'<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">&#8943;</button>':''}
+          ${activeListId?'<button class="ld-action-btn" id="list-menu-btn" aria-label="List options">&#8942;</button>':''}
         </div>
       </div>
       <div class="ld-title-area">
@@ -1241,8 +1241,8 @@ function closeCtxMenu(){
   const m=document.getElementById('ctxmenu');
   const bg=document.getElementById('ctxmenu-bg');
   if(m)m.classList.remove('on');
-  if(bg)bg.classList.remove('on');
-  setTimeout(()=>{if(m&&!m.classList.contains('on'))m.style.display='none';},160);
+  if(bg){bg.classList.remove('on');bg.style.display='none';}
+  if(m)setTimeout(()=>{if(m&&!m.classList.contains('on'))m.style.display='none';},160);
 }
 
 function openListMenu(listId,anchorEl){
@@ -1297,6 +1297,7 @@ function openListMenu(listId,anchorEl){
   menu.style.left=left+'px';
   menu.style.visibility='visible';
 
+  bg.style.display='block';
   bg.classList.add('on');
   requestAnimationFrame(()=>menu.classList.add('on'));
 
