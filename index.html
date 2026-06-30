@@ -289,6 +289,35 @@ textarea.finput{resize:vertical;min-height:80px}
 .sac.sac-danger .sac-label{color:var(--danger)}
 .sac.sac-danger .sac-icon{color:var(--danger)}
 
+/* ── Floating anchored context menu (Microsoft To Do style) ── */
+#ctxmenu-bg{position:fixed;inset:0;z-index:260;display:none}
+#ctxmenu-bg.on{display:block}
+#ctxmenu{position:fixed;z-index:261;display:none;
+  min-width:248px;max-width:300px;
+  background:var(--s1,#1c1c24);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;
+  box-shadow:0 14px 44px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.03) inset;
+  padding:6px;overflow:hidden;
+  transform-origin:top right;
+  transform:scale(.9);opacity:0;
+  transition:transform .14s cubic-bezier(.2,.8,.2,1),opacity .14s ease}
+#ctxmenu.on{display:block;transform:scale(1);opacity:1}
+#ctxmenu .cmi{display:flex;align-items:center;gap:12px;width:100%;
+  background:none;border:none;cursor:pointer;text-align:left;
+  color:var(--ink);padding:12px 12px;border-radius:9px;
+  font-size:15px;font-weight:500;letter-spacing:-.1px}
+#ctxmenu .cmi:active{background:rgba(255,255,255,.07)}
+#ctxmenu .cmi .cmi-ic{width:22px;height:22px;flex:none;display:flex;
+  align-items:center;justify-content:center;opacity:.85}
+#ctxmenu .cmi .cmi-ic svg{width:20px;height:20px;stroke:currentColor;
+  stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+#ctxmenu .cmi .cmi-lbl{flex:1;min-width:0}
+#ctxmenu .cmi .cmi-val{color:var(--ink3);font-size:12.5px;font-weight:500;flex:none}
+#ctxmenu .cmi.cmi-danger{color:var(--danger)}
+#ctxmenu .cmi.cmi-danger .cmi-ic{color:var(--danger)}
+#ctxmenu .cm-sep{height:1px;background:rgba(255,255,255,.07);margin:5px 8px}
+
 /* Sub-sheet: radio check */
 .sac-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--b2);
   flex:none;display:flex;align-items:center;justify-content:center;
@@ -543,6 +572,8 @@ textarea.finput{resize:vertical;min-height:80px}
 </div>
 
 <div id="sheet-bg"></div>
+<div id="ctxmenu-bg"></div>
+<div id="ctxmenu"></div>
 <div id="sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-body" id="sheet-body"></div>
@@ -555,7 +586,7 @@ textarea.finput{resize:vertical;min-height:80px}
    Entity-graph architecture. Firebase-ready schema.
    ═══════════════════════════════════════════════════════════ */
 
-const APP_VERSION='v88';
+const APP_VERSION='v90';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1174,38 +1205,94 @@ function _sacRow(svgKey,label,action,opts={}){
   </button>`;
 }
 
-function openListMenu(listId){
+function _cmiRow(svgKey,label,action,opts={}){
+  const icon=_SVG[svgKey]||_SVG.suggest;
+  const val=opts.value?`<span class="cmi-val">${opts.value}</span>`:'';
+  return `<button class="cmi${opts.danger?' cmi-danger':''}" data-lma="${action}">
+    <span class="cmi-ic">${icon}</span>
+    <span class="cmi-lbl">${label}</span>
+    ${val}
+  </button>`;
+}
+
+function closeCtxMenu(){
+  const m=document.getElementById('ctxmenu');
+  const bg=document.getElementById('ctxmenu-bg');
+  if(m)m.classList.remove('on');
+  if(bg)bg.classList.remove('on');
+  setTimeout(()=>{if(m&&!m.classList.contains('on'))m.style.display='none';},160);
+}
+
+function openListMenu(listId,anchorEl){
   const l=(DB.entities.lists||{})[listId];if(!l)return;
   const name=l.name&&(l.name[L]||l.name.en)||listId;
   const curSort=l.sortBy||'smart';
   const sortLabels={smart:L==='fa'?'هوشمند':'Smart',alpha:'A–Z',date:L==='fa'?'تاریخ':'Due date',priority:L==='fa'?'اولویت':'Priority'};
   const sugOn=l.suggestions!==false;
-  openSheet(`<div style="padding:8px 0 0">
-    ${_sacRow('rename',L==='fa'?'تغییر نام':'Rename list','rename')}
-    ${_sacRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort',{value:sortLabels[curSort]||curSort})}
-    ${_sacRow('reorder',L==='fa'?'مرتب کردن':'Reorder','reorder')}
-    ${_sacRow('shortcut',L==='fa'?'میانبر به صفحه اصلی':'Add shortcut to homescreen','shortcut')}
-    ${_sacRow('theme',L==='fa'?'تغییر رنگ':'Change theme','theme')}
-    ${_sacRow('share',L==='fa'?'اشتراک‌گذاری':'Share','share')}
-    ${_sacRow('duplicate',L==='fa'?'کپی لیست':'Duplicate','duplicate')}
-    ${_sacRow('print',L==='fa'?'چاپ':'Print','print')}
-    ${_sacRow('suggest',L==='fa'?'پیشنهادات':'Suggestions','suggestions',{value:sugOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')})}
-    ${_sacRow('delete',L==='fa'?'حذف لیست':'Delete list','delete',{danger:true})}
-  </div>
-  <button class="sheet-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`);
-  document.querySelector('.sheet-cancel').onclick=closeSheet;
-  document.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
+
+  const menu=document.getElementById('ctxmenu');
+  const bg=document.getElementById('ctxmenu-bg');
+  if(!menu||!bg)return;
+
+  menu.innerHTML=`
+    ${_cmiRow('rename',L==='fa'?'تغییر نام':'Rename list','rename')}
+    ${_cmiRow('sort',L==='fa'?'مرتب‌سازی':'Sort by','sort',{value:sortLabels[curSort]||curSort})}
+    ${_cmiRow('reorder',L==='fa'?'مرتب کردن':'Reorder tasks','reorder')}
+    ${_cmiRow('shortcut',L==='fa'?'میانبر به صفحه اصلی':'Add shortcut to homescreen','shortcut')}
+    ${_cmiRow('theme',L==='fa'?'تغییر رنگ':'Change theme','theme')}
+    ${_cmiRow('share',L==='fa'?'اشتراک‌گذاری':'Send a copy','share')}
+    ${_cmiRow('duplicate',L==='fa'?'کپی لیست':'Duplicate list','duplicate')}
+    ${_cmiRow('print',L==='fa'?'چاپ':'Print list','print')}
+    <div class="cm-sep"></div>
+    ${_cmiRow('delete',L==='fa'?'حذف لیست':'Delete list','delete',{danger:true})}
+    ${_cmiRow('suggest',(sugOn?(L==='fa'?'خاموش کردن پیشنهادات':'Turn off suggestions'):(L==='fa'?'روشن کردن پیشنهادات':'Turn on suggestions')),'suggestions')}
+  `;
+
+  // Show first (display:block) so we can measure, then position
+  menu.style.display='block';
+  menu.style.visibility='hidden';
+  menu.classList.remove('on');
+
+  // Position anchored to the three-dot button
+  const pad=8;
+  const vw=window.innerWidth, vh=window.innerHeight;
+  const mw=menu.offsetWidth||260, mh=menu.offsetHeight||320;
+  let top=pad+44, left=vw-mw-pad; // sensible default: top-right
+  if(anchorEl&&anchorEl.getBoundingClientRect){
+    const r=anchorEl.getBoundingClientRect();
+    // Prefer below the button, right-aligned to it
+    top=r.bottom+6;
+    left=r.right-mw;
+    if(left<pad)left=pad;
+    if(left+mw>vw-pad)left=vw-mw-pad;
+    // If it would overflow bottom, open upward from the button
+    if(top+mh>vh-pad){
+      top=r.top-mh-6;
+      if(top<pad)top=pad;
+    }
+  }
+  menu.style.top=top+'px';
+  menu.style.left=left+'px';
+  menu.style.visibility='visible';
+
+  bg.classList.add('on');
+  requestAnimationFrame(()=>menu.classList.add('on'));
+
+  bg.onclick=closeCtxMenu;
+
+  menu.querySelectorAll('[data-lma]').forEach(b=>b.onclick=()=>{
     const a=b.dataset.lma;
-    if(a==='sort'){closeSheet();_openSortSheet(listId,curSort,sortLabels);}
-    else if(a==='reorder'){l.sortBy='alpha';l.updatedAt=now();saveDB();closeSheet();render();}
-    else if(a==='shortcut'){closeSheet();_addShortcut(listId);}
-    else if(a==='theme'){closeSheet();_openThemeSheet(listId);}
-    else if(a==='share'){closeSheet();_shareList(listId);}
-    else if(a==='duplicate'){closeSheet();_duplicateList(listId);}
-    else if(a==='print'){closeSheet();_printList(listId);}
-    else if(a==='suggestions'){l.suggestions=!sugOn;l.updatedAt=now();saveDB();closeSheet();toast(name+': '+(l.suggestions?'On':'Off'));}
-    else if(a==='rename'){closeSheet();_openRenameSheet(listId);}
-    else if(a==='delete'){closeSheet();_deleteList(listId);}
+    closeCtxMenu();
+    if(a==='sort'){_openSortSheet(listId,curSort,sortLabels);}
+    else if(a==='reorder'){toast(L==='fa'?'مرتب‌سازی دستی به‌زودی':'Manual reorder coming soon');}
+    else if(a==='shortcut'){_addShortcut(listId);}
+    else if(a==='theme'){_openThemeSheet(listId);}
+    else if(a==='share'){_shareList(listId);}
+    else if(a==='duplicate'){_duplicateList(listId);}
+    else if(a==='print'){_printList(listId);}
+    else if(a==='suggestions'){l.suggestions=!sugOn;l.updatedAt=now();saveDB();toast(name+': '+(l.suggestions?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')));}
+    else if(a==='rename'){_openRenameSheet(listId);}
+    else if(a==='delete'){_deleteList(listId);}
   });
 }
 
@@ -1285,8 +1372,13 @@ function _shareList(listId){
   const name=l.name&&(l.name[L]||l.name.en)||'';
   const tasks=activeTasks().filter(t=>t.listId===listId);
   const text=name+'\n\n'+tasks.map(t=>(t.done?'☑ ':'☐ ')+t.text+(t.dueDate?' ('+t.dueDate+')':'')).join('\n');
-  if(navigator.share)navigator.share({title:name,text}).catch(()=>{});
-  else navigator.clipboard&&navigator.clipboard.writeText(text).then(()=>toast(L==='fa'?'کپی شد':'Copied')).catch(()=>{});
+  if(navigator.share){
+    navigator.share({title:name,text}).catch(()=>{});
+  } else if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast(L==='fa'?'در کلیپ‌بورد کپی شد':'Copied to clipboard')).catch(()=>toast(L==='fa'?'کپی ناموفق بود':'Could not copy'));
+  } else {
+    toast(L==='fa'?'اشتراک‌گذاری پشتیبانی نمی‌شود':'Sharing not supported');
+  }
 }
 
 function _duplicateList(listId){
@@ -1304,7 +1396,7 @@ function _printList(listId){
   const name=l.name&&(l.name[L]||l.name.en)||'';
   const tasks=activeTasks().filter(t=>t.listId===listId);
   const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
-  const w=window.open('','_blank');if(!w)return;
+  const w=window.open('','_blank');if(!w){toast(L==='fa'?'پنجره چاپ مسدود شد':'Print window blocked');return;}
   w.document.write(`<!DOCTYPE html><html><head><title>${name}</title>
     <style>body{font-family:sans-serif;max-width:600px;margin:48px auto;font-size:15px}
     h1{font-size:22px;margin-bottom:16px}ul{list-style:none;padding:0}
@@ -1872,7 +1964,7 @@ function bindScreen(){
   if(back)back.onclick=()=>{tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();};
   // List menu
   const lmb=document.getElementById('list-menu-btn');
-  if(lmb)lmb.onclick=()=>openListMenu(activeListId);
+  if(lmb)lmb.onclick=(e)=>{e.stopPropagation();openListMenu(activeListId,lmb);};
   // New list
   const nlb=document.getElementById('btn-new-list');
   if(nlb)nlb.onclick=()=>openNewListSheet();
@@ -2486,13 +2578,16 @@ document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
 document.getElementById('fab').onclick=quickAdd;
 
 // Sheet dismiss
-document.getElementById('sheet-bg').onclick=closeSheet;
+let _exitDialogOpen=false;
+document.getElementById('sheet-bg').onclick=()=>{_exitDialogOpen=false;closeSheet();};
 
 // Task detail panel
 // Prevent Android back button from leaving app
-let _exitDialogOpen=false;
 window.addEventListener('popstate',()=>{
-  if(document.getElementById('task-detail').classList.contains('on')){
+  if(document.getElementById('ctxmenu').classList.contains('on')){
+    closeCtxMenu();
+    history.pushState(null,'',location.href);
+  } else if(document.getElementById('task-detail').classList.contains('on')){
     closeTaskDetail();render();
     history.pushState(null,'',location.href);
   } else if(document.getElementById('search-screen').classList.contains('on')){
