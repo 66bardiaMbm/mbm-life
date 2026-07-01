@@ -342,7 +342,7 @@ textarea.finput{resize:vertical;min-height:80px}
 .acct-item .acct-lbl{flex:1}
 .acct-soon{font-size:11px;color:var(--ink3);margin-left:auto}
 
-.acct-overlay{position:fixed;inset:0;z-index:400;background:var(--bg);
+.acct-overlay{position:fixed;inset:0;z-index:400;background:var(--s0);
   opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;
   overflow-y:auto;padding:env(safe-area-inset-top,0) 0 0}
 .acct-overlay.on{opacity:1;transform:none}
@@ -490,19 +490,25 @@ textarea.finput{resize:vertical;min-height:80px}
   transform:translateY(-8px);opacity:0;pointer-events:none;
   transition:opacity .2s,transform .2s}
 #search-screen.on{transform:translateY(0);opacity:1;pointer-events:all}
-.srch-top{display:flex;align-items:center;gap:10px;padding:14px 16px 10px}
-.srch-input-wrap{flex:1;display:flex;align-items:center;gap:8px;
+.srch-top{display:flex;align-items:center;gap:8px;padding:14px 12px 10px}
+.srch-input-wrap{flex:1;min-width:0;display:flex;align-items:center;gap:6px;
   background:var(--s2);border:1px solid var(--b1);border-radius:14px;
   padding:11px 14px}
 .srch-input-wrap input{flex:1;background:none;border:none;outline:none;
   font-size:16px;color:var(--ink);font-family:inherit}
 .srch-input-wrap input::placeholder{color:var(--ink3)}
 .srch-ic{display:flex;align-items:center;color:var(--ink3);flex:none}
-.srch-mic{width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;
-  background:none;border:none;color:var(--ink2);cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
+.srch-mic{width:32px;height:32px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:none;border:none;color:var(--ink3);cursor:pointer;border-radius:8px;-webkit-tap-highlight-color:transparent}
 .srch-mic:active{background:var(--s3)}
 .srch-mic.recording{color:#f43f5e;animation:micpulse 1.2s ease-in-out infinite}
 @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.4}}
+.srch-cancel{flex:none}
+.planned-filter-row{padding:12px 16px 6px;background:var(--s1)}
+.planned-filter-chip{display:inline-flex;align-items:center;gap:8px;
+  background:var(--s2);border:1px solid var(--b1);color:var(--accent,#38bdf8);
+  padding:9px 16px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer}
+.planned-filter-chip:active{background:var(--s3)}
 .srch-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:80px 40px;text-align:center}
 .srch-empty-ic{color:var(--brand);opacity:.55;margin-bottom:24px}
@@ -643,8 +649,8 @@ textarea.finput{resize:vertical;min-height:80px}
     <div class="srch-input-wrap">
       <span class="srch-ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg></span>
       <input id="srch-input" placeholder="Search tasks and lists" autocomplete="off">
+      <button class="srch-mic" id="srch-mic" aria-label="Voice search"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg></button>
     </div>
-    <button class="srch-mic" id="srch-mic" aria-label="Voice search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg></button>
     <button class="srch-cancel" id="srch-cancel">Cancel</button>
   </div>
   <div class="srch-results" id="srch-results">
@@ -683,7 +689,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v103';
+const APP_VERSION='v104';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -911,6 +917,7 @@ let screen='lists';
 let tasksView='browser'; // 'browser'|'detail'
 let activeListId=null;
 let activeSmartView=null; // 'myday'|'important'|'planned'|'all'
+let plannedFilter='all'; // 'overdue'|'today'|'tomorrow'|'week'|'later'|'all'
 let searchQuery='';
 
 /* ── Render engine ── */
@@ -1160,7 +1167,7 @@ function renderListDetail(){
     bgPhoto=(DB.meta.smartPhoto&&DB.meta.smartPhoto[activeSmartView])||null;
     if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
-    else if(activeSmartView==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
+    else if(activeSmartView==='planned')tasks=filterPlanned(tasks);
     else if(activeSmartView==='assigned')tasks=tasks.filter(t=>t.assigneeId&&t.assigneeId===DB.meta.userId);
   } else if(activeListId){
     const l=(DB.entities.lists||{})[activeListId];
@@ -1217,6 +1224,13 @@ function renderListDetail(){
         <div class="ld-subtitle">${openCount} ${L==='fa'?'باقی‌مانده':'remaining'}</div>
       </div>
     </div>
+    ${activeSmartView==='planned'?`
+      <div class="planned-filter-row">
+        <button class="planned-filter-chip" id="planned-filter-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="17" x2="14" y2="17"/></svg>
+          <span>${plannedFilterLabel()}</span>
+        </button>
+      </div>`:''}
     <div style="background:var(--s1);overflow:hidden;border-top:1px solid var(--b1)" id="task-list-body">
       ${openT.length
         ? openT.map(t=>taskRowFlat(t)).join('')
@@ -1531,6 +1545,42 @@ function openListMenu(listId,anchorEl){
       else if(a==='suggestions'){l.suggestions=!sugOn;l.updatedAt=now();saveDB();toast(name+': '+(l.suggestions?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')));}
       else if(a==='rename'){_openRenameSheet(listId);}
       else if(a==='delete'){_deleteList(listId);}
+    });
+  });
+}
+
+function openPlannedFilterMenu(anchorEl){
+  const ts=todayStr();
+  const all=activeTasks().filter(t=>t.dueDate&&!t.done);
+  const tomorrow=_addDays(ts,1);
+  const weekEnd=_addDays(ts,7);
+  const counts={
+    overdue:all.filter(t=>t.dueDate<ts).length,
+    today:all.filter(t=>t.dueDate===ts).length,
+    tomorrow:all.filter(t=>t.dueDate===tomorrow).length,
+    week:all.filter(t=>t.dueDate>=ts&&t.dueDate<=weekEnd).length,
+    later:all.filter(t=>t.dueDate>weekEnd).length,
+    all:all.length
+  };
+  const d=new Date(ts+'T00:00:00');
+  const tw=new Date(tomorrow+'T00:00:00');
+  const wd=L==='fa'?['یک','دو','سه','چهار','پنج','جمعه','شنبه']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const items=[
+    {k:'overdue',label:L==='fa'?'گذشته':'Overdue'},
+    {k:'today',label:(L==='fa'?'امروز':'Today')+' ('+wd[d.getDay()]+')'},
+    {k:'tomorrow',label:(L==='fa'?'فردا':'Tomorrow')+' ('+wd[tw.getDay()]+')'},
+    {k:'week',label:L==='fa'?'این هفته':'This week'},
+    {k:'later',label:L==='fa'?'بعداً':'Later'},
+    {k:'all',label:L==='fa'?'همه':'All planned'},
+  ];
+  const html=items.map(it=>`
+    <button class="cmi" data-pf="${it.k}">
+      <span class="cmi-lbl" style="${it.k===plannedFilter?'color:var(--brand);font-weight:800':''}">${it.label}</span>
+      ${counts[it.k]?`<span class="cmi-val">${counts[it.k]}</span>`:''}
+    </button>`).join('');
+  _showCtxMenu(html,anchorEl,menu=>{
+    menu.querySelectorAll('[data-pf]').forEach(b=>b.onclick=()=>{
+      plannedFilter=b.dataset.pf;closeCtxMenu();render();
     });
   });
 }
@@ -2409,6 +2459,40 @@ function _addDays(dateStr,n){
   d.setDate(d.getDate()+n);
   return d.toISOString().slice(0,10);
 }
+
+// Filter planned tasks by the selected time bucket (like To Do).
+function filterPlanned(tasks){
+  const ts=todayStr();
+  const tomorrow=_addDays(ts,1);
+  const weekEnd=_addDays(ts,7);
+  return tasks.filter(t=>{
+    if(!t.dueDate)return false;
+    switch(plannedFilter){
+      case 'overdue': return t.dueDate<ts;
+      case 'today': return t.dueDate===ts;
+      case 'tomorrow': return t.dueDate===tomorrow;
+      case 'week': return t.dueDate>=ts && t.dueDate<=weekEnd;
+      case 'later': return t.dueDate>weekEnd;
+      case 'all':
+      default: return true;
+    }
+  });
+}
+function plannedFilterLabel(){
+  const ts=todayStr();
+  const d=new Date(ts+'T00:00:00');
+  const wd=L==='fa'?['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const tw=new Date(_addDays(ts,1)+'T00:00:00');
+  const labels={
+    overdue:L==='fa'?'گذشته':'Overdue',
+    today:(L==='fa'?'امروز':'Today')+' ('+wd[d.getDay()]+')',
+    tomorrow:(L==='fa'?'فردا':'Tomorrow')+' ('+wd[tw.getDay()]+')',
+    week:L==='fa'?'این هفته':'This week',
+    later:L==='fa'?'بعداً':'Later',
+    all:L==='fa'?'همه':'All planned'
+  };
+  return labels[plannedFilter]||labels.all;
+}
 function _addMonths(dateStr,n){
   const d=new Date(dateStr+'T00:00:00');
   const day=d.getDate();
@@ -2710,6 +2794,9 @@ function bindScreen(){
     if(activeListId)openListMenu(activeListId,lmb);
     else if(activeSmartView)openSmartMenu(activeSmartView,lmb);
   };
+  // Planned time filter
+  const pfb=document.getElementById('planned-filter-btn');
+  if(pfb)pfb.onclick=(e)=>{e.stopPropagation();openPlannedFilterMenu(pfb);};
   // New list
   const nlb=document.getElementById('btn-new-list');
   if(nlb)nlb.onclick=()=>openNewListSheet();
