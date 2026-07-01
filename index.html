@@ -408,6 +408,19 @@ textarea.finput{resize:vertical;min-height:80px}
   border-radius:var(--r);color:#f43f5e;font-size:15px;font-weight:700;
   cursor:pointer;font-family:inherit}
 .set-signout:active{background:var(--s3)}
+/* Settings toggle rows */
+.set-trow{display:flex;align-items:center;gap:12px;padding:13px 16px;
+  border-bottom:1px solid var(--b1)}
+.set-group .set-trow:last-child{border-bottom:none}
+.set-trow-label{flex:1;font-size:15px;color:var(--ink);line-height:1.3}
+.set-sw{position:relative;width:46px;height:28px;flex:0 0 auto;border-radius:999px;
+  background:var(--s3);border:1px solid var(--b2);cursor:pointer;transition:background .18s}
+.set-sw::after{content:'';position:absolute;top:2px;left:2px;width:22px;height:22px;
+  border-radius:50%;background:#e8e8f0;transition:transform .18s}
+.set-sw.on{background:var(--brand);border-color:var(--brand)}
+.set-sw.on::after{transform:translateX(18px);background:#fff}
+body.rtl .set-sw::after{left:auto;right:2px}
+body.rtl .set-sw.on::after{transform:translateX(-18px)}
 .appt-map-btn{display:inline-flex;align-items:center;gap:3px;cursor:pointer;
   color:var(--brand);background:var(--s2);border:1px solid var(--b1);
   padding:2px 8px;border-radius:8px;-webkit-tap-highlight-color:transparent}
@@ -593,7 +606,7 @@ textarea.finput{resize:vertical;min-height:80px}
 .sync-bar.error{background:rgba(244,63,94,.15);color:var(--danger)}
 
 /* ── Update banner ── */
-#update-banner{position:fixed;top:0;left:0;right:0;z-index:300;
+#update-banner{position:fixed;top:0;left:0;right:0;z-index:500;
   max-width:480px;margin:0 auto;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;
   animation:ubDrop .35s cubic-bezier(.2,.8,.2,1)}
@@ -742,7 +755,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v107';
+const APP_VERSION='v109';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -753,7 +766,7 @@ const KEY='mbmlife_platform_v1';
 function blankDB(){
   return {
     schema:SCHEMA,
-    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{}},
+    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{},addOnTop:true,starTop:true,soundOn:true,confirmDel:true},
     entities:{
       tasks:{},     // {id,text,listId,dueDate,dueTime,priority,repeat,
                     //  assigneeId,creatorId,status,pinned,done,doneAt,
@@ -802,6 +815,10 @@ function loadDB(){
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
     if(!d.meta.viewOrder)d.meta.viewOrder={};
+    if(d.meta.addOnTop===undefined)d.meta.addOnTop=true;
+    if(d.meta.starTop===undefined)d.meta.starTop=true;
+    if(d.meta.soundOn===undefined)d.meta.soundOn=true;
+    if(d.meta.confirmDel===undefined)d.meta.confirmDel=true;
     if(!Array.isArray(d.meta.groups))d.meta.groups=[];
     if(!Object.keys(d.entities.lists).length)seedDB(d);
     return d;
@@ -865,16 +882,30 @@ function setViewOrder(viewKey,ids){
   saveDB();
 }
 
+let _seqTop=(function(){
+  let mx=0;
+  try{for(const id in DB.entities.tasks){const s=DB.entities.tasks[id].seq;if(typeof s==='number'&&s>mx)mx=s;}}catch(e){}
+  return mx;
+})();
+function _nextSeq(){_seqTop+=1;return _seqTop;}
+function _cmpSeq(a,b){
+  const sa=(typeof a.seq==='number')?a.seq:0;
+  const sb=(typeof b.seq==='number')?b.seq:0;
+  // addOnTop → newest (higher seq) first; else oldest first
+  return DB.meta.addOnTop!==false?(sb-sa):(sa-sb);
+}
 function _cmpSmart(a,b){
-  if(a.pinned!==b.pinned)return a.pinned?-1:1;
+  if(DB.meta.starTop!==false && a.pinned!==b.pinned)return a.pinned?-1:1;
   const ts=todayStr();
-  const ao=a.dueDate&&a.dueDate<ts&&!a.done;
-  const bo=b.dueDate&&b.dueDate<ts&&!b.done;
+  const ao=!!(a.dueDate&&a.dueDate<ts&&!a.done);
+  const bo=!!(b.dueDate&&b.dueDate<ts&&!b.done);
   if(ao!==bo)return ao?-1:1;
-  if(a.dueDate&&b.dueDate)return a.dueDate<b.dueDate?-1:1;
-  if(a.dueDate)return -1;if(b.dueDate)return 1;
+  if(a.dueDate&&b.dueDate&&a.dueDate!==b.dueDate)return a.dueDate<b.dueDate?-1:1;
+  if(a.dueDate&&!b.dueDate)return -1;if(b.dueDate&&!a.dueDate)return 1;
   const po={p1:0,p2:1,p3:2};
-  return (po[a.priority]||1)-(po[b.priority]||1);
+  const pr=(po[a.priority]||1)-(po[b.priority]||1);
+  if(pr!==0)return pr;
+  return _cmpSeq(a,b);
 }
 function _cmpAlpha(a,b){return (a.text||'').localeCompare(b.text||'');}
 function _cmpDate(a,b){
@@ -939,6 +970,8 @@ const I18N={
     changePhoto:'Change photo',uploadPhoto:'Upload a photo',chooseAvatar:'Choose an avatar',
     removePhoto:'Remove photo',checkUpdate:'Check for updates',
     profile:'Profile',appearance:'Appearance',notifications:'Notifications',comingSoon:'Coming soon',back:'Back',
+    setTasksHdr:'Tasks',setAddTop:'Add new tasks on top',setStarTop:'Move starred tasks to top',
+    setSound:'Play completion sound',setConfirmDel:'Confirm before deleting',
     noAppts:'No appointments yet.'},
   fa:{today:'امروز',lists:'لیست‌ها',calendar:'تقویم',people:'افراد',more:'بیشتر',
     noTasks:'هنوز چیزی نیست.',addTask:'کار جدید',tasks:'کارها',important:'مهم',
@@ -962,6 +995,8 @@ const I18N={
     changePhoto:'تغییر عکس',uploadPhoto:'آپلود عکس',chooseAvatar:'انتخاب آواتار',
     removePhoto:'حذف عکس',checkUpdate:'بررسی به‌روزرسانی',
     profile:'پروفایل',appearance:'ظاهر',notifications:'اعلان‌ها',comingSoon:'به‌زودی',back:'بازگشت',
+    setTasksHdr:'کارها',setAddTop:'افزودن کار جدید در بالا',setStarTop:'انتقال کارهای ستاره‌دار به بالا',
+    setSound:'پخش صدای تکمیل',setConfirmDel:'تأیید پیش از حذف',
     noAppts:'هنوز قراری ثبت نشده.'},
 };
 function tr(k){return (I18N[L]||I18N.en)[k]||k;}
@@ -2258,7 +2293,7 @@ function _renderTaskDetail(){
       <div class="td-delete-tx">${L==='fa'?'حذف کار':'Delete task'}</div>
     </div>`;
 
-  document.getElementById('td-chk').onclick=()=>{t.done=!t.done;t.doneAt=t.done?now():null;t.updatedAt=now();saveDB();_renderTaskDetail();render();};
+  document.getElementById('td-chk').onclick=()=>{t.done=!t.done;t.doneAt=t.done?now():null;t.updatedAt=now();if(t.done)playCompletionSound();saveDB();_renderTaskDetail();render();};
   const titleEl=document.getElementById('td-title');
   titleEl.oninput=()=>{const v=titleEl.value.trim();if(!v)return;t.text=v;t.updatedAt=now();saveDB();};
   titleEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();titleEl.blur();}});
@@ -2326,7 +2361,7 @@ function _renderTaskDetail(){
   }
   const cloc=document.getElementById('td-clear-loc');
   if(cloc)cloc.onclick=()=>{t.location='';t.updatedAt=now();saveDB();_renderTaskDetail();};
-  document.getElementById('td-delete').onclick=()=>{t.archivedAt=now();t.updatedAt=now();saveDB();closeTaskDetail();render();toast(L==='fa'?'حذف شد':'Deleted');};
+  document.getElementById('td-delete').onclick=()=>{if(DB.meta.confirmDel!==false&&!confirm(L==='fa'?'این کار حذف شود؟':'Delete this task?'))return;t.archivedAt=now();t.updatedAt=now();saveDB();closeTaskDetail();render();toast(L==='fa'?'حذف شد':'Deleted');};
 }
 
 function openTaskEdit(id){openTaskDetail(id);}
@@ -2598,6 +2633,7 @@ function createTask(text,listId){
   const id=uid();
   DB.entities.tasks[id]={
     id,text,listId:listId||'inbox',
+    seq:_nextSeq(),
     dueDate:null,dueTime:null,priority:'p3',repeat:null,
     assigneeId:null,creatorId:DB.meta.userId,
     status:'open',pinned:false,done:false,doneAt:null,
@@ -2798,7 +2834,28 @@ function completeTask(id){
   t.done=!t.done;
   t.doneAt=t.done?now():null;
   t.updatedAt=now();
+  if(t.done)playCompletionSound();
   saveDB();render();
+}
+// Short pleasant chime via WebAudio (no asset needed). Respects soundOn setting.
+let _audioCtx=null;
+function playCompletionSound(){
+  if(DB.meta.soundOn===false)return;
+  try{
+    _audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    const ctx=_audioCtx;
+    if(ctx.state==='suspended')ctx.resume();
+    const t0=ctx.currentTime;
+    [ [880,0],[1320,0.09] ].forEach(([f,dt])=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.type='sine';o.frequency.value=f;
+      o.connect(g);g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001,t0+dt);
+      g.gain.exponentialRampToValueAtTime(0.22,t0+dt+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+dt+0.22);
+      o.start(t0+dt);o.stop(t0+dt+0.24);
+    });
+  }catch(e){}
 }
 
 /* ══════════════════════════════════════════
@@ -2898,6 +2955,7 @@ function quickAdd(){
     const id=uid();
     DB.entities.tasks[id]={
       id,text,
+      seq:_nextSeq(),
       listId:chipVal('qa-list')||'inbox',
       dueDate:document.getElementById('qa-date').value||null,
       dueTime:document.getElementById('qa-time').value||null,
@@ -3385,6 +3443,26 @@ function openSettingsSheet(){
         </div>
       </div>
 
+      <div class="hub-sec-label">${tr('setTasksHdr')}</div>
+      <div class="set-group">
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setAddTop')}</span>
+          <div class="set-sw ${DB.meta.addOnTop!==false?'on':''}" data-toggle="addOnTop" role="switch"></div>
+        </div>
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setStarTop')}</span>
+          <div class="set-sw ${DB.meta.starTop!==false?'on':''}" data-toggle="starTop" role="switch"></div>
+        </div>
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setSound')}</span>
+          <div class="set-sw ${DB.meta.soundOn!==false?'on':''}" data-toggle="soundOn" role="switch"></div>
+        </div>
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setConfirmDel')}</span>
+          <div class="set-sw ${DB.meta.confirmDel!==false?'on':''}" data-toggle="confirmDel" role="switch"></div>
+        </div>
+      </div>
+
       <div class="hub-sec-label">${tr('about')}</div>
       <div class="set-group">
         <div class="ul-row" style="padding:0 16px;cursor:default">
@@ -3411,8 +3489,15 @@ function openSettingsSheet(){
     if(s==='language'){DB.meta.lang=L==='en'?'fa':'en';saveDB();close();render();openSettingsSheet();}
     else if(s==='appearance'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();close();render();openSettingsSheet();}
     else if(s==='notifications'){toast(tr('comingSoon'));}
-    else if(s==='update'){close();manualCheckForUpdate();}
+    else if(s==='update'){manualCheckForUpdate();}
     else if(s==='signout'){close();doSignOut();}
+  });
+  ov.querySelectorAll('[data-toggle]').forEach(el=>el.onclick=()=>{
+    const k=el.dataset.toggle;
+    DB.meta[k]=(DB.meta[k]===false);
+    el.classList.toggle('on',DB.meta[k]!==false);
+    if(k==='soundOn'&&DB.meta.soundOn!==false)playCompletionSound();
+    saveDB();render();
   });
   const photo=document.getElementById('acct-photo');
   if(photo)photo.onclick=()=>openPhotoSheet();
