@@ -340,6 +340,25 @@ textarea.finput{resize:vertical;min-height:80px}
 .acct-item:active{background:var(--s3)}
 .acct-item .acct-ic{width:24px;text-align:center;font-size:18px;flex:none;color:var(--ink2)}
 .acct-item .acct-lbl{flex:1}
+.acct-soon{font-size:11px;color:var(--ink3);margin-left:auto}
+
+.acct-overlay{position:fixed;inset:0;z-index:400;background:var(--bg);
+  opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;
+  overflow-y:auto;padding:env(safe-area-inset-top,0) 0 0}
+.acct-overlay.on{opacity:1;transform:none}
+.acct-ov-head{display:flex;align-items:flex-start;gap:16px;padding:28px 20px 22px;
+  border-bottom:1px solid var(--b1)}
+.acct-ov-avatar{width:64px;height:64px;border-radius:50%;overflow:hidden;flex:none;border:1px solid var(--b2)}
+.acct-ov-id{flex:1;min-width:0;padding-top:6px}
+.acct-ov-name{font-size:19px;font-weight:800}
+.acct-ov-email{font-size:13px;color:var(--ink3);margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct-ov-close{width:40px;height:40px;flex:none;background:none;border:none;
+  color:var(--ink2);font-size:20px;cursor:pointer;border-radius:50%}
+.acct-ov-close:active{background:var(--s3)}
+.acct-ov-body{padding:10px 0}
+.acct-ov-body .acct-item{padding:16px 22px;font-size:16px}
+.acct-ov-body .acct-ic{font-size:20px;width:28px}
 
 .rep-step{width:38px;height:38px;border-radius:10px;border:1px solid var(--b1);
   background:var(--s2);color:var(--ink);font-size:20px;font-weight:700;cursor:pointer;
@@ -664,7 +683,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v102';
+const APP_VERSION='v103';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3011,33 +3030,42 @@ function removeProfilePhoto(){
 function openAccountSheet(){
   const user=DB.meta;
   const isGuest=!user.email;
-  openSheet(`
-    <div style="display:flex;align-items:center;gap:14px;padding:8px 16px 16px;border-bottom:1px solid var(--b1)">
-      <div style="width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none;border:1px solid var(--b2)">${avatarInner(user,56)}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:17px;font-weight:800">${esc(user.displayName||'Guest')}</div>
-        <div style="font-size:13px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isGuest?tr('statusGuest'):esc(user.email)}</div>
+  // Full-screen overlay (like Microsoft To Do), not a bottom sheet.
+  let ov=document.getElementById('acct-overlay');
+  if(ov)ov.remove();
+  ov=document.createElement('div');
+  ov.id='acct-overlay';
+  ov.className='acct-overlay';
+  ov.innerHTML=`
+    <div class="acct-ov-head">
+      <div class="acct-ov-avatar">${avatarInner(user,64)}</div>
+      <div class="acct-ov-id">
+        <div class="acct-ov-name">${esc(user.displayName||'Guest')}</div>
+        <div class="acct-ov-email">${isGuest?tr('statusGuest'):esc(user.email)}</div>
       </div>
+      <button class="acct-ov-close" id="acct-ov-close" aria-label="Close">&#10005;</button>
     </div>
-    <div style="padding:6px 0">
-      <button class="acct-item" id="acct-add" style="opacity:.45">
+    <div class="acct-ov-body">
+      <button class="acct-item" id="acct-add">
         <span class="acct-ic">＋</span><span class="acct-lbl">${L==='fa'?'افزودن حساب':'Add account'}</span>
-        <span style="font-size:11px;color:var(--ink3);margin-left:auto">${tr('comingSoon')}</span>
+        <span class="acct-soon">${tr('comingSoon')}</span>
       </button>
-      <button class="acct-item" id="acct-manage" style="opacity:.45">
+      <button class="acct-item" id="acct-manage">
         <span class="acct-ic">👥</span><span class="acct-lbl">${L==='fa'?'مدیریت حساب‌ها':'Manage accounts'}</span>
-        <span style="font-size:11px;color:var(--ink3);margin-left:auto">${tr('comingSoon')}</span>
+        <span class="acct-soon">${tr('comingSoon')}</span>
       </button>
-      <div class="hub-sep" style="margin:6px 16px"></div>
+      <div class="hub-sep" style="margin:8px 20px"></div>
       <button class="acct-item" id="acct-settings">
         <span class="acct-ic">⚙</span><span class="acct-lbl">${tr('settings')}</span>
       </button>
-    </div>
-    <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
-  document.querySelector('.sheet-cancel').onclick=closeSheet;
+    </div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(()=>ov.classList.add('on'));
+  const close=()=>{ov.classList.remove('on');setTimeout(()=>ov.remove(),200);};
+  document.getElementById('acct-ov-close').onclick=close;
   document.getElementById('acct-add').onclick=()=>toast(tr('comingSoon'));
   document.getElementById('acct-manage').onclick=()=>toast(tr('comingSoon'));
-  document.getElementById('acct-settings').onclick=()=>{closeSheet();openSettingsSheet();};
+  document.getElementById('acct-settings').onclick=()=>{close();openSettingsSheet();};
 }
 
 function openSettingsSheet(){
@@ -3308,9 +3336,16 @@ function applyUpdate(){
   try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
 
   const reload=()=>{
-    const base=location.href.split('?')[0].split('#')[0];
-    // Unique query defeats HTTP cache for the HTML document on GitHub Pages
-    location.replace(base+'?v='+Date.now());
+    // In an installed PWA (standalone), changing the query string can kick the
+    // user out to an external browser tab. Detect standalone and reload in place.
+    const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone===true;
+    if(standalone){
+      location.reload();
+    } else {
+      const base=location.href.split('?')[0].split('#')[0];
+      location.replace(base+'?v='+Date.now());
+    }
   };
 
   // Run cleanup steps best-effort, then reload no matter what.
