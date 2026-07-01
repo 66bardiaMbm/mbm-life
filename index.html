@@ -23,12 +23,22 @@
   --s0:#0f0f14; --s1:#16161e; --s2:#1e1e2a; --s3:#26263a;
   --ink:#f0f0f8; --ink2:#a0a0c0; --ink3:#606080;
   --brand:#6e56f8; --brand2:#9d7bff;
-  --brandg:linear-gradient(135deg,#6e56f8,#9d7bff);
+  --brandg:linear-gradient(135deg,var(--brand),var(--brand2));
   --ok:#22d3a0; --warn:#f59e0b; --danger:#f43f5e; --info:#38bdf8;
   --b1:rgba(255,255,255,.07); --b2:rgba(255,255,255,.12);
+  --sheet:#1c1c24;
   --sh:0 8px 32px rgba(0,0,0,.5);
   --r:16px; --r2:12px;
 }
+/* ── Light theme ── active when body lacks .dark ── */
+body.light{
+  --s0:#f5f6fa; --s1:#ffffff; --s2:#ffffff; --s3:#eceef4;
+  --ink:#1a1b26; --ink2:#4a4d66; --ink3:#8a8da8;
+  --b1:rgba(0,0,0,.08); --b2:rgba(0,0,0,.14);
+  --sheet:#ffffff;
+  --sh:0 8px 32px rgba(20,20,40,.12);
+}
+body.light{background:var(--s0);color:var(--ink)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
 html,body{height:100%;background:var(--s0);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
@@ -287,8 +297,8 @@ textarea.finput{resize:vertical;min-height:80px}
 #sheet-bg.on{background:rgba(0,0,0,.55);pointer-events:all;
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 #sheet{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
-  background:#1c1c24;border-radius:28px 28px 0 0;
-  border-top:1px solid rgba(255,255,255,.1);z-index:51;
+  background:var(--sheet);border-radius:28px 28px 0 0;
+  border-top:1px solid var(--b1);z-index:51;
   transform:translateY(100%);
   transition:transform .32s cubic-bezier(0.22,1,0.36,1);
   max-height:90vh;overflow-y:auto;overflow-x:hidden;
@@ -421,6 +431,37 @@ textarea.finput{resize:vertical;min-height:80px}
 .set-sw.on::after{transform:translateX(18px);background:#fff}
 body.rtl .set-sw::after{left:auto;right:2px}
 body.rtl .set-sw.on::after{transform:translateX(-18px)}
+/* Appointment date badge — styled like a calendar leaf */
+.appt-cal{width:44px;height:46px;border-radius:10px;overflow:hidden;
+  background:var(--s2);border:1px solid var(--b1);display:flex;flex-direction:column;
+  align-items:center;box-shadow:0 2px 6px rgba(0,0,0,.18)}
+.appt-cal-top{width:100%;background:var(--cal-accent,#f43f5e);color:#fff;
+  font-size:9px;font-weight:800;letter-spacing:.5px;text-align:center;
+  padding:2px 0 1px;line-height:1.3}
+.appt-cal-day{flex:1;display:flex;align-items:center;justify-content:center;
+  font-size:19px;font-weight:800;color:var(--ink);line-height:1}
+/* Month calendar grid */
+.appt-cal-wrap{margin:4px 14px 14px;background:var(--s1);border:1px solid var(--b1);
+  border-radius:var(--r);padding:12px 12px 14px}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-month{font-size:15px;font-weight:800;color:var(--ink)}
+.cal-navbtn{width:34px;height:34px;border-radius:10px;background:var(--s2);
+  border:1px solid var(--b1);color:var(--ink);font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+.cal-navbtn:active{background:var(--s3)}
+.cal-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px}
+.cal-dow>div{text-align:center;font-size:11px;font-weight:700;color:var(--ink3);padding:2px 0}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-cell{position:relative;aspect-ratio:1;display:flex;align-items:center;
+  justify-content:center;font-size:14px;color:var(--ink);border-radius:9px;
+  cursor:pointer;font-weight:600}
+.cal-cell:active{background:var(--s3)}
+.cal-empty{cursor:default}
+.cal-today{background:var(--brand);color:#fff;font-weight:800}
+.cal-dot{position:absolute;bottom:5px;left:50%;transform:translateX(-50%);
+  width:5px;height:5px;border-radius:50%;background:var(--brand)}
+.cal-today .cal-dot{background:#fff}
+.cal-sel{outline:2px solid var(--brand);outline-offset:-2px}
 .appt-map-btn{display:inline-flex;align-items:center;gap:3px;cursor:pointer;
   color:var(--brand);background:var(--s2);border:1px solid var(--b1);
   padding:2px 8px;border-radius:8px;-webkit-tap-highlight-color:transparent}
@@ -755,7 +796,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v109';
+const APP_VERSION='v112';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -766,7 +807,7 @@ const KEY='mbmlife_platform_v1';
 function blankDB(){
   return {
     schema:SCHEMA,
-    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{},addOnTop:true,starTop:true,soundOn:true,confirmDel:true},
+    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{},addOnTop:true,starTop:true,soundOn:true,confirmDel:true,accent:null,showDueMyDay:true,recogniseDates:true,removeDates:false,weekStart:'system',smartShow:{myday:true,important:true,planned:true,assigned:true,all:true},autoHideSmart:false},
     entities:{
       tasks:{},     // {id,text,listId,dueDate,dueTime,priority,repeat,
                     //  assigneeId,creatorId,status,pinned,done,doneAt,
@@ -819,6 +860,14 @@ function loadDB(){
     if(d.meta.starTop===undefined)d.meta.starTop=true;
     if(d.meta.soundOn===undefined)d.meta.soundOn=true;
     if(d.meta.confirmDel===undefined)d.meta.confirmDel=true;
+    if(d.meta.accent===undefined)d.meta.accent=null;
+    if(d.meta.showDueMyDay===undefined)d.meta.showDueMyDay=true;
+    if(d.meta.recogniseDates===undefined)d.meta.recogniseDates=true;
+    if(d.meta.removeDates===undefined)d.meta.removeDates=false;
+    if(d.meta.weekStart===undefined)d.meta.weekStart='system';
+    if(d.meta.autoHideSmart===undefined)d.meta.autoHideSmart=false;
+    if(!d.meta.smartShow||typeof d.meta.smartShow!=='object')d.meta.smartShow={};
+    ['myday','important','planned','assigned','all'].forEach(k=>{if(d.meta.smartShow[k]===undefined)d.meta.smartShow[k]=true;});
     if(!Array.isArray(d.meta.groups))d.meta.groups=[];
     if(!Object.keys(d.entities.lists).length)seedDB(d);
     return d;
@@ -972,6 +1021,13 @@ const I18N={
     profile:'Profile',appearance:'Appearance',notifications:'Notifications',comingSoon:'Coming soon',back:'Back',
     setTasksHdr:'Tasks',setAddTop:'Add new tasks on top',setStarTop:'Move starred tasks to top',
     setSound:'Play completion sound',setConfirmDel:'Confirm before deleting',
+    setShowDueMyDay:"Show 'Due Today' tasks in My Day",setRecognise:'Recognise dates and times in task titles',
+    setRemoveDates:'Remove dates and times from task titles once recognised',
+    setSmartHdr:'Smart lists',setAutoHide:'Auto-hide empty smart lists',
+    setWeekHdr:'Start of the week',weekSystem:'System default',weekSat:'Saturday',weekSun:'Sunday',weekMon:'Monday',
+    themeDark:'Dark',themeLight:'Light',themeSystem:'System',
+    accentColour:'Accent colour',accentDefault:'Default',chooseTheme:'Theme',
+    upToDate:"You're up to date",updateAvailable:'Update available',installNow:'Install now',checking:'Checking…',
     noAppts:'No appointments yet.'},
   fa:{today:'امروز',lists:'لیست‌ها',calendar:'تقویم',people:'افراد',more:'بیشتر',
     noTasks:'هنوز چیزی نیست.',addTask:'کار جدید',tasks:'کارها',important:'مهم',
@@ -997,6 +1053,13 @@ const I18N={
     profile:'پروفایل',appearance:'ظاهر',notifications:'اعلان‌ها',comingSoon:'به‌زودی',back:'بازگشت',
     setTasksHdr:'کارها',setAddTop:'افزودن کار جدید در بالا',setStarTop:'انتقال کارهای ستاره‌دار به بالا',
     setSound:'پخش صدای تکمیل',setConfirmDel:'تأیید پیش از حذف',
+    setShowDueMyDay:'نمایش کارهای امروز در «روز من»',setRecognise:'تشخیص تاریخ و زمان در عنوان کار',
+    setRemoveDates:'حذف تاریخ و زمان از عنوان پس از تشخیص',
+    setSmartHdr:'لیست‌های هوشمند',setAutoHide:'پنهان‌کردن خودکار لیست‌های خالی',
+    setWeekHdr:'شروع هفته',weekSystem:'پیش‌فرض سیستم',weekSat:'شنبه',weekSun:'یکشنبه',weekMon:'دوشنبه',
+    themeDark:'تاریک',themeLight:'روشن',themeSystem:'سیستم',
+    accentColour:'رنگ تأکید',accentDefault:'پیش‌فرض',chooseTheme:'رنگ‌بندی',
+    upToDate:'برنامه به‌روز است',updateAvailable:'به‌روزرسانی موجود است',installNow:'نصب کن',checking:'در حال بررسی…',
     noAppts:'هنوز قراری ثبت نشده.'},
 };
 function tr(k){return (I18N[L]||I18N.en)[k]||k;}
@@ -1043,8 +1106,44 @@ function _renderInner(){
   bindScreen();
 }
 
+function _resolvedTheme(){
+  const t=DB.meta.theme||'dark';
+  if(t==='system'){
+    return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';
+  }
+  return t==='light'?'light':'dark';
+}
 function applyTheme(){
-  document.body.classList.toggle('dark',DB.meta.theme!=='light');
+  const eff=_resolvedTheme();
+  document.body.classList.toggle('dark',eff==='dark');
+  document.body.classList.toggle('light',eff==='light');
+  // Custom accent colour (falls back to default brand).
+  const acc=DB.meta.accent;
+  const root=document.documentElement.style;
+  if(acc){
+    root.setProperty('--brand',acc);
+    root.setProperty('--brand2',_lighten(acc,26));
+  }else{
+    root.removeProperty('--brand');
+    root.removeProperty('--brand2');
+  }
+  // Status-bar colour follows the theme.
+  const meta=document.querySelector('meta[name="theme-color"]');
+  if(meta)meta.setAttribute('content',eff==='light'?'#f5f6fa':'#0f0f14');
+}
+// Lighten a hex colour by mixing toward white (amt 0-100).
+function _lighten(hex,amt){
+  const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if(!m)return hex;
+  const f=p=>{const v=parseInt(p,16);return Math.round(v+(255-v)*(amt/100));};
+  const h=x=>x.toString(16).padStart(2,'0');
+  return '#'+h(f(m[1]))+h(f(m[2]))+h(f(m[3]));
+}
+// Re-apply when the OS theme changes and user is on "System".
+if(window.matchMedia){
+  try{window.matchMedia('(prefers-color-scheme: light)').addEventListener('change',()=>{
+    if((DB.meta.theme||'dark')==='system'){applyTheme();if(typeof render==='function')render();}
+  });}catch(e){}
 }
 function applyLang(){
   L=DB.meta.lang||'en';
@@ -1154,7 +1253,16 @@ function renderLists(){
     myday:allT.filter(t=>!t.done&&t.dueDate===ts).length,
     important:allT.filter(t=>!t.done&&t.pinned).length,
     planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length,
+    assigned:allT.filter(t=>!t.done&&t.assigneeId&&t.assigneeId===DB.meta.userId).length,
     all:allT.filter(t=>!t.done).length,
+  };
+  const _sShow=DB.meta.smartShow||{};
+  const _autoHide=DB.meta.autoHideSmart===true;
+  // Whether a given smart view should render: enabled AND (not auto-hidden while empty).
+  const svVisible=(k)=>{
+    if(_sShow[k]===false)return false;
+    if(_autoHide&&!svCounts[k])return false;
+    return true;
   };
 
   const apptCount=Object.values(DB.entities.appts||{}).filter(a=>!a.archivedAt).length;
@@ -1176,7 +1284,7 @@ function renderLists(){
     </div>
 
     <div style="margin-bottom:4px">
-      ${svDef.slice(0,3).map(s=>`
+      ${svDef.slice(0,3).filter(s=>svVisible(s.sv)).map(s=>`
         <div class="sv-row" data-sv="${s.sv}">
           <div class="sv-icon">
             <div class="sv-icon-inner" style="background:${s.color}18;color:${s.color}">${s.icon}</div>
@@ -1184,12 +1292,13 @@ function renderLists(){
           <span class="sv-name">${esc(s.name)}</span>
           ${svCounts[s.sv]?`<span class="sv-count">${svCounts[s.sv]}</span>`:''}
         </div>`).join('')}
-      <div class="sv-row" data-sv="assigned">
+      ${svVisible('assigned')?`<div class="sv-row" data-sv="assigned">
         <div class="sv-icon">
           <div class="sv-icon-inner" style="background:#34d39918;color:#34d399">&#128100;</div>
         </div>
         <span class="sv-name">${L==='fa'?'محول‌شده به من':'Assigned to me'}</span>
-      </div>
+        ${svCounts.assigned?`<span class="sv-count">${svCounts.assigned}</span>`:''}
+      </div>`:''}
       <div class="sv-row" data-go-appts="1">
         <div class="sv-icon">
           <div class="sv-icon-inner" style="background:#22d3a818;color:#22d3a8">◷</div>
@@ -1197,13 +1306,13 @@ function renderLists(){
         <span class="sv-name">${tr('appts')}</span>
         ${apptCount?`<span class="sv-count">${apptCount}</span>`:''}
       </div>
-      <div class="sv-row" data-sv="all">
+      ${svVisible('all')?`<div class="sv-row" data-sv="all">
         <div class="sv-icon">
           <div class="sv-icon-inner" style="background:#6e56f818;color:#6e56f8">≡</div>
         </div>
         <span class="sv-name">${tr('allTasks')}</span>
         ${svCounts.all?`<span class="sv-count">${svCounts.all}</span>`:''}
-      </div>
+      </div>`:''}
     </div>
 
     <div class="hub-sep"></div>
@@ -1279,7 +1388,7 @@ function renderListDetail(){
     accentColor=(DB.meta.smartColor&&DB.meta.smartColor[activeSmartView])||svColors[activeSmartView]||'#6e56f8';
     bgGradient=listBgGradient(accentColor);
     bgPhoto=(DB.meta.smartPhoto&&DB.meta.smartPhoto[activeSmartView])||null;
-    if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+    if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
     else if(activeSmartView==='planned')tasks=filterPlanned(tasks);
     else if(activeSmartView==='assigned')tasks=tasks.filter(t=>t.assigneeId&&t.assigneeId===DB.meta.userId);
@@ -1821,7 +1930,7 @@ function openSmartMenu(sv,anchorEl){
 function _smartTasks(sv){
   const ts=todayStr();
   let tasks=activeTasks();
-  if(sv==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+  if(sv==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
   else if(sv==='important')tasks=tasks.filter(t=>t.pinned);
   else if(sv==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
   return tasks;
@@ -2003,7 +2112,7 @@ function enterReorder(){
   // Seed manual order from current displayed order if not set yet
   let tasks=activeTasks();
   const ts=todayStr();
-  if(activeSmartView==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+  if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
   else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
   else if(activeSmartView==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
   else if(activeListId)tasks=tasks.filter(t=>t.listId===activeListId);
@@ -2155,7 +2264,7 @@ function _printSmart(sv){
   const name=svMap[sv]||'';
   const ts=todayStr();
   let tasks=activeTasks();
-  if(sv==='myday')tasks=tasks.filter(t=>t.dueDate===ts);
+  if(sv==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
   else if(sv==='important')tasks=tasks.filter(t=>t.pinned);
   else if(sv==='planned')tasks=tasks.filter(t=>t.dueDate&&t.dueDate>ts);
   const open=tasks.filter(t=>!t.done),done=tasks.filter(t=>t.done);
@@ -2369,6 +2478,56 @@ function openTaskEdit(id){openTaskDetail(id);}
 /* ══════════════════════════════════════════
    APPOINTMENTS SCREEN
    ══════════════════════════════════════════ */
+function _weekStartIdx(){
+  // Returns 0=Sun..6=Sat as the first column of the calendar grid.
+  const w=DB.meta.weekStart||'system';
+  if(w==='sun')return 0;
+  if(w==='mon')return 1;
+  if(w==='sat')return 6;
+  // system: infer from locale (most Intl locales: Sun for en-US, Sat for fa/ar, Mon for EU)
+  return L==='fa'?6:0;
+}
+let _apptMonth=null; // {y,m} currently shown; null = current month
+function _apptMonthObj(){
+  if(_apptMonth)return _apptMonth;
+  const n=new Date();return {y:n.getFullYear(),m:n.getMonth()};
+}
+function renderApptCalendar(all){
+  const {y,m}=_apptMonthObj();
+  const ts=todayStr();
+  const first=new Date(y,m,1);
+  const daysInMonth=new Date(y,m+1,0).getDate();
+  const startIdx=_weekStartIdx();
+  // Day-of-week of the 1st, shifted so the grid starts on the chosen weekday.
+  const lead=((first.getDay()-startIdx)+7)%7;
+  // Which dates have appointments (YYYY-MM-DD set for this month).
+  const marks={};
+  all.forEach(a=>{const dt=a.date;if(dt&&dt.slice(0,7)===`${y}-${String(m+1).padStart(2,'0')}`)marks[dt]=true;});
+  const monthName=first.toLocaleDateString(L==='fa'?'fa-IR':'en',{month:'long',year:'numeric'});
+  // Weekday header labels, rotated to weekStart.
+  const dowBase=L==='fa'?['ی','د','س','چ','پ','ج','ش']:['S','M','T','W','T','F','S'];
+  // dowBase is indexed 0=Sun..6=Sat for en; build header from startIdx.
+  const dow=[];for(let i=0;i<7;i++)dow.push(dowBase[(startIdx+i)%7]);
+  let cells='';
+  for(let i=0;i<lead;i++)cells+=`<div class="cal-cell cal-empty"></div>`;
+  for(let d=1;d<=daysInMonth;d++){
+    const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday=ds===ts;
+    const has=marks[ds];
+    cells+=`<div class="cal-cell${isToday?' cal-today':''}" data-calday="${ds}">
+      <span>${d}</span>${has?`<i class="cal-dot"></i>`:''}</div>`;
+  }
+  return `<div class="appt-cal-wrap">
+    <div class="cal-nav">
+      <button class="cal-navbtn" data-calnav="-1" aria-label="Prev">&#8249;</button>
+      <div class="cal-month">${monthName}</div>
+      <button class="cal-navbtn" data-calnav="1" aria-label="Next">&#8250;</button>
+    </div>
+    <div class="cal-dow">${dow.map(x=>`<div>${x}</div>`).join('')}</div>
+    <div class="cal-grid">${cells}</div>
+  </div>`;
+}
+
 function renderAppts(){
   const ts=todayStr();
   const all=Object.values(DB.entities.appts||{})
@@ -2386,6 +2545,8 @@ function renderAppts(){
     <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${tr('appts')}</div>
     <button class="hbtn" id="btn-new-appt" style="width:40px;height:40px;border-radius:12px;background:var(--s2);border:1px solid var(--b1);color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">＋</button>
   </div>`;
+
+  html+=renderApptCalendar(all);
 
   if(!all.length){
     html+=`<div class="empty"><div class="empty-ic">◷</div>
@@ -2410,12 +2571,15 @@ function renderAppts(){
 function apptRow(a){
   const ts=todayStr();
   const isToday=a.date===ts;
-  const dateLabel=isToday?(L==='fa'?'امروز':'Today'):shortDate(a.date);
+  const d=new Date(a.date+'T12:00');
+  const mon=d.toLocaleDateString('en',{month:'short'}).toUpperCase();
+  const day=d.getDate();
+  const accent=isToday?'var(--brand)':'#f43f5e';
   return `<div class="ul-row" data-apptid="${a.id}" style="padding:0 16px;align-items:flex-start">
     <div class="ul-icon" style="padding-top:14px">
-      <div style="width:42px;height:42px;border-radius:12px;background:${isToday?'var(--brand)':'var(--s2)'};display:flex;flex-direction:column;align-items:center;justify-content:center">
-        <div style="font-size:10px;font-weight:700;color:${isToday?'rgba(255,255,255,.8)':'var(--ink3)'};">${new Date(a.date+'T12:00').toLocaleDateString('en',{month:'short'}).toUpperCase()}</div>
-        <div style="font-size:18px;font-weight:800;color:${isToday?'#fff':'var(--ink)'};line-height:1">${new Date(a.date+'T12:00').getDate()}</div>
+      <div class="appt-cal" style="--cal-accent:${accent}">
+        <div class="appt-cal-top">${mon}</div>
+        <div class="appt-cal-day">${day}</div>
       </div>
     </div>
     <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
@@ -2430,14 +2594,14 @@ function apptRow(a){
   </div>`;
 }
 
-function openNewApptSheet(id){
+function openNewApptSheet(id,presetDate){
   const a=id?(DB.entities.appts||{})[id]:null;
   const isEdit=!!a;
   openSheet(`<h3>${isEdit?(L==='fa'?'ویرایش قرار':'Edit Appointment'):tr('newAppt')}</h3>
     <div class="fld"><label>${tr('apptTitle')}</label>
       <input class="finput" id="ap-title" value="${esc(a?.title||'')}" placeholder="${tr('apptTitle')}"></div>
     <div class="fld"><label>${tr('apptDate')}</label>
-      <input class="finput" id="ap-date" type="date" value="${a?.date||''}"></div>
+      <input class="finput" id="ap-date" type="date" value="${a?.date||presetDate||''}"></div>
     <div style="display:flex;gap:10px">
       <div class="fld" style="flex:1"><label>${L==='fa'?'شروع':'Start'}</label>
         <input class="finput" id="ap-time" type="time" value="${a?.time||''}"></div>
@@ -2629,12 +2793,100 @@ function toast(msg,ms=2200){
 /* ══════════════════════════════════════════
    CORE TASK ACTIONS
    ══════════════════════════════════════════ */
+/* ── Natural-language date/time recognition (To Do style) ──
+   Returns {date,time,cleanText}. date/time may be null.
+   Respects DB.meta.recogniseDates and DB.meta.removeDates. */
+function recogniseDateTime(raw){
+  const out={date:null,time:null,cleanText:raw};
+  if(DB.meta.recogniseDates===false)return out;
+  let s=raw;
+  const spans=[]; // [start,end] of matched substrings to optionally strip
+  const ts=todayStr();
+  const base=new Date(ts+'T00:00:00');
+  const isFa=/[\u0600-\u06FF]/.test(s);
+
+  // Weekday name → next occurrence
+  const dowEn={sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6,
+               sun:0,mon:1,tue:2,tues:2,wed:3,thu:4,thur:4,thurs:4,fri:5,sat:6};
+  const dowFa={'یکشنبه':0,'دوشنبه':1,'سه‌شنبه':2,'سه شنبه':2,'چهارشنبه':3,'پنجشنبه':4,'پنج‌شنبه':4,'جمعه':5,'شنبه':6};
+
+  function setDate(d){if(!out.date)out.date=d;}
+
+  // today / tomorrow / day-after
+  const rel=[
+    {re:/\b(today)\b/i,d:0},{re:/\b(tomorrow|tmrw)\b/i,d:1},
+    {re:/\b(day after tomorrow)\b/i,d:2},
+    {re:/(امروز)/,d:0},{re:/(فردا)/,d:1},{re:/(پس ?فردا)/,d:2},
+  ];
+  for(const r of rel){const m=s.match(r.re);if(m){const dd=new Date(base);dd.setDate(dd.getDate()+r.d);setDate(dd.toISOString().slice(0,10));spans.push([m.index,m.index+m[0].length]);break;}}
+
+  // "in N days" / "N روز دیگه"
+  let m=s.match(/\bin\s+(\d{1,3})\s+days?\b/i)||s.match(/(\d{1,3})\s*روز\s*(?:دیگه|بعد)/);
+  if(m){const n=parseInt(m[1],10);const dd=new Date(base);dd.setDate(dd.getDate()+n);setDate(dd.toISOString().slice(0,10));spans.push([m.index,m.index+m[0].length]);}
+
+  // "next week" / "هفته بعد"
+  m=s.match(/\bnext week\b/i)||s.match(/هفته\s*(?:بعد|دیگه)/);
+  if(m&&!out.date){const dd=new Date(base);dd.setDate(dd.getDate()+7);setDate(dd.toISOString().slice(0,10));spans.push([m.index,m.index+m[0].length]);}
+
+  // weekday names (en)
+  if(!out.date){
+    for(const name in dowEn){
+      const re=new RegExp('\\b'+name+'\\b','i');const mm=s.match(re);
+      if(mm){setDate(_nextWeekday(base,dowEn[name]));spans.push([mm.index,mm.index+mm[0].length]);break;}
+    }
+  }
+  // weekday names (fa)
+  if(!out.date){
+    for(const name in dowFa){
+      const idx=s.indexOf(name);
+      if(idx>=0){setDate(_nextWeekday(base,dowFa[name]));spans.push([idx,idx+name.length]);break;}
+    }
+  }
+
+  // explicit date dd/mm or yyyy-mm-dd
+  m=s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if(m){setDate(m[0]);spans.push([m.index,m.index+m[0].length]);}
+  else{
+    m=s.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+    if(m){let dd=+m[1],mo=+m[2],yr=m[3]?(+m[3]<100?2000+ +m[3]:+m[3]):base.getFullYear();
+      const jsd=new Date(yr,mo-1,dd);
+      if(!isNaN(jsd)){setDate(jsd.toISOString().slice(0,10));spans.push([m.index,m.index+m[0].length]);}}
+  }
+
+  // time: 3pm / 3:30pm / 15:30 / ساعت ۳
+  m=s.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if(m){let h=+m[1]%12;if(/pm/i.test(m[3]))h+=12;const mi=m[2]?m[2]:'00';out.time=String(h).padStart(2,'0')+':'+mi;spans.push([m.index,m.index+m[0].length]);}
+  else{
+    m=s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+    if(m){out.time=String(+m[1]).padStart(2,'0')+':'+m[2];spans.push([m.index,m.index+m[0].length]);}
+  }
+
+  // Strip recognised spans if requested
+  if(DB.meta.removeDates&&spans.length){
+    // remove from end to keep indices valid
+    spans.sort((a,b)=>b[0]-a[0]);
+    let t=s;
+    for(const[st,en]of spans)t=t.slice(0,st)+t.slice(en);
+    out.cleanText=t.replace(/\s{2,}/g,' ').replace(/\s+([,.،])/g,'$1').trim();
+    if(!out.cleanText)out.cleanText=raw; // never leave an empty title
+  }
+  return out;
+}
+function _nextWeekday(base,target){
+  const d=new Date(base);
+  let diff=(target-d.getDay()+7)%7;
+  if(diff===0)diff=7; // "monday" said on a monday → next monday
+  d.setDate(d.getDate()+diff);
+  return d.toISOString().slice(0,10);
+}
+
 function createTask(text,listId){
   const id=uid();
+  const rec=recogniseDateTime(text);
   DB.entities.tasks[id]={
-    id,text,listId:listId||'inbox',
+    id,text:rec.cleanText||text,listId:listId||'inbox',
     seq:_nextSeq(),
-    dueDate:null,dueTime:null,priority:'p3',repeat:null,
+    dueDate:rec.date,dueTime:rec.time,priority:'p3',repeat:null,
     assigneeId:null,creatorId:DB.meta.userId,
     status:'open',pinned:false,done:false,doneAt:null,
     placeId:null,expenseId:null,noteIds:[],tags:[],steps:[],notes:'',
@@ -3042,7 +3294,22 @@ function bindScreen(){
   const nab=document.getElementById('btn-new-appt');
   if(nab)nab.onclick=()=>openNewApptSheet(null);
   const apptsBack=document.getElementById('appts-back');
-  if(apptsBack)apptsBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
+  if(apptsBack)apptsBack.onclick=()=>{_apptMonth=null;screen='lists';render();window.scrollTo(0,0);};
+  // Calendar month navigation
+  document.querySelectorAll('[data-calnav]').forEach(el=>el.onclick=()=>{
+    const dir=+el.dataset.calnav;
+    const o=_apptMonthObj();
+    let m=o.m+dir,y=o.y;
+    if(m<0){m=11;y--;}if(m>11){m=0;y++;}
+    _apptMonth={y,m};render();
+  });
+  // Calendar day tap → jump to that day's appointment, or create one on that date
+  document.querySelectorAll('[data-calday]').forEach(el=>el.onclick=()=>{
+    const ds=el.dataset.calday;
+    const hit=Object.values(DB.entities.appts||{}).find(a=>!a.archivedAt&&a.date===ds);
+    if(hit){openNewApptSheet(hit.id);}
+    else{openNewApptSheet(null,ds);}
+  });
   // Appointment rows
   // Map buttons — open Google Maps, don't open the appointment card.
   document.querySelectorAll('[data-map]').forEach(el=>el.onclick=(e)=>{
@@ -3432,9 +3699,9 @@ function openSettingsSheet(){
           <span class="ul-count">${L==='fa'?'فارسی':'English'}</span>
         </div>
         <div class="ul-row" data-set="appearance" style="padding:0 16px">
-          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${DB.meta.theme==='dark'?'&#127769;':'&#9728;'}</div></div>
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${DB.meta.theme==='light'?'&#9728;':DB.meta.theme==='system'?'&#128421;':'&#127769;'}</div></div>
           <span class="ul-name">${tr('appearance')}</span>
-          <span class="ul-count">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}</span>
+          <span class="ul-count">${({dark:tr('themeDark'),light:tr('themeLight'),system:tr('themeSystem')})[DB.meta.theme||'dark']}</span>
         </div>
         <div class="ul-row" data-set="notifications" style="padding:0 16px">
           <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#128276;</div></div>
@@ -3460,6 +3727,40 @@ function openSettingsSheet(){
         <div class="set-trow">
           <span class="set-trow-label">${tr('setConfirmDel')}</span>
           <div class="set-sw ${DB.meta.confirmDel!==false?'on':''}" data-toggle="confirmDel" role="switch"></div>
+        </div>
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setShowDueMyDay')}</span>
+          <div class="set-sw ${DB.meta.showDueMyDay!==false?'on':''}" data-toggle="showDueMyDay" role="switch"></div>
+        </div>
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setRecognise')}</span>
+          <div class="set-sw ${DB.meta.recogniseDates!==false?'on':''}" data-toggle="recogniseDates" role="switch"></div>
+        </div>
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setRemoveDates')}</span>
+          <div class="set-sw ${DB.meta.removeDates===true?'on':''}" data-toggle="removeDates" role="switch"></div>
+        </div>
+      </div>
+
+      <div class="hub-sec-label">${tr('setSmartHdr')}</div>
+      <div class="set-group">
+        ${[['myday',tr('myday')],['important',tr('important')],['planned',tr('planned')],['assigned',(L==='fa'?'محول‌شده به من':'Assigned to me')],['all',tr('allTasks')]].map(([k,label])=>`
+        <div class="set-trow">
+          <span class="set-trow-label">${esc(label)}</span>
+          <div class="set-sw ${(DB.meta.smartShow&&DB.meta.smartShow[k]===false)?'':'on'}" data-smart="${k}" role="switch"></div>
+        </div>`).join('')}
+        <div class="set-trow">
+          <span class="set-trow-label">${tr('setAutoHide')}</span>
+          <div class="set-sw ${DB.meta.autoHideSmart===true?'on':''}" data-toggle="autoHideSmart" role="switch"></div>
+        </div>
+      </div>
+
+      <div class="hub-sec-label">${tr('setWeekHdr')}</div>
+      <div class="set-group">
+        <div class="ul-row" data-set="weekstart" style="padding:0 16px">
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#128197;</div></div>
+          <span class="ul-name">${tr('setWeekHdr')}</span>
+          <span class="ul-count">${({system:tr('weekSystem'),sat:tr('weekSat'),sun:tr('weekSun'),mon:tr('weekMon')})[DB.meta.weekStart||'system']}</span>
         </div>
       </div>
 
@@ -3487,16 +3788,27 @@ function openSettingsSheet(){
   ov.querySelectorAll('[data-set]').forEach(el=>el.onclick=()=>{
     const s=el.dataset.set;
     if(s==='language'){DB.meta.lang=L==='en'?'fa':'en';saveDB();close();render();openSettingsSheet();}
-    else if(s==='appearance'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();close();render();openSettingsSheet();}
+    else if(s==='appearance'){openAppearanceSheet();}
+    else if(s==='weekstart'){openWeekStartSheet();}
     else if(s==='notifications'){toast(tr('comingSoon'));}
     else if(s==='update'){manualCheckForUpdate();}
     else if(s==='signout'){close();doSignOut();}
   });
   ov.querySelectorAll('[data-toggle]').forEach(el=>el.onclick=()=>{
     const k=el.dataset.toggle;
-    DB.meta[k]=(DB.meta[k]===false);
-    el.classList.toggle('on',DB.meta[k]!==false);
+    // removeDates/autoHideSmart default OFF → toggle by truthiness; others default ON.
+    if(k==='removeDates'||k==='autoHideSmart'){DB.meta[k]=(DB.meta[k]!==true);}
+    else{DB.meta[k]=(DB.meta[k]===false);}
+    const onNow=(k==='removeDates'||k==='autoHideSmart')?(DB.meta[k]===true):(DB.meta[k]!==false);
+    el.classList.toggle('on',onNow);
     if(k==='soundOn'&&DB.meta.soundOn!==false)playCompletionSound();
+    saveDB();render();
+  });
+  ov.querySelectorAll('[data-smart]').forEach(el=>el.onclick=()=>{
+    const k=el.dataset.smart;
+    if(!DB.meta.smartShow)DB.meta.smartShow={};
+    DB.meta.smartShow[k]=(DB.meta.smartShow[k]===false);
+    el.classList.toggle('on',DB.meta.smartShow[k]!==false);
     saveDB();render();
   });
   const photo=document.getElementById('acct-photo');
@@ -3507,6 +3819,69 @@ function openSettingsSheet(){
     if(f)setPhotoFromFile(f);
     e.target.value='';
   };
+}
+
+// Accent colours the user can pick for the app (custom theme).
+const ACCENT_COLORS=['#6e56f8','#f43f5e','#f59e0b','#22d3a0','#38bdf8','#ec4899','#10b981','#8b5cf6','#ef4444','#14b8a6'];
+function openAppearanceSheet(){
+  const cur=DB.meta.theme||'dark';
+  const curAcc=DB.meta.accent||null;
+  const opt=(val,label,icon)=>`
+    <div class="set-trow" data-theme-opt="${val}" style="cursor:pointer">
+      <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${icon}</div></div>
+      <span class="set-trow-label">${label}</span>
+      <span style="font-size:18px;color:var(--brand);width:22px;text-align:center">${cur===val?'&#10003;':''}</span>
+    </div>`;
+  const swatches=[`<button class="cpick${!curAcc?' on':''}" data-acc="" style="background:linear-gradient(135deg,#6e56f8,#9d7bff);color:#6e56f8" title="${tr('accentDefault')}"></button>`]
+    .concat(ACCENT_COLORS.filter(c=>c!=='#6e56f8').map(c=>`<button class="cpick${curAcc===c?' on':''}" data-acc="${c}" style="background:${c};color:${c}"></button>`)).join('');
+  openSheet(`
+    <div style="padding:8px 16px 4px;font-size:17px;font-weight:800">${tr('appearance')}</div>
+    <div class="set-group" style="margin:8px 14px 6px">
+      ${opt('light',tr('themeLight'),'&#9728;')}
+      ${opt('dark',tr('themeDark'),'&#127769;')}
+      ${opt('system',tr('themeSystem'),'&#128421;')}
+    </div>
+    <div class="hub-sec-label">${tr('accentColour')}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;padding:4px 18px 10px">${swatches}</div>
+    <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-theme-opt]').forEach(el=>el.onclick=()=>{
+    DB.meta.theme=el.dataset.themeOpt;saveDB();applyTheme();render();closeSheet();
+    close_setOverlayReopen();
+  });
+  document.querySelectorAll('[data-acc]').forEach(el=>el.onclick=()=>{
+    const c=el.dataset.acc||null;
+    DB.meta.accent=c;saveDB();
+    document.querySelectorAll('[data-acc]').forEach(e=>e.classList.toggle('on',(e.dataset.acc||null)===c));
+    applyTheme();render();
+  });
+}
+function openWeekStartSheet(){
+  const cur=DB.meta.weekStart||'system';
+  const opt=(val,label)=>`
+    <div class="set-trow" data-week-opt="${val}" style="cursor:pointer">
+      <span class="set-trow-label">${label}</span>
+      <span style="font-size:18px;color:var(--brand);width:22px;text-align:center">${cur===val?'&#10003;':''}</span>
+    </div>`;
+  openSheet(`
+    <div style="padding:8px 16px 4px;font-size:17px;font-weight:800">${tr('setWeekHdr')}</div>
+    <div class="set-group" style="margin:8px 14px 10px">
+      ${opt('system',tr('weekSystem'))}
+      ${opt('sat',tr('weekSat'))}
+      ${opt('sun',tr('weekSun'))}
+      ${opt('mon',tr('weekMon'))}
+    </div>
+    <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
+  document.querySelector('.sheet-cancel').onclick=closeSheet;
+  document.querySelectorAll('[data-week-opt]').forEach(el=>el.onclick=()=>{
+    DB.meta.weekStart=el.dataset.weekOpt;saveDB();closeSheet();close_setOverlayReopen();
+  });
+}
+// Re-open the settings overlay so it reflects the latest choice.
+function close_setOverlayReopen(){
+  const ov=document.getElementById('set-overlay');
+  if(ov){ov.classList.remove('on');setTimeout(()=>ov.remove(),150);}
+  setTimeout(()=>openSettingsSheet(),160);
 }
 
 function openPhotoSheet(){
@@ -3656,11 +4031,18 @@ let _latestRemoteVer=null;
 
 async function fetchRemoteVersion(){
   const base=location.href.split('?')[0].split('#')[0];
-  const res=await fetch(base+'?_='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache'}});
-  if(!res.ok)return null;
-  const text=await res.text();
-  const match=text.match(/APP_VERSION='([^']+)'/);
-  return match&&match[1]?match[1]:null;
+  // Guard against a hung network call freezing the app: abort after 8s.
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),8000);
+  try{
+    const res=await fetch(base+'?_='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache'},signal:ctrl.signal});
+    if(!res.ok)return null;
+    const text=await res.text();
+    const match=text.match(/APP_VERSION='([^']+)'/);
+    return match&&match[1]?match[1]:null;
+  }finally{
+    clearTimeout(timer);
+  }
 }
 
 function showUpdateBanner(ver){
@@ -3761,11 +4143,16 @@ async function manualCheckForUpdate(){
       // Manual check overrides a prior dismissal for this version
       try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
       showUpdateBanner(ver);
-    }else{
+    }else if(ver){
       toast(L==='fa'?'برنامه به‌روز است ✓':'You’re up to date ✓');
+    }else{
+      // Couldn't read a version (offline / blocked) — say so instead of freezing.
+      toast(L==='fa'?'اتصال برقرار نشد':'Couldn’t reach server');
     }
   }catch(e){
-    toast(L==='fa'?'بررسی ناموفق بود':'Check failed');
+    const aborted=e&&e.name==='AbortError';
+    toast(aborted?(L==='fa'?'زمان بررسی تمام شد':'Check timed out')
+                 :(L==='fa'?'بررسی ناموفق بود':'Check failed'));
   }
 }
 
@@ -3821,6 +4208,8 @@ function startApp(displayName,email){
 
 // Boot Firebase (popup-only; no redirect handler)
 initAuth();
+// Apply saved theme immediately so the auth screen matches (light/dark/system).
+applyTheme();
 
 // Determine initial screen
 if(FB.ready){
