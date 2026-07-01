@@ -202,6 +202,32 @@ textarea.finput{resize:vertical;min-height:80px}
 
 /* Hub dividers */
 .hub-sep{height:1px;background:var(--b1);margin:6px 0}
+.grp-header{display:flex;align-items:center;gap:6px;padding:10px 16px 6px}
+.grp-name{flex:1;font-size:13px;font-weight:700;color:var(--ink3);
+  letter-spacing:.3px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp-menu-btn,.grp-collapse-btn{background:none;border:none;color:var(--ink3);
+  cursor:pointer;width:30px;height:30px;border-radius:50%;font-size:18px;
+  display:flex;align-items:center;justify-content:center;flex:none;-webkit-tap-highlight-color:transparent}
+.grp-menu-btn:active,.grp-collapse-btn:active{background:var(--s3)}
+.grp-arrow{display:inline-block;transition:transform .18s;font-size:18px}
+.grp-arrow.open{transform:rotate(90deg)}
+.grp-lists{border-left:2px solid var(--b2);margin-left:22px}
+.grp-empty{padding:10px 16px;font-size:13px;color:var(--ink3)}
+.lists-footer-row{display:flex;align-items:center;gap:8px}
+.lists-footer-row #btn-new-list{flex:1}
+.btn-new-group{position:relative;display:flex;align-items:center;justify-content:center;
+  width:52px;height:48px;flex:none;background:none;border:none;color:var(--brand);
+  cursor:pointer;border-radius:12px;margin-right:10px;-webkit-tap-highlight-color:transparent}
+.btn-new-group:active{background:var(--s2)}
+.bng-plus{position:absolute;right:6px;top:8px;font-size:12px;font-weight:700}
+.grp-pick{display:flex;align-items:center;gap:12px;width:100%;background:none;
+  border:none;cursor:pointer;text-align:left;color:var(--ink);padding:10px 4px;
+  border-radius:10px;font-family:inherit}
+.grp-pick:active{background:var(--s2)}
+.grp-pick.on{background:var(--s2)}
+.grp-pick .ul-name{flex:1;min-width:0}
+.grp-check{color:var(--brand);font-weight:800;width:20px;flex:none;text-align:center}
+.grp-pick[data-other]{opacity:.55}
 .hub-sec-label{font-size:12px;font-weight:600;color:var(--ink3);padding:10px 20px 4px}
 
 /* User list rows */
@@ -382,6 +408,10 @@ textarea.finput{resize:vertical;min-height:80px}
   border-radius:var(--r);color:#f43f5e;font-size:15px;font-weight:700;
   cursor:pointer;font-family:inherit}
 .set-signout:active{background:var(--s3)}
+.appt-map-btn{display:inline-flex;align-items:center;gap:3px;cursor:pointer;
+  color:var(--brand);background:var(--s2);border:1px solid var(--b1);
+  padding:2px 8px;border-radius:8px;-webkit-tap-highlight-color:transparent}
+.appt-map-btn:active{background:var(--s3)}
 
 .rep-step{width:38px;height:38px;border-radius:10px;border:1px solid var(--b1);
   background:var(--s2);color:var(--ink);font-size:20px;font-weight:700;cursor:pointer;
@@ -712,7 +742,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v105';
+const APP_VERSION='v107';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -772,6 +802,7 @@ function loadDB(){
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
     if(!d.meta.viewOrder)d.meta.viewOrder={};
+    if(!Array.isArray(d.meta.groups))d.meta.groups=[];
     if(!Object.keys(d.entities.lists).length)seedDB(d);
     return d;
   }catch(e){return seedDB(blankDB());}
@@ -1143,26 +1174,51 @@ function renderLists(){
     <div class="hub-sep"></div>
     <div class="hub-sec-label">${L==='fa'?'لیست‌های من':'My Lists'}</div>`;
 
-  if(lists.length){
-    html+=`<div style="margin-bottom:4px">
-      ${lists.map(l=>{
-        const count=allT.filter(t=>t.listId===l.id&&!t.done).length;
-        return `<div class="ul-row" data-listid="${l.id}">
-          <div class="ul-icon">
-            <div class="ul-icon-inner" style="background:${l.color||'#6e56f8'}">${l.icon||'✓'}</div>
-          </div>
-          <span class="ul-name">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</span>
-          ${count?`<span class="ul-count">${count}</span>`:''}
-        </div>`;
-      }).join('')}
+  const groups=DB.meta.groups||[];
+  const listRow=(l)=>{
+    const count=allT.filter(t=>t.listId===l.id&&!t.done).length;
+    return `<div class="ul-row" data-listid="${l.id}">
+      <div class="ul-icon">
+        <div class="ul-icon-inner" style="background:${l.color||'#6e56f8'}">${l.icon||'✓'}</div>
+      </div>
+      <span class="ul-name">${esc(l.name&&(l.name[L]||l.name.en)||l.id)}</span>
+      ${count?`<span class="ul-count">${count}</span>`:''}
     </div>`;
+  };
+
+  // Free lists (not in any group)
+  const freeLists=lists.filter(l=>!l.groupId||!groups.some(g=>g.id===l.groupId));
+  if(freeLists.length){
+    html+=`<div style="margin-bottom:4px">${freeLists.map(listRow).join('')}</div>`;
   }
+
+  // Groups, each with its lists
+  groups.forEach(g=>{
+    const gLists=lists.filter(l=>l.groupId===g.id);
+    html+=`
+      <div class="grp-header" data-grp="${g.id}">
+        <span class="grp-name">${esc(g.name)}</span>
+        <button class="grp-menu-btn" data-grp-menu="${g.id}" aria-label="Group options">&#8942;</button>
+        <button class="grp-collapse-btn" data-grp-toggle="${g.id}" aria-label="Collapse">
+          <span class="grp-arrow${g.collapsed?'':' open'}">&#8250;</span>
+        </button>
+      </div>`;
+    if(!g.collapsed){
+      html+=`<div class="grp-lists">${gLists.length?gLists.map(listRow).join(''):`<div class="grp-empty">${L==='fa'?'لیستی در این گروه نیست':'No lists in this group'}</div>`}</div>`;
+    }
+  });
 
   html+=`
     <div class="hub-sep"></div>
-    <div class="lists-footer" id="btn-new-list">
-      <div class="lf-icon"><div class="lf-plus">＋</div></div>
-      <span class="lf-label">${tr('newList')}</span>
+    <div class="lists-footer-row">
+      <div class="lists-footer" id="btn-new-list">
+        <div class="lf-icon"><div class="lf-plus">＋</div></div>
+        <span class="lf-label">${tr('newList')}</span>
+      </div>
+      <button class="btn-new-group" id="btn-new-group" aria-label="${L==='fa'?'گروه جدید':'New group'}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg>
+        <span class="bng-plus">＋</span>
+      </button>
     </div>`;
 
   return html;
@@ -1433,6 +1489,93 @@ function renderProfile(){
    LIST MANAGEMENT
    ══════════════════════════════════════════ */
 const LIST_COLORS=['#6e56f8','#f43f5e','#22d3a0','#f59e0b','#9d7bff','#38bdf8','#1fb6a8','#e67e22'];
+
+function openNewGroupSheet(){
+  openSheet(`
+    <h3>${L==='fa'?'گروه جدید':'New group'}</h3>
+    <div class="fld"><label>${L==='fa'?'نام گروه':'Group name'}</label>
+      <input class="finput" id="ng-name" placeholder="${L==='fa'?'نام گروه':'Group name'}"></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="ng-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+      <button class="btn btn-primary" id="ng-save">${L==='fa'?'ذخیره':'Save'}</button>
+    </div>`);
+  document.getElementById('ng-cancel').onclick=closeSheet;
+  document.getElementById('ng-save').onclick=()=>{
+    const name=document.getElementById('ng-name').value.trim();if(!name)return;
+    if(!Array.isArray(DB.meta.groups))DB.meta.groups=[];
+    DB.meta.groups.push({id:uid(),name,collapsed:false});
+    saveDB();closeSheet();render();
+  };
+  setTimeout(()=>document.getElementById('ng-name')?.focus(),100);
+}
+
+function openGroupMenu(groupId,anchorEl){
+  const g=(DB.meta.groups||[]).find(x=>x.id===groupId);
+  if(!g)return;
+  const html=`
+    <button class="cmi" data-gm="addremove"><span class="cmi-lbl">${L==='fa'?'افزودن/حذف لیست':'Add/Remove lists'}</span></button>
+    <button class="cmi" data-gm="rename"><span class="cmi-lbl">${L==='fa'?'تغییر نام گروه':'Rename group'}</span></button>
+    <button class="cmi" data-gm="ungroup"><span class="cmi-lbl">${L==='fa'?'انحلال گروه':'Ungroup lists'}</span></button>`;
+  _showCtxMenu(html,anchorEl,menu=>{
+    menu.querySelectorAll('[data-gm]').forEach(b=>b.onclick=()=>{
+      const a=b.dataset.gm;closeCtxMenu();
+      if(a==='addremove')openGroupListsSheet(groupId);
+      else if(a==='rename')openRenameGroupSheet(groupId);
+      else if(a==='ungroup')ungroupLists(groupId);
+    });
+  });
+}
+
+function openRenameGroupSheet(groupId){
+  const g=(DB.meta.groups||[]).find(x=>x.id===groupId);
+  if(!g)return;
+  openSheet(`
+    <h3>${L==='fa'?'تغییر نام گروه':'Rename group'}</h3>
+    <div class="fld"><input class="finput" id="rg-name" value="${esc(g.name)}"></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="rg-cancel">${L==='fa'?'انصراف':'Cancel'}</button>
+      <button class="btn btn-primary" id="rg-save">${L==='fa'?'ذخیره':'Save'}</button>
+    </div>`);
+  document.getElementById('rg-cancel').onclick=closeSheet;
+  document.getElementById('rg-save').onclick=()=>{
+    const name=document.getElementById('rg-name').value.trim();if(!name)return;
+    g.name=name;saveDB();closeSheet();render();
+  };
+  setTimeout(()=>document.getElementById('rg-name')?.focus(),100);
+}
+
+function ungroupLists(groupId){
+  // Free every list in the group, then remove the group.
+  Object.values(DB.entities.lists).forEach(l=>{if(l.groupId===groupId)l.groupId=null;});
+  DB.meta.groups=(DB.meta.groups||[]).filter(g=>g.id!==groupId);
+  saveDB();render();
+}
+
+function openGroupListsSheet(groupId){
+  const g=(DB.meta.groups||[]).find(x=>x.id===groupId);
+  if(!g)return;
+  const lists=active('lists');
+  const rows=lists.map(l=>{
+    const inThis=l.groupId===groupId;
+    const inOther=l.groupId&&l.groupId!==groupId;
+    const label=esc(l.name&&(l.name[L]||l.name.en)||l.id);
+    return `<button class="grp-pick${inThis?' on':''}" data-lp="${l.id}" ${inOther?'data-other="1"':''}>
+      <div class="ul-icon"><div class="ul-icon-inner" style="background:${l.color||'#6e56f8'}">${l.icon||'✓'}</div></div>
+      <span class="ul-name">${label}${inOther?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'در گروه دیگر':'in another group'})</span>`:''}</span>
+      <span class="grp-check">${inThis?'✓':''}</span>
+    </button>`;
+  }).join('');
+  openSheet(`
+    <h3>${L==='fa'?'افزودن/حذف لیست':'Add/Remove lists'} — ${esc(g.name)}</h3>
+    <div style="max-height:52vh;overflow-y:auto">${rows||`<div class="grp-empty">${L==='fa'?'لیستی نیست':'No lists'}</div>`}</div>
+    <div class="btn-row"><button class="btn btn-primary" id="gl-done" style="flex:1">${L==='fa'?'تمام':'Done'}</button></div>`);
+  document.querySelectorAll('[data-lp]').forEach(el=>el.onclick=()=>{
+    const l=DB.entities.lists[el.dataset.lp];if(!l)return;
+    l.groupId=(l.groupId===groupId)?null:groupId; // one list ↔ one group
+    saveDB();openGroupListsSheet(groupId); // refresh sheet
+  });
+  document.getElementById('gl-done').onclick=()=>{closeSheet();render();};
+}
 
 function openNewListSheet(){
   let selColor=LIST_COLORS[Object.keys(DB.entities.lists).length%LIST_COLORS.length];
@@ -2244,7 +2387,7 @@ function apptRow(a){
       <div style="font-size:16px;font-weight:500">${esc(a.title)}</div>
       <div style="font-size:12px;color:var(--ink3);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
         ${a.time?`<span>⏰ ${a.time}${a.endTime?' – '+a.endTime:''}</span>`:''}
-        ${a.location?`<span>📍 ${esc(a.location.split(',')[0])}</span>`:''}
+        ${a.location?`<span class="appt-map-btn" data-map="${encodeURIComponent(a.location)}" role="button" aria-label="Open in Maps">📍 ${esc(a.location.split(',')[0])} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="opacity:.7"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span>`:''}
       </div>
       ${a.notes?`<div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(a.notes)}</div>`:''}
     </div>
@@ -2823,12 +2966,32 @@ function bindScreen(){
   // New list
   const nlb=document.getElementById('btn-new-list');
   if(nlb)nlb.onclick=()=>openNewListSheet();
+  // New group
+  const ngb=document.getElementById('btn-new-group');
+  if(ngb)ngb.onclick=()=>openNewGroupSheet();
+  // Group collapse toggle
+  document.querySelectorAll('[data-grp-toggle]').forEach(el=>el.onclick=(e)=>{
+    e.stopPropagation();
+    const g=(DB.meta.groups||[]).find(x=>x.id===el.dataset.grpToggle);
+    if(g){g.collapsed=!g.collapsed;saveDB();render();}
+  });
+  // Group menu
+  document.querySelectorAll('[data-grp-menu]').forEach(el=>el.onclick=(e)=>{
+    e.stopPropagation();
+    openGroupMenu(el.dataset.grpMenu,el);
+  });
   // New appointment button
   const nab=document.getElementById('btn-new-appt');
   if(nab)nab.onclick=()=>openNewApptSheet(null);
   const apptsBack=document.getElementById('appts-back');
   if(apptsBack)apptsBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   // Appointment rows
+  // Map buttons — open Google Maps, don't open the appointment card.
+  document.querySelectorAll('[data-map]').forEach(el=>el.onclick=(e)=>{
+    e.stopPropagation();
+    const q=el.dataset.map;
+    if(q)window.open('https://www.google.com/maps/search/?api=1&query='+q,'_blank');
+  });
   document.querySelectorAll('[data-apptid]').forEach(el=>el.onclick=()=>openNewApptSheet(el.dataset.apptid));
   // Hub search
   const hsb=document.getElementById('btn-hub-search');
@@ -3452,6 +3615,13 @@ function applyUpdate(){
   if(later)later.style.display='none';
   // Treat the new version as current after reload
   try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
+  // Remember where the user was, so the update doesn't dump them on the home screen.
+  try{
+    localStorage.setItem('mbmlife_restore_v1',JSON.stringify({
+      screen:screen,tasksView:tasksView,activeListId:activeListId,
+      activeSmartView:activeSmartView,plannedFilter:plannedFilter,t:Date.now()
+    }));
+  }catch(e){}
 
   const reload=()=>{
     // In an installed PWA (standalone), changing the query string can kick the
@@ -3530,6 +3700,29 @@ document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
 // Show version on auth screen
 (function(){var v=document.getElementById('auth-ver');if(v)v.textContent=APP_VERSION;})();
 
+function restoreAfterUpdate(){
+  let raw;
+  try{raw=localStorage.getItem('mbmlife_restore_v1');}catch(e){return;}
+  if(!raw)return;
+  try{localStorage.removeItem('mbmlife_restore_v1');}catch(e){}
+  let st;
+  try{st=JSON.parse(raw);}catch(e){return;}
+  if(!st||!st.t||(Date.now()-st.t>60000))return; // only honor a fresh (<60s) restore
+  try{
+    screen=st.screen||'lists';
+    tasksView=st.tasksView||'browser';
+    activeListId=st.activeListId||null;
+    activeSmartView=st.activeSmartView||null;
+    plannedFilter=st.plannedFilter||'all';
+    // Guard: if the saved list no longer exists, fall back to home.
+    if(activeListId && !DB.lists.some(l=>l.id===activeListId)){
+      activeListId=null;tasksView='browser';screen='lists';
+    }
+    render();
+    if(screen==='lists'&&tasksView==='detail'){window.scrollTo(0,0);}
+  }catch(e){}
+}
+
 function startApp(displayName,email){
   DB.meta.displayName=displayName||'Guest';
   DB.meta.email=email||null;
@@ -3537,6 +3730,7 @@ function startApp(displayName,email){
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
   render();
+  restoreAfterUpdate();
   setTimeout(checkForUpdate,3000);
 }
 
