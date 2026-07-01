@@ -106,6 +106,9 @@ body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .pill{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;flex:none}
 .pill.p1{background:rgba(244,63,94,.15);color:var(--danger)}
 .pill.p2{background:rgba(245,158,11,.15);color:var(--warn)}
+.chip-loc{color:var(--brand);border-color:rgba(110,86,248,.3);
+  background:rgba(110,86,248,.08);cursor:pointer}
+.chip-loc:active{background:rgba(110,86,248,.18)}
 
 /* ── Form elements ── */
 .fld{margin-bottom:14px}
@@ -172,7 +175,8 @@ textarea.finput{resize:vertical;min-height:80px}
 .trow-chk-wrap{width:52px;height:56px;display:flex;align-items:center;
   justify-content:center;flex:none}
 .trow-content{flex:1;padding:15px 0 14px;min-width:0}
-.trow-title{font-size:16px;font-weight:400;line-height:1.35;letter-spacing:-.1px}
+.trow-title{font-size:16px;font-weight:400;line-height:1.35;letter-spacing:-.1px;
+  word-break:break-word;overflow-wrap:anywhere}
 .trow-meta-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;align-items:center}
 .trow-star-wrap{width:48px;height:56px;display:flex;align-items:center;
   justify-content:center;flex:none}
@@ -290,7 +294,7 @@ textarea.finput{resize:vertical;min-height:80px}
 /* ════════════════════════════
    PREMIUM SHEET
    ════════════════════════════ */
-#sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,0);z-index:50;
+#sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,0);z-index:450;
   pointer-events:none;
   transition:background .25s,backdrop-filter .25s,-webkit-backdrop-filter .25s;
   backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px)}
@@ -298,7 +302,7 @@ textarea.finput{resize:vertical;min-height:80px}
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 #sheet{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
   background:var(--sheet);border-radius:28px 28px 0 0;
-  border-top:1px solid var(--b1);z-index:51;
+  border-top:1px solid var(--b1);z-index:451;
   transform:translateY(100%);
   transition:transform .32s cubic-bezier(0.22,1,0.36,1);
   max-height:90vh;overflow-y:auto;overflow-x:hidden;
@@ -431,6 +435,11 @@ textarea.finput{resize:vertical;min-height:80px}
 .set-sw.on::after{transform:translateX(18px);background:#fff}
 body.rtl .set-sw::after{left:auto;right:2px}
 body.rtl .set-sw.on::after{transform:translateX(-18px)}
+/* RTL task rows: right-align text/chips, keep checkbox and star in place, prevent overflow */
+body.rtl .trow-title{text-align:right;word-break:break-word;overflow-wrap:anywhere}
+body.rtl .trow-meta-row{justify-content:flex-start;flex-direction:row}
+body.rtl .trow-content{text-align:right}
+.trow-meta-row .chip,.trow-meta-row .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Appointment date badge — styled like a calendar leaf */
 .appt-cal{width:44px;height:46px;border-radius:10px;overflow:hidden;
   background:var(--s2);border:1px solid var(--b1);display:flex;flex-direction:column;
@@ -679,7 +688,7 @@ body.rtl .set-sw.on::after{transform:translateX(-18px)}
   transform:translateX(-50%) translateY(20px);
   background:var(--s2);border:1px solid var(--b2);border-radius:12px;
   padding:10px 18px;font-size:13px;font-weight:600;color:var(--ink);
-  box-shadow:var(--sh);opacity:0;transition:all .25s;z-index:70;
+  box-shadow:var(--sh);opacity:0;transition:all .25s;z-index:600;
   white-space:nowrap;pointer-events:none}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
@@ -796,7 +805,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v112';
+const APP_VERSION='v114';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1484,7 +1493,7 @@ function taskRowFlat(t,isOverdue){
   }
   if(t.dueDate&&!over)meta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
   if(over)meta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
-  if(t.location)meta+=`<span class="chip">📍 ${esc(t.location.split(',')[0])}</span>`;
+  if(t.location)meta+=`<span class="chip chip-loc" data-map="${encodeURIComponent(t.location)}" role="button">📍 ${esc(t.location.split(',')[0])}</span>`;
   // overdue row: subtle left border
   const overStyle=isOverdue?'border-left:2px solid var(--danger);':'';
   return `<div class="trow-flat ${t.done?'done':''}" data-tid="${t.id}" style="${overStyle}">
@@ -1492,7 +1501,7 @@ function taskRowFlat(t,isOverdue){
       <div class="chk ${t.done?'on':''}" data-chk="${t.id}"></div>
     </div>
     <div class="trow-content">
-      <div class="trow-title">${esc(t.text)}</div>
+      <div class="trow-title" dir="auto">${esc(t.text)}</div>
       ${meta||pr?`<div class="trow-meta-row">${meta}${pr}</div>`:''}
     </div>
     <div class="trow-star-wrap">
@@ -2709,11 +2718,11 @@ function _renderSearch(q){
         return `<div class="trow-flat${t.done?' done':''}" data-srch-tid="${t.id}">
           <div class="trow-chk-wrap"><div class="chk${t.done?' on':''}" data-chk="${t.id}"></div></div>
           <div class="trow-content">
-            <div class="trow-title">${esc(t.text)}</div>
+            <div class="trow-title" dir="auto">${esc(t.text)}</div>
             <div class="trow-meta-row">
               ${l?`<span class="chip">${l.icon||'✓'} ${esc(l.name&&(l.name[L]||l.name.en)||'')}</span>`:''}
               ${t.dueDate?`<span class="chip${over?' over':''}">${shortDate(t.dueDate)}</span>`:''}
-              ${t.location?`<span class="chip">📍 ${esc(t.location.split(',')[0])}</span>`:''}
+              ${t.location?`<span class="chip chip-loc" data-map="${encodeURIComponent(t.location)}" role="button">📍 ${esc(t.location.split(',')[0])}</span>`:''}
             </div>
           </div>
           <div class="trow-star-wrap"><button class="star${t.pinned?' on':''}" data-pin="${t.id}">★</button></div>
@@ -3846,8 +3855,8 @@ function openAppearanceSheet(){
     <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
   document.querySelector('.sheet-cancel').onclick=closeSheet;
   document.querySelectorAll('[data-theme-opt]').forEach(el=>el.onclick=()=>{
-    DB.meta.theme=el.dataset.themeOpt;saveDB();applyTheme();render();closeSheet();
-    close_setOverlayReopen();
+    DB.meta.theme=el.dataset.themeOpt;saveDB();applyTheme();
+    closeSheet();close_setOverlayReopen();
   });
   document.querySelectorAll('[data-acc]').forEach(el=>el.onclick=()=>{
     const c=el.dataset.acc||null;
@@ -4252,8 +4261,23 @@ document.getElementById('sheet-bg').onclick=()=>{_exitDialogOpen=false;closeShee
 // Task detail panel
 // Prevent Android back button from leaving app
 window.addEventListener('popstate',()=>{
+  const setOv=document.getElementById('set-overlay');
+  const acctOv=document.getElementById('acct-overlay');
   if(reorderMode){
     exitReorder();
+    history.pushState(null,'',location.href);
+  } else if(document.getElementById('sheet').classList.contains('on')){
+    // A bottom sheet (appearance, week-start, exit dialog, etc.) is open — close it first.
+    closeSheet();
+    _exitDialogOpen=false;
+    history.pushState(null,'',location.href);
+  } else if(setOv){
+    // Settings overlay open → go back to account sheet.
+    setOv.classList.remove('on');setTimeout(()=>setOv.remove(),200);
+    openAccountSheet();
+    history.pushState(null,'',location.href);
+  } else if(acctOv){
+    acctOv.classList.remove('on');setTimeout(()=>acctOv.remove(),200);
     history.pushState(null,'',location.href);
   } else if(document.getElementById('ctxmenu').classList.contains('on')){
     closeCtxMenu();
@@ -4264,16 +4288,11 @@ window.addEventListener('popstate',()=>{
   } else if(document.getElementById('search-screen').classList.contains('on')){
     closeSearch();
     history.pushState(null,'',location.href);
-  } else if(document.getElementById('sheet').classList.contains('on')){
-    // If the exit dialog itself is open, a back press just closes it
-    closeSheet();
-    _exitDialogOpen=false;
-    history.pushState(null,'',location.href);
   } else if(tasksView==='detail'){
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
     history.pushState(null,'',location.href);
   } else if(screen==='appts'){
-    screen='lists';render();
+    _apptMonth=null;screen='lists';render();
     history.pushState(null,'',location.href);
   } else {
     // Nothing to close — show in-app exit confirmation
