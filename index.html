@@ -184,6 +184,10 @@ textarea.finput{resize:vertical;min-height:80px}
   display:flex;align-items:center;justify-content:center;
   font-size:18px;font-weight:800;color:#fff;flex:none}
 .lists-hub-name{font-size:17px;font-weight:700;flex:1}
+.lists-hub-search{width:42px;height:42px;flex:none;display:flex;align-items:center;
+  justify-content:center;background:none;border:none;color:var(--ink2);cursor:pointer;
+  border-radius:12px;-webkit-tap-highlight-color:transparent}
+.lists-hub-search:active{background:var(--s3)}
 
 /* Smart view rows */
 .sv-row{display:flex;align-items:center;padding:0 16px;
@@ -475,6 +479,22 @@ textarea.finput{resize:vertical;min-height:80px}
   font-size:16px;color:var(--ink);font-family:inherit}
 .srch-input-wrap input::placeholder{color:var(--ink3)}
 .srch-ic{display:flex;align-items:center;color:var(--ink3);flex:none}
+.srch-mic{width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:none;border:none;color:var(--ink2);cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
+.srch-mic:active{background:var(--s3)}
+.srch-mic.recording{color:#f43f5e;animation:micpulse 1.2s ease-in-out infinite}
+@keyframes micpulse{0%,100%{opacity:1}50%{opacity:.4}}
+.srch-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:80px 40px;text-align:center}
+.srch-empty-ic{color:var(--brand);opacity:.55;margin-bottom:24px}
+.srch-empty-text{color:var(--ink3);font-size:15px;line-height:1.6;max-width:300px}
+.qa-input-row{display:flex;align-items:center;gap:8px}
+.qa-input-row .finput{flex:1}
+.qa-mic{width:42px;height:42px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:var(--s2);border:1px solid var(--b1);color:var(--ink2);cursor:pointer;border-radius:12px;
+  -webkit-tap-highlight-color:transparent}
+.qa-mic:active{background:var(--s3)}
+.qa-mic.recording{color:#f43f5e;border-color:#f43f5e;animation:micpulse 1.2s ease-in-out infinite}
 .srch-cancel{background:none;border:none;color:var(--brand);font-size:15px;
   font-weight:600;cursor:pointer;white-space:nowrap;flex:none;
   padding:0 4px;font-family:inherit}
@@ -605,10 +625,16 @@ textarea.finput{resize:vertical;min-height:80px}
       <span class="srch-ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg></span>
       <input id="srch-input" placeholder="Search tasks and lists" autocomplete="off">
     </div>
+    <button class="srch-mic" id="srch-mic" aria-label="Voice search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg></button>
     <button class="srch-cancel" id="srch-cancel">Cancel</button>
   </div>
   <div class="srch-results" id="srch-results">
-    <div class="srch-hint">Search tasks, lists, and notes</div>
+    <div class="srch-empty-state">
+      <div class="srch-empty-ic">
+        <svg width="76" height="76" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
+      </div>
+      <div class="srch-empty-text">What would you like to find? You can search within tasks, steps and notes</div>
+    </div>
   </div>
 </div>
 
@@ -638,7 +664,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v100';
+const APP_VERSION='v102';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2200,7 +2226,12 @@ function closeSearch(){
 function _renderSearch(q){
   const el=document.getElementById('srch-results');if(!el)return;
   if(!q.trim()){
-    el.innerHTML='<div class="srch-hint">'+(L==='fa'?'جستجوی کارها، لیست‌ها و قرارها':'Search tasks, lists and appointments')+'</div>';return;}
+    el.innerHTML=`<div class="srch-empty-state">
+      <div class="srch-empty-ic">
+        <svg width="76" height="76" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
+      </div>
+      <div class="srch-empty-text">${L==='fa'?'چه چیزی می‌خواهی پیدا کنی؟ می‌توانی در کارها، مراحل و یادداشت‌ها جستجو کنی':'What would you like to find? You can search within tasks, steps and notes'}</div>
+    </div>`;return;}
   const ql=q.toLowerCase();
   const tasks=activeTasks().filter(t=>
     t.text.toLowerCase().includes(ql)||
@@ -2504,13 +2535,66 @@ function completeTask(id){
 /* ══════════════════════════════════════════
    QUICK ADD (FAB)
    ══════════════════════════════════════════ */
+// Reusable voice-to-text for any input + mic button pair.
+let _voiceRecog=null,_voiceActiveBtn=null;
+function attachVoiceInput(micId,inputId,onText){
+  const micBtn=document.getElementById(micId);
+  const inp=document.getElementById(inputId);
+  if(!micBtn||!inp)return;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  micBtn.onclick=()=>{
+    if(!SR){
+      toast(L==='fa'
+        ?'جستجوی صوتی در این مرورگر/اپ پشتیبانی نمی‌شود'
+        :'Voice input not supported in this browser/app');
+      return;
+    }
+    // toggle off if already recording on this button
+    if(_voiceActiveBtn===micBtn&&_voiceRecog){try{_voiceRecog.stop();}catch(_){}return;}
+    // stop any other active recognition
+    if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
+    try{
+      const rec=new SR();
+      _voiceRecog=rec;_voiceActiveBtn=micBtn;
+      rec.lang=(L==='fa')?'fa-IR':'en-US';
+      rec.interimResults=true;
+      rec.maxAlternatives=1;
+      rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
+      rec.onresult=(e)=>{
+        let txt='';
+        for(let i=0;i<e.results.length;i++)txt+=e.results[i][0].transcript;
+        inp.value=txt;
+        if(typeof onText==='function')onText(txt);
+      };
+      rec.onerror=(e)=>{
+        micBtn.classList.remove('recording');
+        const err=e.error;
+        if(err==='not-allowed'||err==='service-not-allowed')
+          toast(L==='fa'?'دسترسی میکروفون رد شد. از تنظیمات اجازه دهید':'Microphone blocked. Allow it in settings');
+        else if(err==='no-speech')toast(L==='fa'?'صدایی شنیده نشد':'No speech detected');
+        else if(err==='audio-capture')toast(L==='fa'?'میکروفونی یافت نشد':'No microphone found');
+        else if(err!=='aborted')toast(L==='fa'?'خطای میکروفون':'Microphone error');
+      };
+      rec.onend=()=>{micBtn.classList.remove('recording');if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}};
+      rec.start();
+    }catch(err){
+      micBtn.classList.remove('recording');
+      toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable');
+    }
+  };
+}
+
 function quickAdd(){
   const lists=active('lists');
   const defList=activeListId||'inbox';
   openSheet(`
     <h3>${L==='fa'?'کار جدید':'New Task'}</h3>
     <div class="fld">
-      <input class="finput" id="qa-text" placeholder="${tr('addTask')}" autofocus></div>
+      <div class="qa-input-row">
+        <input class="finput" id="qa-text" placeholder="${tr('addTask')}" autofocus>
+        <button class="qa-mic" id="qa-mic" type="button" aria-label="Voice input"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg></button>
+      </div>
+    </div>
     <div class="fld"><label>${L==='fa'?'تاریخ':'Due date'}</label>
       <input class="finput" id="qa-date" type="date"></div>
     <div class="fld"><label>${L==='fa'?'ساعت':'Time'}</label>
@@ -2535,6 +2619,7 @@ function quickAdd(){
   bindChipsel('qa-pri','p3');
   bindChipsel('qa-list',defList);
   setTimeout(()=>document.getElementById('qa-text')?.focus(),100);
+  attachVoiceInput('qa-mic','qa-text');
   // Location autocomplete
   const qaLoc=document.getElementById('qa-location');
   if(qaLoc)attachLocationAutocomplete(qaLoc,({name})=>{qaLoc.value=name;});
@@ -3410,6 +3495,9 @@ document.getElementById('srch-cancel').onclick=closeSearch;
 document.getElementById('srch-input').oninput=function(){_renderSearch(this.value);};
 document.getElementById('srch-input').addEventListener('keydown',e=>{
   if(e.key==='Escape')closeSearch();});
+
+// Voice search uses the shared attachVoiceInput helper
+attachVoiceInput('srch-mic','srch-input',function(txt){_renderSearch(txt);});
 </script>
 </body>
 </html>
