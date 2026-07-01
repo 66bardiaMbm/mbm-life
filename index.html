@@ -360,6 +360,29 @@ textarea.finput{resize:vertical;min-height:80px}
 .acct-ov-body .acct-item{padding:16px 22px;font-size:16px}
 .acct-ov-body .acct-ic{font-size:20px;width:28px}
 
+.set-overlay{overflow:hidden;display:flex;flex-direction:column}
+.set-ov-head{display:flex;align-items:center;gap:10px;padding:14px 16px 12px;
+  border-bottom:1px solid var(--b1);flex:none}
+.set-ov-back{background:none;border:none;color:var(--ink);font-size:24px;
+  cursor:pointer;width:36px;height:36px;border-radius:50%}
+.set-ov-back:active{background:var(--s3)}
+.set-ov-title{font-size:19px;font-weight:800}
+.set-ov-scroll{flex:1;overflow-y:auto;padding-bottom:20px}
+.set-profile{display:flex;flex-direction:column;align-items:center;padding:18px 20px 16px}
+.set-profile-photo{width:80px;height:80px;border-radius:50%;overflow:hidden;
+  cursor:pointer;position:relative;border:2px solid var(--b2)}
+.set-profile-edit{position:absolute;right:-2px;bottom:-2px;width:28px;height:28px;
+  border-radius:50%;background:var(--brand);border:3px solid var(--s0);
+  display:flex;align-items:center;justify-content:center;font-size:13px}
+.set-profile-name{font-size:17px;font-weight:800;margin-top:10px}
+.set-profile-email{font-size:12.5px;color:var(--ink3);margin-top:3px}
+.set-group{background:var(--s2);border-radius:var(--r);overflow:hidden;
+  border:1px solid var(--b1);margin:0 14px 10px}
+.set-signout{width:100%;padding:14px;background:var(--s2);border:1px solid var(--b1);
+  border-radius:var(--r);color:#f43f5e;font-size:15px;font-weight:700;
+  cursor:pointer;font-family:inherit}
+.set-signout:active{background:var(--s3)}
+
 .rep-step{width:38px;height:38px;border-radius:10px;border:1px solid var(--b1);
   background:var(--s2);color:var(--ink);font-size:20px;font-weight:700;cursor:pointer;
   display:flex;align-items:center;justify-content:center}
@@ -689,7 +712,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v104';
+const APP_VERSION='v105';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3160,66 +3183,74 @@ function openSettingsSheet(){
   const isGuest=!user.email;
   const provider=isGuest?'guest':(user.provider||'google');
   const providerLabel=provider==='google'?tr('providerGoogle'):provider==='email'?tr('providerEmail'):tr('providerGuest');
-  openSheet(`
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 16px 12px">
-      <button class="sheet-back" id="set-back" style="background:none;border:none;color:var(--ink);font-size:22px;cursor:pointer">&#8249;</button>
-      <div style="font-size:18px;font-weight:800">${tr('settings')}</div>
+  let ov=document.getElementById('set-overlay');
+  if(ov)ov.remove();
+  ov=document.createElement('div');
+  ov.id='set-overlay';
+  ov.className='acct-overlay set-overlay';
+  ov.innerHTML=`
+    <div class="set-ov-head">
+      <button class="set-ov-back" id="set-back" aria-label="Back">&#8249;</button>
+      <div class="set-ov-title">${tr('settings')}</div>
     </div>
-
-    <div style="display:flex;flex-direction:column;align-items:center;padding:4px 20px 14px">
-      <div id="acct-photo" data-action="change-photo" style="width:80px;height:80px;border-radius:50%;overflow:hidden;cursor:pointer;position:relative;border:2px solid var(--b2)">
-        ${avatarInner(user,80)}
-        <div style="position:absolute;right:-2px;bottom:-2px;width:28px;height:28px;border-radius:50%;background:var(--brand);border:3px solid var(--s1);display:flex;align-items:center;justify-content:center;font-size:13px">✏️</div>
+    <div class="set-ov-scroll">
+      <div class="set-profile">
+        <div id="acct-photo" data-action="change-photo" class="set-profile-photo">
+          ${avatarInner(user,80)}
+          <div class="set-profile-edit">✏️</div>
+        </div>
+        <div class="set-profile-name">${esc(user.displayName||'Guest')}</div>
+        <div class="set-profile-email">${isGuest?tr('statusGuest'):esc(user.email)} · ${providerLabel}</div>
       </div>
-      <div style="font-size:16px;font-weight:800;margin-top:10px">${esc(user.displayName||'Guest')}</div>
-      <div style="font-size:12.5px;color:var(--ink3);margin-top:2px">${isGuest?tr('statusGuest'):esc(user.email)} · ${providerLabel}</div>
+
+      <div class="hub-sec-label">${tr('settings')}</div>
+      <div class="set-group">
+        <div class="ul-row" data-set="language" style="padding:0 16px">
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#127760;</div></div>
+          <span class="ul-name">${tr('language')}</span>
+          <span class="ul-count">${L==='fa'?'فارسی':'English'}</span>
+        </div>
+        <div class="ul-row" data-set="appearance" style="padding:0 16px">
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${DB.meta.theme==='dark'?'&#127769;':'&#9728;'}</div></div>
+          <span class="ul-name">${tr('appearance')}</span>
+          <span class="ul-count">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}</span>
+        </div>
+        <div class="ul-row" data-set="notifications" style="padding:0 16px">
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#128276;</div></div>
+          <span class="ul-name">${tr('notifications')}</span>
+          <span class="ul-count" style="font-size:18px;opacity:.4">›</span>
+        </div>
+      </div>
+
+      <div class="hub-sec-label">${tr('about')}</div>
+      <div class="set-group">
+        <div class="ul-row" style="padding:0 16px;cursor:default">
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:16px">i</div></div>
+          <span class="ul-name">MBM Life</span>
+          <span class="ul-count">${APP_VERSION}</span>
+        </div>
+        <div class="ul-row" data-set="update" style="padding:0 16px">
+          <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#8635;</div></div>
+          <span class="ul-name">${tr('checkUpdate')}</span>
+        </div>
+      </div>
+
+      <div style="padding:6px 14px 24px"><button class="set-signout" data-set="signout">${user.email?tr('signOut'):tr('exitGuest')}</button></div>
     </div>
+    <input type="file" id="acct-file" accept="image/*" style="display:none">`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(()=>ov.classList.add('on'));
+  const close=()=>{ov.classList.remove('on');setTimeout(()=>ov.remove(),200);};
 
-    <div class="hub-sec-label">${tr('settings')}</div>
-    <div style="background:var(--s2);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 14px 10px">
-      <div class="ul-row" data-set="language" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#127760;</div></div>
-        <span class="ul-name">${tr('language')}</span>
-        <span class="ul-count">${L==='fa'?'فارسی':'English'}</span>
-      </div>
-      <div class="ul-row" data-set="appearance" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">${DB.meta.theme==='dark'?'&#127769;':'&#9728;'}</div></div>
-        <span class="ul-name">${tr('appearance')}</span>
-        <span class="ul-count">${DB.meta.theme==='dark'?(L==='fa'?'تاریک':'Dark'):(L==='fa'?'روشن':'Light')}</span>
-      </div>
-      <div class="ul-row" data-set="notifications" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#128276;</div></div>
-        <span class="ul-name">${tr('notifications')}</span>
-        <span class="ul-count" style="font-size:18px;opacity:.4">›</span>
-      </div>
-    </div>
-
-    <div class="hub-sec-label">${tr('about')}</div>
-    <div style="background:var(--s2);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 14px 10px">
-      <div class="ul-row" style="padding:0 16px;cursor:default">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:16px">i</div></div>
-        <span class="ul-name">MBM Life</span>
-        <span class="ul-count">${APP_VERSION}</span>
-      </div>
-      <div class="ul-row" data-set="update" style="padding:0 16px">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:18px">&#8635;</div></div>
-        <span class="ul-name">${tr('checkUpdate')}</span>
-      </div>
-    </div>
-
-    <div style="padding:0 14px 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-set="signout">${user.email?tr('signOut'):tr('exitGuest')}</button></div>
-    <input type="file" id="acct-file" accept="image/*" style="display:none">`);
-
-  document.getElementById('set-back').onclick=()=>{closeSheet();openAccountSheet();};
-  document.querySelectorAll('[data-set]').forEach(el=>el.onclick=()=>{
+  document.getElementById('set-back').onclick=()=>{close();openAccountSheet();};
+  ov.querySelectorAll('[data-set]').forEach(el=>el.onclick=()=>{
     const s=el.dataset.set;
-    if(s==='language'){DB.meta.lang=L==='en'?'fa':'en';saveDB();closeSheet();render();openSettingsSheet();}
-    else if(s==='appearance'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();closeSheet();render();openSettingsSheet();}
+    if(s==='language'){DB.meta.lang=L==='en'?'fa':'en';saveDB();close();render();openSettingsSheet();}
+    else if(s==='appearance'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();close();render();openSettingsSheet();}
     else if(s==='notifications'){toast(tr('comingSoon'));}
-    else if(s==='update'){closeSheet();manualCheckForUpdate();}
-    else if(s==='signout'){closeSheet();doSignOut();}
+    else if(s==='update'){close();manualCheckForUpdate();}
+    else if(s==='signout'){close();doSignOut();}
   });
-  // photo edit
   const photo=document.getElementById('acct-photo');
   if(photo)photo.onclick=()=>openPhotoSheet();
   const acctFile=document.getElementById('acct-file');
