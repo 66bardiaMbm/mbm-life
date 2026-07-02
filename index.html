@@ -15,6 +15,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
 <style>
 /* ═══════════════════════════════════
    MBM LIFE — Design System v64
@@ -805,7 +806,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v114';
+const APP_VERSION='v115';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -816,7 +817,7 @@ const KEY='mbmlife_platform_v1';
 function blankDB(){
   return {
     schema:SCHEMA,
-    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{},addOnTop:true,starTop:true,soundOn:true,confirmDel:true,accent:null,showDueMyDay:true,recogniseDates:true,removeDates:false,weekStart:'system',smartShow:{myday:true,important:true,planned:true,assigned:true,all:true},autoHideSmart:false},
+    meta:{theme:'dark',lang:'en',userId:null,displayName:null,email:null,photo:null,avatar:null,viewSort:{},viewOrder:{},addOnTop:true,starTop:true,soundOn:true,confirmDel:true,accent:null,showDueMyDay:true,recogniseDates:true,removeDates:false,weekStart:'system',smartShow:{myday:true,important:true,planned:true,assigned:true,all:true},autoHideSmart:false,pushEnabled:false,notifPrefs:{taskReminders:true,dueToday:true,sharedActivity:true}},
     entities:{
       tasks:{},     // {id,text,listId,dueDate,dueTime,priority,repeat,
                     //  assigneeId,creatorId,status,pinned,done,doneAt,
@@ -869,6 +870,8 @@ function loadDB(){
     if(d.meta.starTop===undefined)d.meta.starTop=true;
     if(d.meta.soundOn===undefined)d.meta.soundOn=true;
     if(d.meta.confirmDel===undefined)d.meta.confirmDel=true;
+    if(d.meta.pushEnabled===undefined)d.meta.pushEnabled=false;
+    if(d.meta.notifPrefs===undefined)d.meta.notifPrefs={taskReminders:true,dueToday:true,sharedActivity:true};
     if(d.meta.accent===undefined)d.meta.accent=null;
     if(d.meta.showDueMyDay===undefined)d.meta.showDueMyDay=true;
     if(d.meta.recogniseDates===undefined)d.meta.recogniseDates=true;
@@ -3382,13 +3385,23 @@ const firebaseConfig={
   measurementId:"G-YYBY4WV8LC"
 };
 
-let FB={app:null,auth:null,db:null,user:null,ready:false};
+let FB={app:null,auth:null,db:null,messaging:null,user:null,ready:false};
 let _syncUnsubs=[];
+
+// Web Push VAPID public key — from Firebase Console → Project settings →
+// Cloud Messaging → Web configuration → Web Push certificates → "Key pair".
+// This is a PUBLIC key; safe to ship in client code.
+const FCM_VAPID_KEY="REPLACE_WITH_WEB_PUSH_CERTIFICATE_KEY_PAIR";
 
 try{
   FB.app=firebase.initializeApp(firebaseConfig);
   FB.auth=firebase.auth();
   FB.db=firebase.firestore();
+  try{
+    if(firebase.messaging&&firebase.messaging.isSupported&&firebase.messaging.isSupported()){
+      FB.messaging=firebase.messaging();
+    }
+  }catch(e){console.warn('Messaging unsupported:',e);}
   FB.ready=true;
 }catch(e){console.warn('Firebase init failed:',e);}
 
@@ -3415,6 +3428,7 @@ function initAuth(){
       saveDB();
       startListeners();
       pullProfile();
+      refreshPushOnStart();
       const as=document.getElementById('auth-screen');
       if(as&&as.style.display!=='none'){
         as.style.display='none';
@@ -3492,6 +3506,7 @@ function showAuthScreen(){
 /* ── Sign out (Google or Guest) without relying on reload ── */
 function doSignOut(){
   stopListeners();
+  try{removeDeviceToken();}catch(e){}
   DB.meta.userId=null;
   DB.meta.displayName=null;
   DB.meta.email=null;
@@ -3579,6 +3594,120 @@ function pullProfile(){
         render();
       }
     },()=>{});
+}
+
+/* ══════════════════════════════════════════
+   PUSH NOTIFICATIONS (FCM)
+   Production architecture:
+   - Client obtains an FCM registration token and stores it under
+     workspaces/{ws}/devices/{token} with metadata + tz offset.
+   - A scheduled Cloud Function scans tasks/appts each minute and sends
+     push messages to that workspace's device tokens when a reminder is due.
+   - Foreground messages are shown via the Notification API directly.
+   ══════════════════════════════════════════ */
+let _fcmToken=null;
+const REMINDER_LEAD_MIN=0; // reminders fire at the task's exact due time
+
+function notifSupported(){
+  return !!(FB.messaging && 'Notification' in window && 'serviceWorker' in navigator);
+}
+function notifPermission(){
+  return ('Notification' in window)?Notification.permission:'unsupported';
+}
+
+// Register the dedicated messaging service worker (separate scope/file required by FCM).
+async function registerMessagingSW(){
+  if(!('serviceWorker' in navigator))return null;
+  try{
+    return await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+  }catch(e){
+    console.warn('Messaging SW registration failed:',e);
+    return null;
+  }
+}
+
+// Ask for permission, fetch token, persist it. Returns true if enabled.
+async function enablePushNotifications(){
+  if(!notifSupported()){toast(L==='fa'?'دستگاه پشتیبانی نمی‌کند':'Not supported on this device');return false;}
+  if(FCM_VAPID_KEY.startsWith('REPLACE_')){
+    console.warn('FCM VAPID key not configured');
+    toast(L==='fa'?'کلید Push تنظیم نشده':'Push key not configured');
+    return false;
+  }
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){toast(L==='fa'?'اجازه اعلان رد شد':'Notifications denied');return false;}
+    const swReg=await registerMessagingSW();
+    const token=await FB.messaging.getToken({vapidKey:FCM_VAPID_KEY,serviceWorkerRegistration:swReg||undefined});
+    if(!token){toast(L==='fa'?'دریافت توکن ناموفق':'Could not get token');return false;}
+    _fcmToken=token;
+    await storeDeviceToken(token);
+    DB.meta.pushEnabled=true;saveDB();
+    attachForegroundHandler();
+    toast(L==='fa'?'اعلان‌ها فعال شد ✓':'Notifications enabled ✓');
+    return true;
+  }catch(e){
+    console.warn('enablePush failed:',e);
+    toast(L==='fa'?'فعال‌سازی ناموفق':'Enable failed');
+    return false;
+  }
+}
+
+// Persist token in Firestore so the Cloud Function can target this device.
+async function storeDeviceToken(token){
+  if(!FB.ready||!FB.user||!token)return;
+  const ws=wsId(FB.user.uid);
+  const tzOffsetMin=-new Date().getTimezoneOffset(); // minutes east of UTC
+  await FB.db.collection('workspaces').doc(ws).collection('devices').doc(token).set({
+    token,
+    platform:navigator.userAgent||'unknown',
+    tzOffsetMin,
+    lang:DB.meta.lang||'en',
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true}).catch(e=>console.warn('storeDeviceToken:',e));
+}
+
+// Remove token (called on sign-out or when user disables).
+async function removeDeviceToken(){
+  try{
+    if(_fcmToken&&FB.messaging&&FB.messaging.deleteToken)await FB.messaging.deleteToken();
+    if(FB.ready&&FB.user&&_fcmToken){
+      const ws=wsId(FB.user.uid);
+      await FB.db.collection('workspaces').doc(ws).collection('devices').doc(_fcmToken).delete().catch(()=>{});
+    }
+  }catch(e){console.warn('removeDeviceToken:',e);}
+  _fcmToken=null;DB.meta.pushEnabled=false;saveDB();
+}
+
+// Foreground messages don't trigger the SW; show them manually.
+let _fgHandlerAttached=false;
+function attachForegroundHandler(){
+  if(_fgHandlerAttached||!FB.messaging)return;
+  _fgHandlerAttached=true;
+  FB.messaging.onMessage(payload=>{
+    const n=(payload&&payload.notification)||{};
+    const title=n.title||'MBM Life';
+    const body=n.body||'';
+    try{
+      if(Notification.permission==='granted'){
+        new Notification(title,{body,icon:'/icon-192.png',tag:(payload.data&&payload.data.tag)||undefined});
+      }else{
+        toast(title+(body?' — '+body:''));
+      }
+    }catch(e){toast(title);}
+  });
+}
+
+// Re-sync token on app start if the user previously enabled push.
+async function refreshPushOnStart(){
+  if(!notifSupported())return;
+  if(DB.meta.pushEnabled&&notifPermission()==='granted'&&!FCM_VAPID_KEY.startsWith('REPLACE_')){
+    try{
+      const swReg=await registerMessagingSW();
+      const token=await FB.messaging.getToken({vapidKey:FCM_VAPID_KEY,serviceWorkerRegistration:swReg||undefined});
+      if(token){_fcmToken=token;await storeDeviceToken(token);attachForegroundHandler();}
+    }catch(e){console.warn('refreshPushOnStart:',e);}
+  }
 }
 
 /* ── Profile photo: compress, set, choose avatar, remove ── */
@@ -3799,7 +3928,7 @@ function openSettingsSheet(){
     if(s==='language'){DB.meta.lang=L==='en'?'fa':'en';saveDB();close();render();openSettingsSheet();}
     else if(s==='appearance'){openAppearanceSheet();}
     else if(s==='weekstart'){openWeekStartSheet();}
-    else if(s==='notifications'){toast(tr('comingSoon'));}
+    else if(s==='notifications'){openNotificationsSheet();}
     else if(s==='update'){manualCheckForUpdate();}
     else if(s==='signout'){close();doSignOut();}
   });
@@ -3884,6 +4013,65 @@ function openWeekStartSheet(){
   document.querySelector('.sheet-cancel').onclick=closeSheet;
   document.querySelectorAll('[data-week-opt]').forEach(el=>el.onclick=()=>{
     DB.meta.weekStart=el.dataset.weekOpt;saveDB();closeSheet();close_setOverlayReopen();
+  });
+}
+
+function openNotificationsSheet(){
+  const perm=notifPermission();
+  const supported=notifSupported();
+  const on=!!DB.meta.pushEnabled && perm==='granted';
+  if(DB.meta.notifPrefs===undefined)DB.meta.notifPrefs={taskReminders:true,dueToday:true,sharedActivity:true};
+  const p=DB.meta.notifPrefs;
+  let statusLine='';
+  if(!supported)statusLine=L==='fa'?'این دستگاه از اعلان‌ها پشتیبانی نمی‌کند.':'This device does not support notifications.';
+  else if(perm==='denied')statusLine=L==='fa'?'اجازه اعلان در مرورگر مسدود شده. از تنظیمات مرورگر آن را آزاد کنید.':'Notifications are blocked in the browser. Re-enable them in browser settings.';
+  else if(!on)statusLine=L==='fa'?'برای دریافت یادآورها اعلان‌ها را فعال کنید.':'Enable notifications to receive reminders.';
+  else statusLine=L==='fa'?'اعلان‌ها فعال است.':'Notifications are on.';
+
+  const prefRow=(key,label)=>`
+    <div class="set-trow">
+      <span class="set-trow-label">${label}</span>
+      <div class="set-sw ${p[key]!==false?'on':''}" data-notif="${key}" role="switch"></div>
+    </div>`;
+
+  openSheet(`
+    <div style="padding:8px 16px 4px;font-size:17px;font-weight:800">${tr('notifications')}</div>
+    <div style="padding:0 18px 8px;font-size:13px;color:var(--ink3)">${statusLine}</div>
+    <div style="padding:4px 14px 8px">
+      <button class="btn ${on?'btn-ghost':'btn-primary'}" id="notif-enable" style="width:100%"
+        ${(!supported||perm==='denied')?'disabled style="width:100%;opacity:.5"':''}>
+        ${on?(L==='fa'?'اعلان‌ها فعال است ✓':'Notifications enabled ✓'):(L==='fa'?'فعال‌سازی اعلان‌ها':'Enable notifications')}
+      </button>
+    </div>
+    ${on?`
+    <div class="hub-sec-label">${L==='fa'?'یادآورها':'Reminders'}</div>
+    <div class="set-group" style="margin:0 14px 10px">
+      ${prefRow('taskReminders',L==='fa'?'یادآور زمان کار':'Task time reminders')}
+      ${prefRow('dueToday',L==='fa'?'یادآور کارهای امروز':"'Due today' summary")}
+      ${prefRow('sharedActivity',L==='fa'?'فعالیت لیست مشترک':'Shared list activity')}
+    </div>
+    <div style="padding:0 14px 8px">
+      <button class="sheet-cancel" id="notif-disable" style="margin:0;border-radius:var(--r);color:var(--danger)">${L==='fa'?'غیرفعال‌کردن اعلان‌ها':'Turn off notifications'}</button>
+    </div>`:''}
+    <button class="sheet-cancel">${L==='fa'?'بستن':'Close'}</button>`);
+
+  document.querySelectorAll('.sheet-cancel').forEach(b=>{if(!b.id)b.onclick=()=>closeSheet();});
+  const en=document.getElementById('notif-enable');
+  if(en&&!on)en.onclick=async()=>{const ok=await enablePushNotifications();closeSheet();if(ok)openNotificationsSheet();};
+  const dis=document.getElementById('notif-disable');
+  if(dis)dis.onclick=async()=>{await removeDeviceToken();closeSheet();openNotificationsSheet();};
+  document.querySelectorAll('[data-notif]').forEach(el=>el.onclick=()=>{
+    const k=el.dataset.notif;
+    if(!DB.meta.notifPrefs)DB.meta.notifPrefs={};
+    DB.meta.notifPrefs[k]=(DB.meta.notifPrefs[k]===false);
+    el.classList.toggle('on',DB.meta.notifPrefs[k]!==false);
+    saveDB();
+    // Persist prefs to the device doc so the Cloud Function respects them.
+    if(FB.ready&&FB.user&&_fcmToken){
+      const ws=wsId(FB.user.uid);
+      FB.db.collection('workspaces').doc(ws).collection('devices').doc(_fcmToken)
+        .set({prefs:DB.meta.notifPrefs},{merge:true}).catch(()=>{});
+    }
   });
 }
 // Re-open the settings overlay so it reflects the latest choice.
