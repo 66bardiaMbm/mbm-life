@@ -276,9 +276,11 @@ textarea.finput{resize:vertical;min-height:80px}
 /* Full-screen list background (To-Do style): photo covers the whole screen */
 .ld-fullbg{position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;background-repeat:no-repeat}
 .ld-fullbg-scrim{position:fixed;inset:0;z-index:0;
-  background:linear-gradient(180deg,rgba(0,0,0,.25) 0%,rgba(0,0,0,.55) 55%,rgba(0,0,0,.72) 100%)}
+  background:linear-gradient(180deg,rgba(0,0,0,.12) 0%,rgba(0,0,0,.30) 55%,rgba(0,0,0,.48) 100%)}
 .ld-bg.over-photo{background:transparent}
 .ld-bg.over-photo .ld-bg-layer{display:none}
+.ld-bg.over-photo .ld-title,.ld-bg.over-photo .ld-subtitle{text-shadow:0 1px 6px rgba(0,0,0,.6)}
+.task-list-body.over-photo .trow-title,.task-list-body.over-photo .done-toggle{text-shadow:0 1px 4px rgba(0,0,0,.55)}
 /* When a photo is set, screen content floats above it with light translucency */
 .task-list-body{background:var(--s1);border-top:1px solid var(--b1);position:relative;z-index:1}
 .task-list-body.over-photo{background:transparent;border-top:none}
@@ -830,7 +832,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v122';
+const APP_VERSION='v123';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2045,16 +2047,16 @@ const THEME_PHOTOS=[
   'linear-gradient(135deg,#43e97b,#38f9d7)',
   'linear-gradient(160deg,#0f2027,#203a43,#2c5364)',
   'linear-gradient(160deg,#3a1c71,#d76d77,#ffaf7b)',
-  'url(https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1439066615861-d1af74d74000?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800&q=70&auto=format&fit=crop)',
-  'url(https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800&q=70&auto=format&fit=crop)'
+  'url(https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1439066615861-d1af74d74000?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1600&q=90&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=1600&q=90&auto=format&fit=crop)'
 ];
 
 function _themeGet(target){
@@ -2123,7 +2125,7 @@ function _openThemeFor(target){
     const file=document.getElementById('thm-file');
     if(file)file.onchange=e=>{
       const f=e.target.files&&e.target.files[0];if(!f)return;
-      compressImage(f,1400,dataUrl=>{sel.photo='url('+dataUrl+')';rerender();});
+      compressImage(f,1920,dataUrl=>{sel.photo='url('+dataUrl+')';rerender();});
       e.target.value='';
     };
     const c=document.getElementById('thm-cancel');if(c)c.onclick=closeSheet;
@@ -3839,7 +3841,7 @@ function compressImage(file,maxOrCb,maybeCb){
   if(typeof maxOrCb==='function'){cb=maxOrCb;}
   else{max=maxOrCb||256;cb=maybeCb;}
   // Larger images (backgrounds) get a bigger byte budget than avatars.
-  const byteBudget=max>=800?700000:120000;
+  const byteBudget=max>=800?900000:120000;
   const reader=new FileReader();
   reader.onload=e=>{
     const img=new Image();
@@ -3851,8 +3853,8 @@ function compressImage(file,maxOrCb,maybeCb){
       cv.width=w;cv.height=h;
       const ctx=cv.getContext('2d');
       ctx.drawImage(img,0,0,w,h);
-      let q=0.85,out=cv.toDataURL('image/jpeg',q);
-      while(out.length>byteBudget&&q>0.4){q-=0.08;out=cv.toDataURL('image/jpeg',q);}
+      let q=0.92,out=cv.toDataURL('image/jpeg',q);
+      while(out.length>byteBudget&&q>0.45){q-=0.07;out=cv.toDataURL('image/jpeg',q);}
       cb(out);
     };
     img.onerror=()=>cb(null);
