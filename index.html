@@ -273,6 +273,21 @@ textarea.finput{resize:vertical;min-height:80px}
    LIST DETAIL
    ════════════════════════════ */
 .ld-bg{position:relative;overflow:hidden;min-height:200px;background:var(--s2)}
+/* Full-screen list background (To-Do style): photo covers the whole screen */
+.ld-fullbg{position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;background-repeat:no-repeat}
+.ld-fullbg-scrim{position:fixed;inset:0;z-index:0;
+  background:linear-gradient(180deg,rgba(0,0,0,.25) 0%,rgba(0,0,0,.55) 55%,rgba(0,0,0,.72) 100%)}
+.ld-bg.over-photo{background:transparent}
+.ld-bg.over-photo .ld-bg-layer{display:none}
+/* When a photo is set, screen content floats above it with light translucency */
+.task-list-body{background:var(--s1);border-top:1px solid var(--b1);position:relative;z-index:1}
+.task-list-body.over-photo{background:transparent;border-top:none}
+.task-list-body.over-photo .trow-flat{background:rgba(20,20,30,.34);border-bottom:1px solid rgba(255,255,255,.06)}
+.task-list-body.over-photo .trow-flat:active{background:rgba(20,20,30,.5)}
+.task-list-body.over-photo .trow-title{color:#fff}
+.task-list-body.over-photo .done-toggle{background:transparent;color:#fff}
+.inline-add.over-photo{background:rgba(20,20,30,.34);position:relative;z-index:1}
+.inline-add.over-photo input{color:#fff}
 .ld-bg-layer{position:absolute;inset:0;z-index:0;background-size:cover;background-position:center}
 /* Dark scrim so white header text stays legible over photo backgrounds */
 .ld-bg-layer.has-photo::after{content:'';position:absolute;inset:0;
@@ -815,7 +830,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v119';
+const APP_VERSION='v122';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1456,7 +1471,8 @@ function renderListDetail(){
   }
 
   return `
-    <div class="ld-bg">
+    ${bgPhoto?`<div class="ld-fullbg" style="background-image:${bgPhoto}"></div><div class="ld-fullbg-scrim"></div>`:''}
+    <div class="ld-bg${bgPhoto?' over-photo':''}">
       <div class="ld-bg-layer ${bgPhoto?'has-photo':''}" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
@@ -1476,10 +1492,10 @@ function renderListDetail(){
           <span>${plannedFilterLabel()}</span>
         </button>
       </div>`:''}
-    <div style="background:var(--s1);overflow:hidden;border-top:1px solid var(--b1)" id="task-list-body">
+    <div class="task-list-body${bgPhoto?' over-photo':''}" style="overflow:hidden" id="task-list-body">
       ${openT.length
         ? openT.map(t=>taskRowFlat(t)).join('')
-        : '<div class="done-toggle" style="color:var(--ink3);cursor:default;font-weight:400;background:var(--s1)">'+tr('noTasks')+'</div>'}
+        : '<div class="done-toggle" style="color:var(--ink3);cursor:default;font-weight:400;background:transparent">'+tr('noTasks')+'</div>'}
       ${doneCount?`
         <div class="done-toggle" id="done-toggle">
           <span class="done-toggle-arrow${doneCollapsed?'':' open'}">&#8250;</span>
@@ -1489,7 +1505,7 @@ function renderListDetail(){
       `:''}
     </div>
     ${activeListId?`
-    <div class="inline-add">
+    <div class="inline-add${bgPhoto?' over-photo':''}">
       <div class="inline-add-chk"><div class="inline-add-dot"></div></div>
       <input id="inline-add-input" placeholder="${tr('addTask')}" autocomplete="off">
     </div>`:''}`;
@@ -2020,26 +2036,25 @@ function _addShortcutSmart(sv){
 
 const THEME_COLORS=['#6e56f8','#7c8cff','#f43f5e','#ec4899','#f59e0b','#f97316','#22c55e','#34d399','#14b8a6','#38bdf8','#8b5cf6','#94a3b8'];
 // Background choices for lists & smart views.
-// Gradients render instantly & offline; photo URLs (Unsplash, stable CDN ids)
-// give the To-Do-style scenic look. Both are stored as CSS background values.
+// Gradients render offline; photo URLs give the To-Do-style scenic look and
+// load on the deployed site (GitHub Pages). Personal uploads (data-URL) always work.
 const THEME_PHOTOS=[
   'linear-gradient(135deg,#667eea,#764ba2)',
   'linear-gradient(135deg,#f093fb,#f5576c)',
   'linear-gradient(135deg,#4facfe,#00f2fe)',
   'linear-gradient(135deg,#43e97b,#38f9d7)',
-  'linear-gradient(135deg,#fa709a,#fee140)',
-  'linear-gradient(135deg,#30cfd0,#330867)',
-  'linear-gradient(135deg,#a8edea,#fed6e3)',
-  'linear-gradient(135deg,#ff9a9e,#fecfef)',
-  // Real scenic photos (stable Unsplash CDN, sized & compressed via params)
-  'url(https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=800&q=70&auto=format&fit=crop)', // poppies
-  'url(https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=70&auto=format&fit=crop)', // sky
-  'url(https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&q=70&auto=format&fit=crop)', // misty forest
-  'url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=70&auto=format&fit=crop)', // beach
-  'url(https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&q=70&auto=format&fit=crop)', // forest sun
-  'url(https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&q=70&auto=format&fit=crop)', // sunlit leaves
-  'url(https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=800&q=70&auto=format&fit=crop)', // mountains
-  'url(https://images.unsplash.com/photo-1439066615861-d1af74d74000?w=800&q=70&auto=format&fit=crop)'  // lake
+  'linear-gradient(160deg,#0f2027,#203a43,#2c5364)',
+  'linear-gradient(160deg,#3a1c71,#d76d77,#ffaf7b)',
+  'url(https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1439066615861-d1af74d74000?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800&q=70&auto=format&fit=crop)',
+  'url(https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800&q=70&auto=format&fit=crop)'
 ];
 
 function _themeGet(target){
@@ -4623,7 +4638,8 @@ window.addEventListener('popstate',()=>{
     };
   }
 });
-history.pushState(null,'',location.href);
+history.pushState({mbm:1},'',location.href);
+history.pushState({mbm:2},'',location.href);
 
 // Re-check for updates when user returns to app
 document.addEventListener('visibilitychange',()=>{
