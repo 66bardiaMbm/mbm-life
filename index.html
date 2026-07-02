@@ -274,6 +274,9 @@ textarea.finput{resize:vertical;min-height:80px}
    ════════════════════════════ */
 .ld-bg{position:relative;overflow:hidden;min-height:152px}
 .ld-bg-layer{position:absolute;inset:0;z-index:0}
+/* Dark scrim so white header text stays legible over photo backgrounds */
+.ld-bg-layer.has-photo::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.35) 100%)}
 .ld-topbar{display:flex;align-items:center;gap:4px;padding:12px 8px 0;
   position:relative;z-index:2}
 .ld-back{width:44px;height:44px;border-radius:50%;background:none;border:none;
@@ -806,7 +809,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v116';
+const APP_VERSION='v117';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1424,7 +1427,7 @@ function renderListDetail(){
     const ordered=openT; // already in view order from sortTasksForView
     return `
     <div class="ld-bg">
-      <div class="ld-bg-layer" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
+      <div class="ld-bg-layer ${bgPhoto?'has-photo':''}" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
       </div>
@@ -1448,7 +1451,7 @@ function renderListDetail(){
 
   return `
     <div class="ld-bg">
-      <div class="ld-bg-layer" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
+      <div class="ld-bg-layer ${bgPhoto?'has-photo':''}" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
       <div class="ld-topbar">
         <button class="ld-back" id="list-back">&#8249;</button>
         <div class="ld-actions">
@@ -2010,6 +2013,9 @@ function _addShortcutSmart(sv){
 }
 
 const THEME_COLORS=['#6e56f8','#7c8cff','#f43f5e','#ec4899','#f59e0b','#f97316','#22c55e','#34d399','#14b8a6','#38bdf8','#8b5cf6','#94a3b8'];
+// Background choices for lists & smart views.
+// Gradients render instantly & offline; photo URLs (Unsplash, stable CDN ids)
+// give the To-Do-style scenic look. Both are stored as CSS background values.
 const THEME_PHOTOS=[
   'linear-gradient(135deg,#667eea,#764ba2)',
   'linear-gradient(135deg,#f093fb,#f5576c)',
@@ -2018,7 +2024,16 @@ const THEME_PHOTOS=[
   'linear-gradient(135deg,#fa709a,#fee140)',
   'linear-gradient(135deg,#30cfd0,#330867)',
   'linear-gradient(135deg,#a8edea,#fed6e3)',
-  'linear-gradient(135deg,#ff9a9e,#fecfef)'
+  'linear-gradient(135deg,#ff9a9e,#fecfef)',
+  // Real scenic photos (stable Unsplash CDN, sized & compressed via params)
+  'url(https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=800&q=70&auto=format&fit=crop)', // poppies
+  'url(https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=70&auto=format&fit=crop)', // sky
+  'url(https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&q=70&auto=format&fit=crop)', // misty forest
+  'url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=70&auto=format&fit=crop)', // beach
+  'url(https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&q=70&auto=format&fit=crop)', // forest sun
+  'url(https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&q=70&auto=format&fit=crop)', // sunlit leaves
+  'url(https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=800&q=70&auto=format&fit=crop)', // mountains
+  'url(https://images.unsplash.com/photo-1439066615861-d1af74d74000?w=800&q=70&auto=format&fit=crop)'  // lake
 ];
 
 function _themeGet(target){
