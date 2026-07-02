@@ -279,15 +279,19 @@ textarea.finput{resize:vertical;min-height:80px}
   background:linear-gradient(180deg,rgba(0,0,0,.12) 0%,rgba(0,0,0,.30) 55%,rgba(0,0,0,.48) 100%)}
 .ld-bg.over-photo{background:transparent}
 .ld-bg.over-photo .ld-bg-layer{display:none}
-.ld-bg.over-photo .ld-title,.ld-bg.over-photo .ld-subtitle{text-shadow:0 1px 6px rgba(0,0,0,.6)}
-.task-list-body.over-photo .trow-title,.task-list-body.over-photo .done-toggle{text-shadow:0 1px 4px rgba(0,0,0,.55)}
+.ld-bg.over-photo .ld-title,.ld-bg.over-photo .ld-subtitle{
+  text-shadow:0 1px 2px rgba(0,0,0,.9),0 2px 8px rgba(0,0,0,.8),0 0 3px rgba(0,0,0,.7)}
+.task-list-body.over-photo .trow-title,.task-list-body.over-photo .done-toggle,
+.task-list-body.over-photo .trow-meta-row,.task-list-body.over-photo .chip{
+  text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 4px rgba(0,0,0,.85),0 1px 6px rgba(0,0,0,.7)}
 /* When a photo is set, screen content floats above it with light translucency */
 .task-list-body{background:var(--s1);border-top:1px solid var(--b1);position:relative;z-index:1}
 .task-list-body.over-photo{background:transparent;border-top:none}
-.task-list-body.over-photo .trow-flat{background:rgba(20,20,30,.34);border-bottom:1px solid rgba(255,255,255,.06)}
-.task-list-body.over-photo .trow-flat:active{background:rgba(20,20,30,.5)}
-.task-list-body.over-photo .trow-title{color:#fff}
-.task-list-body.over-photo .done-toggle{background:transparent;color:#fff}
+.task-list-body.over-photo .trow-flat{background:rgba(15,15,22,.42);border-bottom:1px solid rgba(255,255,255,.06)}
+.task-list-body.over-photo .trow-flat:active{background:rgba(15,15,22,.6)}
+.task-list-body.over-photo .trow-title{color:#fff;font-weight:600}
+.task-list-body.over-photo .trow-meta-row,.task-list-body.over-photo .trow-meta-row *{color:#f0f0f5}
+.task-list-body.over-photo .done-toggle{background:transparent;color:#fff;font-weight:700}
 .inline-add.over-photo{background:rgba(20,20,30,.34);position:relative;z-index:1}
 .inline-add.over-photo input{color:#fff}
 .ld-bg-layer{position:absolute;inset:0;z-index:0;background-size:cover;background-position:center}
@@ -304,6 +308,7 @@ textarea.finput{resize:vertical;min-height:80px}
   color:rgba(255,255,255,.8);font-size:20px;cursor:pointer;
   display:flex;align-items:center;justify-content:center}
 .ld-title-area{padding:2px 20px 18px;position:relative;z-index:2}
+.ld-bg.over-photo .ld-subtitle{color:rgba(255,255,255,.92)}
 .ld-title{font-size:32px;font-weight:800;letter-spacing:-.6px;
   line-height:1.15;color:#fff}
 .ld-subtitle{font-size:13px;color:rgba(255,255,255,.7);margin-top:5px;font-weight:500}
@@ -587,6 +592,10 @@ body.rtl .trow-content{text-align:right}
   font-size:22px;font-weight:600;color:var(--ink);font-family:inherit;
   line-height:1.3;padding:0;resize:none;min-height:36px}
 .td-title-input.done{text-decoration:line-through;opacity:.4}
+.td-star{flex:none;margin-top:2px;background:none;border:none;cursor:pointer;
+  font-size:26px;line-height:1;color:var(--ink3);padding:4px;transition:color .15s,transform .1s}
+.td-star.on{color:#f5b301}
+.td-star:active{transform:scale(.85)}
 .td-section{border-top:1px solid var(--b1);margin-top:6px}
 .td-row{display:flex;align-items:center;padding:0 8px;
   cursor:pointer;transition:background .1s;min-height:52px}
@@ -832,7 +841,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v123';
+const APP_VERSION='v127';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1304,7 +1313,7 @@ function renderLists(){
     return true;
   };
 
-  const apptCount=Object.values(DB.entities.appts||{}).filter(a=>!a.archivedAt).length;
+  const apptCount=Object.values(DB.entities.appts||{}).filter(a=>!a.archivedAt&&!a.done).length;
 
   const svDef=[
     {sv:'myday',icon:'☀',color:'#f59e0b',name:tr('myday')},
@@ -2395,6 +2404,7 @@ function _renderTaskDetail(){
     <div class="td-title-wrap">
       <div class="td-chk${t.done?' on':''}" id="td-chk"></div>
       <textarea class="td-title-input${t.done?' done':''}" id="td-title" rows="2">${esc(t.text)}</textarea>
+      <button class="td-star${t.pinned?' on':''}" id="td-star" aria-label="Important">★</button>
     </div>
     <div class="td-section">
       ${steps.map((s,i)=>`<div class="td-step${s.done?' done':''}">
@@ -2454,6 +2464,7 @@ function _renderTaskDetail(){
     </div>`;
 
   document.getElementById('td-chk').onclick=()=>{t.done=!t.done;t.doneAt=t.done?now():null;t.updatedAt=now();if(t.done)playCompletionSound();saveDB();_renderTaskDetail();render();};
+  document.getElementById('td-star').onclick=()=>{t.pinned=!t.pinned;t.updatedAt=now();saveDB();_renderTaskDetail();render();};
   const titleEl=document.getElementById('td-title');
   titleEl.oninput=()=>{const v=titleEl.value.trim();if(!v)return;t.text=v;t.updatedAt=now();saveDB();};
   titleEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();titleEl.blur();}});
@@ -4257,8 +4268,8 @@ function ensureUserGeo(cb){
     },
     err=>{
       _userGeoTried=true;
-      // Fallback: use Hobart if permission denied
-      _userGeo={lat:-42.8821,lon:147.3272};
+      // Fallback: use Hobart (user's home city) if permission denied.
+      _userGeo={lat:-42.8821,lon:147.3272,cc:'au'};
       cb(_userGeo);
     },
     {enableHighAccuracy:false,timeout:8000,maximumAge:300000});
@@ -4321,38 +4332,48 @@ function attachLocationAutocomplete(inputEl,onSelect){
     if(q.length<2){removeDrop();return;}
     _timer=setTimeout(()=>{
       showLoading();
-      function doSearch(geo){
-        let url=`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7`;
-        if(geo)url+=`&lat=${geo.lat}&lon=${geo.lon}`;
-        fetch(url)
+      // Nominatim first: it handles house numbers ("102 Elizabeth Street") far
+      // better than Photon. We bias to the user's area but never hard-bound, so
+      // out-of-town searches still work.
+      function nominatim(geo){
+        let url=`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&q=${encodeURIComponent(q)}`;
+        if(geo){
+          // Prefer results near the user (viewbox) but keep others (bounded=0).
+          const d=1.2;
+          url+=`&viewbox=${geo.lon-d},${geo.lat-d},${geo.lon+d},${geo.lat+d}&bounded=0`;
+          // Also nudge Nominatim toward the user's country if known.
+          if(geo.cc)url+=`&countrycodes=${geo.cc}`;
+        }
+        return fetch(url,{headers:{'Accept':'application/json'}})
           .then(r=>r.json())
-          .then(data=>{
-            const results=(data.features||[]).map(f=>{
-              const p=f.properties;
-              const parts=[p.name,p.street&&p.housenumber?p.street+' '+p.housenumber:p.street,p.city||p.town||p.village,p.state,p.country].filter(Boolean);
-              return {display_name:parts.join(', '),lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]};
-            });
-            if(results.length){showDrop(results);}
-            else{
-              // Fallback to Nominatim
-              let url2=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
-              if(geo)url2+=`&viewbox=${geo.lon-.5},${geo.lat-.5},${geo.lon+.5},${geo.lat+.5}&bounded=0`;
-              fetch(url2,{headers:{'User-Agent':'MBMLife/1.0'}})
-                .then(r=>r.json()).then(r=>showDrop(r)).catch(()=>showError());
-            }
-          }).catch(()=>{
-            // Fallback to Nominatim
-            let url2=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
-            fetch(url2,{headers:{'User-Agent':'MBMLife/1.0'}})
-              .then(r=>r.json()).then(r=>showDrop(r)).catch(()=>showError());
-          });
+          .then(list=>(list||[]).map(r=>({
+            display_name:r.display_name,
+            lat:r.lat,lon:r.lon
+          })));
       }
-      if(_userGeo){doSearch(_userGeo);}
+      function photon(geo){
+        let url=`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6`;
+        if(geo)url+=`&lat=${geo.lat}&lon=${geo.lon}`;
+        return fetch(url).then(r=>r.json()).then(data=>(data.features||[]).map(f=>{
+          const p=f.properties;
+          const parts=[p.housenumber&&p.street?p.street+' '+p.housenumber:(p.name||p.street),p.city||p.town||p.village,p.state,p.country].filter(Boolean);
+          return {display_name:parts.join(', '),lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]};
+        }));
+      }
+      function run(geo){
+        nominatim(geo)
+          .then(results=>{
+            if(results&&results.length){showDrop(results);}
+            else{photon(geo).then(r=>showDrop(r)).catch(()=>showError());}
+          })
+          .catch(()=>{photon(geo).then(r=>showDrop(r)).catch(()=>showError());});
+      }
+      if(_userGeo){run(_userGeo);}
       else{
-        doSearch(null);
-        ensureUserGeo(geo=>{if(geo&&q===inputEl.value.trim())doSearch(geo);});
+        run(null);
+        ensureUserGeo(geo=>{if(geo&&q===inputEl.value.trim())run(geo);});
       }
-    },300);
+    },350);
   };
   inputEl.addEventListener('blur',()=>setTimeout(removeDrop,200));
 }
@@ -4581,67 +4602,77 @@ document.getElementById('fab').onclick=()=>{
 let _exitDialogOpen=false;
 document.getElementById('sheet-bg').onclick=()=>{_exitDialogOpen=false;closeSheet();};
 
-// Task detail panel
-// Prevent Android back button from leaving app
-window.addEventListener('popstate',()=>{
+// Android back button behaviour:
+//   - From any inner screen  → go back toward Home (close overlay / detail / etc.)
+//   - From Home              → show Exit confirmation
+//   - Exit button            → actually leave the app
+//
+// Mechanism (the reliable pattern): keep exactly ONE sentinel entry on top of
+// history at all times. Every time the user presses back, popstate fires, we
+// consume the intent, then immediately push the sentinel again so the stack can
+// never run dry. Because we re-push on EVERY popstate unconditionally, no
+// sequence of back presses can pop past us — except the explicit Exit path,
+// where we remove our own listener and call history.back() once to leave.
+let _exitingApp=false;
+function armBackSentinel(){ history.pushState({mbmSentinel:true},'',location.href); }
+
+window.addEventListener('popstate',function onPop(){
+  if(_exitingApp) return; // let the real back through
+
+  // Re-arm immediately so the stack never empties.
+  armBackSentinel();
+
   const setOv=document.getElementById('set-overlay');
   const acctOv=document.getElementById('acct-overlay');
   if(reorderMode){
     exitReorder();
-    history.pushState(null,'',location.href);
   } else if(document.getElementById('sheet').classList.contains('on')){
-    // A bottom sheet (appearance, week-start, exit dialog, etc.) is open — close it first.
-    closeSheet();
-    _exitDialogOpen=false;
-    history.pushState(null,'',location.href);
+    closeSheet();_exitDialogOpen=false;
   } else if(setOv){
-    // Settings overlay open → go back to account sheet.
     setOv.classList.remove('on');setTimeout(()=>setOv.remove(),200);
     openAccountSheet();
-    history.pushState(null,'',location.href);
   } else if(acctOv){
     acctOv.classList.remove('on');setTimeout(()=>acctOv.remove(),200);
-    history.pushState(null,'',location.href);
   } else if(document.getElementById('ctxmenu').classList.contains('on')){
     closeCtxMenu();
-    history.pushState(null,'',location.href);
   } else if(document.getElementById('task-detail').classList.contains('on')){
     closeTaskDetail();render();
-    history.pushState(null,'',location.href);
   } else if(document.getElementById('search-screen').classList.contains('on')){
     closeSearch();
-    history.pushState(null,'',location.href);
   } else if(tasksView==='detail'){
+    // Inside a list or smart view → go to Home (lists browser).
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
-    history.pushState(null,'',location.href);
   } else if(screen==='appts'){
     _apptMonth=null;screen='lists';render();
-    history.pushState(null,'',location.href);
+  } else if(screen&&screen!=='lists'){
+    // Any other non-Home screen → go Home.
+    screen='lists';render();
   } else {
-    // Nothing to close — show in-app exit confirmation
-    history.pushState(null,'',location.href);
+    // Already Home → confirm exit.
     if(_exitDialogOpen)return;
     _exitDialogOpen=true;
     openSheet(`<div style="padding:8px 0 0">
       <div style="padding:16px 20px 8px;font-size:18px;font-weight:700">${L==='fa'?'خروج از اپ؟':'Exit MBM Life?'}</div>
-      <div style="padding:0 20px 16px;font-size:14px;color:var(--ink2)">${L==='fa'?'مطمئنی می‌خوای بری؟':'Are you sure you want to exit?'}</div>
+      <div style="padding:0 20px 16px;font-size:14px;color:var(--ink2)">${L==='fa'?'مطمئنی می‌خوای از برنامه خارج شوی؟':'Are you sure you want to exit?'}</div>
       <div style="display:flex;gap:10px;padding:0 14px 16px">
-        <button class="btn btn-ghost" id="exit-cancel" style="flex:1">${L==='fa'?'نه':'Cancel'}</button>
+        <button class="btn btn-ghost" id="exit-cancel" style="flex:1">${L==='fa'?'انصراف':'Cancel'}</button>
         <button class="btn btn-danger" id="exit-ok" style="flex:1">${L==='fa'?'خروج':'Exit'}</button>
       </div>
     </div>`);
     document.getElementById('exit-cancel').onclick=()=>{_exitDialogOpen=false;closeSheet();};
     document.getElementById('exit-ok').onclick=()=>{
-      _exitDialogOpen=false;
-      closeSheet();
-      // Best-effort exit; PWAs usually can't close programmatically.
-      // Never freeze — if close() is blocked, the user simply stays in the app.
-      try{window.close();}catch(e){}
+      _exitDialogOpen=false;closeSheet();
+      // Leave the app: stop intercepting and step back through our sentinels.
+      _exitingApp=true;
+      window.removeEventListener('popstate',onPop);
+      // Two backs: one for the sentinel we just re-armed, one to exit the doc.
+      history.back();
+      setTimeout(()=>{ history.back(); try{window.close();}catch(e){} },30);
     };
   }
 });
-history.pushState({mbm:1},'',location.href);
-history.pushState({mbm:2},'',location.href);
+// Prime a single sentinel on top of the initial entry.
+armBackSentinel();
 
 // Re-check for updates when user returns to app
 document.addEventListener('visibilitychange',()=>{
