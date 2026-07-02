@@ -806,7 +806,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v115';
+const APP_VERSION='v116';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -871,6 +871,7 @@ function loadDB(){
     if(d.meta.soundOn===undefined)d.meta.soundOn=true;
     if(d.meta.confirmDel===undefined)d.meta.confirmDel=true;
     if(d.meta.pushEnabled===undefined)d.meta.pushEnabled=false;
+    if(d.meta.notifPermGranted===undefined)d.meta.notifPermGranted=false;
     if(d.meta.notifPrefs===undefined)d.meta.notifPrefs={taskReminders:true,dueToday:true,sharedActivity:true};
     if(d.meta.accent===undefined)d.meta.accent=null;
     if(d.meta.showDueMyDay===undefined)d.meta.showDueMyDay=true;
@@ -3608,6 +3609,10 @@ function pullProfile(){
 let _fcmToken=null;
 const REMINDER_LEAD_MIN=0; // reminders fire at the task's exact due time
 
+// True if the browser can even show notifications (independent of FCM).
+function notifCapable(){
+  return ('Notification' in window) && ('serviceWorker' in navigator);
+}
 function notifSupported(){
   return !!(FB.messaging && 'Notification' in window && 'serviceWorker' in navigator);
 }
@@ -3626,20 +3631,72 @@ async function registerMessagingSW(){
   }
 }
 
-// Ask for permission, fetch token, persist it. Returns true if enabled.
+// Ask the OS/browser for notification permission. MUST be called directly from
+// a user gesture (button click) with no awaits before it, or Android/iOS will
+// silently skip the system dialog. Returns the resulting permission string.
+async function requestNotifPermission(){
+  if(!('Notification' in window))return 'unsupported';
+  // Notification.requestPermission supports both promise and legacy callback.
+  try{
+    const r=Notification.requestPermission(function(){});
+    // If it returned a promise, await it; otherwise read the updated value.
+    if(r&&typeof r.then==='function')return await r;
+    return Notification.permission;
+  }catch(e){
+    return await new Promise(res=>{
+      try{Notification.requestPermission(res);}catch(_){res(Notification.permission);}
+    });
+  }
+}
+
+// Enable flow. Permission is requested FIRST (so the Android dialog always
+// shows), independently of whether FCM/VAPID are ready. Token retrieval only
+// happens afterwards and only if it's configured.
 async function enablePushNotifications(){
-  if(!notifSupported()){toast(L==='fa'?'دستگاه پشتیبانی نمی‌کند':'Not supported on this device');return false;}
-  if(FCM_VAPID_KEY.startsWith('REPLACE_')){
-    console.warn('FCM VAPID key not configured');
-    toast(L==='fa'?'کلید Push تنظیم نشده':'Push key not configured');
+  if(!notifCapable()){
+    toast(L==='fa'?'این دستگاه از اعلان‌ها پشتیبانی نمی‌کند':'This device does not support notifications');
     return false;
   }
+
+  // 1) Always ask the OS first — this is what shows the Samsung/Android dialog.
+  let perm=notifPermission();
+  if(perm!=='granted'){
+    perm=await requestNotifPermission();
+  }
+  if(perm==='denied'){
+    toast(L==='fa'?'اجازه اعلان رد شد. از تنظیمات مرورگر آن را آزاد کنید.':'Notifications blocked. Re-enable in browser settings.');
+    return false;
+  }
+  if(perm!=='granted'){
+    toast(L==='fa'?'اجازه اعلان داده نشد':'Notification permission not granted');
+    return false;
+  }
+
+  // Permission granted. Mark local state so the toggle reflects reality even
+  // if the push-token step can't complete yet.
+  DB.meta.notifPermGranted=true;
+
+  // 2) Now try to register for FCM push (needs messaging support + VAPID key).
+  if(!FB.messaging){
+    saveDB();
+    toast(L==='fa'?'اجازه داده شد، ولی Push روی این مرورگر پشتیبانی نمی‌شود':'Allowed, but push isn\u2019t supported on this browser');
+    return true;
+  }
+  if(FCM_VAPID_KEY.startsWith('REPLACE_')){
+    saveDB();
+    console.warn('FCM VAPID key not configured — permission granted but no token fetched.');
+    toast(L==='fa'?'اجازه داده شد. کلید Push هنوز تنظیم نشده.':'Allowed. Push key not configured yet.');
+    return true;
+  }
+
   try{
-    const perm=await Notification.requestPermission();
-    if(perm!=='granted'){toast(L==='fa'?'اجازه اعلان رد شد':'Notifications denied');return false;}
     const swReg=await registerMessagingSW();
     const token=await FB.messaging.getToken({vapidKey:FCM_VAPID_KEY,serviceWorkerRegistration:swReg||undefined});
-    if(!token){toast(L==='fa'?'دریافت توکن ناموفق':'Could not get token');return false;}
+    if(!token){
+      saveDB();
+      toast(L==='fa'?'اجازه داده شد، ولی توکن دریافت نشد':'Allowed, but couldn\u2019t get push token');
+      return true;
+    }
     _fcmToken=token;
     await storeDeviceToken(token);
     DB.meta.pushEnabled=true;saveDB();
@@ -3647,9 +3704,10 @@ async function enablePushNotifications(){
     toast(L==='fa'?'اعلان‌ها فعال شد ✓':'Notifications enabled ✓');
     return true;
   }catch(e){
-    console.warn('enablePush failed:',e);
-    toast(L==='fa'?'فعال‌سازی ناموفق':'Enable failed');
-    return false;
+    console.warn('getToken failed:',e);
+    saveDB();
+    toast(L==='fa'?'اجازه داده شد، ولی ثبت Push ناموفق بود':'Allowed, but push registration failed');
+    return true;
   }
 }
 
@@ -3676,7 +3734,7 @@ async function removeDeviceToken(){
       await FB.db.collection('workspaces').doc(ws).collection('devices').doc(_fcmToken).delete().catch(()=>{});
     }
   }catch(e){console.warn('removeDeviceToken:',e);}
-  _fcmToken=null;DB.meta.pushEnabled=false;saveDB();
+  _fcmToken=null;DB.meta.pushEnabled=false;DB.meta.notifPermGranted=false;saveDB();
 }
 
 // Foreground messages don't trigger the SW; show them manually.
@@ -4018,12 +4076,15 @@ function openWeekStartSheet(){
 
 function openNotificationsSheet(){
   const perm=notifPermission();
-  const supported=notifSupported();
-  const on=!!DB.meta.pushEnabled && perm==='granted';
+  const capable=notifCapable();
+  const granted=perm==='granted';
+  // "on" reflects reality: permission granted (token may still be pending if
+  // VAPID isn't configured yet, but the user has enabled notifications).
+  const on=granted && (!!DB.meta.pushEnabled || DB.meta.notifPermGranted===true);
   if(DB.meta.notifPrefs===undefined)DB.meta.notifPrefs={taskReminders:true,dueToday:true,sharedActivity:true};
   const p=DB.meta.notifPrefs;
   let statusLine='';
-  if(!supported)statusLine=L==='fa'?'این دستگاه از اعلان‌ها پشتیبانی نمی‌کند.':'This device does not support notifications.';
+  if(!capable)statusLine=L==='fa'?'این دستگاه از اعلان‌ها پشتیبانی نمی‌کند.':'This device does not support notifications.';
   else if(perm==='denied')statusLine=L==='fa'?'اجازه اعلان در مرورگر مسدود شده. از تنظیمات مرورگر آن را آزاد کنید.':'Notifications are blocked in the browser. Re-enable them in browser settings.';
   else if(!on)statusLine=L==='fa'?'برای دریافت یادآورها اعلان‌ها را فعال کنید.':'Enable notifications to receive reminders.';
   else statusLine=L==='fa'?'اعلان‌ها فعال است.':'Notifications are on.';
@@ -4039,7 +4100,7 @@ function openNotificationsSheet(){
     <div style="padding:0 18px 8px;font-size:13px;color:var(--ink3)">${statusLine}</div>
     <div style="padding:4px 14px 8px">
       <button class="btn ${on?'btn-ghost':'btn-primary'}" id="notif-enable" style="width:100%"
-        ${(!supported||perm==='denied')?'disabled style="width:100%;opacity:.5"':''}>
+        ${(!capable||perm==='denied')?'disabled style="width:100%;opacity:.5"':''}>
         ${on?(L==='fa'?'اعلان‌ها فعال است ✓':'Notifications enabled ✓'):(L==='fa'?'فعال‌سازی اعلان‌ها':'Enable notifications')}
       </button>
     </div>
@@ -4057,7 +4118,11 @@ function openNotificationsSheet(){
 
   document.querySelectorAll('.sheet-cancel').forEach(b=>{if(!b.id)b.onclick=()=>closeSheet();});
   const en=document.getElementById('notif-enable');
-  if(en&&!on)en.onclick=async()=>{const ok=await enablePushNotifications();closeSheet();if(ok)openNotificationsSheet();};
+  if(en&&!on)en.onclick=()=>{
+    // Kick off the OS permission request synchronously inside the gesture,
+    // then finish enabling. Do not await anything before this call.
+    enablePushNotifications().then(ok=>{closeSheet();if(ok)openNotificationsSheet();});
+  };
   const dis=document.getElementById('notif-disable');
   if(dis)dis.onclick=async()=>{await removeDeviceToken();closeSheet();openNotificationsSheet();};
   document.querySelectorAll('[data-notif]').forEach(el=>el.onclick=()=>{
