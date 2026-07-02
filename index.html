@@ -272,11 +272,11 @@ textarea.finput{resize:vertical;min-height:80px}
 /* ════════════════════════════
    LIST DETAIL
    ════════════════════════════ */
-.ld-bg{position:relative;overflow:hidden;min-height:152px}
-.ld-bg-layer{position:absolute;inset:0;z-index:0}
+.ld-bg{position:relative;overflow:hidden;min-height:200px}
+.ld-bg-layer{position:absolute;inset:0;z-index:0;background-size:cover;background-position:center}
 /* Dark scrim so white header text stays legible over photo backgrounds */
 .ld-bg-layer.has-photo::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.35) 100%)}
+  background:linear-gradient(180deg,rgba(0,0,0,.10) 0%,rgba(0,0,0,.28) 60%,rgba(0,0,0,.45) 100%)}
 .ld-topbar{display:flex;align-items:center;gap:4px;padding:12px 8px 0;
   position:relative;z-index:2}
 .ld-back{width:44px;height:44px;border-radius:50%;background:none;border:none;
@@ -809,7 +809,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v117';
+const APP_VERSION='v118';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1864,7 +1864,7 @@ function openListMenu(listId,anchorEl){
       if(a==='sort'){_openViewSortSheet(vk);}
       else if(a==='reorder'){enterReorder();}
       else if(a==='shortcut'){_addShortcut(listId);}
-      else if(a==='theme'){_openThemeSheet(listId);}
+      else if(a==='theme'){_openThemeFor({type:'list',id:listId});}
       else if(a==='share'){_shareList(listId);}
       else if(a==='duplicate'){_duplicateList(listId);}
       else if(a==='print'){_printList(listId);}
@@ -2102,7 +2102,7 @@ function _openThemeFor(target){
     const file=document.getElementById('thm-file');
     if(file)file.onchange=e=>{
       const f=e.target.files&&e.target.files[0];if(!f)return;
-      compressImage(f,1000,dataUrl=>{sel.photo='url('+dataUrl+')';rerender();});
+      compressImage(f,1400,dataUrl=>{sel.photo='url('+dataUrl+')';rerender();});
       e.target.value='';
     };
     const c=document.getElementById('thm-cancel');if(c)c.onclick=closeSheet;
@@ -3784,12 +3784,18 @@ async function refreshPushOnStart(){
 }
 
 /* ── Profile photo: compress, set, choose avatar, remove ── */
-function compressImage(file,cb){
+// compressImage(file, cb)                → avatar mode (256px, ~120KB)
+// compressImage(file, maxSize, cb)       → custom size (e.g. 1400px background)
+function compressImage(file,maxOrCb,maybeCb){
+  let max=256, cb;
+  if(typeof maxOrCb==='function'){cb=maxOrCb;}
+  else{max=maxOrCb||256;cb=maybeCb;}
+  // Larger images (backgrounds) get a bigger byte budget than avatars.
+  const byteBudget=max>=800?700000:120000;
   const reader=new FileReader();
   reader.onload=e=>{
     const img=new Image();
     img.onload=()=>{
-      const max=256;
       let w=img.width,h=img.height;
       if(w>h){if(w>max){h=Math.round(h*max/w);w=max;}}
       else{if(h>max){w=Math.round(w*max/h);h=max;}}
@@ -3797,9 +3803,8 @@ function compressImage(file,cb){
       cv.width=w;cv.height=h;
       const ctx=cv.getContext('2d');
       ctx.drawImage(img,0,0,w,h);
-      let q=0.7,out=cv.toDataURL('image/jpeg',q);
-      // Keep well under Firestore 1MB doc limit; target < ~120KB
-      while(out.length>120000&&q>0.4){q-=0.1;out=cv.toDataURL('image/jpeg',q);}
+      let q=0.85,out=cv.toDataURL('image/jpeg',q);
+      while(out.length>byteBudget&&q>0.4){q-=0.08;out=cv.toDataURL('image/jpeg',q);}
       cb(out);
     };
     img.onerror=()=>cb(null);
