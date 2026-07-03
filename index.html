@@ -11,6 +11,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href='data:application/manifest+json,{"name":"MBM Life","short_name":"MBM Life","start_url":".","scope":".","display":"standalone","background_color":"%230f0f14","theme_color":"%230f0f14","orientation":"portrait","icons":[{"src":"https://66bardiambm.github.io/mbm-life/icon-192.png","sizes":"192x192","type":"image/png"},{"src":"https://66bardiambm.github.io/mbm-life/icon-512.png","sizes":"512x512","type":"image/png"}]}'>
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -95,8 +96,11 @@ body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .star{width:36px;height:36px;flex:none;background:none;border:none;
   cursor:pointer;color:var(--ink3);font-size:18px;
   display:flex;align-items:center;justify-content:center;
-  opacity:.45;transition:all .15s}
+  opacity:.6;transition:all .15s}
 .star.on{color:#f59e0b;opacity:1}
+.task-list-body.over-photo .star{color:#fff;opacity:.85;
+  text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 4px rgba(0,0,0,.8)}
+.task-list-body.over-photo .star.on{color:#ffcc33;opacity:1}
 
 /* ── Chips / pills ── */
 .chip{display:inline-flex;align-items:center;gap:3px;background:var(--s2);
@@ -841,7 +845,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v127';
+const APP_VERSION='v128';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1433,8 +1437,9 @@ function renderListDetail(){
     const svMap={myday:tr('myday'),important:tr('important'),planned:tr('planned'),all:tr('allTasks'),assigned:(L==='fa'?'محول‌شده به من':'Assigned to me')};
     const svColors={myday:'#f59e0b',important:'#f43f5e',planned:'#38bdf8',all:'#6e56f8',assigned:'#34d399'};
     title=svMap[activeSmartView]||'';
-    accentColor=(DB.meta.smartColor&&DB.meta.smartColor[activeSmartView])||svColors[activeSmartView]||'#6e56f8';
-    bgGradient=listBgGradient(accentColor);
+    const _sc=(DB.meta.smartColor&&DB.meta.smartColor[activeSmartView]);
+    accentColor=_sc||svColors[activeSmartView]||'#6e56f8';
+    bgGradient=(_sc===null&&DB.meta.smartColor&&activeSmartView in DB.meta.smartColor)?null:listBgGradient(accentColor);
     bgPhoto=(DB.meta.smartPhoto&&DB.meta.smartPhoto[activeSmartView])||null;
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
@@ -1444,7 +1449,7 @@ function renderListDetail(){
     const l=(DB.entities.lists||{})[activeListId];
     title=l?(l.name&&(l.name[L]||l.name.en)||'List'):'List';
     accentColor=l&&l.color||'#6e56f8';
-    bgGradient=listBgGradient(accentColor);
+    bgGradient=(l&&l.color)?listBgGradient(l.color):null;
     bgPhoto=l&&l.photo||null;
     tasks=tasks.filter(t=>t.listId===activeListId);
   }
@@ -2082,11 +2087,11 @@ function _themeSet(target,color,photo){
   if(target.type==='smart'){
     if(!DB.meta.smartColor)DB.meta.smartColor={};
     if(!DB.meta.smartPhoto)DB.meta.smartPhoto={};
-    if(color)DB.meta.smartColor[target.sv]=color;
+    DB.meta.smartColor[target.sv]=color||null;
     DB.meta.smartPhoto[target.sv]=photo||null;
   } else {
     const l=DB.entities.lists[target.id];if(!l)return;
-    if(color)l.color=color;
+    l.color=color||null;
     l.photo=photo||null;l.updatedAt=now();
   }
   saveDB();
@@ -2100,6 +2105,7 @@ function _openThemeFor(target){
     let inner='';
     if(sel.tab==='colour'){
       inner=`<div class="thm-colors">
+        <button class="thm-swatch thm-none${(!sel.photo&&!sel.color)?' on':''}" data-tc-none="1" style="background:var(--s2);border:1px solid var(--b2)">${(!sel.photo&&!sel.color)?'<span class="chk">✓</span>':'<span style="color:var(--ink3);font-size:11px">✕</span>'}</button>
         ${THEME_COLORS.map(c=>`<button class="thm-swatch${(!sel.photo&&c===sel.color)?' on':''}" data-tc="${c}" style="background:${c}">${(!sel.photo&&c===sel.color)?'<span class="chk">✓</span>':''}</button>`).join('')}
       </div>`;
     } else if(sel.tab==='photo'){
@@ -2128,6 +2134,8 @@ function _openThemeFor(target){
   function bind(){
     document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{sel.tab=b.dataset.tab;rerender();});
     document.querySelectorAll('[data-tc]').forEach(b=>b.onclick=()=>{sel.color=b.dataset.tc;sel.photo=null;rerender();});
+    const noneBtn=document.querySelector('[data-tc-none]');
+    if(noneBtn)noneBtn.onclick=()=>{sel.color=null;sel.photo=null;rerender();};
     document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>{sel.photo=b.dataset.photo;rerender();});
     const add=document.querySelector('[data-photo-add]');
     if(add)add.onclick=()=>document.getElementById('thm-file').click();
@@ -2599,8 +2607,9 @@ function renderAppts(){
       return (a.time||'')< (b.time||'')?-1:1;
     });
 
-  const upcoming=all.filter(a=>a.date>=ts);
-  const past=all.filter(a=>a.date<ts);
+  const upcoming=all.filter(a=>a.date>=ts&&!a.done);
+  const past=all.filter(a=>a.date<ts&&!a.done);
+  const doneAppts=all.filter(a=>a.done);
 
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="appts-back" style="width:40px;height:40px;flex:none">&#8249;</button>
@@ -2624,6 +2633,12 @@ function renderAppts(){
       html+=`<div class="hub-sec-label">${L==='fa'?'گذشته':'Past'}</div>
       <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px;opacity:.65">
         ${past.map(a=>apptRow(a)).join('')}
+      </div>`;
+    }
+    if(doneAppts.length){
+      html+=`<div class="hub-sec-label">${L==='fa'?'انجام‌شده':'Completed'} ${doneAppts.length}</div>
+      <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px;opacity:.6">
+        ${doneAppts.map(a=>apptRow(a)).join('')}
       </div>`;
     }
   }
