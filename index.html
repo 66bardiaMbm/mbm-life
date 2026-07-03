@@ -94,11 +94,12 @@ body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 
 /* ── Star ── */
 .star{width:36px;height:36px;flex:none;background:none;border:none;
-  cursor:pointer;color:var(--ink3);font-size:18px;
+  cursor:pointer;color:#8a8ab0;font-size:19px;
   display:flex;align-items:center;justify-content:center;
-  opacity:.6;transition:all .15s}
-.star.on{color:#f59e0b;opacity:1}
-.task-list-body.over-photo .star{color:#fff;opacity:.85;
+  opacity:.85;transition:all .15s}
+.star.on{color:#f5b301;opacity:1}
+body.light .star{color:var(--ink3)}
+.task-list-body.over-photo .star{color:#fff;opacity:.9;
   text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 4px rgba(0,0,0,.8)}
 .task-list-body.over-photo .star.on{color:#ffcc33;opacity:1}
 
@@ -180,8 +181,9 @@ textarea.finput{resize:vertical;min-height:80px}
 .trow-chk-wrap{width:52px;height:56px;display:flex;align-items:center;
   justify-content:center;flex:none}
 .trow-content{flex:1;padding:15px 0 14px;min-width:0}
-.trow-title{font-size:16px;font-weight:400;line-height:1.35;letter-spacing:-.1px;
-  word-break:break-word;overflow-wrap:anywhere}
+.trow-title{font-size:16px;font-weight:500;line-height:1.35;letter-spacing:-.1px;
+  color:#ffffff;word-break:break-word;overflow-wrap:anywhere}
+body.light .trow-title{color:var(--ink)}
 .trow-meta-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;align-items:center}
 .trow-star-wrap{width:48px;height:56px;display:flex;align-items:center;
   justify-content:center;flex:none}
@@ -845,7 +847,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v129';
+const APP_VERSION='v130';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4315,28 +4317,45 @@ function attachLocationAutocomplete(inputEl,onSelect){
   }
   function showDrop(results){
     removeDrop();
-    if(!results||!results.length){
-      _drop=document.createElement('div');
-      _drop.style.cssText=dropStyle;
-      _drop.innerHTML=`<div style="padding:12px 14px;font-size:13px;color:var(--ink3)">${L==='fa'?'نتیجه‌ای یافت نشد':'No results found'}</div>`;
-      const wrap=inputEl.closest('.fld')||inputEl.parentElement;
-      wrap.style.position='relative';wrap.appendChild(_drop);
-      setTimeout(removeDrop,2000);
-      return;
-    }
+    const typed=inputEl.value.trim();
+    // Extract a leading house number the user typed (e.g. "15 William...").
+    const numMatch=typed.match(/^\s*(\d+[A-Za-z]?)\s+/);
+    const typedNum=numMatch?numMatch[1]:null;
     _drop=document.createElement('div');
     _drop.style.cssText=dropStyle;
-    results.slice(0,5).forEach(r=>{
+    let any=false;
+    (results||[]).slice(0,5).forEach(r=>{
+      any=true;
+      let label=r.display_name;
+      // If the user typed a house number but OSM's result doesn't start with one,
+      // prepend the typed number so it isn't lost.
+      if(typedNum && !/^\s*\d/.test(label)){
+        label=typedNum+' '+label;
+      }
       const row=document.createElement('div');
       row.style.cssText='padding:13px 14px;font-size:14px;color:#f0f0f8;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06)';
-      row.textContent=r.display_name;
+      row.textContent=label;
       row.onclick=()=>{
-        inputEl.value=r.display_name;
-        onSelect({name:r.display_name,lat:parseFloat(r.lat),lon:parseFloat(r.lon)});
+        inputEl.value=label;
+        onSelect({name:label,lat:parseFloat(r.lat),lon:parseFloat(r.lon)});
         removeDrop();};
       _drop.appendChild(row);
     });
-    // Position relative to input
+    // Always offer: keep exactly what I typed (so a house number OSM doesn't
+    // know is never blocked). Uses the typed text verbatim as the location.
+    if(typed.length>=3){
+      const keep=document.createElement('div');
+      keep.style.cssText='padding:13px 14px;font-size:13px;color:var(--brand);cursor:pointer;font-weight:600';
+      keep.textContent=(L==='fa'?'✓ استفاده از متن دقیق: ':'✓ Use exactly: ')+typed;
+      keep.onclick=()=>{
+        inputEl.value=typed;
+        onSelect({name:typed,lat:null,lon:null});
+        removeDrop();};
+      _drop.appendChild(keep);
+    }
+    if(!any && typed.length<3){
+      _drop.innerHTML=`<div style="padding:12px 14px;font-size:13px;color:var(--ink3)">${L==='fa'?'نتیجه‌ای یافت نشد':'No results found'}</div>`;
+    }
     const wrap=inputEl.closest('.fld')||inputEl.parentElement;
     wrap.style.position='relative';
     wrap.appendChild(_drop);
