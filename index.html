@@ -845,7 +845,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v128';
+const APP_VERSION='v129';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4399,11 +4399,14 @@ let _latestRemoteVer=null;
 
 async function fetchRemoteVersion(){
   const base=location.href.split('?')[0].split('#')[0];
-  // Guard against a hung network call freezing the app: abort after 8s.
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),8000);
   try{
-    const res=await fetch(base+'?_='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache'},signal:ctrl.signal});
+    // Strong cache-bust: unique query each call. NOTE: GitHub Pages' CDN can
+    // still serve a stale copy for up to ~10 min after a push regardless of
+    // this — that delay is server-side and cannot be fixed from the client.
+    const bust=Date.now()+'-'+Math.random().toString(36).slice(2);
+    const res=await fetch(base+'?_='+bust,{cache:'no-store',headers:{'Cache-Control':'no-cache, no-store, must-revalidate','Pragma':'no-cache'},signal:ctrl.signal});
     if(!res.ok)return null;
     const text=await res.text();
     const match=text.match(/APP_VERSION='([^']+)'/);
@@ -4459,16 +4462,13 @@ function applyUpdate(){
   }catch(e){}
 
   const reload=()=>{
-    // In an installed PWA (standalone), changing the query string can kick the
-    // user out to an external browser tab. Detect standalone and reload in place.
-    const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
-      || window.navigator.standalone===true;
-    if(standalone){
-      location.reload();
-    } else {
-      const base=location.href.split('?')[0].split('#')[0];
-      location.replace(base+'?v='+Date.now());
-    }
+    // Always cache-bust the reload. A plain location.reload() can re-serve the
+    // stale HTML from GitHub Pages' CDN / disk cache, which makes the app come
+    // back on the SAME old version and re-show the update banner. Replacing the
+    // URL with a fresh query string forces a real network fetch. This works in
+    // standalone PWAs too (same-origin, same scope — it does not open a browser tab).
+    const base=location.href.split('?')[0].split('#')[0];
+    location.replace(base+'?v='+Date.now());
   };
 
   // Run cleanup steps best-effort, then reload no matter what.
