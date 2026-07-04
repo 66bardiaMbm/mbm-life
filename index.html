@@ -850,7 +850,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v132';
+const APP_VERSION='v133';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4722,6 +4722,14 @@ window.addEventListener('popstate',function onPop(){
 });
 // Prime a single sentinel on top of the initial entry.
 armBackSentinel();
+
+// Register app service worker (relative path → scope stays under /mbm-life/).
+// Required for a full standalone install (WebAPK) on Android Chrome.
+if('serviceWorker' in navigator){
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  });
+}
 
 // Re-check for updates when user returns to app
 document.addEventListener('visibilitychange',()=>{
