@@ -850,9 +850,35 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v138';
+const APP_VERSION='v140';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
+
+/* ═══ Back-button navigation — gesture-only history guards ═══
+   ROOT CAUSE (verified via Chromium history_manipulation_intervention docs):
+   a pushState entry created WITHOUT a user activation marks ALL same-document
+   entries skippable, so the next Back skips them and popstate never fires → the
+   app exits. The previous code re-armed the sentinel INSIDE popstate (no
+   gesture), which poisoned the whole stack and made every 2nd Back exit.
+   FIX: build history guards ONLY on real user gestures (never in popstate,
+   never on load) — one guard per open layer plus one home-exit guard. popstate
+   only UNWINDS one layer based on the live UI and never pushes. On resume the
+   Back state is reset so reopening the WebAPK starts fresh. */
+(function backButtonBootstrap(){
+  window.addEventListener('popstate', onPop);
+  var reconcile=function(){ try{ reconcileGuards(); }catch(e){} };
+  // Reconcile before the tap's handler (pre) and just after it (post, still
+  // inside the gesture's activation window) so a newly opened view gets a guard.
+  window.addEventListener('pointerdown', reconcile, true);
+  window.addEventListener('keydown', reconcile, true);
+  window.addEventListener('pointerup', function(){ setTimeout(reconcile,0); }, true);
+  window.addEventListener('click', function(){ setTimeout(reconcile,0); }, true);
+  // Resume / fresh load: clear exit flag and reset guard count so the next
+  // gesture rebuilds a clean Back state (no stale entries from a prior session).
+  var onResume=function(){ if(document.visibilityState==='visible'){ _exitingApp=false; _guards=0; window.addEventListener('popstate', onPop); } };
+  document.addEventListener('visibilitychange', onResume);
+  window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
+})();
 
 /* ── Entity Schema ──────────────────────────────────────────
    All entities share: id, createdAt, updatedAt, archivedAt(null)
@@ -4617,10 +4643,6 @@ initAuth();
 // Apply saved theme immediately so the auth screen matches (light/dark/system).
 applyTheme();
 
-// Back-button handling: prime the sentinel and attach the handler EARLY, so a
-// later boot error cannot leave the app without deterministic back handling.
-armBackSentinel();
-window.addEventListener('popstate', onPop);
 
 // Determine initial screen.
 // Default visible element is #splash. onAuthStateChanged (in initAuth) reveals
@@ -4670,17 +4692,37 @@ document.getElementById('sheet-bg').onclick=()=>{_exitDialogOpen=false;closeShee
 // sequence of back presses can pop past us — except the explicit Exit path,
 // where we remove our own listener and call history.back() once to leave.
 var _exitingApp=false;
-function armBackSentinel(){ history.pushState({mbmSentinel:true},'',location.href); }
+var _guards=0;   // history guard entries we've pushed above the launch entry
+function armGuard(){ try{ history.pushState({mbmGuard:1},'',location.href); _guards++; }catch(e){} }
 
-// Deterministic back handling. Priority ladder: overlays → subpage → Home → exit.
-// A hoisted declaration so it can be attached EARLY in boot (below), guaranteeing
-// back works even if later boot code throws. Every DOM read is null-guarded.
+// Count of back-closable layers currently open. MUST mirror onPop's ladder so
+// that one guard exists per layer (+1 home-exit guard).
+function appDepth(){
+  const on=(id)=>{ const el=document.getElementById(id); return !!(el&&el.classList&&el.classList.contains('on')); };
+  let d=0;
+  if(reorderMode) d++;
+  if(on('sheet')) d++;
+  if(document.getElementById('set-overlay')) d++;
+  if(document.getElementById('acct-overlay')) d++;
+  if(on('ctxmenu')) d++;
+  if(on('task-detail')) d++;
+  if(on('search-screen')) d++;
+  if(tasksView==='detail' || (screen && screen!=='lists')) d++;
+  return d;
+}
+// Push guards up to (open layers + 1). Called ONLY from user-gesture listeners,
+// so entries are never marked skippable by Chrome's intervention.
+function reconcileGuards(){
+  const want=appDepth()+1;
+  let budget=8;
+  while(_guards<want && budget-->0) armGuard();
+}
+
+// popstate handler: a Back consumed one guard. UNWIND exactly one live UI layer.
+// Never pushState here (that would poison the whole history stack).
 function onPop(){
-  if(_exitingApp) return; // let the real back through
-
-  // Re-arm immediately so the stack never empties.
-  armBackSentinel();
-
+  if(_exitingApp) return;                 // exit in progress → let the real back through
+  _guards=Math.max(0,_guards-1);
   const on=(id)=>{ const el=document.getElementById(id); return !!(el&&el.classList&&el.classList.contains('on')); };
   const setOv=document.getElementById('set-overlay');
   const acctOv=document.getElementById('acct-overlay');
@@ -4728,10 +4770,9 @@ function onPop(){
     document.getElementById('exit-cancel').onclick=close;
     document.getElementById('exit-ok').onclick=()=>{
       _exitDialogOpen=false;ov.remove();
-      _exitingApp=true;
-      window.removeEventListener('popstate',onPop);
-      history.back();
-      setTimeout(()=>{ history.back(); try{window.close();}catch(e){} },30);
+      _exitingApp=true;                 // onPop early-returns while this is set
+      try{ history.go(-(_guards+1)); }catch(e){}
+      setTimeout(()=>{ try{window.close();}catch(e){} },50);
     };
   }
 }
