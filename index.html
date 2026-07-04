@@ -6,12 +6,13 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>MBM Life</title>commit
+<title>MBM Life</title>
 <meta name="theme-color" content="#0f0f14">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="manifest" href='data:application/manifest+json,{"name":"MBM Life","short_name":"MBM Life","start_url":".","scope":".","display":"standalone","background_color":"%230f0f14","theme_color":"%230f0f14","orientation":"portrait","icons":[{"src":"https://66bardiambm.github.io/mbm-life/icon-192.png","sizes":"192x192","type":"image/png"},{"src":"https://66bardiambm.github.io/mbm-life/icon-512.png","sizes":"512x512","type":"image/png"}]}'>
+<link rel="manifest" href='data:application/manifest+json,%7B%22name%22%3A%22MBM%20Life%22%2C%22short_name%22%3A%22MBM%20Life%22%2C%22start_url%22%3A%22.%22%2C%22scope%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230f0f14%22%2C%22theme_color%22%3A%22%230f0f14%22%2C%22orientation%22%3A%22portrait%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgNTEyIDUxMiI%2BPHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSIxMTUiIGZpbGw9IiM2ZTU2ZjgiLz48dGV4dCB4PSIyNTYiIHk9IjM0NSIgZm9udC1mYW1pbHk9IkFyaWFsLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAwIiBmb250LXdlaWdodD0iODAwIiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5NPC90ZXh0Pjwvc3ZnPg%3D%3D%22%2C%22sizes%22%3A%22any%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22purpose%22%3A%22any%20maskable%22%7D%5D%7D'>
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgNTEyIDUxMiI+PHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSIxMTUiIGZpbGw9IiM2ZTU2ZjgiLz48dGV4dCB4PSIyNTYiIHk9IjM0NSIgZm9udC1mYW1pbHk9IkFyaWFsLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAwIiBmb250LXdlaWdodD0iODAwIiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5NPC90ZXh0Pjwvc3ZnPg==">
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -289,7 +290,7 @@ body.light .trow-title{color:var(--ink)}
   text-shadow:0 1px 2px rgba(0,0,0,.9),0 2px 8px rgba(0,0,0,.8),0 0 3px rgba(0,0,0,.7)}
 .task-list-body.over-photo .trow-title,.task-list-body.over-photo .done-toggle,
 .task-list-body.over-photo .trow-meta-row,.task-list-body.over-photo .chip{
-  text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 4px rgba(0,0,0,.85),0 1px 6px rgba(0,0,0,.7)}
+  text-shadow:0 1px 3px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.6)}
 /* When a photo is set, screen content floats above it with light translucency */
 .task-list-body{background:var(--s1);border-top:1px solid var(--b1);position:relative;z-index:1}
 .task-list-body.over-photo{background:transparent;border-top:none}
@@ -533,6 +534,8 @@ body.rtl .trow-content{text-align:right}
 .thm-swatch.on{border-color:#fff;box-shadow:0 0 0 2px var(--brand)}
 .thm-swatch .chk{color:#fff;font-size:20px;font-weight:900;line-height:1}
 .thm-photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:6px 18px 8px}
+.thm-none-photo{background:var(--s3,#23242e)!important;border:1px solid var(--b2)!important;
+  display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:22px;font-weight:400}
 .thm-photo{aspect-ratio:1;border-radius:14px;cursor:pointer;border:3px solid transparent;
   background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center}
 .thm-photo.on{border-color:#fff;box-shadow:0 0 0 2px var(--brand)}
@@ -847,7 +850,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v130';
+const APP_VERSION='v131';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2113,8 +2116,9 @@ function _openThemeFor(target){
     } else if(sel.tab==='photo'){
       inner=`<div class="thm-photo-grid">
         <button class="thm-photo add" data-photo-add="1">＋</button>
+        <button class="thm-photo thm-none-photo${!sel.photo?' on':''}" data-photo-none="1" title="${L==='fa'?'بدون عکس':'No photo'}">✕</button>
         ${THEME_PHOTOS.map((p,i)=>`<button class="thm-photo${sel.photo===p?' on':''}" data-photo="${p}" style="background-image:${p}"></button>`).join('')}
-        ${(sel.photo&&sel.photo.startsWith('url'))?`<button class="thm-photo on" data-photo="${sel.photo}" style="background-image:${sel.photo}"></button>`:''}
+        ${(sel.photo&&sel.photo.startsWith('url')&&THEME_PHOTOS.indexOf(sel.photo)===-1)?`<button class="thm-photo on" data-photo="${sel.photo}" style="background-image:${sel.photo}"></button>`:''}
       </div>`;
     } else {
       inner=`<div style="padding:24px 20px;text-align:center;color:var(--ink3);font-size:14px">${tr('comingSoon')}</div>`;
@@ -2139,6 +2143,8 @@ function _openThemeFor(target){
     const noneBtn=document.querySelector('[data-tc-none]');
     if(noneBtn)noneBtn.onclick=()=>{sel.color=null;sel.photo=null;rerender();};
     document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>{sel.photo=b.dataset.photo;rerender();});
+    const noneP=document.querySelector('[data-photo-none]');
+    if(noneP)noneP.onclick=()=>{sel.photo=null;rerender();};
     const add=document.querySelector('[data-photo-add]');
     if(add)add.onclick=()=>document.getElementById('thm-file').click();
     const file=document.getElementById('thm-file');
@@ -4466,6 +4472,9 @@ function dismissUpdate(){
 }
 
 function applyUpdate(){
+  // Remember which version we're updating to, so once we come back on it the
+  // banner won't show again for the same version.
+  try{if(_latestRemoteVer)localStorage.setItem('mbmlife_applied_ver',_latestRemoteVer);}catch(e){}
   const update=document.getElementById('ub-update');
   if(update){update.textContent=(L==='fa'?'در حال نصب...':'Updating...');update.disabled=true;}
   const later=document.getElementById('ub-later');
@@ -4515,8 +4524,10 @@ async function checkForUpdate(){
     if(!ver||ver===APP_VERSION)return;
     let dismissed=null;
     try{dismissed=localStorage.getItem(UPD_DISMISS_KEY);}catch(e){}
-    // Only show if this exact newer version hasn't been dismissed
-    if(dismissed===ver)return;
+    // Suppress if this exact version was already dismissed OR already applied.
+    let applied=null;
+    try{applied=localStorage.getItem('mbmlife_applied_ver');}catch(e){}
+    if(dismissed===ver||applied===ver)return;
     showUpdateBanner(ver);
   }catch(e){}
 }
@@ -4682,24 +4693,28 @@ window.addEventListener('popstate',function onPop(){
     // Any other non-Home screen → go Home.
     screen='lists';render();
   } else {
-    // Already Home → confirm exit.
+    // Already Home → confirm exit with a centered modal.
     if(_exitDialogOpen)return;
     _exitDialogOpen=true;
-    openSheet(`<div style="padding:8px 0 0">
-      <div style="padding:16px 20px 8px;font-size:18px;font-weight:700">${L==='fa'?'خروج از اپ؟':'Exit MBM Life?'}</div>
-      <div style="padding:0 20px 16px;font-size:14px;color:var(--ink2)">${L==='fa'?'مطمئنی می‌خوای از برنامه خارج شوی؟':'Are you sure you want to exit?'}</div>
-      <div style="display:flex;gap:10px;padding:0 14px 16px">
-        <button class="btn btn-ghost" id="exit-cancel" style="flex:1">${L==='fa'?'انصراف':'Cancel'}</button>
-        <button class="btn btn-danger" id="exit-ok" style="flex:1">${L==='fa'?'خروج':'Exit'}</button>
-      </div>
-    </div>`);
-    document.getElementById('exit-cancel').onclick=()=>{_exitDialogOpen=false;closeSheet();};
+    const ov=document.createElement('div');
+    ov.id='exit-modal';
+    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(2px)';
+    ov.innerHTML=`
+      <div style="background:var(--s1,#1a1b26);border-radius:22px;max-width:340px;width:100%;padding:28px 24px 20px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+        <div style="font-size:20px;font-weight:800;text-align:center;color:#fff;margin-bottom:24px">${L==='fa'?'از برنامه خارج می‌شوید؟':'Are you sure you want to exit?'}</div>
+        <div style="display:flex;gap:12px">
+          <button id="exit-cancel" style="flex:1;padding:14px;border-radius:999px;border:1.5px solid var(--brand,#6e56f8);background:none;color:var(--brand,#6e56f8);font-size:16px;font-weight:700;cursor:pointer">${L==='fa'?'انصراف':'Cancel'}</button>
+          <button id="exit-ok" style="flex:1;padding:14px;border-radius:999px;border:none;background:var(--brand,#6e56f8);color:#fff;font-size:16px;font-weight:700;cursor:pointer">${L==='fa'?'خروج':'Exit'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close=()=>{_exitDialogOpen=false;ov.remove();};
+    ov.onclick=(e)=>{if(e.target===ov)close();};
+    document.getElementById('exit-cancel').onclick=close;
     document.getElementById('exit-ok').onclick=()=>{
-      _exitDialogOpen=false;closeSheet();
-      // Leave the app: stop intercepting and step back through our sentinels.
+      _exitDialogOpen=false;ov.remove();
       _exitingApp=true;
       window.removeEventListener('popstate',onPop);
-      // Two backs: one for the sentinel we just re-armed, one to exit the doc.
       history.back();
       setTimeout(()=>{ history.back(); try{window.close();}catch(e){} },30);
     };
