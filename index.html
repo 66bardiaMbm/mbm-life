@@ -737,6 +737,8 @@ body.rtl .trow-content{text-align:right}
   white-space:nowrap;pointer-events:none}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
+#splash{position:fixed;inset:0;z-index:300;background:var(--s0);display:flex;flex-direction:column;align-items:center;justify-content:center}
+@keyframes spin{to{transform:rotate(360deg)}}
 #auth-screen{position:fixed;inset:0;background:var(--s0);z-index:100;
   display:flex;flex-direction:column;align-items:center;
   justify-content:center;padding:40px 32px}
@@ -752,13 +754,16 @@ body.rtl .trow-content{text-align:right}
   padding:16px;width:100%;cursor:pointer;font-size:16px;font-weight:600;
   color:var(--ink);margin-bottom:12px;transition:background .15s;font-family:inherit}
 .auth-btn:active{background:var(--s3)}
-.auth-skip{color:var(--ink2);font-size:14px;cursor:pointer;margin-top:8px;
-  background:none;border:none;text-decoration:underline;font-family:inherit}
 </style>
 </head>
 <body>
 
-<div id="auth-screen">
+<div id="splash">
+  <div class="auth-logo">M</div>
+  <div style="margin-top:18px;width:26px;height:26px;border:3px solid rgba(255,255,255,.22);border-top-color:var(--brand,#6e56f8);border-radius:50%;animation:spin .8s linear infinite"></div>
+</div>
+
+<div id="auth-screen" style="display:none">
   <div class="auth-logo">M</div>
   <div class="auth-title">MBM Life</div>
   <div class="auth-sub">Your world, connected.<br>Tasks, people, time — all in one place.</div>
@@ -766,7 +771,6 @@ body.rtl .trow-content{text-align:right}
     <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.96 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
     Continue with Google
   </button>
-  <button class="auth-skip" id="auth-skip">Continue as Guest</button>
   <div id="auth-error" style="display:none;margin-top:16px;padding:12px 14px;border-radius:12px;background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.35);color:#ff6b7a;font-size:13px;line-height:1.5;text-align:center;max-width:100%;word-break:break-word"></div>
   <div style="margin-top:24px;font-size:12px;color:var(--ink3)" id="auth-ver"></div>
 </div>
@@ -788,10 +792,6 @@ body.rtl .trow-content{text-align:right}
 
 <div id="app" style="display:none">
   <div id="screen"></div>
-  <nav id="nav" style="display:none">
-    <button class="nv on" data-s="lists"><span class="nv-ic">≡</span><span class="nv-lb">Lists</span></button>
-  </nav>
-  </nav>
   <button id="fab">＋</button>
 </div>
 
@@ -850,7 +850,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v133';
+const APP_VERSION='v138';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1064,15 +1064,15 @@ const I18N={
     print:'Print list',suggestions:'Suggestions',reorder:'Reorder tasks',
     high:'High',medium:'Medium',low:'Low',
     search:'Search',noResults:'No results.',
-    signOut:'Sign out',exitGuest:'Exit Guest Mode',settings:'Settings',about:'About',
+    signOut:'Sign out',settings:'Settings',about:'About',
     version:'Version',language:'Language',theme:'Theme',
     offline:'Offline',synced:'Synced',syncing:'Syncing…',
     appts:'Appointments',newAppt:'New Appointment',apptTitle:'Title',
     apptDate:'Date',apptTime:'Time',apptLocation:'Location',apptNotes:'Notes',
     account:'Account',profilePhoto:'Profile photo',displayName:'Display name',email:'Email',
     loginMethod:'Login method',accountStatus:'Status',
-    providerGoogle:'Google',providerEmail:'Email',providerGuest:'Guest',
-    statusSignedIn:'Signed in',statusGuest:'Guest mode',
+    providerGoogle:'Google',providerEmail:'Email',
+    statusSignedIn:'Signed in',
     changePhoto:'Change photo',uploadPhoto:'Upload a photo',chooseAvatar:'Choose an avatar',
     removePhoto:'Remove photo',checkUpdate:'Check for updates',
     profile:'Profile',appearance:'Appearance',notifications:'Notifications',comingSoon:'Coming soon',back:'Back',
@@ -1096,15 +1096,15 @@ const I18N={
     print:'چاپ لیست',suggestions:'پیشنهادات',reorder:'مرتب کردن',
     high:'بالا',medium:'متوسط',low:'پایین',
     search:'جستجو',noResults:'نتیجه‌ای نیست.',
-    signOut:'خروج',exitGuest:'خروج از حالت مهمان',settings:'تنظیمات',about:'درباره',
+    signOut:'خروج',settings:'تنظیمات',about:'درباره',
     version:'نسخه',language:'زبان',theme:'رنگ‌بندی',
     offline:'آفلاین',synced:'همگام‌سازی شد',syncing:'در حال همگام‌سازی…',
     appts:'قرار ملاقات‌ها',newAppt:'قرار جدید',apptTitle:'عنوان',
     apptDate:'تاریخ',apptTime:'ساعت',apptLocation:'مکان',apptNotes:'یادداشت',
     account:'حساب کاربری',profilePhoto:'عکس پروفایل',displayName:'نام نمایشی',email:'ایمیل',
     loginMethod:'روش ورود',accountStatus:'وضعیت',
-    providerGoogle:'گوگل',providerEmail:'ایمیل',providerGuest:'مهمان',
-    statusSignedIn:'وارد شده',statusGuest:'حالت مهمان',
+    providerGoogle:'گوگل',providerEmail:'ایمیل',
+    statusSignedIn:'وارد شده',
     changePhoto:'تغییر عکس',uploadPhoto:'آپلود عکس',chooseAvatar:'انتخاب آواتار',
     removePhoto:'حذف عکس',checkUpdate:'بررسی به‌روزرسانی',
     profile:'پروفایل',appearance:'ظاهر',notifications:'اعلان‌ها',comingSoon:'به‌زودی',back:'بازگشت',
@@ -1613,15 +1613,14 @@ function _hubRow(icon,label,action,opts={}){
 
 function renderMore(){
   const user=DB.meta;
-  const isGuest=!user.email;
   return `
     <div class="hub-sec-label" style="margin-top:14px">${tr('account')}</div>
     <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
       <div class="ul-row" data-hub="profile" style="padding:8px 16px">
         <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none;margin-right:12px;border:1px solid var(--b2)">${avatarInner(user,44)}</div>
         <div style="flex:1;min-width:0">
-          <div class="ul-name" style="font-weight:700">${esc(user.displayName||'Guest')}</div>
-          <div style="font-size:12.5px;color:var(--ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isGuest?tr('statusGuest'):esc(user.email)}</div>
+          <div class="ul-name" style="font-weight:700">${esc(user.displayName||user.email)}</div>
+          <div style="font-size:12.5px;color:var(--ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(user.email)}</div>
         </div>
         <span class="ul-count" style="font-size:18px;opacity:.4">›</span>
       </div>
@@ -1647,10 +1646,9 @@ function renderMore(){
 
 function renderProfile(){
   const user=DB.meta;
-  const isGuest=!user.email;
-  const provider=isGuest?'guest':(user.provider||'google');
-  const providerLabel=provider==='google'?tr('providerGoogle'):provider==='email'?tr('providerEmail'):tr('providerGuest');
-  const statusLabel=isGuest?tr('statusGuest'):tr('statusSignedIn');
+  const provider=user.provider||'google';
+  const providerLabel=provider==='email'?tr('providerEmail'):tr('providerGoogle');
+  const statusLabel=tr('statusSignedIn');
   return `
     <div style="display:flex;align-items:center;gap:6px;padding:8px 4px 4px">
       <button class="ld-action-btn" data-hub="back-more" aria-label="Back" style="font-size:22px">&#8592;</button>
@@ -1662,18 +1660,18 @@ function renderProfile(){
         ${avatarInner(user,96)}
         <div style="position:absolute;right:-2px;bottom:-2px;width:32px;height:32px;border-radius:50%;background:var(--brand);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:15px">✏️</div>
       </div>
-      <div style="font-size:19px;font-weight:800;margin-top:14px">${esc(user.displayName||'Guest')}</div>
-      <div style="font-size:13px;color:var(--ink3);margin-top:3px">${isGuest?tr('statusGuest'):esc(user.email)}</div>
+      <div style="font-size:19px;font-weight:800;margin-top:14px">${esc(user.displayName||user.email)}</div>
+      <div style="font-size:13px;color:var(--ink3);margin-top:3px">${esc(user.email)}</div>
     </div>
 
     <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
       <div class="ul-row" style="padding:0 16px;cursor:default">
         <span class="ul-name">${tr('displayName')}</span>
-        <span class="ul-count">${esc(user.displayName||'Guest')}</span>
+        <span class="ul-count">${esc(user.displayName||user.email)}</span>
       </div>
       <div class="ul-row" style="padding:0 16px;cursor:default">
         <span class="ul-name">${tr('email')}</span>
-        <span class="ul-count">${isGuest?'—':esc(user.email)}</span>
+        <span class="ul-count">${esc(user.email)}</span>
       </div>
       <div class="ul-row" style="padding:0 16px;cursor:default">
         <span class="ul-name">${tr('loginMethod')}</span>
@@ -1685,7 +1683,7 @@ function renderProfile(){
       </div>
     </div>
 
-    <div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">${user.email?tr('signOut'):tr('exitGuest')}</button></div>
+    <div style="padding:0 0 8px"><button class="sheet-cancel" style="margin:0;border-radius:var(--r)" data-action="sign-out">${tr('signOut')}</button></div>
     <input type="file" id="acct-file" accept="image/*" style="display:none">`;
 }
 /* ══════════════════════════════════════════
@@ -3497,13 +3495,28 @@ try{
 /* ── Workspace ID per user ── */
 function wsId(uid){return 'user_'+uid;}
 
+/* ── Session capability model (auth architecture) ──
+   Single source of truth for what the current session may do. Today only the
+   'google' mode exists (a full account). A future LOCAL-ONLY trial ('guest')
+   mode can be enabled later WITHOUT redesigning auth: (1) uncomment its row
+   below, (2) add a 'guest' branch in sessionMode(), (3) add a guest entry
+   button that activates it. sync / backup / push already gate on sessionCap(),
+   so guest (all-false) is automatically device-local: no Firestore, no cloud
+   backup, no FCM, no shared workspace. */
+const SESSION_CAPS = {
+  google: { sync:true, backup:true, push:true, shared:true, localOnly:false }
+  // ,guest: { sync:false, backup:false, push:false, shared:false, localOnly:true }
+};
+function sessionMode(){ return (FB.user && FB.user.email) ? 'google' : null; }
+function sessionCap(cap){ const m=sessionMode(); return !!(m && SESSION_CAPS[m] && SESSION_CAPS[m][cap]); }
+
 /* ── Auth state ── */
 function initAuth(){
   if(!FB.ready){
-    // No Firebase - use local state
-    if(DB.meta.displayName){
-      startApp(DB.meta.displayName,DB.meta.email);
-    }
+    // Production: never open the app from cached local data.
+    // If Firebase/Auth is unavailable, keep the login screen and show an error.
+    showAuthScreen();
+    authError(L==='fa'?'سرویس ورود در دسترس نیست. اتصال اینترنت را بررسی کنید و دوباره باز کنید.':'Sign-in service unavailable. Check your connection and reopen.');
     return;
   }
   FB.auth.onAuthStateChanged(user=>{
@@ -3526,10 +3539,12 @@ function initAuth(){
       startListeners();
       pullProfile();
       refreshPushOnStart();
+      hideSplash();
       const as=document.getElementById('auth-screen');
-      if(as&&as.style.display!=='none'){
-        as.style.display='none';
-        document.getElementById('app').style.display='flex';
+      if(as)as.style.display='none';
+      const appEl=document.getElementById('app');
+      if(appEl&&appEl.style.display==='none'){
+        appEl.style.display='flex';
         render();
         setTimeout(checkForUpdate,3000);
       } else {
@@ -3538,7 +3553,10 @@ function initAuth(){
     } else {
       FB.user=null;
       stopListeners();
-      // Signed out: do not auto-open anything. Boot logic / doSignOut control the screen.
+      // No signed-in user (fresh boot with no session, or after Sign out):
+      // reveal the Login screen. Never open the app from cached data.
+      hideSplash();
+      showAuthScreen();
     }
   });
 }
@@ -3588,19 +3606,19 @@ function signInWithGoogle(){
 /* ── (Redirect path removed in v85 — popup only) ── */
 
 /* ── Reset auth screen to clean signed-out state ── */
+function hideSplash(){ const s=document.getElementById('splash'); if(s){ s.style.transition='opacity .2s'; s.style.opacity='0'; setTimeout(()=>{ if(s.parentNode) s.remove(); },200); } }
 function showAuthScreen(){
+  hideSplash();
   const app=document.getElementById('app');
   const as=document.getElementById('auth-screen');
   if(app)app.style.display='none';
   if(as)as.style.display='flex';
   authClearError();
   const googleBtn=document.getElementById('auth-google');
-  const skipBtn=document.getElementById('auth-skip');
   if(googleBtn){googleBtn.style.display='flex';googleBtn.disabled=false;googleBtn.style.opacity='1';}
-  if(skipBtn){skipBtn.style.display='block';skipBtn.disabled=false;skipBtn.textContent=(L==='fa'?'ادامه به‌صورت مهمان':'Continue as Guest');}
 }
 
-/* ── Sign out (Google or Guest) without relying on reload ── */
+/* ── Sign out without relying on reload ── */
 function doSignOut(){
   stopListeners();
   try{removeDeviceToken();}catch(e){}
@@ -3627,6 +3645,7 @@ function doSignOut(){
 /* ── Firestore listeners ── */
 function startListeners(){
   if(!FB.ready||!FB.user)return;
+  if(!sessionCap('sync'))return;   // guest (future) = local-only, no Firestore reads
   stopListeners();
   const ws=wsId(FB.user.uid);
   const db=FB.db;
@@ -3655,6 +3674,7 @@ function stopListeners(){
 
 function syncPush(){
   if(!FB.ready||!FB.user)return;
+  if(!sessionCap('sync'))return;   // guest (future) = local-only, no Firestore writes
   const ws=wsId(FB.user.uid);
   const db=FB.db;
   const batch=db.batch();
@@ -3858,6 +3878,7 @@ function attachForegroundHandler(){
 // Re-sync token on app start if the user previously enabled push.
 async function refreshPushOnStart(){
   if(!notifSupported())return;
+  if(!sessionCap('push'))return;   // guest (future) = no FCM notifications
   if(DB.meta.pushEnabled&&notifPermission()==='granted'&&!FCM_VAPID_KEY.startsWith('REPLACE_')){
     try{
       const swReg=await registerMessagingSW();
@@ -3927,7 +3948,6 @@ function removeProfilePhoto(){
 }
 function openAccountSheet(){
   const user=DB.meta;
-  const isGuest=!user.email;
   // Full-screen overlay (like Microsoft To Do), not a bottom sheet.
   let ov=document.getElementById('acct-overlay');
   if(ov)ov.remove();
@@ -3938,8 +3958,8 @@ function openAccountSheet(){
     <div class="acct-ov-head">
       <div class="acct-ov-avatar">${avatarInner(user,64)}</div>
       <div class="acct-ov-id">
-        <div class="acct-ov-name">${esc(user.displayName||'Guest')}</div>
-        <div class="acct-ov-email">${isGuest?tr('statusGuest'):esc(user.email)}</div>
+        <div class="acct-ov-name">${esc(user.displayName||user.email)}</div>
+        <div class="acct-ov-email">${esc(user.email)}</div>
       </div>
       <button class="acct-ov-close" id="acct-ov-close" aria-label="Close">&#10005;</button>
     </div>
@@ -3968,9 +3988,8 @@ function openAccountSheet(){
 
 function openSettingsSheet(){
   const user=DB.meta;
-  const isGuest=!user.email;
-  const provider=isGuest?'guest':(user.provider||'google');
-  const providerLabel=provider==='google'?tr('providerGoogle'):provider==='email'?tr('providerEmail'):tr('providerGuest');
+  const provider=user.provider||'google';
+  const providerLabel=provider==='email'?tr('providerEmail'):tr('providerGoogle');
   let ov=document.getElementById('set-overlay');
   if(ov)ov.remove();
   ov=document.createElement('div');
@@ -3987,8 +4006,8 @@ function openSettingsSheet(){
           ${avatarInner(user,80)}
           <div class="set-profile-edit">✏️</div>
         </div>
-        <div class="set-profile-name">${esc(user.displayName||'Guest')}</div>
-        <div class="set-profile-email">${isGuest?tr('statusGuest'):esc(user.email)} · ${providerLabel}</div>
+        <div class="set-profile-name">${esc(user.displayName||user.email)}</div>
+        <div class="set-profile-email">${esc(user.email)} · ${providerLabel}</div>
       </div>
 
       <div class="hub-sec-label">${tr('settings')}</div>
@@ -4077,7 +4096,7 @@ function openSettingsSheet(){
         </div>
       </div>
 
-      <div style="padding:6px 14px 24px"><button class="set-signout" data-set="signout">${user.email?tr('signOut'):tr('exitGuest')}</button></div>
+      <div style="padding:6px 14px 24px"><button class="set-signout" data-set="signout">${tr('signOut')}</button></div>
     </div>
     <input type="file" id="acct-file" accept="image/*" style="display:none">`;
   document.body.appendChild(ov);
@@ -4559,7 +4578,7 @@ async function manualCheckForUpdate(){
    ══════════════════════════════════════════ */
 // Auth screen
 document.getElementById('auth-google').onclick=()=>signInWithGoogle();
-document.getElementById('auth-skip').onclick=()=>startApp('Guest',null);
+/* Guest mode removed for production. */
 // Update banner buttons
 (function(){
   const later=document.getElementById('ub-later');
@@ -4593,41 +4612,33 @@ function restoreAfterUpdate(){
   }catch(e){}
 }
 
-function startApp(displayName,email){
-  DB.meta.displayName=displayName||'Guest';
-  DB.meta.email=email||null;
-  saveDB();
-  document.getElementById('auth-screen').style.display='none';
-  document.getElementById('app').style.display='flex';
-  render();
-  restoreAfterUpdate();
-  setTimeout(checkForUpdate,3000);
-}
-
 // Boot Firebase (popup-only; no redirect handler)
 initAuth();
 // Apply saved theme immediately so the auth screen matches (light/dark/system).
 applyTheme();
 
-// Determine initial screen
+// Back-button handling: prime the sentinel and attach the handler EARLY, so a
+// later boot error cannot leave the app without deterministic back handling.
+armBackSentinel();
+window.addEventListener('popstate', onPop);
+
+// Determine initial screen.
+// Default visible element is #splash. onAuthStateChanged (in initAuth) reveals
+// either the app (signed-in) or the Login screen (no session). This removes the
+// login-screen flash on every launch for already-signed-in users.
 if(FB.ready){
-  // Firebase present: onAuthStateChanged decides. Show brief checking state,
-  // then fall back to auth screen if no signed-in user appears.
-  const authScreen=document.getElementById('auth-screen');
-  const skipBtn=document.getElementById('auth-skip');
-  const googleBtn=document.getElementById('auth-google');
-  if(googleBtn)googleBtn.style.display='none';
-  if(skipBtn){skipBtn.textContent=(L==='fa'?'در حال بررسی...':'Checking...');skipBtn.disabled=true;}
+  // Safety net: if auth never resolves (e.g. network hang), reveal Login so the
+  // user is not stuck on the splash forever.
   setTimeout(()=>{
-    // Still on auth screen after 2.5s → no signed-in Firebase user
-    if(authScreen&&authScreen.style.display!=='none'&&!FB.user){
-      if(googleBtn)googleBtn.style.display='flex';
-      if(skipBtn){skipBtn.textContent=(L==='fa'?'ادامه به‌صورت مهمان':'Continue as Guest');skipBtn.disabled=false;}
+    const appEl=document.getElementById('app');
+    if(!FB.user && (!appEl || appEl.style.display==='none')){
+      showAuthScreen();
     }
-  },2500);
-} else if(DB.meta.displayName){
-  // No Firebase but a prior local/Guest session exists
-  startApp(DB.meta.displayName,DB.meta.email);
+  },8000);
+} else {
+  // Production: no Firebase → NEVER open app from cached data. Show Login + error.
+  showAuthScreen();
+  authError(L==='fa'?'سرویس ورود در دسترس نیست. اتصال اینترنت را بررسی کنید و دوباره باز کنید.':'Sign-in service unavailable. Check your connection and reopen.');
 }
 
 
@@ -4658,31 +4669,35 @@ document.getElementById('sheet-bg').onclick=()=>{_exitDialogOpen=false;closeShee
 // never run dry. Because we re-push on EVERY popstate unconditionally, no
 // sequence of back presses can pop past us — except the explicit Exit path,
 // where we remove our own listener and call history.back() once to leave.
-let _exitingApp=false;
+var _exitingApp=false;
 function armBackSentinel(){ history.pushState({mbmSentinel:true},'',location.href); }
 
-window.addEventListener('popstate',function onPop(){
+// Deterministic back handling. Priority ladder: overlays → subpage → Home → exit.
+// A hoisted declaration so it can be attached EARLY in boot (below), guaranteeing
+// back works even if later boot code throws. Every DOM read is null-guarded.
+function onPop(){
   if(_exitingApp) return; // let the real back through
 
   // Re-arm immediately so the stack never empties.
   armBackSentinel();
 
+  const on=(id)=>{ const el=document.getElementById(id); return !!(el&&el.classList&&el.classList.contains('on')); };
   const setOv=document.getElementById('set-overlay');
   const acctOv=document.getElementById('acct-overlay');
   if(reorderMode){
     exitReorder();
-  } else if(document.getElementById('sheet').classList.contains('on')){
+  } else if(on('sheet')){
     closeSheet();_exitDialogOpen=false;
   } else if(setOv){
     setOv.classList.remove('on');setTimeout(()=>setOv.remove(),200);
     openAccountSheet();
   } else if(acctOv){
     acctOv.classList.remove('on');setTimeout(()=>acctOv.remove(),200);
-  } else if(document.getElementById('ctxmenu').classList.contains('on')){
+  } else if(on('ctxmenu')){
     closeCtxMenu();
-  } else if(document.getElementById('task-detail').classList.contains('on')){
+  } else if(on('task-detail')){
     closeTaskDetail();render();
-  } else if(document.getElementById('search-screen').classList.contains('on')){
+  } else if(on('search-screen')){
     closeSearch();
   } else if(tasksView==='detail'){
     // Inside a list or smart view → go to Home (lists browser).
@@ -4719,9 +4734,7 @@ window.addEventListener('popstate',function onPop(){
       setTimeout(()=>{ history.back(); try{window.close();}catch(e){} },30);
     };
   }
-});
-// Prime a single sentinel on top of the initial entry.
-armBackSentinel();
+}
 
 // Register app service worker (relative path → scope stays under /mbm-life/).
 // Required for a full standalone install (WebAPK) on Android Chrome.
@@ -4730,6 +4743,7 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(function(){});
   });
 }
+
 
 // Re-check for updates when user returns to app
 document.addEventListener('visibilitychange',()=>{
