@@ -260,9 +260,6 @@ body.light .trow-title{color:var(--ink)}
 .shop-name.done{text-decoration:line-through;color:var(--ink3)}
 .shop-meta{font-size:12px;color:var(--ink2);margin-top:1px}
 .shop-sec{font-size:12px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.4px;padding:16px 8px 6px}
-.shop-sug-wrap{display:flex;flex-wrap:wrap;gap:8px}
-.shop-sug{font-size:13px;background:var(--s2);border:1px solid var(--b1);border-radius:999px;padding:7px 12px;color:var(--ink);cursor:pointer}
-.shop-sug:active{background:var(--s3)}
 .shop-toolbar{display:flex;gap:8px;padding:0 16px 8px}
 .shop-tbtn{flex:1;font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 10px;color:var(--ink);cursor:pointer}
 .shop-tbtn.on{background:var(--brand,#6e56f8)18;border-color:var(--brand,#6e56f8);color:var(--brand,#6e56f8)}
@@ -282,6 +279,14 @@ body.light .trow-title{color:var(--ink)}
 .shop-act{font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 11px;color:var(--ink);cursor:pointer}
 .shop-act:disabled{opacity:.4}
 .shop-act.danger{color:#ef4444;border-color:#ef444455}
+.shop-prows{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;margin:2px 0 4px}
+.shop-prow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--s2);border:1px solid var(--b1);border-radius:12px;padding:9px 12px;cursor:pointer}
+.shop-prow:active{background:var(--s3)}
+.shop-pthumb{width:38px;height:38px;flex:none;border-radius:9px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:20px}
+.shop-pmain{flex:1;min-width:0;display:flex;flex-direction:column}
+.shop-pname{font-size:15px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shop-pcat{font-size:12px;color:var(--ink2)}
+.shop-padd{flex:none;font-size:20px;color:var(--brand,#6e56f8);font-weight:700}
 
 /* Hub dividers */
 .hub-sep{height:1px;background:var(--b1);margin:6px 0}
@@ -913,7 +918,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v147';
+const APP_VERSION='v149';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3052,31 +3057,35 @@ function shopResolveLoc(text,picked){
 }
 function openShopFromTemplate(key){
   const s=shopStore(key); if(!s)return;
-  // Always create a NEW, fully independent list from this store (its own name,
-  // icon, colour, address and items). Never reuse/merge — that guarantees one
-  // store's identity can never bleed into another's.
-  const id=shopCreateList({name:s.name,icon:s.icon,color:s.color,template:key});
-  activeShopListId=id; shopView='detail'; render(); window.scrollTo(0,0);
+  // Open the create dialog pre-filled with this store's identity so the user can
+  // immediately search & attach the branch LOCATION (same field as a custom
+  // list). Still creates a NEW, fully independent list — no reuse/merge, so one
+  // store's identity/location can never bleed into another's.
+  openCreateShopList({name:s.name,icon:s.icon,color:s.color,template:key});
 }
-function openCreateShopList(){
+function openCreateShopList(prefill){
+  prefill=prefill||{};
+  const fromStore=!!prefill.name;
   let picked=null;
   openSheet(`
-    <h3>${L==='fa'?'لیست خرید جدید':'New shopping list'}</h3>
+    <h3>${fromStore?esc(prefill.name):(L==='fa'?'لیست خرید جدید':'New shopping list')}</h3>
     <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
-      <input class="finput" id="sl-name" placeholder="${L==='fa'?'مثلاً خرید هفتگی':'e.g. Weekly groceries'}" autofocus></div>
+      <input class="finput" id="sl-name" placeholder="${L==='fa'?'مثلاً خرید هفتگی':'e.g. Weekly groceries'}" value="${esc(prefill.name||'')}"></div>
     <div class="fld"><label>${L==='fa'?'فروشگاه / مکان (اختیاری)':'Store / location (optional)'}</label>
-      <input class="finput" id="sl-loc" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}"></div>
+      <input class="finput" id="sl-loc" placeholder="${L==='fa'?'جستجوی شعبه یا آدرس':'Search branch or address'}"></div>
     <div class="fld" style="display:flex;gap:10px">
       <div style="flex:1"><label>${L==='fa'?'آیکون':'Icon'}</label>
-        <input class="finput" id="sl-icon" placeholder="🛒" maxlength="2" value="🛒"></div>
+        <input class="finput" id="sl-icon" placeholder="🛒" maxlength="2" value="${esc(prefill.icon||'🛒')}"></div>
       <div style="flex:1"><label>${L==='fa'?'رنگ':'Colour'}</label>
-        <input class="finput" id="sl-color" type="color" value="#22c55e" style="height:44px;padding:4px"></div>
+        <input class="finput" id="sl-color" type="color" value="${esc(prefill.color||'#22c55e')}" style="height:44px;padding:4px"></div>
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" id="sl-cancel">${tr('cancel')}</button>
       <button class="btn btn-primary" id="sl-save">${tr('save')}</button>
     </div>`);
-  setTimeout(()=>document.getElementById('sl-name')?.focus(),100);
+  // When started from a store the name is known → focus the LOCATION field so the
+  // user can search the branch straight away; otherwise focus the name field.
+  setTimeout(()=>document.getElementById(fromStore?'sl-loc':'sl-name')?.focus(),100);
   attachLocationAutocomplete(document.getElementById('sl-loc'),(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon};});
   document.getElementById('sl-cancel').onclick=()=>closeSheet();
   document.getElementById('sl-save').onclick=()=>{
@@ -3085,7 +3094,7 @@ function openCreateShopList(){
     const icon=(document.getElementById('sl-icon').value||'🛒').trim()||'🛒';
     const color=document.getElementById('sl-color').value||'#22c55e';
     const loc=shopResolveLoc(document.getElementById('sl-loc').value,picked);
-    const id=shopCreateList({name,icon,color,address:loc.address,lat:loc.lat,lon:loc.lon});
+    const id=shopCreateList({name,icon,color,template:prefill.template||null,address:loc.address,lat:loc.lat,lon:loc.lon});
     closeSheet();
     activeShopListId=id; shopView='detail'; render(); window.scrollTo(0,0);
   };
@@ -3156,22 +3165,124 @@ function openShopListMenu(id){
 }
 
 // ── Add items (multi-line paste → one item per line) + suggestions ──
+// ── Shopping v148: local product catalogue + contextual type-ahead ──
+// HONEST scope: no live store APIs. This is a built-in catalogue. "Contextual"
+// means the STORE TYPE filters what makes sense (a hardware store won't suggest
+// milk; a pharmacy suggests pharmacy items; a custom list shows everything).
+// grp = product group; each store template allows a set of groups.
+const SHOP_STORE_GRP={
+  woolworths:['grocery','household','baby'], coles:['grocery','household','baby'],
+  aldi:['grocery','household','baby'], costco:['grocery','household','baby'],
+  kmart:['household','general','baby','pet'], bigw:['household','general','baby','pet'],
+  chemistwarehouse:['pharmacy','baby','household'], priceline:['pharmacy','baby','household'],
+  officeworks:['office','electronics'], jbhifi:['electronics'], harveynorman:['electronics','household'],
+  ikea:['furniture','household'], bunnings:['hardware','garden','household'], petbarn:['pet']
+};
+const SHOP_PRODUCTS=[
+  // Dairy
+  {n:'Milk',c:'Dairy',s:'2L',g:'grocery'},{n:'Full cream milk',c:'Dairy',s:'2L',g:'grocery'},
+  {n:'Lite milk',c:'Dairy',s:'2L',g:'grocery'},{n:'Lactose free milk',c:'Dairy',s:'1L',g:'grocery'},
+  {n:'Almond milk',c:'Dairy',s:'1L',g:'grocery'},{n:'Oat milk',c:'Dairy',s:'1L',g:'grocery'},
+  {n:'Soy milk',c:'Dairy',s:'1L',g:'grocery'},{n:'Cheese block',c:'Dairy',s:'500g',g:'grocery'},
+  {n:'Butter',c:'Dairy',s:'250g',g:'grocery'},{n:'Greek yogurt',c:'Dairy',s:'1kg',g:'grocery'},
+  {n:'Thickened cream',c:'Dairy',s:'300ml',g:'grocery'},{n:'Eggs',c:'Dairy',s:'12pk',g:'grocery'},
+  // Bakery
+  {n:'Bread',c:'Bakery',s:'700g',g:'grocery'},{n:'White bread',c:'Bakery',s:'700g',g:'grocery'},
+  {n:'Wholemeal bread',c:'Bakery',s:'700g',g:'grocery'},{n:'Sourdough',c:'Bakery',g:'grocery',a:'bread'},
+  {n:'Wraps',c:'Bakery',s:'8pk',g:'grocery',a:'bread'},{n:'Bread rolls',c:'Bakery',s:'6pk',g:'grocery'},
+  {n:'Croissants',c:'Bakery',s:'4pk',g:'grocery',a:'bread'},
+  // Meat
+  {n:'Chicken breast',c:'Meat',s:'1kg',g:'grocery'},{n:'Chicken thighs',c:'Meat',s:'1kg',g:'grocery'},
+  {n:'Chicken mince',c:'Meat',s:'500g',g:'grocery'},{n:'BBQ chicken',c:'Meat',g:'grocery'},
+  {n:'Beef mince',c:'Meat',s:'500g',g:'grocery'},{n:'Steak',c:'Meat',g:'grocery'},
+  {n:'Sausages',c:'Meat',s:'6pk',g:'grocery'},{n:'Bacon',c:'Meat',s:'250g',g:'grocery'},
+  // Seafood
+  {n:'Salmon fillet',c:'Seafood',g:'grocery'},{n:'Tuna can',c:'Seafood',s:'95g',g:'grocery'},
+  {n:'Prawns',c:'Seafood',g:'grocery'},
+  // Fruit
+  {n:'Banana',c:'Fruit',g:'grocery'},{n:'Apple',c:'Fruit',g:'grocery'},{n:'Orange',c:'Fruit',g:'grocery'},
+  {n:'Grapes',c:'Fruit',g:'grocery'},{n:'Strawberries',c:'Fruit',s:'250g',g:'grocery'},
+  {n:'Avocado',c:'Fruit',g:'grocery'},{n:'Lemon',c:'Fruit',g:'grocery'},
+  // Vegetables
+  {n:'Tomato',c:'Vegetables',g:'grocery'},{n:'Potato',c:'Vegetables',s:'2kg',g:'grocery'},
+  {n:'Onion',c:'Vegetables',g:'grocery'},{n:'Carrot',c:'Vegetables',s:'1kg',g:'grocery'},
+  {n:'Broccoli',c:'Vegetables',g:'grocery'},{n:'Cucumber',c:'Vegetables',g:'grocery'},
+  {n:'Lettuce',c:'Vegetables',g:'grocery'},{n:'Baby spinach',c:'Vegetables',s:'120g',g:'grocery'},
+  // Pantry / staples
+  {n:'Rice',c:'Other',s:'1kg',g:'grocery'},{n:'Basmati rice',c:'Other',s:'1kg',g:'grocery'},
+  {n:'Pasta',c:'Other',s:'500g',g:'grocery'},{n:'Spaghetti',c:'Other',s:'500g',g:'grocery'},
+  {n:'Flour',c:'Other',s:'1kg',g:'grocery'},{n:'Sugar',c:'Other',s:'1kg',g:'grocery'},
+  {n:'Olive oil',c:'Other',s:'500ml',g:'grocery'},{n:'Cereal',c:'Snacks',g:'grocery'},
+  {n:'Coffee',c:'Drinks',s:'200g',g:'grocery'},{n:'Tea bags',c:'Drinks',s:'100pk',g:'grocery'},
+  // Drinks
+  {n:'Water bottles',c:'Drinks',s:'24pk',g:'grocery'},{n:'Orange juice',c:'Drinks',s:'2L',g:'grocery'},
+  {n:'Soft drink',c:'Drinks',s:'1.25L',g:'grocery'},{n:'Sparkling water',c:'Drinks',g:'grocery'},
+  // Snacks
+  {n:'Chocolate',c:'Snacks',g:'grocery'},{n:'Chips',c:'Snacks',g:'grocery'},
+  {n:'Biscuits',c:'Snacks',g:'grocery'},{n:'Muesli bars',c:'Snacks',s:'6pk',g:'grocery'},
+  // Household
+  {n:'Toilet paper',c:'Cleaning',s:'12pk',g:'household'},{n:'Paper towel',c:'Cleaning',s:'4pk',g:'household'},
+  {n:'Dishwashing liquid',c:'Cleaning',g:'household'},{n:'Laundry detergent',c:'Cleaning',g:'household'},
+  {n:'Garbage bags',c:'Cleaning',g:'household'},{n:'Surface spray',c:'Cleaning',g:'household'},
+  {n:'Sponges',c:'Cleaning',s:'4pk',g:'household'},{n:'Aluminium foil',c:'Kitchen',g:'household'},
+  {n:'Cling wrap',c:'Kitchen',g:'household'},
+  // Baby
+  {n:'Nappies',c:'Baby',g:'baby'},{n:'Baby wipes',c:'Baby',g:'baby'},
+  {n:'Baby formula',c:'Baby',g:'baby'},{n:'Baby food',c:'Baby',g:'baby'},
+  // Pharmacy
+  {n:'Paracetamol',c:'Pharmacy',g:'pharmacy'},{n:'Ibuprofen',c:'Pharmacy',g:'pharmacy'},
+  {n:'Vitamins',c:'Pharmacy',g:'pharmacy'},{n:'Band-aids',c:'Pharmacy',g:'pharmacy'},
+  {n:'Hand sanitiser',c:'Pharmacy',g:'pharmacy'},{n:'Shampoo',c:'Bathroom',g:'pharmacy'},
+  {n:'Toothpaste',c:'Bathroom',g:'pharmacy'},{n:'Deodorant',c:'Bathroom',g:'pharmacy'},
+  // Pet
+  {n:'Dog food',c:'Pet',g:'pet'},{n:'Cat food',c:'Pet',g:'pet'},
+  {n:'Cat litter',c:'Pet',g:'pet'},{n:'Pet treats',c:'Pet',g:'pet'},
+  // Hardware / garden
+  {n:'Screws',c:'Hardware',g:'hardware'},{n:'Nails',c:'Hardware',g:'hardware'},
+  {n:'Duct tape',c:'Hardware',g:'hardware'},{n:'Light bulb',c:'Hardware',g:'hardware'},
+  {n:'Paint',c:'Hardware',g:'hardware'},{n:'Extension cord',c:'Hardware',g:'hardware'},
+  {n:'Potting mix',c:'Garden',g:'garden'},{n:'Plant pot',c:'Garden',g:'garden'},
+  {n:'Seeds',c:'Garden',g:'garden'},{n:'Fertiliser',c:'Garden',g:'garden'},
+  // Office
+  {n:'A4 paper',c:'Stationery',s:'500pk',g:'office'},{n:'Pens',c:'Stationery',g:'office'},
+  {n:'Notebook',c:'Stationery',g:'office'},{n:'Printer ink',c:'Stationery',g:'office'},
+  {n:'Stapler',c:'Stationery',g:'office'},{n:'Envelopes',c:'Stationery',g:'office'},
+  // Electronics
+  {n:'USB cable',c:'Electronics',g:'electronics'},{n:'Phone charger',c:'Electronics',g:'electronics'},
+  {n:'Headphones',c:'Electronics',g:'electronics'},{n:'Batteries',c:'Electronics',s:'AA 8pk',g:'electronics'},
+  {n:'HDMI cable',c:'Electronics',g:'electronics'},
+  // Furniture
+  {n:'Cushion',c:'Other',g:'furniture'},{n:'Lamp',c:'Other',g:'furniture'},
+  {n:'Storage box',c:'Other',g:'furniture'},{n:'Rug',c:'Other',g:'furniture'}
+];
+const SHOP_PROD_BY_NAME=(()=>{ const m={}; SHOP_PRODUCTS.forEach(p=>{m[p.n.toLowerCase()]=p;}); return m; })();
+function shopProdCat(name){ const p=SHOP_PROD_BY_NAME[String(name||'').trim().toLowerCase()]; return p?p.c:shopCatFor(name); }
+// Contextual type-ahead: filter the catalogue by the store's allowed groups
+// (custom list = no template = show everything), then name match.
+function shopProductSuggest(query,template){
+  const q=String(query||'').trim().toLowerCase();
+  if(q.length<2)return [];
+  const allowed=template?new Set(SHOP_STORE_GRP[template]||[]):null;
+  const base=SHOP_PRODUCTS.filter(p=>!allowed||allowed.has(p.g));
+  const hay=p=>(p.n+' '+(p.a||'')).toLowerCase();
+  const starts=base.filter(p=>p.n.toLowerCase().startsWith(q));
+  const incl=base.filter(p=>!p.n.toLowerCase().startsWith(q)&&hay(p).includes(q));
+  return starts.concat(incl).slice(0,8);
+}
+
 function openAddShopItems(){
   const l=shopActiveList(); if(!l)return;
-  // Built-in product catalogue (SHOP_SUGGEST). Architecture note: a future version
-  // can extend/replace this source with a live product API, images, or barcode
-  // lookups without changing the input flow — it only needs {n,i}[] results.
-  const sugHtml=(q)=>{
-    const s=(q||'').trim().toLowerCase();
-    let list=SHOP_SUGGEST;
-    if(s){
-      const starts=SHOP_SUGGEST.filter(x=>x.n.toLowerCase().startsWith(s));
-      const incl=SHOP_SUGGEST.filter(x=>!x.n.toLowerCase().startsWith(s)&&x.n.toLowerCase().includes(s));
-      list=starts.concat(incl);
-    }
-    list=list.slice(0,24);
-    if(!list.length)return `<span style="font-size:13px;color:var(--ink3)">${L==='fa'?'پیشنهادی نیست':'No suggestions'}</span>`;
-    return list.map(x=>`<button type="button" class="shop-sug" data-sug="${esc(x.n)}">${x.i} ${esc(x.n)}</button>`).join('');
+  const rows=(q)=>{
+    const list=shopProductSuggest(q,l.template);
+    if(!list.length)return '';
+    return list.map(p=>{
+      const em=SHOP_CAT_EMOJI[p.c]||'🛒';
+      return `<button type="button" class="shop-prow" data-prod="${esc(p.n)}">
+        <span class="shop-pthumb">${em}</span>
+        <span class="shop-pmain"><span class="shop-pname">${esc(p.n)}</span><span class="shop-pcat">${esc(p.c)}${p.s?' · '+esc(p.s):''}</span></span>
+        <span class="shop-padd">＋</span>
+      </button>`;
+    }).join('');
   };
   openSheet(`
     <h3>${L==='fa'?'افزودن آیتم‌ها':'Add items'}</h3>
@@ -3179,9 +3290,7 @@ function openAddShopItems(){
       <label>${L==='fa'?'هر خط یک آیتم — می‌توانید چند مورد را با هم بچسبانید':'One item per line — paste many at once'}</label>
       <textarea class="finput" id="si-text" rows="6" placeholder="milk&#10;bread&#10;eggs&#10;banana&#10;rice&#10;chicken" style="resize:vertical;line-height:1.6" autofocus></textarea>
     </div>
-    <div class="fld"><label>${L==='fa'?'پیشنهادها (بر اساس تایپ شما)':'Suggestions (as you type)'}</label>
-      <div class="shop-sug-wrap" id="si-sug">${sugHtml('')}</div>
-    </div>
+    <div id="si-sug" class="shop-prows"></div>
     <div class="btn-row">
       <button class="btn btn-ghost" id="si-cancel">${tr('cancel')}</button>
       <button class="btn btn-primary" id="si-save">${L==='fa'?'افزودن':'Add'}</button>
@@ -3190,16 +3299,16 @@ function openAddShopItems(){
   const ta=document.getElementById('si-text');
   const sug=document.getElementById('si-sug');
   const curLine=()=>{const p=ta.value.split('\n');return p[p.length-1];};
-  // Live filter suggestions by the line currently being typed.
-  ta.oninput=()=>{ sug.innerHTML=sugHtml(curLine()); };
-  // Tap a suggestion → complete the current line and add it as its own row.
+  // Type-ahead: only after ≥2 chars on the CURRENT line; empty otherwise.
+  ta.oninput=()=>{ sug.innerHTML=rows(curLine()); };
+  // Tap a product → autocomplete ONLY the current line, then ready for the next.
   sug.onclick=(e)=>{
-    const b=e.target.closest('.shop-sug'); if(!b)return;
-    const name=b.dataset.sug;
+    const b=e.target.closest('.shop-prow'); if(!b)return;
+    const name=b.dataset.prod;
     const val=ta.value; const idx=val.lastIndexOf('\n');
     const head=idx>=0?val.slice(0,idx+1):'';
     ta.value=head+name+'\n';
-    sug.innerHTML=sugHtml('');
+    sug.innerHTML='';
     ta.focus();
   };
   document.getElementById('si-cancel').onclick=()=>closeSheet();
@@ -3210,14 +3319,13 @@ function openAddShopItems(){
     const now=new Date().toISOString();
     names.forEach(nm=>{
       const id=uid();
-      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopIconFor(nm),qty:1,unit:'ea',category:shopCatFor(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
+      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopIconFor(nm),qty:1,unit:'ea',category:shopProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
     });
     l.updatedAt=now;saveDB();closeSheet();render();window.scrollTo(0,0);
     toast((L==='fa'?'افزوده شد: ':'Added ')+names.length);
   };
 }
 
-// ── Edit a single item (qty / unit / category / note / delete) ──
 function openShopItemEditor(id){
   const it=shopItemsMap()[id]; if(!it)return;
   openSheet(`
