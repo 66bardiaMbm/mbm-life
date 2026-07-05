@@ -863,7 +863,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v143';
+const APP_VERSION='v144';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1203,6 +1203,19 @@ function _renderInner(){
   else if(screen==='more')el.innerHTML=renderMore();
   else if(screen==='profile')el.innerHTML=renderProfile();
   bindScreen();
+  updateFab();
+}
+// Central FAB control. The (+) is Task/Appointment-specific on the main screens.
+// On Life Hub it is hidden. On a module page it appears ONLY if that module is
+// ready and owns a create handler — so it never opens New Task by mistake.
+function updateFab(){
+  const fab=document.getElementById('fab');
+  if(!fab)return;
+  let show=false;
+  if(screen==='lists'||screen==='today'||screen==='appts') show=true;
+  else if(screen==='module') show=moduleHasCreate(hubModule(currentModule));
+  else show=false; // lifehub, profile, more, search, ...
+  fab.style.display=show?'':'none';
 }
 
 function _resolvedTheme(){
@@ -2657,15 +2670,20 @@ function renderApptCalendar(all){
 // Scalable module registry. Future milestones fill in each module's real page;
 // nothing here touches Tasks, Auth, Sync, or the Back model beyond navigation.
 const HUB_MODULES=[
-  {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas'},
-  {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry'},
-  {id:'bills',    icon:'§',  color:'#f59e0b', title:'Bills',     desc:'Bills, subscriptions & due dates'},
-  {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)'},
-  {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records'},
-  {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings'},
-  {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules'},
-  {id:'family',   icon:'♥',  color:'#ec4899', title:'Family',    desc:'Shared family space (future)'}
+  // ready:false → placeholder page, "Coming soon" badge, NO create (+) button.
+  // A future milestone flips ready:true and supplies createLabel + onCreate()
+  // so the module gets its OWN independent FAB & create dialog (never New Task).
+  {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas',   ready:false, createLabel:'New Note',         onCreate:null},
+  {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:false, createLabel:'New Shopping List', onCreate:null},
+  {id:'bills',    icon:'§',  color:'#f59e0b', title:'Bills',     desc:'Bills, subscriptions & due dates',  ready:false, createLabel:'New Bill',         onCreate:null},
+  {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)',   ready:false, createLabel:'New Secure Item',  onCreate:null},
+  {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records',    ready:false, createLabel:'New Document',     onCreate:null},
+  {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings',         ready:false, createLabel:'New Trip',         onCreate:null},
+  {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules',           ready:false, createLabel:'New Home Item',    onCreate:null},
+  {id:'family',   icon:'♥',  color:'#ec4899', title:'Family',    desc:'Shared family space (future)',      ready:false, createLabel:'New Family Item',  onCreate:null}
 ];
+// A module shows its own FAB only when it is ready AND defines a create handler.
+function moduleHasCreate(m){ return !!(m && m.ready && typeof m.onCreate==='function'); }
 function hubModule(id){ return HUB_MODULES.find(m=>m.id===id)||null; }
 
 function renderLifeHub(){
@@ -2679,7 +2697,7 @@ function renderLifeHub(){
       <div class="hub-card-ic" style="background:${m.color}18;color:${m.color}">${m.icon}</div>
       <div class="hub-card-t">${esc(m.title)}</div>
       <div class="hub-card-d">${esc(m.desc)}</div>
-      <div class="hub-soon">${tr('hubComingSoon')}</div>
+      ${m.ready?'':`<div class="hub-soon">${tr('hubComingSoon')}</div>`}
     </div>`;
   });
   html+=`</div>`;
@@ -2695,12 +2713,12 @@ function renderModule(){
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${esc(title)}</div>
   </div>
-  <div class="hub-ph">
+  ${(m&&m.ready)?'':`<div class="hub-ph">
     <div class="hub-ph-ic" style="background:${color}18;color:${color}">${icon}</div>
     <div class="hub-ph-t">${esc(title)}</div>
     <div class="hub-ph-d">${tr('hubModuleSoon')}</div>
     <div class="hub-soon" style="margin-top:14px">${tr('hubComingSoon')}</div>
-  </div>`;
+  </div>`}`;
 }
 
 function renderAppts(){
@@ -4751,8 +4769,14 @@ document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
 
 // FAB
 document.getElementById('fab').onclick=()=>{
-  if(screen==='appts')openNewApptSheet(null);
-  else quickAdd();
+  if(screen==='appts'){ openNewApptSheet(null); return; }
+  if(screen==='module'){
+    const m=hubModule(currentModule);
+    if(moduleHasCreate(m)) m.onCreate();   // module's own create dialog (no Task dependency)
+    return;                                 // never open New Task from a module
+  }
+  if(screen==='lists'||screen==='today'){ quickAdd(); return; }
+  // Life Hub and other screens: FAB is hidden; do nothing.
 };
 
 // Sheet dismiss
