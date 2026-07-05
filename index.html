@@ -232,6 +232,37 @@ body.light .trow-title{color:var(--ink)}
 .hub-ph-ic{width:72px;height:72px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:34px;margin-bottom:18px}
 .hub-ph-t{font-size:22px;font-weight:800;letter-spacing:-.3px;margin-bottom:10px}
 .hub-ph-d{font-size:14px;line-height:1.6;color:var(--ink2);max-width:300px}
+.btn-col{display:flex;flex-direction:column;gap:10px}
+.shop-list-wrap{display:flex;flex-direction:column;gap:8px;padding:2px 16px 4px}
+.shop-lcard{display:flex;align-items:center;gap:12px;background:var(--s2);border:1px solid var(--b1);border-radius:14px;padding:12px 12px;cursor:pointer}
+.shop-lcard:active{background:var(--s3)}
+.shop-lic{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}
+.shop-lmain{flex:1;min-width:0}
+.shop-lname{font-size:16px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shop-lmeta{font-size:12px;color:var(--ink2);margin-top:2px}
+.shop-laddr{font-size:12px;color:var(--ink2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shop-lmenu{width:36px;height:36px;flex:none;border:none;background:none;color:var(--ink2);font-size:20px;cursor:pointer;border-radius:8px}
+.shop-lmenu:active{background:var(--s3)}
+.shop-store-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:6px 16px 24px}
+.shop-store{display:flex;flex-direction:column;align-items:center;gap:6px;background:var(--s2);border:1px solid var(--b1);border-radius:14px;padding:12px 6px;cursor:pointer;text-align:center}
+.shop-store:active{background:var(--s3)}
+.shop-store-ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.shop-store-n{font-size:11px;font-weight:600;color:var(--ink);line-height:1.2}
+.shop-store-custom{border-style:dashed}
+.shop-items{display:flex;flex-direction:column;padding:2px 12px 24px}
+.shop-item{display:flex;align-items:center;gap:12px;padding:11px 8px;border-bottom:1px solid var(--b1);cursor:pointer}
+.shop-item:active{background:var(--s2)}
+.shop-check{width:26px;height:26px;flex:none;border-radius:50%;border:2px solid var(--b2,#3a3b46);background:none;color:#fff;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.shop-check.on{background:#22c55e;border-color:#22c55e}
+.shop-ic{width:30px;text-align:center;font-size:20px;flex:none}
+.shop-main{flex:1;min-width:0}
+.shop-name{font-size:15px;font-weight:500}
+.shop-name.done{text-decoration:line-through;color:var(--ink3)}
+.shop-meta{font-size:12px;color:var(--ink2);margin-top:1px}
+.shop-sec{font-size:12px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.4px;padding:16px 8px 6px}
+.shop-sug-wrap{display:flex;flex-wrap:wrap;gap:8px}
+.shop-sug{font-size:13px;background:var(--s2);border:1px solid var(--b1);border-radius:999px;padding:7px 12px;color:var(--ink);cursor:pointer}
+.shop-sug:active{background:var(--s3)}
 
 /* Hub dividers */
 .hub-sep{height:1px;background:var(--b1);margin:6px 0}
@@ -863,7 +894,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v144';
+const APP_VERSION='v146';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -921,6 +952,8 @@ function blankDB(){
                     //  createdAt,updatedAt,archivedAt}
       places:{},    // {id,name,address,lat,lng,taskIds[],
                     //  createdAt,updatedAt,archivedAt}
+      shopLists:{}, // {id,name,icon,color,template,address,createdAt,updatedAt,archivedAt}
+      shopItems:{}, // {id,listId,name,icon,qty,unit,category,note,purchased,createdAt,updatedAt}
     }
   };
 }
@@ -1166,6 +1199,9 @@ let tasksView='browser'; // 'browser'|'detail'
 let activeListId=null;
 let activeSmartView=null; // 'myday'|'important'|'planned'|'all'
 let currentModule=null;   // Life Hub: active module id when screen==='module'
+let shopView='home';      // Shopping: 'home' | 'detail'
+let activeShopListId=null;
+let shopSearch='';
 let plannedFilter='all'; // 'overdue'|'today'|'tomorrow'|'week'|'later'|'all'
 let searchQuery='';
 
@@ -1213,7 +1249,7 @@ function updateFab(){
   if(!fab)return;
   let show=false;
   if(screen==='lists'||screen==='today'||screen==='appts') show=true;
-  else if(screen==='module') show=moduleHasCreate(hubModule(currentModule));
+  else if(screen==='module') show=(currentModule==='shopping')?true:moduleHasCreate(hubModule(currentModule));
   else show=false; // lifehub, profile, more, search, ...
   fab.style.display=show?'':'none';
 }
@@ -2674,7 +2710,7 @@ const HUB_MODULES=[
   // A future milestone flips ready:true and supplies createLabel + onCreate()
   // so the module gets its OWN independent FAB & create dialog (never New Task).
   {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas',   ready:false, createLabel:'New Note',         onCreate:null},
-  {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:false, createLabel:'New Shopping List', onCreate:null},
+  {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:true,  createLabel:'New Shopping List', onCreate:null},
   {id:'bills',    icon:'§',  color:'#f59e0b', title:'Bills',     desc:'Bills, subscriptions & due dates',  ready:false, createLabel:'New Bill',         onCreate:null},
   {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)',   ready:false, createLabel:'New Secure Item',  onCreate:null},
   {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records',    ready:false, createLabel:'New Document',     onCreate:null},
@@ -2685,6 +2721,371 @@ const HUB_MODULES=[
 // A module shows its own FAB only when it is ready AND defines a create handler.
 function moduleHasCreate(m){ return !!(m && m.ready && typeof m.onCreate==='function'); }
 function hubModule(id){ return HUB_MODULES.find(m=>m.id===id)||null; }
+
+// ═══════════════════════ SHOPPING MODULE (real MVP) ═══════════════════════
+// Local-only (persisted via saveDB → localStorage). It is NOT in the Firestore
+// sync set, so Sync is untouched. No dependency on Tasks/Appointments.
+const SHOP_STORES=[
+  {key:'woolworths',       name:'Woolworths',        icon:'🛒', color:'#178841'},
+  {key:'coles',            name:'Coles',             icon:'🛒', color:'#e01a22'},
+  {key:'aldi',             name:'ALDI',              icon:'🛒', color:'#00449e'},
+  {key:'costco',           name:'Costco',            icon:'🏬', color:'#005daa'},
+  {key:'bunnings',         name:'Bunnings',          icon:'🔨', color:'#0d5257'},
+  {key:'kmart',            name:'Kmart',             icon:'🛍️', color:'#e01a22'},
+  {key:'bigw',             name:'Big W',             icon:'🛍️', color:'#0a7dc2'},
+  {key:'chemistwarehouse', name:'Chemist Warehouse', icon:'💊', color:'#f7a800'},
+  {key:'priceline',        name:'Priceline Pharmacy',icon:'💄', color:'#e6007e'},
+  {key:'officeworks',      name:'Officeworks',       icon:'📎', color:'#0057b8'},
+  {key:'jbhifi',           name:'JB Hi-Fi',          icon:'🎧', color:'#111'},
+  {key:'harveynorman',     name:'Harvey Norman',     icon:'🛋️', color:'#f79b1f'},
+  {key:'ikea',             name:'IKEA',              icon:'🪑', color:'#0051ba'},
+  {key:'petbarn',          name:'Petbarn',           icon:'🐾', color:'#7ab800'}
+];
+const SHOP_CATEGORIES=['Fruit','Vegetables','Dairy','Meat','Seafood','Bakery','Frozen','Drinks','Snacks','Baby','Pet','Cleaning','Bathroom','Kitchen','Pharmacy','Electronics','Stationery','Garden','Hardware','Other'];
+const SHOP_UNITS=['ea','kg','g','L','ml','pack','dozen','box'];
+const SHOP_SUGGEST=[
+  {n:'Milk',i:'🥛'},{n:'Bread',i:'🍞'},{n:'Eggs',i:'🥚'},{n:'Apple',i:'🍎'},{n:'Banana',i:'🍌'},
+  {n:'Chicken',i:'🍗'},{n:'Rice',i:'🍚'},{n:'Cheese',i:'🧀'},{n:'Butter',i:'🧈'},{n:'Tomato',i:'🍅'},
+  {n:'Potato',i:'🥔'},{n:'Onion',i:'🧅'},{n:'Carrot',i:'🥕'},{n:'Coffee',i:'☕'},{n:'Tea',i:'🍵'},
+  {n:'Water',i:'💧'},{n:'Orange',i:'🍊'},{n:'Grapes',i:'🍇'},{n:'Strawberry',i:'🍓'},{n:'Fish',i:'🐟'},
+  {n:'Meat',i:'🥩'},{n:'Pasta',i:'🍝'},{n:'Yogurt',i:'🥛'},{n:'Honey',i:'🍯'},{n:'Sugar',i:'🧂'},
+  {n:'Salt',i:'🧂'},{n:'Chocolate',i:'🍫'},{n:'Juice',i:'🧃'},{n:'Lemon',i:'🍋'},{n:'Avocado',i:'🥑'},
+  {n:'Corn',i:'🌽'},{n:'Broccoli',i:'🥦'},{n:'Cucumber',i:'🥒'},{n:'Pepper',i:'🫑'},{n:'Mushroom',i:'🍄'},
+  {n:'Peanut',i:'🥜'},{n:'Cookies',i:'🍪'},{n:'Cake',i:'🍰'},{n:'Ice cream',i:'🍦'},{n:'Watermelon',i:'🍉'},
+  {n:'Pineapple',i:'🍍'},{n:'Croissant',i:'🥐'},{n:'Bacon',i:'🥓'},{n:'Shrimp',i:'🦐'},{n:'Soap',i:'🧼'},
+  {n:'Toilet paper',i:'🧻'},{n:'Detergent',i:'🧴'},{n:'Flour',i:'🌾'},{n:'Nappy',i:'🍼'},{n:'Dog food',i:'🦴'}
+];
+function shopIconFor(name){
+  const n=String(name||'').trim().toLowerCase();
+  if(!n)return '🛒';
+  let hit=SHOP_SUGGEST.find(s=>s.n.toLowerCase()===n);
+  if(!hit)hit=SHOP_SUGGEST.find(s=>s.n.toLowerCase().startsWith(n)||n.startsWith(s.n.toLowerCase()));
+  return hit?hit.i:'🛒';
+}
+function shopStore(key){ return SHOP_STORES.find(s=>s.key===key)||null; }
+function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
+function shopItemsMap(){ if(!DB.entities.shopItems)DB.entities.shopItems={}; return DB.entities.shopItems; }
+function shopListsAll(){ return Object.values(shopListsMap()).filter(l=>!l.archivedAt); }
+function shopItemsFor(listId){ return Object.values(shopItemsMap()).filter(it=>it.listId===listId); }
+function shopActiveList(){ return activeShopListId?shopListsMap()[activeShopListId]:null; }
+
+function renderShopping(){ return shopView==='detail' ? renderShopDetail() : renderShopHome(); }
+
+function renderShopHome(){
+  const lists=shopListsAll().sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${L==='fa'?'خرید':'Shopping'}</div>
+  </div>`;
+
+  if(lists.length){
+    html+=`<div class="hub-sec-label" style="padding:6px 20px">${L==='fa'?'لیست‌های شما':'Your lists'}</div><div class="shop-list-wrap">`;
+    lists.forEach(l=>{
+      const items=shopItemsFor(l.id);
+      const rem=items.filter(it=>!it.purchased).length, done=items.filter(it=>it.purchased).length;
+      html+=`<div class="shop-lcard" data-shop-list="${l.id}">
+        <div class="shop-lic" style="background:${l.color}18;color:${l.color}">${l.icon||'🛒'}</div>
+        <div class="shop-lmain">
+          <div class="shop-lname">${esc(l.name)}</div>
+          <div class="shop-lmeta">${rem} ${L==='fa'?'باقی‌مانده':'remaining'}${done?` · ${done} ${L==='fa'?'خریداری‌شده':'purchased'}`:''}</div>
+          ${l.address?`<div class="shop-laddr">📍 ${esc(l.address)}</div>`:''}
+        </div>
+        <button class="shop-lmenu" data-shop-menu="${l.id}" aria-label="options">⋯</button>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
+  html+=`<div class="hub-sec-label" style="padding:14px 20px 6px">${L==='fa'?'شروع از یک فروشگاه':'Start from a store'}</div>
+    <div class="shop-store-grid">`;
+  SHOP_STORES.forEach(s=>{
+    html+=`<div class="shop-store" data-shop-template="${s.key}">
+      <div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div>
+      <div class="shop-store-n">${esc(s.name)}</div>
+    </div>`;
+  });
+  html+=`<div class="shop-store shop-store-custom" data-shop-custom="1">
+      <div class="shop-store-ic" style="background:var(--s3);color:var(--ink2)">＋</div>
+      <div class="shop-store-n">${L==='fa'?'سفارشی':'Custom list'}</div>
+    </div>`;
+  html+=`</div>`;
+  return html;
+}
+
+function renderShopDetail(){
+  const l=shopActiveList();
+  if(!l){ shopView='home'; return renderShopHome(); }
+  let items=shopItemsFor(l.id);
+  const q=(shopSearch||'').trim().toLowerCase();
+  if(q)items=items.filter(it=>it.name.toLowerCase().includes(q));
+  const remaining=items.filter(it=>!it.purchased);
+  const purchased=items.filter(it=>it.purchased);
+  const totalRem=shopItemsFor(l.id).filter(it=>!it.purchased).length;
+  const totalDone=shopItemsFor(l.id).filter(it=>it.purchased).length;
+
+  const itemRow=(it)=>`<div class="shop-item" data-shop-item="${it.id}">
+      <button class="shop-check ${it.purchased?'on':''}" data-shop-toggle="${it.id}" aria-label="purchased">${it.purchased?'✓':''}</button>
+      <div class="shop-ic">${esc(it.icon||shopIconFor(it.name))}</div>
+      <div class="shop-main">
+        <div class="shop-name ${it.purchased?'done':''}">${esc(it.name)}</div>
+        ${(()=>{const bits=[];if(it.qty&&Number(it.qty)!==1||it.unit&&it.unit!=='ea'){bits.push(esc((it.qty||'')+(it.unit&&it.unit!=='ea'?' '+it.unit:'')).trim());}if(it.category&&it.category!=='Other')bits.push(esc(it.category));if(it.note)bits.push(esc(it.note));return bits.length?`<div class="shop-meta">${bits.join(' · ')}</div>`:'';})()}
+      </div>
+    </div>`;
+
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="shop-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:24px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.name)}</div>
+      <div style="font-size:12px;color:var(--ink2)">${totalRem} ${L==='fa'?'باقی‌مانده':'remaining'} · ${totalDone} ${L==='fa'?'خریداری‌شده':'purchased'}</div>
+      ${l.address?`<div class="shop-laddr" data-shop-maps="${l.id}" style="cursor:pointer">📍 ${esc(l.address)}</div>`:''}
+    </div>
+    <button class="shop-lmenu" data-shop-menu="${l.id}" style="width:40px;height:40px" aria-label="options">⋯</button>
+  </div>
+  <div style="padding:4px 16px 8px">
+    <input class="finput" id="shop-search" placeholder="${L==='fa'?'جستجوی آیتم':'Search items'}" value="${esc(shopSearch||'')}" style="width:100%">
+  </div>`;
+
+  if(!remaining.length&&!purchased.length){
+    html+=`<div class="hub-ph" style="padding:40px 28px"><div class="hub-ph-ic" style="background:#22c55e18;color:#22c55e">🛒</div>
+      <div class="hub-ph-t">${L==='fa'?'لیست خالی است':'Empty list'}</div>
+      <div class="hub-ph-d">${L==='fa'?'برای افزودن آیتم‌ها دکمه + را بزنید. می‌توانید چند مورد را خط‌به‌خط بچسبانید.':'Tap + to add items. You can paste many at once, one per line.'}</div></div>`;
+  }else{
+    html+=`<div class="shop-items">`;
+    html+=remaining.map(itemRow).join('');
+    if(purchased.length){
+      html+=`<div class="shop-sec">${L==='fa'?'خریداری‌شده':'Purchased'} (${purchased.length})</div>`;
+      html+=purchased.map(itemRow).join('');
+    }
+    html+=`</div>`;
+  }
+  return html;
+}
+
+// ── Create / edit shopping list ──
+function shopCreateList({name,icon,color,template,address,lat,lon}){
+  const id=uid(), now=new Date().toISOString();
+  shopListsMap()[id]={id,name:name||'Shopping',icon:icon||'🛒',color:color||'#22c55e',template:template||null,address:address||'',lat:(lat!=null?lat:null),lon:(lon!=null?lon:null),createdAt:now,updatedAt:now,archivedAt:null};
+  saveDB();
+  return id;
+}
+// Open a shopping list's store location in Maps (same behaviour as task location).
+function shopOpenMaps(id){
+  const l=shopListsMap()[id]; if(!l)return;
+  let q=(l.lat!=null&&l.lon!=null)?(l.lat+','+l.lon):(l.address||l.name||'');
+  if(q)window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q),'_blank');
+}
+// Resolve what to persist from a location field: picked suggestion (with coords)
+// if the text is unchanged, else the raw typed text (no coords), else cleared.
+function shopResolveLoc(text,picked){
+  const t=(text||'').trim();
+  if(!t)return {address:'',lat:null,lon:null};
+  if(picked&&t===picked.address)return {address:picked.address,lat:picked.lat,lon:picked.lon};
+  return {address:t,lat:null,lon:null};
+}
+function openShopFromTemplate(key){
+  const s=shopStore(key); if(!s)return;
+  // Reuse an existing non-archived list for this store if present, else create.
+  let existing=shopListsAll().find(l=>l.template===key);
+  const id=existing?existing.id:shopCreateList({name:s.name,icon:s.icon,color:s.color,template:key});
+  activeShopListId=id; shopView='detail'; render(); window.scrollTo(0,0);
+}
+function openCreateShopList(){
+  let picked=null;
+  openSheet(`
+    <h3>${L==='fa'?'لیست خرید جدید':'New shopping list'}</h3>
+    <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
+      <input class="finput" id="sl-name" placeholder="${L==='fa'?'مثلاً خرید هفتگی':'e.g. Weekly groceries'}" autofocus></div>
+    <div class="fld"><label>${L==='fa'?'فروشگاه / مکان (اختیاری)':'Store / location (optional)'}</label>
+      <input class="finput" id="sl-loc" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}"></div>
+    <div class="fld" style="display:flex;gap:10px">
+      <div style="flex:1"><label>${L==='fa'?'آیکون':'Icon'}</label>
+        <input class="finput" id="sl-icon" placeholder="🛒" maxlength="2" value="🛒"></div>
+      <div style="flex:1"><label>${L==='fa'?'رنگ':'Colour'}</label>
+        <input class="finput" id="sl-color" type="color" value="#22c55e" style="height:44px;padding:4px"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="sl-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary" id="sl-save">${tr('save')}</button>
+    </div>`);
+  setTimeout(()=>document.getElementById('sl-name')?.focus(),100);
+  attachLocationAutocomplete(document.getElementById('sl-loc'),(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon};});
+  document.getElementById('sl-cancel').onclick=()=>closeSheet();
+  document.getElementById('sl-save').onclick=()=>{
+    const name=(document.getElementById('sl-name').value||'').trim();
+    if(!name){document.getElementById('sl-name').focus();return;}
+    const icon=(document.getElementById('sl-icon').value||'🛒').trim()||'🛒';
+    const color=document.getElementById('sl-color').value||'#22c55e';
+    const loc=shopResolveLoc(document.getElementById('sl-loc').value,picked);
+    const id=shopCreateList({name,icon,color,address:loc.address,lat:loc.lat,lon:loc.lon});
+    closeSheet();
+    activeShopListId=id; shopView='detail'; render(); window.scrollTo(0,0);
+  };
+}
+
+// ── List actions: rename / archive / delete ──
+function openShopListMenu(id){
+  const l=shopListsMap()[id]; if(!l)return;
+  openSheet(`
+    <h3>${esc(l.name)}</h3>
+    <div class="btn-col">
+      <button class="btn btn-ghost" id="sm-rename">${L==='fa'?'ویرایش':'Edit'}</button>
+      <button class="btn btn-ghost" id="sm-archive">${L==='fa'?'بایگانی':'Archive'}</button>
+      <button class="btn btn-danger" id="sm-delete">${L==='fa'?'حذف':'Delete'}</button>
+      <button class="btn btn-ghost" id="sm-close">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('sm-close').onclick=()=>closeSheet();
+  document.getElementById('sm-rename').onclick=()=>{
+    let picked={address:l.address||'',lat:(l.lat!=null?l.lat:null),lon:(l.lon!=null?l.lon:null)};
+    openSheet(`
+      <h3>${L==='fa'?'ویرایش لیست':'Edit list'}</h3>
+      <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
+        <input class="finput" id="se-name" value="${esc(l.name)}" autofocus></div>
+      <div class="fld"><label>${L==='fa'?'فروشگاه / مکان':'Store / location'}</label>
+        <input class="finput" id="se-loc" value="${esc(l.address||'')}" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="se-cancel">${tr('cancel')}</button>
+        <button class="btn btn-primary" id="se-save">${tr('save')}</button>
+      </div>`);
+    setTimeout(()=>document.getElementById('se-name')?.focus(),100);
+    attachLocationAutocomplete(document.getElementById('se-loc'),(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon};});
+    document.getElementById('se-cancel').onclick=()=>closeSheet();
+    document.getElementById('se-save').onclick=()=>{
+      const nn=(document.getElementById('se-name').value||'').trim();
+      if(nn)l.name=nn;
+      const loc=shopResolveLoc(document.getElementById('se-loc').value,picked);
+      l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon;
+      l.updatedAt=new Date().toISOString();saveDB();closeSheet();render();
+    };
+  };
+  document.getElementById('sm-archive').onclick=()=>{
+    l.archivedAt=new Date().toISOString();l.updatedAt=l.archivedAt;saveDB();
+    closeSheet();
+    if(shopView==='detail'){shopView='home';activeShopListId=null;}
+    render();window.scrollTo(0,0);
+    toast(L==='fa'?'بایگانی شد':'Archived');
+  };
+  document.getElementById('sm-delete').onclick=()=>{
+    openSheet(`
+      <h3>${L==='fa'?'حذف لیست؟':'Delete list?'}</h3>
+      <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'این لیست و همه‌ی آیتم‌هایش حذف می‌شوند. این عمل بازگشت‌پذیر نیست.':'This list and all its items will be removed. This cannot be undone.'}</p>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="sd-cancel">${tr('cancel')}</button>
+        <button class="btn btn-danger" id="sd-ok">${L==='fa'?'حذف':'Delete'}</button>
+      </div>`);
+    document.getElementById('sd-cancel').onclick=()=>closeSheet();
+    document.getElementById('sd-ok').onclick=()=>{
+      shopItemsFor(id).forEach(it=>{delete shopItemsMap()[it.id];});
+      delete shopListsMap()[id];
+      saveDB();closeSheet();
+      if(shopView==='detail'){shopView='home';activeShopListId=null;}
+      render();window.scrollTo(0,0);
+      toast(L==='fa'?'حذف شد':'Deleted');
+    };
+  };
+}
+
+// ── Add items (multi-line paste → one item per line) + suggestions ──
+function openAddShopItems(){
+  const l=shopActiveList(); if(!l)return;
+  // Built-in product catalogue (SHOP_SUGGEST). Architecture note: a future version
+  // can extend/replace this source with a live product API, images, or barcode
+  // lookups without changing the input flow — it only needs {n,i}[] results.
+  const sugHtml=(q)=>{
+    const s=(q||'').trim().toLowerCase();
+    let list=SHOP_SUGGEST;
+    if(s){
+      const starts=SHOP_SUGGEST.filter(x=>x.n.toLowerCase().startsWith(s));
+      const incl=SHOP_SUGGEST.filter(x=>!x.n.toLowerCase().startsWith(s)&&x.n.toLowerCase().includes(s));
+      list=starts.concat(incl);
+    }
+    list=list.slice(0,24);
+    if(!list.length)return `<span style="font-size:13px;color:var(--ink3)">${L==='fa'?'پیشنهادی نیست':'No suggestions'}</span>`;
+    return list.map(x=>`<button type="button" class="shop-sug" data-sug="${esc(x.n)}">${x.i} ${esc(x.n)}</button>`).join('');
+  };
+  openSheet(`
+    <h3>${L==='fa'?'افزودن آیتم‌ها':'Add items'}</h3>
+    <div class="fld">
+      <label>${L==='fa'?'هر خط یک آیتم — می‌توانید چند مورد را با هم بچسبانید':'One item per line — paste many at once'}</label>
+      <textarea class="finput" id="si-text" rows="6" placeholder="milk&#10;bread&#10;eggs&#10;banana&#10;rice&#10;chicken" style="resize:vertical;line-height:1.6" autofocus></textarea>
+    </div>
+    <div class="fld"><label>${L==='fa'?'پیشنهادها (بر اساس تایپ شما)':'Suggestions (as you type)'}</label>
+      <div class="shop-sug-wrap" id="si-sug">${sugHtml('')}</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="si-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary" id="si-save">${L==='fa'?'افزودن':'Add'}</button>
+    </div>`);
+  setTimeout(()=>document.getElementById('si-text')?.focus(),100);
+  const ta=document.getElementById('si-text');
+  const sug=document.getElementById('si-sug');
+  const curLine=()=>{const p=ta.value.split('\n');return p[p.length-1];};
+  // Live filter suggestions by the line currently being typed.
+  ta.oninput=()=>{ sug.innerHTML=sugHtml(curLine()); };
+  // Tap a suggestion → complete the current line and add it as its own row.
+  sug.onclick=(e)=>{
+    const b=e.target.closest('.shop-sug'); if(!b)return;
+    const name=b.dataset.sug;
+    const val=ta.value; const idx=val.lastIndexOf('\n');
+    const head=idx>=0?val.slice(0,idx+1):'';
+    ta.value=head+name+'\n';
+    sug.innerHTML=sugHtml('');
+    ta.focus();
+  };
+  document.getElementById('si-cancel').onclick=()=>closeSheet();
+  document.getElementById('si-save').onclick=()=>{
+    const raw=ta.value||'';
+    const names=raw.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
+    if(!names.length){closeSheet();return;}
+    const now=new Date().toISOString();
+    names.forEach(nm=>{
+      const id=uid();
+      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopIconFor(nm),qty:1,unit:'ea',category:'Other',note:'',purchased:false,createdAt:now,updatedAt:now};
+    });
+    l.updatedAt=now;saveDB();closeSheet();render();window.scrollTo(0,0);
+    toast((L==='fa'?'افزوده شد: ':'Added ')+names.length);
+  };
+}
+
+// ── Edit a single item (qty / unit / category / note / delete) ──
+function openShopItemEditor(id){
+  const it=shopItemsMap()[id]; if(!it)return;
+  openSheet(`
+    <h3>${esc(it.name)}</h3>
+    <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
+      <input class="finput" id="it-name" value="${esc(it.name)}"></div>
+    <div class="fld" style="display:flex;gap:10px">
+      <div style="flex:1"><label>${L==='fa'?'تعداد':'Quantity'}</label>
+        <input class="finput" id="it-qty" type="number" min="0" step="any" value="${esc(it.qty!=null?it.qty:1)}"></div>
+      <div style="flex:1"><label>${L==='fa'?'واحد':'Unit'}</label>
+        <select class="finput" id="it-unit">${SHOP_UNITS.map(u=>`<option value="${u}" ${it.unit===u?'selected':''}>${u}</option>`).join('')}</select></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'دسته':'Category'}</label>
+      <select class="finput" id="it-cat">${SHOP_CATEGORIES.map(c=>`<option value="${c}" ${it.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
+    <div class="fld"><label>${L==='fa'?'یادداشت':'Note'}</label>
+      <input class="finput" id="it-note" value="${esc(it.note||'')}" placeholder="${L==='fa'?'اختیاری':'Optional'}"></div>
+    <div class="btn-row">
+      <button class="btn btn-danger" id="it-del">${L==='fa'?'حذف':'Delete'}</button>
+      <button class="btn btn-primary" id="it-save">${tr('save')}</button>
+    </div>`);
+  document.getElementById('it-save').onclick=()=>{
+    const nm=(document.getElementById('it-name').value||'').trim();
+    if(nm){it.name=nm;it.icon=shopIconFor(nm);}
+    const q=parseFloat(document.getElementById('it-qty').value);it.qty=isNaN(q)?1:q;
+    it.unit=document.getElementById('it-unit').value||'ea';
+    it.category=document.getElementById('it-cat').value||'Other';
+    it.note=(document.getElementById('it-note').value||'').trim();
+    it.updatedAt=new Date().toISOString();saveDB();closeSheet();render();
+  };
+  document.getElementById('it-del').onclick=()=>{
+    delete shopItemsMap()[id];saveDB();closeSheet();render();
+    toast(L==='fa'?'حذف شد':'Deleted');
+  };
+}
+function toggleShopItem(id){
+  const it=shopItemsMap()[id]; if(!it)return;
+  it.purchased=!it.purchased;it.updatedAt=new Date().toISOString();saveDB();render();
+}
+
 
 function renderLifeHub(){
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
@@ -2705,6 +3106,7 @@ function renderLifeHub(){
 }
 
 function renderModule(){
+  if(currentModule==='shopping') return renderShopping();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -3463,7 +3865,23 @@ function bindScreen(){
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{currentModule=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{currentModule=null;shopView='home';activeShopListId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  // ── Shopping wiring ──
+  const shopBack=document.getElementById('shop-back');
+  if(shopBack)shopBack.onclick=()=>{shopView='home';activeShopListId=null;render();window.scrollTo(0,0);};
+  document.querySelectorAll('[data-shop-list]').forEach(el=>el.onclick=(e)=>{
+    if(e.target.closest('[data-shop-menu]'))return;
+    activeShopListId=el.dataset.shopList;shopView='detail';shopSearch='';render();window.scrollTo(0,0);});
+  document.querySelectorAll('[data-shop-template]').forEach(el=>el.onclick=()=>openShopFromTemplate(el.dataset.shopTemplate));
+  document.querySelectorAll('[data-shop-custom]').forEach(el=>el.onclick=()=>openCreateShopList());
+  document.querySelectorAll('[data-shop-menu]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();openShopListMenu(el.dataset.shopMenu);});
+  document.querySelectorAll('[data-shop-toggle]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();toggleShopItem(el.dataset.shopToggle);});
+  document.querySelectorAll('[data-shop-item]').forEach(el=>el.onclick=(e)=>{
+    if(e.target.closest('[data-shop-toggle]'))return;
+    openShopItemEditor(el.dataset.shopItem);});
+  document.querySelectorAll('[data-shop-maps]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();shopOpenMaps(el.dataset.shopMaps);});
+  const shopSearchEl=document.getElementById('shop-search');
+  if(shopSearchEl)shopSearchEl.oninput=()=>{shopSearch=shopSearchEl.value;const items=document.querySelector('.shop-items');/* re-render for filter */ render();const f=document.getElementById('shop-search');if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
   // Account menu (tap name/avatar)
   const hubAcct=document.getElementById('hub-account');
   if(hubAcct)hubAcct.onclick=(e)=>{
@@ -4771,6 +5189,7 @@ document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
 document.getElementById('fab').onclick=()=>{
   if(screen==='appts'){ openNewApptSheet(null); return; }
   if(screen==='module'){
+    if(currentModule==='shopping'){ (shopView==='detail'?openAddShopItems:openCreateShopList)(); return; }
     const m=hubModule(currentModule);
     if(moduleHasCreate(m)) m.onCreate();   // module's own create dialog (no Task dependency)
     return;                                 // never open New Task from a module
@@ -4811,7 +5230,8 @@ function appDepth(){
   if(on('ctxmenu')) d++;
   if(on('task-detail')) d++;
   if(on('search-screen')) d++;
-  if(screen==='module') d+=2;
+  if(screen==='module' && currentModule==='shopping' && shopView==='detail') d+=3;
+  else if(screen==='module') d+=2;
   else if(screen==='lifehub') d+=1;
   else if(tasksView==='detail' || (screen && screen!=='lists')) d++;
   return d;
@@ -4847,9 +5267,12 @@ function onPop(){
     closeTaskDetail();render();
   } else if(on('search-screen')){
     closeSearch();
+  } else if(screen==='module' && currentModule==='shopping' && shopView==='detail'){
+    // Shopping list detail → Shopping home.
+    shopView='home';activeShopListId=null;render();
   } else if(screen==='module'){
     // Life Hub module page → back to the Life Hub grid.
-    currentModule=null;screen='lifehub';render();
+    currentModule=null;shopView='home';activeShopListId=null;screen='lifehub';render();
   } else if(screen==='lifehub'){
     // Life Hub grid → back to main Lists (Home).
     screen='lists';render();
