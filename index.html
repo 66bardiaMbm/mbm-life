@@ -221,6 +221,17 @@ body.light .trow-title{color:var(--ink)}
   align-items:center;justify-content:center;font-size:19px}
 .sv-name{flex:1;font-size:16px;font-weight:400;padding:16px 0;letter-spacing:-.1px}
 .sv-count{font-size:14px;font-weight:600;color:var(--ink2);padding-right:4px}
+.hub-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 16px 24px}
+.hub-card{position:relative;background:var(--s2);border:1px solid var(--b1);border-radius:16px;padding:16px 14px 14px;cursor:pointer;transition:background .15s,transform .1s;overflow:hidden}
+.hub-card:active{background:var(--s3);transform:scale(.985)}
+.hub-card-ic{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:10px}
+.hub-card-t{font-size:16px;font-weight:700;letter-spacing:-.2px;margin-bottom:3px}
+.hub-card-d{font-size:12px;line-height:1.4;color:var(--ink2);min-height:32px}
+.hub-soon{display:inline-block;margin-top:8px;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--ink3);background:var(--s1);border:1px solid var(--b1);border-radius:999px;padding:3px 8px}
+.hub-ph{display:flex;flex-direction:column;align-items:center;text-align:center;padding:48px 28px}
+.hub-ph-ic{width:72px;height:72px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:34px;margin-bottom:18px}
+.hub-ph-t{font-size:22px;font-weight:800;letter-spacing:-.3px;margin-bottom:10px}
+.hub-ph-d{font-size:14px;line-height:1.6;color:var(--ink2);max-width:300px}
 
 /* Hub dividers */
 .hub-sep{height:1px;background:var(--b1);margin:6px 0}
@@ -852,7 +863,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v142';
+const APP_VERSION='v143';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1084,7 +1095,7 @@ let L=DB.meta.lang||'en';
 const I18N={
   en:{today:'Today',lists:'Lists',calendar:'Calendar',people:'People',more:'More',
     noTasks:'Nothing here yet.',addTask:'Add a task',tasks:'Tasks',important:'Important',
-    planned:'Planned',allTasks:'All Tasks',myday:'My Day',
+    planned:'Planned',allTasks:'All Tasks',myday:'My Day',lifeHub:'Life Hub',hubComingSoon:'Coming soon',hubModuleSoon:'This module is coming soon. Its foundation is ready and full features will arrive in a future update.',
     done:'Completed',overdue:'Overdue',
     newList:'New List',listName:'List name',cancel:'Cancel',save:'Save',
     rename:'Rename list',delete:'Delete list',sortBy:'Sort by',
@@ -1116,7 +1127,7 @@ const I18N={
     noAppts:'No appointments yet.'},
   fa:{today:'امروز',lists:'لیست‌ها',calendar:'تقویم',people:'افراد',more:'بیشتر',
     noTasks:'هنوز چیزی نیست.',addTask:'کار جدید',tasks:'کارها',important:'مهم',
-    planned:'برنامه‌ریزی شده',allTasks:'همه کارها',myday:'روز من',
+    planned:'برنامه‌ریزی شده',allTasks:'همه کارها',myday:'روز من',lifeHub:'لایف هاب',hubComingSoon:'به‌زودی',hubModuleSoon:'این بخش به‌زودی فعال می‌شود. پایه‌ی آن آماده است و قابلیت‌های کامل در به‌روزرسانی بعدی اضافه می‌شوند.',
     done:'انجام شده',overdue:'عقب‌افتاده',
     newList:'لیست جدید',listName:'نام لیست',cancel:'انصراف',save:'ذخیره',
     rename:'تغییر نام',delete:'حذف لیست',sortBy:'مرتب‌سازی',
@@ -1154,6 +1165,7 @@ let screen='lists';
 let tasksView='browser'; // 'browser'|'detail'
 let activeListId=null;
 let activeSmartView=null; // 'myday'|'important'|'planned'|'all'
+let currentModule=null;   // Life Hub: active module id when screen==='module'
 let plannedFilter='all'; // 'overdue'|'today'|'tomorrow'|'week'|'later'|'all'
 let searchQuery='';
 
@@ -1185,6 +1197,8 @@ function _renderInner(){
   if(screen==='today')el.innerHTML=renderToday();
   else if(screen==='lists')el.innerHTML=renderLists();
   else if(screen==='appts')el.innerHTML=renderAppts();
+  else if(screen==='lifehub')el.innerHTML=renderLifeHub();
+  else if(screen==='module')el.innerHTML=renderModule();
   else if(screen==='search'){openSearch();screen='lists';el.innerHTML=renderLists();}
   else if(screen==='more')el.innerHTML=renderMore();
   else if(screen==='profile')el.innerHTML=renderProfile();
@@ -1390,6 +1404,13 @@ function renderLists(){
         </div>
         <span class="sv-name">${tr('appts')}</span>
         ${apptCount?`<span class="sv-count">${apptCount}</span>`:''}
+      </div>
+      <div class="sv-row" data-go-hub="1">
+        <div class="sv-icon">
+          <div class="sv-icon-inner" style="background:#f59e0b18;color:#f59e0b">◆</div>
+        </div>
+        <span class="sv-name">${tr('lifeHub')}</span>
+        <span class="sv-count" style="opacity:.6">›</span>
       </div>
       ${svVisible('all')?`<div class="sv-row" data-sv="all">
         <div class="sv-icon">
@@ -2632,6 +2653,56 @@ function renderApptCalendar(all){
   </div>`;
 }
 
+// ═══════════ LIFE HUB (foundation only — modules are placeholders) ═══════════
+// Scalable module registry. Future milestones fill in each module's real page;
+// nothing here touches Tasks, Auth, Sync, or the Back model beyond navigation.
+const HUB_MODULES=[
+  {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas'},
+  {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry'},
+  {id:'bills',    icon:'§',  color:'#f59e0b', title:'Bills',     desc:'Bills, subscriptions & due dates'},
+  {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)'},
+  {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records'},
+  {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings'},
+  {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules'},
+  {id:'family',   icon:'♥',  color:'#ec4899', title:'Family',    desc:'Shared family space (future)'}
+];
+function hubModule(id){ return HUB_MODULES.find(m=>m.id===id)||null; }
+
+function renderLifeHub(){
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="hub-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${tr('lifeHub')}</div>
+  </div>
+  <div class="hub-grid">`;
+  HUB_MODULES.forEach(m=>{
+    html+=`<div class="hub-card" data-hub-mod="${m.id}">
+      <div class="hub-card-ic" style="background:${m.color}18;color:${m.color}">${m.icon}</div>
+      <div class="hub-card-t">${esc(m.title)}</div>
+      <div class="hub-card-d">${esc(m.desc)}</div>
+      <div class="hub-soon">${tr('hubComingSoon')}</div>
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
+function renderModule(){
+  const m=hubModule(currentModule);
+  const title=m?m.title:'Module';
+  const icon=m?m.icon:'◆';
+  const color=m?m.color:'#6e56f8';
+  return `<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${esc(title)}</div>
+  </div>
+  <div class="hub-ph">
+    <div class="hub-ph-ic" style="background:${color}18;color:${color}">${icon}</div>
+    <div class="hub-ph-t">${esc(title)}</div>
+    <div class="hub-ph-d">${tr('hubModuleSoon')}</div>
+    <div class="hub-soon" style="margin-top:14px">${tr('hubComingSoon')}</div>
+  </div>`;
+}
+
 function renderAppts(){
   const ts=todayStr();
   const all=Object.values(DB.entities.appts||{})
@@ -3365,6 +3436,16 @@ function bindScreen(){
   // Appointments row in hub
   document.querySelectorAll('[data-go-appts]').forEach(el=>el.onclick=()=>{
     screen='appts';render();window.scrollTo(0,0);});
+  // Life Hub row → hub grid
+  document.querySelectorAll('[data-go-hub]').forEach(el=>el.onclick=()=>{
+    screen='lifehub';render();window.scrollTo(0,0);});
+  // Life Hub grid → module placeholder page
+  document.querySelectorAll('[data-hub-mod]').forEach(el=>el.onclick=()=>{
+    currentModule=el.dataset.hubMod;screen='module';render();window.scrollTo(0,0);});
+  const hubBack=document.getElementById('hub-back');
+  if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
+  const moduleBack=document.getElementById('module-back');
+  if(moduleBack)moduleBack.onclick=()=>{currentModule=null;screen='lifehub';render();window.scrollTo(0,0);};
   // Account menu (tap name/avatar)
   const hubAcct=document.getElementById('hub-account');
   if(hubAcct)hubAcct.onclick=(e)=>{
@@ -4706,7 +4787,9 @@ function appDepth(){
   if(on('ctxmenu')) d++;
   if(on('task-detail')) d++;
   if(on('search-screen')) d++;
-  if(tasksView==='detail' || (screen && screen!=='lists')) d++;
+  if(screen==='module') d+=2;
+  else if(screen==='lifehub') d+=1;
+  else if(tasksView==='detail' || (screen && screen!=='lists')) d++;
   return d;
 }
 // Push guards up to (open layers + 1). Called ONLY from user-gesture listeners,
@@ -4740,6 +4823,12 @@ function onPop(){
     closeTaskDetail();render();
   } else if(on('search-screen')){
     closeSearch();
+  } else if(screen==='module'){
+    // Life Hub module page → back to the Life Hub grid.
+    currentModule=null;screen='lifehub';render();
+  } else if(screen==='lifehub'){
+    // Life Hub grid → back to main Lists (Home).
+    screen='lists';render();
   } else if(tasksView==='detail'){
     // Inside a list or smart view → go to Home (lists browser).
     tasksView='browser';activeListId=null;activeSmartView=null;doneCollapsed=true;render();
