@@ -261,6 +261,10 @@ body.light .trow-title{color:var(--ink)}
 .shop-meta{font-size:12px;color:var(--ink2);margin-top:1px}
 .shop-sec{font-size:12px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.4px;padding:16px 8px 6px}
 .shop-toolbar{display:flex;gap:8px;padding:0 16px 8px}
+.shop-toolbar2{display:flex;justify-content:flex-end;gap:14px;padding:0 18px 8px}
+.shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
+.shop-mini:active{opacity:.6}
+.shop-mini.on{color:var(--brand,#6e56f8)}
 .shop-tbtn{flex:1;font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 10px;color:var(--ink);cursor:pointer}
 .shop-tbtn.on{background:var(--brand,#6e56f8)18;border-color:var(--brand,#6e56f8);color:var(--brand,#6e56f8)}
 .shop-tbtn:active{background:var(--s3)}
@@ -918,7 +922,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v149';
+const APP_VERSION='v150';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2803,7 +2807,7 @@ function renderShopHome(){
   </div>`;
 
   if(lists.length){
-    html+=`<div class="hub-sec-label" style="padding:6px 20px">${L==='fa'?'لیست‌های شما':'Your lists'}</div><div class="shop-list-wrap">`;
+    html+=`<div class="shop-list-wrap">`;
     lists.forEach(l=>{
       const items=shopItemsFor(l.id);
       const rem=items.filter(it=>!it.purchased).length, done=items.filter(it=>it.purchased).length;
@@ -2818,53 +2822,45 @@ function renderShopHome(){
       </div>`;
     });
     html+=`</div>`;
+  }else{
+    html+=`<div class="hub-ph" style="padding:44px 28px">
+      <div class="hub-ph-ic" style="background:#22c55e18;color:#22c55e">🛒</div>
+      <div class="hub-ph-t">${L==='fa'?'هنوز لیستی نداری':'No lists yet'}</div>
+      <div class="hub-ph-d">${L==='fa'?'یک لیست خرید بساز تا شروع کنی.':'Create a shopping list to get started.'}</div>
+      <button class="btn btn-primary" id="shop-new-empty" style="margin-top:18px">${L==='fa'?'لیست خرید جدید':'New shopping list'}</button>
+    </div>`;
   }
-
-  html+=`<div class="hub-sec-label" style="padding:14px 20px 6px">${L==='fa'?'الگوهای آماده':'Quick templates'}</div>
-    <div class="shop-store-grid">`;
-  SHOP_TEMPLATES.forEach(t=>{
-    html+=`<div class="shop-store" data-shop-builtin="${t.key}">
-      <div class="shop-store-ic" style="background:${t.color}18;color:${t.color}">${t.icon}</div>
-      <div class="shop-store-n">${esc(t.name)}</div>
-    </div>`;
-  });
-  html+=`</div>`;
-  html+=`<div class="hub-sec-label" style="padding:14px 20px 6px">${L==='fa'?'شروع از یک فروشگاه':'Start from a store'}</div>
-    <div class="shop-store-grid">`;
-  SHOP_STORES.forEach(s=>{
-    html+=`<div class="shop-store" data-shop-template="${s.key}">
-      <div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div>
-      <div class="shop-store-n">${esc(s.name)}</div>
-    </div>`;
-  });
-  html+=`<div class="shop-store shop-store-custom" data-shop-custom="1">
-      <div class="shop-store-ic" style="background:var(--s3);color:var(--ink2)">＋</div>
-      <div class="shop-store-n">${L==='fa'?'سفارشی':'Custom list'}</div>
-    </div>`;
-  html+=`</div>`;
   return html;
 }
-
 // ── Shopping v147: categories, favorites, multi-select, templates ──
-const SHOP_CAT_ORDER=['Dairy','Fruit','Vegetables','Meat','Seafood','Bakery','Frozen','Drinks','Snacks','Baby','Pet','Cleaning','Bathroom','Kitchen','Pharmacy','Electronics','Stationery','Garden','Hardware','Other'];
-const SHOP_CAT_EMOJI={Dairy:'🥛',Fruit:'🍎',Vegetables:'🥦',Meat:'🥩',Seafood:'🐟',Bakery:'🍞',Frozen:'🧊',Drinks:'🧃',Snacks:'🍫',Baby:'🍼',Pet:'🐾',Cleaning:'🧴',Bathroom:'🚿',Kitchen:'🍽️',Pharmacy:'💊',Electronics:'🔌',Stationery:'✏️',Garden:'🌱',Hardware:'🔧',Other:'🛒'};
+const SHOP_CAT_ORDER=['Fruit','Vegetables','Herbs','Dairy','Bakery','Meat','Seafood','Frozen','Pantry','Drinks','Snacks','Baby','Pet','Cleaning','Bathroom','Kitchen','Pharmacy','Electronics','Stationery','Garden','Hardware','Other'];
+const SHOP_CAT_EMOJI={Fruit:'🍎',Vegetables:'🥦',Herbs:'🌿',Dairy:'🥛',Bakery:'🍞',Meat:'🥩',Seafood:'🐟',Frozen:'🧊',Pantry:'🥫',Drinks:'🧃',Snacks:'🍫',Baby:'🍼',Pet:'🐾',Cleaning:'🧴',Bathroom:'🚿',Kitchen:'🍽️',Pharmacy:'💊',Electronics:'🔌',Stationery:'✏️',Garden:'🌱',Hardware:'🔧',Other:'🛒'};
+// Order matters (first match wins). Herbs before produce so basil≠vegetable.
 const SHOP_CAT_GUESS=[
-  [/milk|cheese|butter|yogurt|yoghurt|cream/i,'Dairy'],
-  [/bread|croissant|cake|cookie|bun|bakery|pastry|muffin/i,'Bakery'],
-  [/apple|banana|orange|grape|lemon|strawberry|watermelon|pineapple|avocado|berry|mango|peach|pear|fruit/i,'Fruit'],
-  [/tomato|potato|onion|carrot|broccoli|cucumber|pepper|mushroom|corn|lettuce|garlic|spinach|cabbage|celery|vegetable/i,'Vegetables'],
-  [/chicken|beef|steak|meat|sausage|bacon|pork|lamb|mince|burger|ham/i,'Meat'],
-  [/fish|salmon|shrimp|prawn|tuna|seafood|crab/i,'Seafood'],
-  [/ice cream|frozen|peas|nugget/i,'Frozen'],
-  [/water|juice|coffee|tea|soda|drink|cola|beer|wine|cordial/i,'Drinks'],
-  [/chocolate|chips|snack|biscuit|candy|lolly|crackers|popcorn/i,'Snacks'],
-  [/nappy|nappies|diaper|formula|baby|wipes|bib/i,'Baby'],
-  [/dog|cat|pet|litter|kibble/i,'Pet'],
-  [/detergent|bleach|soap|sponge|trash|bin bag|cleaner|spray|paper towel|toilet paper|dish|garbage/i,'Cleaning'],
-  [/shampoo|toothpaste|toothbrush|deodorant|razor|shower|bathroom/i,'Bathroom'],
-  [/medicine|panadol|nurofen|vitamin|tablet|pharmacy|bandaid|painkiller|paracetamol/i,'Pharmacy']
+  [/basil|coriander|cilantro|parsley|mint|thyme|rosemary|oregano|dill|chive|sage|herb/i,'Herbs'],
+  [/milk|cheese|butter|yogurt|yoghurt|cream|custard/i,'Dairy'],
+  [/bread|croissant|cake|cookie|\bbun\b|bakery|pastry|muffin|bagel|roll|tortilla|wrap/i,'Bakery'],
+  [/apple|banana|orange|grape|lemon|lime|strawberry|raspberry|blueberry|watermelon|melon|pineapple|avocado|berry|mango|peach|pear|plum|apricot|cherry|kiwi|fig|date\b|dates|coconut|nectarine|fruit/i,'Fruit'],
+  [/tomato|potato|onion|carrot|broccoli|cucumber|capsicum|pepper|mushroom|corn|lettuce|garlic|ginger|spinach|cabbage|celery|zucchini|pumpkin|eggplant|bean sprout|kale|vegetable/i,'Vegetables'],
+  [/chicken|beef|steak|meat|sausage|bacon|pork|lamb|mince|burger|\bham\b|turkey|veal|ribs/i,'Meat'],
+  [/fish|salmon|shrimp|prawn|tuna|seafood|crab|oyster|squid|calamari/i,'Seafood'],
+  [/ice cream|frozen|\bpeas\b|nugget|fish finger/i,'Frozen'],
+  [/rice|pasta|noodle|flour|sugar|\boil\b|olive oil|cereal|bean|lentil|chickpea|quinoa|oat|sauce|canned|\bcan\b|\btin\b|spice|salt|honey|vinegar|stock|jam|spread|cracker|muesli|peanut butter|nutella|soup|tomato paste|coconut milk/i,'Pantry'],
+  [/water|juice|coffee|\btea\b|soda|soft drink|drink|cola|beer|wine|cordial|smoothie|kombucha/i,'Drinks'],
+  [/chocolate|chips|snack|biscuit|candy|lolly|crackers|popcorn|nuts|chip|pretzel/i,'Snacks'],
+  [/nappy|nappies|diaper|formula|\bbaby\b|wipes|\bbib\b|dummy/i,'Baby'],
+  [/dog|\bcat\b|\bpet\b|litter|kibble|pet food/i,'Pet'],
+  [/detergent|bleach|soap|sponge|trash|bin bag|cleaner|surface spray|paper towel|toilet paper|dish|garbage|disinfectant|mop/i,'Cleaning'],
+  [/shampoo|conditioner|toothpaste|toothbrush|deodorant|razor|shower gel|body wash|bathroom|floss|cotton/i,'Bathroom'],
+  [/medicine|panadol|nurofen|vitamin|supplement|tablet|pharmacy|bandaid|band-aid|painkiller|paracetamol|ibuprofen|sanitiser|first aid/i,'Pharmacy'],
+  [/\bcable\b|charger|\busb\b|hdmi|headphone|earbud|\bbattery\b|batteries|adapter|powerbank|mouse|keyboard/i,'Electronics'],
+  [/\bpen\b|pencil|notebook|\bpaper\b|stapler|envelope|marker|folder|printer ink|stationery|glue|scissors/i,'Stationery'],
+  [/potting mix|plant|\bseed\b|seeds|fertiliser|fertilizer|garden|mulch|soil/i,'Garden'],
+  [/screw|nail|\btape\b|duct tape|light bulb|globe|paint|\btool\b|drill|hammer|screwdriver|hinge|bolt|\bwire\b|sandpaper|silicone/i,'Hardware']
 ];
 function shopCatFor(name){ const n=String(name||''); for(const g of SHOP_CAT_GUESS){ if(g[0].test(n))return g[1]; } return 'Other'; }
+// Item icon: specific product emoji if known, else the category emoji, else cart.
+function shopItemIcon(name){ const sp=shopIconFor(name); if(sp&&sp!=='🛒')return sp; const c=(typeof shopProdCat==='function')?shopProdCat(name):shopCatFor(name); return SHOP_CAT_EMOJI[c]||'🛒'; }
 function shopGrouped(){ return DB.meta.shopGrouped!==false; }  // default: grouped ON
 
 // ── Favorites (per list, stored locally) ──
@@ -2885,12 +2881,13 @@ function shopQuickAddFav(name){
   if(dup){ toast(L==='fa'?'قبلاً در لیست است':'Already in list'); return; }
   const fav=shopFavsFor(l.id).find(f=>f.name.trim().toLowerCase()===k);
   const now=new Date().toISOString(), id=uid();
-  shopItemsMap()[id]={id,listId:l.id,name:String(name).trim(),icon:(fav&&fav.icon)||shopIconFor(name),qty:1,unit:'ea',category:(fav&&fav.category)||shopCatFor(name),note:'',purchased:false,createdAt:now,updatedAt:now};
+  shopItemsMap()[id]={id,listId:l.id,name:String(name).trim(),icon:(fav&&fav.icon)||shopItemIcon(name),qty:1,unit:'ea',category:(fav&&fav.category)||shopCatFor(name),note:'',purchased:false,createdAt:now,updatedAt:now};
   l.updatedAt=now; saveDB(); render();
 }
 
 // ── Multi-select ──
 let shopSelectMode=false, shopSel=new Set();
+var _shopAddDraft='';   // preserves the Add-Items textarea while the sheet is open
 function shopResetSelect(){ shopSelectMode=false; shopSel=new Set(); }
 function shopToggleSelectMode(){ shopSelectMode=!shopSelectMode; shopSel=new Set(); render(); }
 function shopToggleSel(id){ if(shopSel.has(id))shopSel.delete(id); else shopSel.add(id); render(); }
@@ -2933,9 +2930,9 @@ const SHOP_TEMPLATES=[
 ];
 function shopCreateFromBuiltin(key){
   const t=SHOP_TEMPLATES.find(x=>x.key===key); if(!t)return;
-  const id=shopCreateList({name:t.name,icon:t.icon,color:t.color});
+  const id=shopCreateList({name:t.name,icon:t.icon,color:t.color,template:key});
   const now=new Date().toISOString();
-  t.items.forEach(nm=>{const iid=uid();shopItemsMap()[iid]={id:iid,listId:id,name:nm,icon:shopIconFor(nm),qty:1,unit:'ea',category:shopCatFor(nm),note:'',purchased:false,createdAt:now,updatedAt:now};});
+  t.items.forEach(nm=>{const iid=uid();shopItemsMap()[iid]={id:iid,listId:id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:shopProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};});
   saveDB(); activeShopListId=id; shopView='detail'; render(); window.scrollTo(0,0);
 }
 
@@ -2962,13 +2959,13 @@ function renderShopDetail(){
       const on=shopSel.has(it.id);
       return `<div class="shop-item ${on?'sel':''}" data-shop-sel="${it.id}">
         <button class="shop-selbox ${on?'on':''}" aria-label="select">${on?'✓':''}</button>
-        <div class="shop-ic">${esc(it.icon||shopIconFor(it.name))}</div>
+        <div class="shop-ic">${esc(it.icon||shopItemIcon(it.name))}</div>
         <div class="shop-main"><div class="shop-name ${it.purchased?'done':''}">${esc(it.name)} ${favStar}</div>${meta}</div>
       </div>`;
     }
     return `<div class="shop-item" data-shop-item="${it.id}">
       <button class="shop-check ${it.purchased?'on':''}" data-shop-toggle="${it.id}" aria-label="purchased">${it.purchased?'✓':''}</button>
-      <div class="shop-ic">${esc(it.icon||shopIconFor(it.name))}</div>
+      <div class="shop-ic">${esc(it.icon||shopItemIcon(it.name))}</div>
       <div class="shop-main"><div class="shop-name ${it.purchased?'done':''}">${esc(it.name)} ${favStar}</div>${meta}</div>
     </div>`;
   };
@@ -2985,9 +2982,9 @@ function renderShopDetail(){
   <div style="padding:4px 16px 8px">
     <input class="finput" id="shop-search" placeholder="${L==='fa'?'جستجوی آیتم':'Search items'}" value="${esc(shopSearch||'')}" style="width:100%">
   </div>
-  <div class="shop-toolbar">
-    <button class="shop-tbtn ${grouped?'on':''}" id="shop-view-toggle">${grouped?(L==='fa'?'▤ گروه‌بندی':'▤ Grouped'):(L==='fa'?'☰ ساده':'☰ Simple')}</button>
-    <button class="shop-tbtn ${shopSelectMode?'on':''}" id="shop-select-toggle">${shopSelectMode?(L==='fa'?'✕ لغو':'✕ Cancel'):(L==='fa'?'☑ انتخاب':'☑ Select')}</button>
+  <div class="shop-toolbar2">
+    <button class="shop-mini" id="shop-view-toggle">${grouped?(L==='fa'?'نما: دسته':'View: Category'):(L==='fa'?'نما: ساده':'View: Simple')}</button>
+    <button class="shop-mini ${shopSelectMode?'on':''}" id="shop-select-toggle">${shopSelectMode?(L==='fa'?'انجام شد':'Done'):(L==='fa'?'انتخاب موارد':'Select items')}</button>
   </div>`;
 
   // Favourites quick-add
@@ -3063,6 +3060,58 @@ function openShopFromTemplate(key){
   // store's identity/location can never bleed into another's.
   openCreateShopList({name:s.name,icon:s.icon,color:s.color,template:key});
 }
+// ── New shopping list flow (clean, no crowded home) ──
+function openNewShopSheet(){
+  openSheet(`
+    <h3>${L==='fa'?'لیست خرید جدید':'New shopping list'}</h3>
+    <div class="btn-col">
+      <button class="btn btn-ghost" id="ns-store">🏬 ${L==='fa'?'انتخاب فروشگاه':'Choose a store'}</button>
+      <button class="btn btn-ghost" id="ns-template">🗂️ ${L==='fa'?'شروع از الگو':'Start from a template'}</button>
+      <button class="btn btn-ghost" id="ns-custom">✏️ ${L==='fa'?'لیست سفارشی':'Custom list'}</button>
+      <button class="btn btn-ghost" id="ns-cancel">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('ns-cancel').onclick=()=>closeSheet();
+  document.getElementById('ns-store').onclick=()=>openStorePicker();
+  document.getElementById('ns-template').onclick=()=>openTemplatePicker();
+  document.getElementById('ns-custom').onclick=()=>{closeSheet();openCreateShopList();};
+}
+function openStorePicker(){
+  openSheet(`<h3>${L==='fa'?'انتخاب فروشگاه':'Choose a store'}</h3>
+    <div class="shop-store-grid">${SHOP_STORES.map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}</div>`);
+  document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>pickStoreOrTemplate(el.dataset.pickStore,'store'));
+}
+function openTemplatePicker(){
+  openSheet(`<h3>${L==='fa'?'شروع از الگو':'Start from a template'}</h3>
+    <div class="shop-store-grid">${SHOP_TEMPLATES.map(t=>`<div class="shop-store" data-pick-tpl="${t.key}"><div class="shop-store-ic" style="background:${t.color}18;color:${t.color}">${t.icon}</div><div class="shop-store-n">${esc(t.name)}</div></div>`).join('')}</div>`);
+  document.querySelectorAll('[data-pick-tpl]').forEach(el=>el.onclick=()=>pickStoreOrTemplate(el.dataset.pickTpl,'builtin'));
+}
+function openShopList(id){
+  activeShopListId=id; shopView='detail'; shopSearch=''; shopResetSelect();
+  render(); window.scrollTo(0,0);
+}
+// Duplicate guard: never silently create a second list for the same store/template.
+function pickStoreOrTemplate(key,kind){
+  const existing=shopListsAll().find(l=>l.template===key);
+  const createNew=()=>{
+    if(kind==='store'){ const s=shopStore(key); closeSheet(); openCreateShopList({name:s.name,icon:s.icon,color:s.color,template:key}); }
+    else { closeSheet(); shopCreateFromBuiltin(key); }
+  };
+  if(existing){
+    openSheet(`<h3>${esc(existing.name)}</h3>
+      <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'یک لیست برای این مورد از قبل هست. باز شود یا یکی دیگر ساخته شود؟':'A list for this already exists. Open it, or create another?'}</p>
+      <div class="btn-col">
+        <button class="btn btn-primary" id="dup-open">${L==='fa'?'باز کردن لیست موجود':'Open existing list'}</button>
+        <button class="btn btn-ghost" id="dup-new">${L==='fa'?'ساختن یکی دیگر':'Create another'}</button>
+        <button class="btn btn-ghost" id="dup-cancel">${tr('cancel')}</button>
+      </div>`);
+    document.getElementById('dup-cancel').onclick=()=>closeSheet();
+    document.getElementById('dup-open').onclick=()=>{ closeSheet(); openShopList(existing.id); };
+    document.getElementById('dup-new').onclick=createNew;
+  }else{
+    createNew();
+  }
+}
+
 function openCreateShopList(prefill){
   prefill=prefill||{};
   const fromStore=!!prefill.name;
@@ -3298,9 +3347,12 @@ function openAddShopItems(){
   setTimeout(()=>document.getElementById('si-text')?.focus(),100);
   const ta=document.getElementById('si-text');
   const sug=document.getElementById('si-sug');
+  // Restore any in-progress draft (survives rerenders / keyboard / reopen).
+  if(_shopAddDraft){ ta.value=_shopAddDraft; }
   const curLine=()=>{const p=ta.value.split('\n');return p[p.length-1];};
   // Type-ahead: only after ≥2 chars on the CURRENT line; empty otherwise.
-  ta.oninput=()=>{ sug.innerHTML=rows(curLine()); };
+  // Only updates the suggestion list — never rerenders the app or the textarea.
+  ta.oninput=()=>{ _shopAddDraft=ta.value; sug.innerHTML=rows(curLine()); };
   // Tap a product → autocomplete ONLY the current line, then ready for the next.
   sug.onclick=(e)=>{
     const b=e.target.closest('.shop-prow'); if(!b)return;
@@ -3308,19 +3360,21 @@ function openAddShopItems(){
     const val=ta.value; const idx=val.lastIndexOf('\n');
     const head=idx>=0?val.slice(0,idx+1):'';
     ta.value=head+name+'\n';
+    _shopAddDraft=ta.value;
     sug.innerHTML='';
     ta.focus();
   };
-  document.getElementById('si-cancel').onclick=()=>closeSheet();
+  document.getElementById('si-cancel').onclick=()=>{ _shopAddDraft=''; closeSheet(); };
   document.getElementById('si-save').onclick=()=>{
     const raw=ta.value||'';
     const names=raw.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
-    if(!names.length){closeSheet();return;}
+    if(!names.length){ _shopAddDraft=''; closeSheet(); return; }
     const now=new Date().toISOString();
     names.forEach(nm=>{
       const id=uid();
-      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopIconFor(nm),qty:1,unit:'ea',category:shopProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
+      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:shopProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
     });
+    _shopAddDraft='';
     l.updatedAt=now;saveDB();closeSheet();render();window.scrollTo(0,0);
     toast((L==='fa'?'افزوده شد: ':'Added ')+names.length);
   };
@@ -3353,7 +3407,7 @@ function openShopItemEditor(id){
   };
   document.getElementById('it-save').onclick=()=>{
     const nm=(document.getElementById('it-name').value||'').trim();
-    if(nm){it.name=nm;it.icon=shopIconFor(nm);}
+    if(nm){it.name=nm;it.icon=shopItemIcon(nm);}
     const q=parseFloat(document.getElementById('it-qty').value);it.qty=isNaN(q)?1:q;
     it.unit=document.getElementById('it-unit').value||'ea';
     it.category=document.getElementById('it-cat').value||'Other';
@@ -4151,6 +4205,8 @@ function bindScreen(){
   const moduleBack=document.getElementById('module-back');
   if(moduleBack)moduleBack.onclick=()=>{currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();screen='lifehub';render();window.scrollTo(0,0);};
   // ── Shopping wiring ──
+  const shopNewEmpty=document.getElementById('shop-new-empty');
+  if(shopNewEmpty)shopNewEmpty.onclick=()=>openNewShopSheet();
   const shopBack=document.getElementById('shop-back');
   if(shopBack)shopBack.onclick=()=>{shopView='home';activeShopListId=null;shopResetSelect();render();window.scrollTo(0,0);};
   document.querySelectorAll('[data-shop-list]').forEach(el=>el.onclick=(e)=>{
@@ -5483,7 +5539,7 @@ document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
 document.getElementById('fab').onclick=()=>{
   if(screen==='appts'){ openNewApptSheet(null); return; }
   if(screen==='module'){
-    if(currentModule==='shopping'){ (shopView==='detail'?openAddShopItems:openCreateShopList)(); return; }
+    if(currentModule==='shopping'){ (shopView==='detail'?openAddShopItems:openNewShopSheet)(); return; }
     const m=hubModule(currentModule);
     if(moduleHasCreate(m)) m.onCreate();   // module's own create dialog (no Task dependency)
     return;                                 // never open New Task from a module
