@@ -922,7 +922,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v151';
+const APP_VERSION='v153';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1037,7 +1037,6 @@ function saveDB(){
 }
 
 let DB=loadDB();
-ensureShopStoreDedup();
 
 // One-time migration (guarded by DB.meta.shopStoreDedupV1): before openStore()
 // existed, the old prompt-based flow could create more than one ACTIVE list
@@ -3419,6 +3418,8 @@ function renderShopDetail(){
       <div style="font-size:24px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.name)}</div>
       <div style="font-size:12px;color:var(--ink2)">${totalRem} ${L==='fa'?'باقی‌مانده':'remaining'} · ${totalDone} ${L==='fa'?'خریداری‌شده':'purchased'}</div>
       ${l.address?`<div class="shop-laddr" data-shop-maps="${l.id}" style="cursor:pointer">📍 ${esc(l.address)}</div>`:''}
+      ${(l.tripDate||l.tripTime)?`<div class="shop-laddr">🗓️ ${esc(l.tripDate||'')}${l.tripDate&&l.tripTime?' · ':''}${esc(l.tripTime||'')}</div>`:''}
+      ${l.tripNotes?`<div class="shop-laddr">📝 ${esc(l.tripNotes)}</div>`:''}
     </div>
     <button class="shop-lmenu" data-shop-menu="${l.id}" style="width:40px;height:40px" aria-label="options">⋯</button>
   </div>
@@ -3617,6 +3618,17 @@ function openShopListMenu(id){
         <input class="finput" id="se-name" value="${esc(l.name)}" autofocus></div>
       <div class="fld"><label>${L==='fa'?'فروشگاه / مکان':'Store / location'}</label>
         <input class="finput" id="se-loc" value="${esc(l.address||'')}" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}"></div>
+      <div class="fld" style="display:flex;gap:10px">
+        <div style="flex:1"><label>${L==='fa'?'تاریخ':'Date'}</label>
+          <input class="finput" id="se-date" type="date" value="${esc(l.tripDate||'')}"></div>
+        <div style="flex:1"><label>${L==='fa'?'ساعت':'Time'}</label>
+          <input class="finput" id="se-time" type="time" value="${esc(l.tripTime||'')}"></div>
+      </div>
+      <div class="fld"><label>${L==='fa'?'یادداشت خرید':'Trip notes'}</label>
+        <input class="finput" id="se-notes" value="${esc(l.tripNotes||'')}" placeholder="${L==='fa'?'اختیاری':'Optional'}"></div>
+      <div class="fld"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="se-reminder" ${l.reminder?'checked':''}> ${L==='fa'?'یادآوری':'Reminder'}
+      </label></div>
       <div class="btn-row">
         <button class="btn btn-ghost" id="se-cancel">${tr('cancel')}</button>
         <button class="btn btn-primary" id="se-save">${tr('save')}</button>
@@ -3629,6 +3641,10 @@ function openShopListMenu(id){
       if(nn)l.name=nn;
       const loc=shopResolveLoc(document.getElementById('se-loc').value,picked);
       l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon;
+      l.tripDate=document.getElementById('se-date').value||'';
+      l.tripTime=document.getElementById('se-time').value||'';
+      l.tripNotes=(document.getElementById('se-notes').value||'').trim();
+      l.reminder=!!document.getElementById('se-reminder').checked; // inert: stored only, no notification/Tasks wiring
       l.updatedAt=new Date().toISOString();saveDB();closeSheet();render();
     };
   };
@@ -3765,6 +3781,16 @@ function shopProductSuggest(query,template){
   return starts.concat(incl).slice(0,8);
 }
 
+function shopDomainExamples(domain){
+  const inDom=(p)=> !domain||domain==='all'||(Array.isArray(p.d)&&p.d.includes(domain));
+  const seenCat=new Set(), names=[];
+  for(const p of SHOP_CATALOGUE){
+    if(names.length>=6)break;
+    if(!inDom(p)||seenCat.has(p.c))continue;
+    seenCat.add(p.c); names.push(p.n);
+  }
+  return names.length?names.join('&#10;'):'milk&#10;bread&#10;eggs';
+}
 function openAddShopItems(){
   const l=shopActiveList(); if(!l)return;
   const rows=(q)=>{
@@ -3783,7 +3809,7 @@ function openAddShopItems(){
     <h3>${L==='fa'?'افزودن آیتم‌ها':'Add items'}</h3>
     <div class="fld">
       <label>${L==='fa'?'هر خط یک آیتم — می‌توانید چند مورد را با هم بچسبانید':'One item per line — paste many at once'}</label>
-      <textarea class="finput" id="si-text" rows="6" placeholder="milk&#10;bread&#10;eggs&#10;banana&#10;rice&#10;chicken" style="resize:vertical;line-height:1.6" autofocus></textarea>
+      <textarea class="finput" id="si-text" rows="6" placeholder="${shopDomainExamples(shopListDomain(l))}" style="resize:vertical;line-height:1.6" autofocus></textarea>
     </div>
     <div id="si-sug" class="shop-prows"></div>
     <div class="btn-row">
@@ -4861,6 +4887,7 @@ const firebaseConfig={
 };
 
 let FB={app:null,auth:null,db:null,messaging:null,user:null,ready:false};
+ensureShopStoreDedup();
 let _syncUnsubs=[];
 
 // Web Push VAPID public key — from Firebase Console → Project settings →
