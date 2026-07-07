@@ -922,7 +922,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v150';
+const APP_VERSION='v151';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1037,6 +1037,31 @@ function saveDB(){
 }
 
 let DB=loadDB();
+ensureShopStoreDedup();
+
+// One-time migration (guarded by DB.meta.shopStoreDedupV1): before openStore()
+// existed, the old prompt-based flow could create more than one ACTIVE list
+// for the same store. For each store key, keep the OLDEST active list, move
+// every item and favourite from any other active list into it, then archive
+// (never delete) the now-empty duplicate — so no item is ever lost and the
+// duplicate's history/address is still recoverable via Archived Lists.
+function ensureShopStoreDedup(){
+  if(DB.meta.shopStoreDedupV1)return;
+  const byStore={};
+  Object.values(shopListsMap()).forEach(l=>{
+    if(l.archivedAt||!l.template)return;
+    (byStore[l.template]=byStore[l.template]||[]).push(l);
+  });
+  Object.values(byStore).forEach(group=>{
+    if(group.length<2)return;
+    group.sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+    const keep=group[0];
+    for(let i=1;i<group.length;i++) shopMergeListInto(group[i].id, keep.id, 'archive');
+    keep.updatedAt=new Date().toISOString();
+  });
+  DB.meta.shopStoreDedupV1=true;
+  saveDB();
+}
 
 /* ── Helpers ── */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
@@ -1227,7 +1252,9 @@ let tasksView='browser'; // 'browser'|'detail'
 let activeListId=null;
 let activeSmartView=null; // 'myday'|'important'|'planned'|'all'
 let currentModule=null;   // Life Hub: active module id when screen==='module'
-let shopView='home';      // Shopping: 'home' | 'detail'
+let shopView='home';      // Shopping: 'home' | 'detail' | 'archive' | 'archiveView'
+let shopArchiveFilter=null;   // template key to scope Archived Trips to one store, or null = global
+let shopArchiveViewId=null;   // id of the archived trip currently shown read-only
 let activeShopListId=null;
 let shopSearch='';
 let plannedFilter='all'; // 'overdue'|'today'|'tomorrow'|'week'|'later'|'all'
@@ -1277,7 +1304,7 @@ function updateFab(){
   if(!fab)return;
   let show=false;
   if(screen==='lists'||screen==='today'||screen==='appts') show=true;
-  else if(screen==='module') show=(currentModule==='shopping')?!(shopView==='detail'&&shopSelectMode):moduleHasCreate(hubModule(currentModule));
+  else if(screen==='module') show=(currentModule==='shopping')?((shopView==='archive'||shopView==='archiveView')?false:!(shopView==='detail'&&shopSelectMode)):moduleHasCreate(hubModule(currentModule));
   else show=false; // lifehub, profile, more, search, ...
   fab.style.display=show?'':'none';
 }
@@ -2794,17 +2821,196 @@ function shopStore(key){ return SHOP_STORES.find(s=>s.key===key)||null; }
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
 function shopItemsMap(){ if(!DB.entities.shopItems)DB.entities.shopItems={}; return DB.entities.shopItems; }
 function shopListsAll(){ return Object.values(shopListsMap()).filter(l=>!l.archivedAt); }
+function shopListsArchived(){ return Object.values(shopListsMap()).filter(l=>l.archivedAt); }
+// Shared merge core. Moves all items + favourites from source into target.
+// dispose='archive' (Phase 3 migration: source becomes an archived shell —
+// unchanged, byte-identical to the original migration behaviour) or
+// dispose='delete' (Phase 5 restore-conflict: source is fully removed once
+// merged — "the archived trip has fulfilled its purpose").
+// opts.mergeAddress: OFF by default (Phase 3 never touched address — kept
+// identical). Phase 5 passes true: adopts source's address/lat/lon ONLY if
+// target has none — the active trip's own location is never overwritten.
+function shopMergeListInto(sourceId,targetId,dispose,opts){
+  opts=opts||{};
+  const target=shopListsMap()[targetId], source=shopListsMap()[sourceId];
+  if(!target||!source||target.id===source.id)return;
+  const ts=new Date().toISOString();
+  Object.values(shopItemsMap()).forEach(it=>{ if(it.listId===source.id){ it.listId=target.id; it.updatedAt=ts; } });
+  const targetFavs=shopFavsFor(target.id);
+  shopFavsFor(source.id).forEach(f=>{
+    if(!targetFavs.some(tf=>tf.name.trim().toLowerCase()===f.name.trim().toLowerCase())) targetFavs.push(f);
+  });
+  delete shopFavsMap()[source.id];
+  if(opts.mergeAddress && !target.address && source.address){
+    target.address=source.address; target.lat=source.lat; target.lon=source.lon;
+  }
+  target.updatedAt=ts;
+  if(dispose==='delete'){
+    delete shopListsMap()[source.id];
+  }else{
+    source.archivedAt=ts; source.updatedAt=ts;
+  }
+}
 function shopItemsFor(listId){ return Object.values(shopItemsMap()).filter(it=>it.listId===listId); }
 function shopActiveList(){ return activeShopListId?shopListsMap()[activeShopListId]:null; }
 
-function renderShopping(){ return shopView==='detail' ? renderShopDetail() : renderShopHome(); }
+// Restore an archived trip/list. Stores and builtin templates (weekly/bbq/...)
+// must keep exactly one ACTIVE list per template (the Phase 3 invariant) — if
+// one is already active, restoring the archived one would recreate that bug.
+// So: no conflict -> restore directly. Conflict -> merge into the active one,
+// or cancel. Custom lists (template=null) never conflict.
+function shopRestoreList(id){
+  const l=shopListsMap()[id]; if(!l||!l.archivedAt)return;
+  const conflict = l.template ? shopListsAll().find(x=>x.template===l.template) : null;
+  if(!conflict){
+    l.archivedAt=null; l.updatedAt=new Date().toISOString(); saveDB();
+    render(); window.scrollTo(0,0);
+    toast(L==='fa'?'بازیابی شد':'Restored');
+    return;
+  }
+  openSheet(`<h3>${L==='fa'?'یک لیست فعال از قبل هست':'An active trip already exists'}</h3>
+    <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?`«${esc(conflict.name)}» الان فعال است. آیتم‌های آرشیوشده به آن اضافه شوند؟`:`"${esc(conflict.name)}" is currently active. Merge the archived items into it?`}</p>
+    <div class="btn-col">
+      <button class="btn btn-primary" id="rc-merge">${L==='fa'?'ادغام با لیست فعال':'Merge into current trip'}</button>
+      <button class="btn btn-ghost" id="rc-cancel">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('rc-cancel').onclick=()=>closeSheet();
+  document.getElementById('rc-merge').onclick=()=>{
+    // dispose='delete': the archived trip has fulfilled its purpose, no shell left.
+    // mergeAddress=true, but the active trip's own address is never overwritten
+    // (shopMergeListInto only adopts source's address if target has none).
+    shopMergeListInto(id,conflict.id,'delete',{mergeAddress:true});
+    saveDB(); closeSheet(); render(); window.scrollTo(0,0);
+    toast(L==='fa'?'ادغام شد':'Merged');
+  };
+}
+// Irreversible. Only ever reachable from the Archived Trips screen.
+function shopPermanentDelete(id){
+  const l=shopListsMap()[id]; if(!l)return;
+  openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3>
+    <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'این لیست و همه‌ی آیتم‌هایش برای همیشه حذف می‌شوند. این عمل بازگشت‌پذیر نیست.':'This trip and all its items will be permanently deleted. This cannot be undone.'}</p>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="pd-cancel">${tr('cancel')}</button>
+      <button class="btn btn-danger" id="pd-ok">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>
+    </div>`);
+  document.getElementById('pd-cancel').onclick=()=>closeSheet();
+  document.getElementById('pd-ok').onclick=()=>{
+    Object.keys(shopItemsMap()).forEach(iid=>{ if(shopItemsMap()[iid].listId===id) delete shopItemsMap()[iid]; });
+    delete shopFavsMap()[id];
+    delete shopListsMap()[id];
+    saveDB(); closeSheet();
+    render(); window.scrollTo(0,0);
+    toast(L==='fa'?'حذف شد':'Deleted');
+  };
+}
+
+function renderShopping(){
+  if(shopView==='archiveView') return renderShopArchiveView();
+  if(shopView==='archive') return renderShopArchived();
+  return shopView==='detail' ? renderShopDetail() : renderShopHome();
+}
+// Opens Archived Trips. filterTemplate=null -> global (platform-wide) history.
+// filterTemplate=<template key> -> scoped to one store/builtin (called from
+// within that store's detail screen). activeShopListId is deliberately left
+// untouched: if set (we came from a store), Back returns to that detail; if
+// null (we came from Home), Back returns to Home. No new state needed for this.
+function openArchivedTrips(filterTemplate){
+  shopArchiveFilter=filterTemplate||null;
+  shopView='archive';
+  render(); window.scrollTo(0,0);
+}
+
+function renderShopArchived(){
+  const filt=shopArchiveFilter;
+  const scopeStore=filt?shopStore(filt):null;
+  const all=shopListsArchived();
+  const list=(filt?all.filter(l=>l.template===filt):all).sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
+  const title=scopeStore?`${scopeStore.name} — ${L==='fa'?'آرشیو':'Archived'}`:(L==='fa'?'آرشیو خرید':'Archived Trips');
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="archive-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:24px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(title)}</div>
+  </div>`;
+  if(!list.length){
+    html+=`<div class="hub-ph" style="padding:44px 28px">
+      <div class="hub-ph-ic" style="background:var(--s3);color:var(--ink2)">🗄️</div>
+      <div class="hub-ph-t">${L==='fa'?'آرشیوی نیست':'Nothing archived'}</div>
+      <div class="hub-ph-d">${scopeStore?(L==='fa'?`هنوز خریدی از «${esc(scopeStore.name)}» آرشیو نشده.`:`No trips from ${esc(scopeStore.name)} have been archived yet.`):(L==='fa'?'وقتی یک خرید را تمام کنی یا لیستی را آرشیو کنی، اینجا نشان داده می‌شود.':'Completed trips and archived lists will appear here.')}</div></div>`;
+    return html;
+  }
+  html+=`<div class="shop-list-wrap">`;
+  list.forEach(l=>{
+    const n=Object.values(shopItemsMap()).filter(it=>it.listId===l.id).length;
+    html+=`<div class="shop-lcard" data-arch-view="${l.id}">
+      <div class="shop-lic" style="background:${l.color}18;color:${l.color}">${l.icon||'🛒'}</div>
+      <div class="shop-lmain">
+        <div class="shop-lname">${esc(l.name)}</div>
+        <div class="shop-lmeta">${n} ${L==='fa'?'آیتم':'items'} · ${shortDate((l.archivedAt||'').slice(0,10))}</div>
+      </div>
+      <span class="sv-count" style="opacity:.6">›</span>
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+// Read-only inspection of one archived trip, reached by tapping a row in
+// Archived Trips. Offers Restore / Delete / Cancel — no editing controls.
+function renderShopArchiveView(){
+  const l=shopListsMap()[shopArchiveViewId];
+  if(!l||!l.archivedAt){
+    // Item was restored/merged/deleted from underneath this view (or is gone)
+    // -> bounce back to the archive list instead of showing a broken screen.
+    shopArchiveViewId=null; shopView='archive'; return renderShopArchived();
+  }
+  const items=Object.values(shopItemsMap()).filter(it=>it.listId===l.id);
+  const remaining=items.filter(it=>!it.purchased), purchased=items.filter(it=>it.purchased);
+  const row=(it)=>{
+    const meta=(()=>{const bits=[];
+      if((it.qty&&Number(it.qty)!==1)||(it.unit&&it.unit!=='ea'))bits.push(esc(((it.qty||'')+(it.unit&&it.unit!=='ea'?' '+it.unit:'')).trim()));
+      if(it.category&&it.category!=='Other')bits.push(esc(it.category));
+      if(it.note)bits.push(esc(it.note));
+      return bits.length?`<div class="shop-meta">${bits.join(' · ')}</div>`:'';})();
+    return `<div class="shop-item">
+      <div class="shop-check ${it.purchased?'on':''}" style="pointer-events:none">${it.purchased?'✓':''}</div>
+      <div class="shop-ic">${esc(it.icon||shopItemIcon(it.name))}</div>
+      <div class="shop-main"><div class="shop-name ${it.purchased?'done':''}">${esc(it.name)}</div>${meta}</div>
+    </div>`;
+  };
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="archview-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:22px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.name)}</div>
+      <div style="font-size:12px;color:var(--ink2)">${items.length} ${L==='fa'?'آیتم':'items'} · ${L==='fa'?'آرشیو در ':'archived '}${shortDate((l.archivedAt||'').slice(0,10))} · ${L==='fa'?'فقط نمایش':'read-only'}</div>
+    </div>
+  </div>`;
+  if(!items.length){
+    html+=`<div class="hub-ph" style="padding:36px 28px"><div class="hub-ph-ic" style="background:var(--s3);color:var(--ink2)">🗄️</div>
+      <div class="hub-ph-t">${L==='fa'?'این خرید خالی بود':'This trip was empty'}</div></div>`;
+  }else{
+    html+=`<div class="shop-items">`;
+    html+=remaining.map(row).join('');
+    if(purchased.length){
+      html+=`<div class="shop-sec">${L==='fa'?'خریداری‌شده':'Purchased'} (${purchased.length})</div>`;
+      html+=purchased.map(row).join('');
+    }
+    html+=`</div>`;
+  }
+  html+=`<div class="shop-actionbar">
+    <button class="shop-act" id="archview-restore">${L==='fa'?'بازیابی':'Restore'}</button>
+    <button class="shop-act danger" id="archview-delete">${L==='fa'?'حذف':'Delete'}</button>
+    <button class="shop-act" id="archview-cancel">${tr('cancel')}</button>
+  </div>`;
+  return html;
+}
 
 function renderShopHome(){
   const lists=shopListsAll().sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${L==='fa'?'خرید':'Shopping'}</div>
-  </div>`;
+  </div>
+  <div class="hub-sec-label" style="padding:6px 20px">${L==='fa'?'فروشگاه‌ها':'Stores'}</div>
+  <div class="shop-store-grid">${SHOP_STORES.map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}<div class="shop-store" data-shop-custom="1"><div class="shop-store-ic" style="background:var(--s3);color:var(--ink2)">＋</div><div class="shop-store-n">${L==='fa'?'فروشگاه سفارشی':'Add custom store'}</div></div></div>
+  <div class="hub-sec-label" style="padding:10px 20px 6px">${L==='fa'?'لیست‌ها':'Lists'}</div>`;
 
   if(lists.length){
     html+=`<div class="shop-list-wrap">`;
@@ -2823,11 +3029,23 @@ function renderShopHome(){
     });
     html+=`</div>`;
   }else{
+    // "No lists yet" must only appear when there is truly no data. If every
+    // list is archived, the data still exists — say so, don't claim emptiness.
+    const hasArchived=shopListsArchived().length>0;
     html+=`<div class="hub-ph" style="padding:44px 28px">
       <div class="hub-ph-ic" style="background:#22c55e18;color:#22c55e">🛒</div>
-      <div class="hub-ph-t">${L==='fa'?'هنوز لیستی نداری':'No lists yet'}</div>
-      <div class="hub-ph-d">${L==='fa'?'یک لیست خرید بساز تا شروع کنی.':'Create a shopping list to get started.'}</div>
+      <div class="hub-ph-t">${hasArchived?(L==='fa'?'همه‌ی لیست‌ها بایگانی شده‌اند':'All lists are archived'):(L==='fa'?'هنوز لیستی نداری':'No lists yet')}</div>
+      <div class="hub-ph-d">${hasArchived?(L==='fa'?'می‌توانی یک لیست جدید بسازی.':'You can create a new list.'):(L==='fa'?'یک لیست خرید بساز تا شروع کنی.':'Create a shopping list to get started.')}</div>
       <button class="btn btn-primary" id="shop-new-empty" style="margin-top:18px">${L==='fa'?'لیست خرید جدید':'New shopping list'}</button>
+    </div>`;
+  }
+  const archCount=shopListsArchived().length;
+  if(archCount>0){
+    html+=`<div class="sv-row" data-go-archive="1">
+      <div class="sv-icon"><div class="sv-icon-inner" style="background:var(--s3);color:var(--ink2)">🗄️</div></div>
+      <span class="sv-name">${L==='fa'?'آرشیو خرید':'Archived Trips'}</span>
+      <span class="sv-count">${archCount}</span>
+      <span class="sv-count" style="opacity:.6">›</span>
     </div>`;
   }
   return html;
@@ -2859,6 +3077,185 @@ const SHOP_CAT_GUESS=[
   [/screw|nail|\btape\b|duct tape|light bulb|globe|paint|\btool\b|drill|hammer|screwdriver|hinge|bolt|\bwire\b|sandpaper|silicone/i,'Hardware']
 ];
 function shopCatFor(name){ const n=String(name||''); for(const g of SHOP_CAT_GUESS){ if(g[0].test(n))return g[1]; } return 'Other'; }
+
+// ═══ v151 catalogue data layer — ISOLATED, INERT. Nothing calls these yet. ═══
+// ═══════════ Shopping v151: store-domain catalogue ═══════════
+const SHOP_STORE_DOMAIN={
+  woolworths:'grocery',coles:'grocery',aldi:'grocery',costco:'grocery',
+  kmart:'general',bigw:'general',
+  chemistwarehouse:'pharmacy',priceline:'pharmacy',
+  officeworks:'office',jbhifi:'electronics',harveynorman:'electronics',
+  ikea:'home',bunnings:'hardware',petbarn:'pet'
+};
+const SHOP_CAT_KEYWORDS={
+  meat:'Meat',dairy:'Dairy',veg:'Vegetables',vegetable:'Vegetables',vegetables:'Vegetables',
+  fruit:'Fruit',fruits:'Fruit',herb:'Herbs',herbs:'Herbs',drink:'Drinks',drinks:'Drinks',
+  frozen:'Frozen',bakery:'Bakery',bread:'Bakery',snack:'Snacks',snacks:'Snacks',
+  seafood:'Seafood',fish:'Seafood',pantry:'Pantry',cleaning:'Cleaning',hardware:'Hardware',
+  pharmacy:'Pharmacy',medicine:'Pharmacy',stationery:'Stationery',office:'Stationery',
+  pet:'Pet',baby:'Baby',electronics:'Electronics',home:'Home',garden:'Garden'
+};
+const SHOP_CATALOGUE=[
+  {n:'Milk',c:'Dairy',s:'2L',d:['grocery']},{n:'Full cream milk',c:'Dairy',s:'2L',d:['grocery']},
+  {n:'Lite milk',c:'Dairy',s:'2L',d:['grocery']},{n:'Lactose free milk',c:'Dairy',s:'1L',d:['grocery']},
+  {n:'Almond milk',c:'Dairy',s:'1L',d:['grocery']},{n:'Oat milk',c:'Dairy',s:'1L',d:['grocery']},
+  {n:'Soy milk',c:'Dairy',s:'1L',d:['grocery']},{n:'Cheese block',c:'Dairy',s:'500g',d:['grocery']},
+  {n:'Shredded cheese',c:'Dairy',s:'250g',d:['grocery']},{n:'Cream cheese',c:'Dairy',d:['grocery']},
+  {n:'Butter',c:'Dairy',s:'250g',d:['grocery']},{n:'Margarine',c:'Dairy',d:['grocery']},
+  {n:'Greek yogurt',c:'Dairy',s:'1kg',d:['grocery']},{n:'Yogurt pouches',c:'Dairy',d:['grocery']},
+  {n:'Thickened cream',c:'Dairy',s:'300ml',d:['grocery']},{n:'Sour cream',c:'Dairy',d:['grocery']},
+  {n:'Eggs',c:'Dairy',s:'12pk',d:['grocery']},{n:'Free range eggs',c:'Dairy',s:'12pk',d:['grocery']},
+  {n:'Bread',c:'Bakery',s:'700g',d:['grocery']},{n:'White bread',c:'Bakery',s:'700g',d:['grocery']},
+  {n:'Wholemeal bread',c:'Bakery',s:'700g',d:['grocery']},{n:'Multigrain bread',c:'Bakery',d:['grocery']},
+  {n:'Sourdough',c:'Bakery',a:'bread',d:['grocery']},{n:'Bread rolls',c:'Bakery',s:'6pk',d:['grocery']},
+  {n:'Wraps',c:'Bakery',s:'8pk',a:'bread',d:['grocery']},{n:'Tortillas',c:'Bakery',a:'bread',d:['grocery']},
+  {n:'Bagels',c:'Bakery',a:'bread',d:['grocery']},{n:'Croissants',c:'Bakery',s:'4pk',a:'bread',d:['grocery']},
+  {n:'Muffins',c:'Bakery',d:['grocery']},{n:'Crumpets',c:'Bakery',d:['grocery']},
+  {n:'Chicken breast',c:'Meat',s:'1kg',d:['grocery']},{n:'Chicken thighs',c:'Meat',s:'1kg',d:['grocery']},
+  {n:'Chicken mince',c:'Meat',s:'500g',d:['grocery']},{n:'Whole chicken',c:'Meat',d:['grocery']},
+  {n:'BBQ chicken',c:'Meat',d:['grocery']},{n:'Chicken wings',c:'Meat',d:['grocery']},
+  {n:'Beef mince',c:'Meat',s:'500g',d:['grocery']},{n:'Beef steak',c:'Meat',a:'steak',d:['grocery']},
+  {n:'Lamb chops',c:'Meat',a:'lamb',d:['grocery']},{n:'Lamb roast',c:'Meat',a:'lamb',d:['grocery']},
+  {n:'Pork chops',c:'Meat',a:'pork',d:['grocery']},{n:'Sausages',c:'Meat',s:'6pk',d:['grocery']},
+  {n:'Bacon',c:'Meat',s:'250g',d:['grocery']},{n:'Ham',c:'Meat',d:['grocery']},{n:'Meatballs',c:'Meat',a:'meat',d:['grocery']},
+  {n:'Salmon fillet',c:'Seafood',a:'fish',d:['grocery']},{n:'White fish fillet',c:'Seafood',a:'fish',d:['grocery']},
+  {n:'Tuna can',c:'Seafood',s:'95g',a:'fish',d:['grocery']},{n:'Prawns',c:'Seafood',d:['grocery']},
+  {n:'Fish fingers',c:'Seafood',a:'fish frozen',d:['grocery']},
+  {n:'Banana',c:'Fruit',d:['grocery']},{n:'Apple',c:'Fruit',d:['grocery']},{n:'Orange',c:'Fruit',d:['grocery']},
+  {n:'Grapes',c:'Fruit',d:['grocery']},{n:'Strawberries',c:'Fruit',s:'250g',d:['grocery']},
+  {n:'Blueberries',c:'Fruit',d:['grocery']},{n:'Avocado',c:'Fruit',d:['grocery']},
+  {n:'Lemon',c:'Fruit',d:['grocery']},{n:'Lime',c:'Fruit',d:['grocery']},{n:'Mango',c:'Fruit',d:['grocery']},
+  {n:'Watermelon',c:'Fruit',d:['grocery']},{n:'Pineapple',c:'Fruit',d:['grocery']},
+  {n:'Kiwi',c:'Fruit',d:['grocery']},{n:'Pear',c:'Fruit',d:['grocery']},{n:'Peach',c:'Fruit',d:['grocery']},
+  {n:'Dates',c:'Fruit',a:'date',d:['grocery']},{n:'Rockmelon',c:'Fruit',d:['grocery']},
+  {n:'Tomato',c:'Vegetables',d:['grocery']},{n:'Potato',c:'Vegetables',s:'2kg',d:['grocery']},
+  {n:'Onion',c:'Vegetables',d:['grocery']},{n:'Carrot',c:'Vegetables',s:'1kg',d:['grocery']},
+  {n:'Broccoli',c:'Vegetables',d:['grocery']},{n:'Cauliflower',c:'Vegetables',d:['grocery']},
+  {n:'Cucumber',c:'Vegetables',d:['grocery']},{n:'Capsicum',c:'Vegetables',a:'pepper',d:['grocery']},
+  {n:'Lettuce',c:'Vegetables',d:['grocery']},{n:'Baby spinach',c:'Vegetables',s:'120g',d:['grocery']},
+  {n:'Garlic',c:'Vegetables',d:['grocery']},{n:'Ginger',c:'Vegetables',d:['grocery']},
+  {n:'Mushroom',c:'Vegetables',d:['grocery']},{n:'Zucchini',c:'Vegetables',d:['grocery']},
+  {n:'Pumpkin',c:'Vegetables',d:['grocery']},{n:'Sweet potato',c:'Vegetables',d:['grocery']},
+  {n:'Celery',c:'Vegetables',d:['grocery']},{n:'Corn',c:'Vegetables',d:['grocery']},
+  {n:'Basil',c:'Herbs',a:'herb',d:['grocery']},{n:'Coriander',c:'Herbs',a:'herb cilantro',d:['grocery']},
+  {n:'Parsley',c:'Herbs',a:'herb',d:['grocery']},{n:'Mint',c:'Herbs',a:'herb',d:['grocery']},
+  {n:'Rosemary',c:'Herbs',a:'herb',d:['grocery']},{n:'Thyme',c:'Herbs',a:'herb',d:['grocery']},
+  {n:'Rice',c:'Pantry',s:'1kg',d:['grocery']},{n:'Basmati rice',c:'Pantry',s:'1kg',d:['grocery']},
+  {n:'Pasta',c:'Pantry',s:'500g',d:['grocery']},{n:'Spaghetti',c:'Pantry',s:'500g',d:['grocery']},
+  {n:'Noodles',c:'Pantry',d:['grocery']},{n:'Flour',c:'Pantry',s:'1kg',d:['grocery']},
+  {n:'Sugar',c:'Pantry',s:'1kg',d:['grocery']},{n:'Salt',c:'Pantry',d:['grocery']},
+  {n:'Olive oil',c:'Pantry',s:'500ml',a:'oil',d:['grocery']},{n:'Vegetable oil',c:'Pantry',a:'oil',d:['grocery']},
+  {n:'Cereal',c:'Pantry',d:['grocery']},{n:'Oats',c:'Pantry',d:['grocery']},{n:'Muesli',c:'Pantry',d:['grocery']},
+  {n:'Coffee',c:'Pantry',s:'200g',d:['grocery']},{n:'Tea bags',c:'Pantry',s:'100pk',d:['grocery']},
+  {n:'Honey',c:'Pantry',d:['grocery']},{n:'Peanut butter',c:'Pantry',d:['grocery']},{n:'Vegemite',c:'Pantry',d:['grocery']},
+  {n:'Canned tomatoes',c:'Pantry',a:'can tin',d:['grocery']},{n:'Baked beans',c:'Pantry',a:'can',d:['grocery']},
+  {n:'Chickpeas',c:'Pantry',a:'can bean',d:['grocery']},{n:'Lentils',c:'Pantry',d:['grocery']},
+  {n:'Tomato sauce',c:'Pantry',a:'sauce ketchup',d:['grocery']},{n:'Soy sauce',c:'Pantry',a:'sauce',d:['grocery']},
+  {n:'Pasta sauce',c:'Pantry',a:'sauce',d:['grocery']},{n:'Stock cubes',c:'Pantry',d:['grocery']},
+  {n:'Vinegar',c:'Pantry',d:['grocery']},{n:'Coconut milk',c:'Pantry',a:'can',d:['grocery']},{n:'Jam',c:'Pantry',d:['grocery']},
+  {n:'Frozen peas',c:'Frozen',a:'veg',d:['grocery']},{n:'Frozen chips',c:'Frozen',a:'fries',d:['grocery']},
+  {n:'Frozen vegetables',c:'Frozen',a:'veg',d:['grocery']},{n:'Ice cream',c:'Frozen',d:['grocery']},
+  {n:'Frozen berries',c:'Frozen',a:'fruit',d:['grocery']},{n:'Frozen pizza',c:'Frozen',d:['grocery']},
+  {n:'Chicken nuggets',c:'Frozen',d:['grocery']},
+  {n:'Water bottles',c:'Drinks',s:'24pk',a:'water',d:['grocery']},{n:'Sparkling water',c:'Drinks',d:['grocery']},
+  {n:'Orange juice',c:'Drinks',s:'2L',a:'juice',d:['grocery']},{n:'Apple juice',c:'Drinks',a:'juice',d:['grocery']},
+  {n:'Soft drink',c:'Drinks',s:'1.25L',a:'cola soda',d:['grocery']},{n:'Cordial',c:'Drinks',d:['grocery']},
+  {n:'Energy drink',c:'Drinks',d:['grocery']},{n:'Sports drink',c:'Drinks',d:['grocery']},
+  {n:'Chocolate',c:'Snacks',d:['grocery']},{n:'Chips',c:'Snacks',a:'crisps',d:['grocery']},
+  {n:'Biscuits',c:'Snacks',a:'cookies',d:['grocery']},{n:'Crackers',c:'Snacks',d:['grocery']},
+  {n:'Muesli bars',c:'Snacks',s:'6pk',d:['grocery']},{n:'Nuts',c:'Snacks',d:['grocery']},
+  {n:'Popcorn',c:'Snacks',d:['grocery']},{n:'Lollies',c:'Snacks',a:'candy',d:['grocery']},
+  {n:'Toilet paper',c:'Cleaning',s:'12pk',d:['grocery','general']},{n:'Paper towel',c:'Cleaning',s:'4pk',d:['grocery','general']},
+  {n:'Tissues',c:'Cleaning',d:['grocery','general']},{n:'Dishwashing liquid',c:'Cleaning',a:'dish',d:['grocery','general']},
+  {n:'Dishwasher tablets',c:'Cleaning',d:['grocery','general']},{n:'Laundry detergent',c:'Cleaning',a:'washing',d:['grocery','general']},
+  {n:'Fabric softener',c:'Cleaning',d:['grocery','general']},{n:'Garbage bags',c:'Cleaning',a:'bin trash',d:['grocery','general']},
+  {n:'Surface spray',c:'Cleaning',a:'cleaner',d:['grocery','general']},{n:'Bleach',c:'Cleaning',d:['grocery','general']},
+  {n:'Sponges',c:'Cleaning',s:'4pk',d:['grocery','general']},{n:'Cling wrap',c:'Kitchen',a:'plastic',d:['grocery','general']},
+  {n:'Aluminium foil',c:'Kitchen',a:'foil',d:['grocery','general']},{n:'Baking paper',c:'Kitchen',d:['grocery','general']},
+  {n:'Zip lock bags',c:'Kitchen',d:['grocery','general']},
+  {n:'Nappies',c:'Baby',a:'diaper baby',d:['grocery','pharmacy','general']},{n:'Baby wipes',c:'Baby',a:'baby',d:['grocery','pharmacy','general']},
+  {n:'Baby formula',c:'Baby',a:'baby',d:['grocery','pharmacy']},{n:'Baby food',c:'Baby',a:'baby',d:['grocery','pharmacy']},
+  {n:'Baby bottles',c:'Baby',a:'baby',d:['pharmacy','general']},{n:'Dummies',c:'Baby',a:'baby pacifier',d:['pharmacy','general']},
+  {n:'Paracetamol',c:'Pharmacy',a:'panadol medicine',d:['pharmacy']},{n:'Ibuprofen',c:'Pharmacy',a:'nurofen medicine',d:['pharmacy']},
+  {n:'Cold and flu tablets',c:'Pharmacy',a:'medicine',d:['pharmacy']},{n:'Vitamins',c:'Pharmacy',a:'supplement',d:['pharmacy']},
+  {n:'Vitamin C',c:'Pharmacy',a:'supplement',d:['pharmacy']},{n:'Multivitamin',c:'Pharmacy',a:'supplement',d:['pharmacy']},
+  {n:'Band-aids',c:'Pharmacy',a:'bandaid first aid',d:['pharmacy']},{n:'Antiseptic',c:'Pharmacy',a:'first aid',d:['pharmacy']},
+  {n:'Hand sanitiser',c:'Pharmacy',d:['pharmacy']},{n:'Sunscreen',c:'Pharmacy',a:'skincare',d:['pharmacy']},
+  {n:'Moisturiser',c:'Bathroom',a:'skincare',d:['pharmacy']},{n:'Shampoo',c:'Bathroom',d:['pharmacy','general']},
+  {n:'Conditioner',c:'Bathroom',d:['pharmacy','general']},{n:'Body wash',c:'Bathroom',a:'soap',d:['pharmacy','general']},
+  {n:'Toothpaste',c:'Bathroom',d:['pharmacy','general']},{n:'Toothbrush',c:'Bathroom',d:['pharmacy','general']},
+  {n:'Deodorant',c:'Bathroom',d:['pharmacy','general']},{n:'Razors',c:'Bathroom',a:'razor shaving',d:['pharmacy','general']},
+  {n:'Cotton buds',c:'Bathroom',d:['pharmacy']},{n:'Face wash',c:'Bathroom',a:'skincare',d:['pharmacy']},
+  {n:'A4 paper',c:'Stationery',s:'500pk',a:'paper',d:['office']},{n:'Printer ink',c:'Stationery',a:'cartridge',d:['office']},
+  {n:'Pens',c:'Stationery',a:'pen',d:['office']},{n:'Pencils',c:'Stationery',d:['office']},
+  {n:'Highlighters',c:'Stationery',a:'marker',d:['office']},{n:'Markers',c:'Stationery',d:['office']},
+  {n:'Notebook',c:'Stationery',d:['office']},{n:'Sticky notes',c:'Stationery',a:'post it',d:['office']},
+  {n:'Folders',c:'Stationery',a:'folder',d:['office']},{n:'Binder',c:'Stationery',d:['office']},
+  {n:'Envelopes',c:'Stationery',d:['office']},{n:'Stapler',c:'Stationery',d:['office']},
+  {n:'Staples',c:'Stationery',d:['office']},{n:'Sticky tape',c:'Stationery',a:'tape',d:['office']},
+  {n:'Scissors',c:'Stationery',d:['office']},{n:'Glue stick',c:'Stationery',a:'glue',d:['office']},
+  {n:'Whiteboard marker',c:'Stationery',a:'marker',d:['office']},{n:'Calculator',c:'Stationery',d:['office']},
+  {n:'Labels',c:'Stationery',a:'label',d:['office']},
+  {n:'Screws',c:'Hardware',a:'screw',d:['hardware']},{n:'Nails',c:'Hardware',a:'nail',d:['hardware']},
+  {n:'Wall plugs',c:'Hardware',d:['hardware']},{n:'Drill bits',c:'Hardware',a:'drill',d:['hardware']},
+  {n:'Timber',c:'Hardware',a:'wood',d:['hardware']},{n:'Paint',c:'Hardware',d:['hardware']},
+  {n:'Paint brush',c:'Hardware',a:'brush',d:['hardware']},{n:'Paint roller',c:'Hardware',d:['hardware']},
+  {n:'Sandpaper',c:'Hardware',d:['hardware']},{n:'Duct tape',c:'Hardware',a:'tape',d:['hardware']},
+  {n:'Silicone',c:'Hardware',d:['hardware']},{n:'Cable ties',c:'Hardware',d:['hardware']},
+  {n:'Light bulb',c:'Hardware',a:'globe',d:['hardware','general']},{n:'Extension cord',c:'Hardware',d:['hardware']},
+  {n:'Hammer',c:'Hardware',a:'tool',d:['hardware']},{n:'Screwdriver',c:'Hardware',a:'tool',d:['hardware']},
+  {n:'Tape measure',c:'Hardware',a:'tool',d:['hardware']},{n:'Pliers',c:'Hardware',a:'tool',d:['hardware']},
+  {n:'Work gloves',c:'Hardware',a:'gloves',d:['hardware']},{n:'WD-40',c:'Hardware',a:'lubricant',d:['hardware']},
+  {n:'Potting mix',c:'Garden',a:'soil',d:['hardware']},{n:'Garden soil',c:'Garden',a:'soil',d:['hardware']},
+  {n:'Mulch',c:'Garden',d:['hardware']},{n:'Fertiliser',c:'Garden',d:['hardware']},
+  {n:'Plant pot',c:'Garden',a:'pot',d:['hardware']},{n:'Seeds',c:'Garden',a:'seed',d:['hardware']},
+  {n:'Seedlings',c:'Garden',a:'plant',d:['hardware']},{n:'Garden hose',c:'Garden',a:'hose',d:['hardware']},
+  {n:'USB cable',c:'Electronics',a:'cable',d:['electronics','office']},{n:'Phone charger',c:'Electronics',a:'charger',d:['electronics']},
+  {n:'HDMI cable',c:'Electronics',a:'cable',d:['electronics']},{n:'Headphones',c:'Electronics',d:['electronics']},
+  {n:'Earbuds',c:'Electronics',d:['electronics']},{n:'Power bank',c:'Electronics',d:['electronics']},
+  {n:'Batteries',c:'Electronics',s:'AA 8pk',a:'battery',d:['electronics','general','hardware']},
+  {n:'Mouse',c:'Electronics',d:['electronics','office']},{n:'Keyboard',c:'Electronics',d:['electronics','office']},
+  {n:'USB drive',c:'Electronics',a:'memory',d:['electronics','office']},{n:'Power board',c:'Electronics',a:'powerboard',d:['electronics']},
+  {n:'Towels',c:'Home',d:['general','home']},{n:'Bed sheets',c:'Home',a:'linen',d:['general','home']},
+  {n:'Pillow',c:'Home',d:['general','home']},{n:'Storage box',c:'Home',d:['general','home']},
+  {n:'Coat hangers',c:'Home',d:['general','home']},{n:'Kids toy',c:'General',a:'toy',d:['general']},
+  {n:'Socks',c:'General',a:'clothing',d:['general']},{n:'T-shirt',c:'General',a:'clothing',d:['general']},
+  {n:'Water bottle',c:'General',d:['general']},{n:'Umbrella',c:'General',d:['general']},
+  {n:'Cushion',c:'Home',d:['home']},{n:'Lamp',c:'Home',d:['home']},{n:'Rug',c:'Home',d:['home']},
+  {n:'Shelf',c:'Home',d:['home']},{n:'Picture frame',c:'Home',a:'frame',d:['home']},
+  {n:'Candles',c:'Home',d:['home']},{n:'Cutlery set',c:'Kitchen',d:['home']},
+  {n:'Plates',c:'Kitchen',d:['home']},{n:'Glasses',c:'Kitchen',d:['home']},{n:'Cooking pot',c:'Kitchen',a:'pot',d:['home']},
+  {n:'Dog food',c:'Pet',a:'pet',d:['pet']},{n:'Cat food',c:'Pet',a:'pet',d:['pet']},
+  {n:'Cat litter',c:'Pet',a:'litter',d:['pet']},{n:'Dog treats',c:'Pet',a:'pet',d:['pet']},
+  {n:'Pet shampoo',c:'Pet',a:'pet',d:['pet']},{n:'Dog toy',c:'Pet',a:'toy pet',d:['pet']},
+  {n:'Flea treatment',c:'Pet',a:'pet',d:['pet']},{n:'Fish food',c:'Pet',a:'pet',d:['pet']},
+  {n:'Bird seed',c:'Pet',a:'pet',d:['pet']},{n:'Puppy pads',c:'Pet',a:'pet',d:['pet']},
+  {n:'Pet bowls',c:'Pet',a:'bowl',d:['pet']}
+];
+const SHOP_CAT_BY_NAME=(()=>{const m={};SHOP_CATALOGUE.forEach(p=>{m[p.n.toLowerCase()]=p;});return m;})();
+function catalogueProdCat(name){ const p=SHOP_CAT_BY_NAME[String(name||'').trim().toLowerCase()]; return p?p.c:shopCatFor(name); }
+function catalogueSuggest(query,domain,limit){
+  const q=String(query||'').trim().toLowerCase();
+  if(q.length<2)return [];
+  limit=limit||10;
+  const inDom=(p)=> !domain||domain==='all'||(Array.isArray(p.d)&&p.d.includes(domain));
+  const base=SHOP_CATALOGUE.filter(inDom);
+  const hay=p=>(p.n+' '+(p.a||'')).toLowerCase();
+  const seen=new Set(), out=[];
+  const push=p=>{const k=p.n.toLowerCase(); if(!seen.has(k)){seen.add(k);out.push(p);}};
+  const cat=SHOP_CAT_KEYWORDS[q];
+  if(cat){
+    // A category keyword ("meat","dairy"...) means "show me this category" —
+    // it must not be truncated by the tight name-typeahead limit, or common
+    // staples get cut just because they sit later in catalogue insertion order.
+    base.filter(p=>p.c===cat).forEach(push);
+    return out.slice(0,Math.max(limit,20));
+  }
+  base.filter(p=>p.n.toLowerCase().startsWith(q)).forEach(push);
+  base.filter(p=>hay(p).includes(q)).forEach(push);
+  return out.slice(0,limit);
+}
+// ═══ end v151 catalogue data layer ═══
 // Item icon: specific product emoji if known, else the category emoji, else cart.
 function shopItemIcon(name){ const sp=shopIconFor(name); if(sp&&sp!=='🛒')return sp; const c=(typeof shopProdCat==='function')?shopProdCat(name):shopCatFor(name); return SHOP_CAT_EMOJI[c]||'🛒'; }
 function shopGrouped(){ return DB.meta.shopGrouped!==false; }  // default: grouped ON
@@ -2932,18 +3329,64 @@ function shopCreateFromBuiltin(key){
   const t=SHOP_TEMPLATES.find(x=>x.key===key); if(!t)return;
   const id=shopCreateList({name:t.name,icon:t.icon,color:t.color,template:key});
   const now=new Date().toISOString();
-  t.items.forEach(nm=>{const iid=uid();shopItemsMap()[iid]={id:iid,listId:id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:shopProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};});
+  t.items.forEach(nm=>{const iid=uid();shopItemsMap()[iid]={id:iid,listId:id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:catalogueProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};});
   saveDB(); activeShopListId=id; shopView='detail'; render(); window.scrollTo(0,0);
+}
+// Suggested Lists (Weekly/BBQ/Baby/Cleaning) must behave like Stores: open if it
+// already exists, else create it prefilled with starter items. No prompt, ever.
+function openBuiltinList(key){
+  const existing=shopListsAll().find(l=>l.template===key);
+  if(existing){ openShopList(existing.id); return; }
+  shopCreateFromBuiltin(key);
+}
+
+// A list's product domain: store lists use their store's domain; builtin
+// templates and custom lists get 'all' (generic catalogue) — matches the
+// already-approved architecture (Stores are domain-specific, Lists are not).
+function shopListDomain(l){ return (l&&l.template&&SHOP_STORE_DOMAIN[l.template])||'all'; }
+
+// Renders the live "Add Product" suggestion rows for the current query+domain.
+// Reuses the existing .shop-prow row styling (from the Add-Items sheet) so no
+// new CSS is introduced. Zero matches -> offer to add the typed text as-is.
+function shopSuggestRows(query,domain){
+  const q=(query||'').trim();
+  if(q.length<2)return '';
+  const list=catalogueSuggest(q,domain,8);
+  let html=list.map(p=>`<button type="button" class="shop-prow" data-cat-add="${esc(p.n)}">
+      <span class="shop-pthumb">${SHOP_CAT_EMOJI[p.c]||'🛒'}</span>
+      <span class="shop-pmain"><span class="shop-pname">${esc(p.n)}</span><span class="shop-pcat">${esc(p.c)}${p.s?' · '+esc(p.s):''}</span></span>
+      <span class="shop-padd">＋</span>
+    </button>`).join('');
+  const exact=list.some(p=>p.n.toLowerCase()===q.toLowerCase());
+  if(!exact){
+    html+=`<button type="button" class="shop-prow" data-cat-add-custom="${esc(q)}">
+      <span class="shop-pthumb">🛒</span>
+      <span class="shop-pmain"><span class="shop-pname">${L==='fa'?`افزودن «${esc(q)}» به‌عنوان آیتم`:`Add "${esc(q)}" as item`}</span></span>
+      <span class="shop-padd">＋</span>
+    </button>`;
+  }
+  return html;
+}
+// Adds one item to the given list from a catalogue match (accurate category
+// from the catalogue) or as free-text (category guessed via shopCatFor, same
+// fallback used everywhere else — no new guessing logic).
+function shopAddCatalogueItem(listId,name,fromCatalogue){
+  const l=shopListsMap()[listId]; if(!l)return;
+  const id=uid(), ts=new Date().toISOString();
+  const cat=fromCatalogue?fromCatalogue.c:shopCatFor(name);
+  shopItemsMap()[id]={id,listId,name,icon:shopItemIcon(name),qty:1,unit:'ea',category:cat,note:'',purchased:false,createdAt:ts,updatedAt:ts};
+  l.updatedAt=ts; saveDB();
 }
 
 function renderShopDetail(){
   const l=shopActiveList();
   if(!l){ shopView='home'; shopResetSelect(); return renderShopHome(); }
+  // The search field no longer filters the current list (that behaviour is
+  // removed per the Add-Product redesign) — it only drives catalogue lookup.
   const all=shopItemsFor(l.id);
-  const q=(shopSearch||'').trim().toLowerCase();
-  const shown=q?all.filter(it=>it.name.toLowerCase().includes(q)):all;
-  const remaining=shown.filter(it=>!it.purchased);
-  const purchased=shown.filter(it=>it.purchased);
+  const q=(shopSearch||'').trim();
+  const remaining=all.filter(it=>!it.purchased);
+  const purchased=all.filter(it=>it.purchased);
   const totalRem=all.filter(it=>!it.purchased).length, totalDone=all.filter(it=>it.purchased).length;
   const grouped=shopGrouped();
   const favs=shopFavsFor(l.id);
@@ -2979,8 +3422,16 @@ function renderShopDetail(){
     </div>
     <button class="shop-lmenu" data-shop-menu="${l.id}" style="width:40px;height:40px" aria-label="options">⋯</button>
   </div>
-  <div style="padding:4px 16px 8px">
-    <input class="finput" id="shop-search" placeholder="${L==='fa'?'جستجوی آیتم':'Search items'}" value="${esc(shopSearch||'')}" style="width:100%">
+  ${(()=>{ if(!l.template)return ''; const cnt=shopListsArchived().filter(x=>x.template===l.template).length; if(!cnt)return '';
+    return `<div class="sv-row" data-go-store-archive="${l.template}">
+      <div class="sv-icon"><div class="sv-icon-inner" style="background:var(--s3);color:var(--ink2)">🗄️</div></div>
+      <span class="sv-name">${L==='fa'?'آرشیو این فروشگاه':'Archived Trips'}</span>
+      <span class="sv-count">${cnt}</span>
+      <span class="sv-count" style="opacity:.6">›</span>
+    </div>`; })()}
+  <div style="padding:4px 16px 4px">
+    <input class="finput" id="shop-search" placeholder="${L==='fa'?'افزودن محصول...':'Add a product…'}" value="${esc(shopSearch||'')}" style="width:100%" autocomplete="off">
+    <div id="shop-suggest-box" class="shop-prows" style="margin-top:6px">${shopSuggestRows(q,shopListDomain(l))}</div>
   </div>
   <div class="shop-toolbar2">
     <button class="shop-mini" id="shop-view-toggle">${grouped?(L==='fa'?'نما: دسته':'View: Category'):(L==='fa'?'نما: ساده':'View: Simple')}</button>
@@ -2996,11 +3447,11 @@ function renderShopDetail(){
 
   if(!remaining.length&&!purchased.length){
     html+=`<div class="hub-ph" style="padding:36px 28px"><div class="hub-ph-ic" style="background:#22c55e18;color:#22c55e">🛒</div>
-      <div class="hub-ph-t">${q?(L==='fa'?'نتیجه‌ای نیست':'No matches'):(L==='fa'?'لیست خالی است':'Empty list')}</div>
-      <div class="hub-ph-d">${L==='fa'?'برای افزودن آیتم‌ها دکمه + را بزنید. می‌توانید چند مورد را خط‌به‌خط بچسبانید.':'Tap + to add items. You can paste many at once, one per line.'}</div></div>`;
+      <div class="hub-ph-t">${L==='fa'?'لیست خالی است':'Empty list'}</div>
+      <div class="hub-ph-d">${L==='fa'?'برای افزودن، بالا یک محصول را جستجو کنید یا دکمه + را بزنید.':'Search a product above, or tap + to add items.'}</div></div>`;
   }else{
     html+=`<div class="shop-items">`;
-    if(grouped && !q){
+    if(grouped){
       const byCat={};
       remaining.forEach(it=>{const c=(it.category&&SHOP_CAT_EMOJI[it.category])?it.category:'Other';(byCat[c]=byCat[c]||[]).push(it);});
       SHOP_CAT_ORDER.forEach(c=>{
@@ -3078,39 +3529,34 @@ function openNewShopSheet(){
 function openStorePicker(){
   openSheet(`<h3>${L==='fa'?'انتخاب فروشگاه':'Choose a store'}</h3>
     <div class="shop-store-grid">${SHOP_STORES.map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}</div>`);
-  document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>pickStoreOrTemplate(el.dataset.pickStore,'store'));
+  document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>openStore(el.dataset.pickStore));
 }
 function openTemplatePicker(){
   openSheet(`<h3>${L==='fa'?'شروع از الگو':'Start from a template'}</h3>
     <div class="shop-store-grid">${SHOP_TEMPLATES.map(t=>`<div class="shop-store" data-pick-tpl="${t.key}"><div class="shop-store-ic" style="background:${t.color}18;color:${t.color}">${t.icon}</div><div class="shop-store-n">${esc(t.name)}</div></div>`).join('')}</div>`);
-  document.querySelectorAll('[data-pick-tpl]').forEach(el=>el.onclick=()=>pickStoreOrTemplate(el.dataset.pickTpl,'builtin'));
+  document.querySelectorAll('[data-pick-tpl]').forEach(el=>el.onclick=()=>openBuiltinList(el.dataset.pickTpl));
 }
 function openShopList(id){
   activeShopListId=id; shopView='detail'; shopSearch=''; shopResetSelect();
   render(); window.scrollTo(0,0);
 }
-// Duplicate guard: never silently create a second list for the same store/template.
-function pickStoreOrTemplate(key,kind){
-  const existing=shopListsAll().find(l=>l.template===key);
-  const createNew=()=>{
-    if(kind==='store'){ const s=shopStore(key); closeSheet(); openCreateShopList({name:s.name,icon:s.icon,color:s.color,template:key}); }
-    else { closeSheet(); shopCreateFromBuiltin(key); }
-  };
-  if(existing){
-    openSheet(`<h3>${esc(existing.name)}</h3>
-      <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'یک لیست برای این مورد از قبل هست. باز شود یا یکی دیگر ساخته شود؟':'A list for this already exists. Open it, or create another?'}</p>
-      <div class="btn-col">
-        <button class="btn btn-primary" id="dup-open">${L==='fa'?'باز کردن لیست موجود':'Open existing list'}</button>
-        <button class="btn btn-ghost" id="dup-new">${L==='fa'?'ساختن یکی دیگر':'Create another'}</button>
-        <button class="btn btn-ghost" id="dup-cancel">${tr('cancel')}</button>
-      </div>`);
-    document.getElementById('dup-cancel').onclick=()=>closeSheet();
-    document.getElementById('dup-open').onclick=()=>{ closeSheet(); openShopList(existing.id); };
-    document.getElementById('dup-new').onclick=createNew;
-  }else{
-    createNew();
+// A Store is a permanent context (defined in SHOP_STORES, never archived/deleted).
+// It owns exactly one ACTIVE list. Opening a store is deterministic: reuse the
+// active list if one exists, otherwise create it. No prompt, no duplicates —
+// this replaces the old prompt-based duplicate flow (removed) for stores.
+// now only used for the optional builtin List templates, not Stores).
+function openStore(storeKey){
+  const s=shopStore(storeKey); if(!s)return;
+  let list=shopListsAll().find(l=>l.template===storeKey);
+  if(!list){
+    const id=shopCreateList({name:s.name,icon:s.icon,color:s.color,template:storeKey});
+    list=shopListsMap()[id];
   }
+  openShopList(list.id);
 }
+// Superseded by openStore() and openBuiltinList() above — both stores and
+// builtin templates now open-if-exists/create-if-not deterministically.
+
 
 function openCreateShopList(prefill){
   prefill=prefill||{};
@@ -3157,7 +3603,7 @@ function openShopListMenu(id){
     <div class="btn-col">
       <button class="btn btn-ghost" id="sm-rename">${L==='fa'?'ویرایش':'Edit'}</button>
       <button class="btn btn-ghost" id="sm-duplicate">${L==='fa'?'کپی کردن':'Duplicate'}</button>
-      <button class="btn btn-ghost" id="sm-archive">${L==='fa'?'بایگانی':'Archive'}</button>
+      <button class="btn btn-ghost" id="sm-archive">${(l.template&&SHOP_STORE_DOMAIN[l.template])?(L==='fa'?'اتمام خرید':'Complete Shopping Trip'):(L==='fa'?'آرشیو لیست':'Archive List')}</button>
       <button class="btn btn-danger" id="sm-delete">${L==='fa'?'حذف':'Delete'}</button>
       <button class="btn btn-ghost" id="sm-close">${tr('cancel')}</button>
     </div>`);
@@ -3191,7 +3637,7 @@ function openShopListMenu(id){
     closeSheet();
     if(shopView==='detail'){shopView='home';activeShopListId=null;}
     render();window.scrollTo(0,0);
-    toast(L==='fa'?'بایگانی شد':'Archived');
+    toast((l.template&&SHOP_STORE_DOMAIN[l.template])?(L==='fa'?'خرید تمام شد':'Trip completed'):(L==='fa'?'بایگانی شد':'Archived'));
   };
   document.getElementById('sm-delete').onclick=()=>{
     openSheet(`
@@ -3322,7 +3768,7 @@ function shopProductSuggest(query,template){
 function openAddShopItems(){
   const l=shopActiveList(); if(!l)return;
   const rows=(q)=>{
-    const list=shopProductSuggest(q,l.template);
+    const list=catalogueSuggest(q,shopListDomain(l),8);
     if(!list.length)return '';
     return list.map(p=>{
       const em=SHOP_CAT_EMOJI[p.c]||'🛒';
@@ -3372,7 +3818,7 @@ function openAddShopItems(){
     const now=new Date().toISOString();
     names.forEach(nm=>{
       const id=uid();
-      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:shopProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
+      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:catalogueProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
     });
     _shopAddDraft='';
     l.updatedAt=now;saveDB();closeSheet();render();window.scrollTo(0,0);
@@ -4209,11 +4655,36 @@ function bindScreen(){
   if(shopNewEmpty)shopNewEmpty.onclick=()=>openNewShopSheet();
   const shopBack=document.getElementById('shop-back');
   if(shopBack)shopBack.onclick=()=>{shopView='home';activeShopListId=null;shopResetSelect();render();window.scrollTo(0,0);};
+  // Global Archived Trips (from Shopping Home) — no store scope, no active list.
+  document.querySelectorAll('[data-go-archive]').forEach(el=>el.onclick=()=>openArchivedTrips(null));
+  // Per-store Archived Trips (from within a store's detail) — activeShopListId
+  // stays set, so Back returns to that same store, not Shopping Home.
+  document.querySelectorAll('[data-go-store-archive]').forEach(el=>el.onclick=()=>openArchivedTrips(el.dataset.goStoreArchive));
+  const archiveBack=document.getElementById('archive-back');
+  // Back target depends on how we got here: activeShopListId is only ever set
+  // while inside a store/list detail, so its presence tells us where to return.
+  if(archiveBack)archiveBack.onclick=()=>{shopView=activeShopListId?'detail':'home';render();window.scrollTo(0,0);};
+  // Tapping a row opens it read-only; Restore/Delete inside that row must not
+  // also trigger the row-open (stopPropagation), matching the existing
+  // data-shop-list / data-shop-menu pattern used on Shopping Home.
+  document.querySelectorAll('[data-arch-view]').forEach(el=>el.onclick=()=>{
+    shopArchiveViewId=el.dataset.archView; shopView='archiveView'; render(); window.scrollTo(0,0);
+  });
+  // Read-only archived-trip view actions.
+  const archViewBack=document.getElementById('archview-back');
+  if(archViewBack)archViewBack.onclick=()=>{shopArchiveViewId=null;shopView='archive';render();window.scrollTo(0,0);};
+  const archViewCancel=document.getElementById('archview-cancel');
+  if(archViewCancel)archViewCancel.onclick=()=>{shopArchiveViewId=null;shopView='archive';render();window.scrollTo(0,0);};
+  const archViewRestore=document.getElementById('archview-restore');
+  if(archViewRestore)archViewRestore.onclick=()=>shopRestoreList(shopArchiveViewId);
+  const archViewDelete=document.getElementById('archview-delete');
+  if(archViewDelete)archViewDelete.onclick=()=>shopPermanentDelete(shopArchiveViewId);
   document.querySelectorAll('[data-shop-list]').forEach(el=>el.onclick=(e)=>{
     if(e.target.closest('[data-shop-menu]'))return;
     activeShopListId=el.dataset.shopList;shopView='detail';shopSearch='';shopResetSelect();render();window.scrollTo(0,0);});
   document.querySelectorAll('[data-shop-template]').forEach(el=>el.onclick=()=>openShopFromTemplate(el.dataset.shopTemplate));
   document.querySelectorAll('[data-shop-custom]').forEach(el=>el.onclick=()=>openCreateShopList());
+  document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>openStore(el.dataset.pickStore));
   document.querySelectorAll('[data-shop-menu]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();openShopListMenu(el.dataset.shopMenu);});
   document.querySelectorAll('[data-shop-toggle]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();toggleShopItem(el.dataset.shopToggle);});
   document.querySelectorAll('[data-shop-item]').forEach(el=>el.onclick=(e)=>{
@@ -4231,7 +4702,29 @@ function bindScreen(){
   const saM=document.getElementById('sa-move'); if(saM)saM.onclick=()=>shopBulkMove();
   const saD=document.getElementById('sa-delete'); if(saD)saD.onclick=()=>shopBulkDelete();
   const shopSearchEl=document.getElementById('shop-search');
-  if(shopSearchEl)shopSearchEl.oninput=()=>{shopSearch=shopSearchEl.value;const items=document.querySelector('.shop-items');/* re-render for filter */ render();const f=document.getElementById('shop-search');if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}};
+  const shopSuggestBox=document.getElementById('shop-suggest-box');
+  if(shopSearchEl&&shopSuggestBox){
+    // Live "Add Product" suggestions: only this box's innerHTML updates while
+    // typing — the field itself is never re-rendered, so focus/cursor survive.
+    shopSearchEl.oninput=()=>{
+      shopSearch=shopSearchEl.value;
+      const l=shopActiveList();
+      shopSuggestBox.innerHTML=l?shopSuggestRows(shopSearch,shopListDomain(l)):'';
+    };
+    shopSuggestBox.onclick=(e)=>{
+      const row=e.target.closest('[data-cat-add],[data-cat-add-custom]'); if(!row)return;
+      const l=shopActiveList(); if(!l)return;
+      if(row.dataset.catAdd){
+        const p=SHOP_CATALOGUE.find(x=>x.n===row.dataset.catAdd);
+        shopAddCatalogueItem(l.id,row.dataset.catAdd,p||null);
+      }else{
+        shopAddCatalogueItem(l.id,row.dataset.catAddCustom,null);
+      }
+      shopSearch='';
+      render(); window.scrollTo(0,0);
+      const f=document.getElementById('shop-search'); if(f)f.focus();
+    };
+  }
   // Account menu (tap name/avatar)
   const hubAcct=document.getElementById('hub-account');
   if(hubAcct)hubAcct.onclick=(e)=>{
@@ -5581,6 +6074,8 @@ function appDepth(){
   if(on('task-detail')) d++;
   if(on('search-screen')) d++;
   if(screen==='module' && currentModule==='shopping' && shopView==='detail') d+=(shopSelectMode?4:3);
+  else if(screen==='module' && currentModule==='shopping' && shopView==='archiveView') d+=(activeShopListId?5:4);
+  else if(screen==='module' && currentModule==='shopping' && shopView==='archive') d+=(activeShopListId?4:3);
   else if(screen==='module') d+=2;
   else if(screen==='lifehub') d+=1;
   else if(tasksView==='detail' || (screen && screen!=='lists')) d++;
@@ -5617,6 +6112,13 @@ function onPop(){
     closeTaskDetail();render();
   } else if(on('search-screen')){
     closeSearch();
+  } else if(screen==='module' && currentModule==='shopping' && shopView==='archiveView'){
+    // Read-only archived-trip view → back to the Archived Trips list.
+    shopArchiveViewId=null;shopView='archive';render();
+  } else if(screen==='module' && currentModule==='shopping' && shopView==='archive'){
+    // Archived Trips → back to wherever it was opened from: a store's detail
+    // (activeShopListId still set) or Shopping home (global entry).
+    shopView=activeShopListId?'detail':'home';render();
   } else if(screen==='module' && currentModule==='shopping' && shopView==='detail' && shopSelectMode){
     // Exit multi-select first.
     shopResetSelect();render();
