@@ -263,6 +263,8 @@ body.light .trow-title{color:var(--ink)}
 .shop-toolbar{display:flex;gap:8px;padding:0 16px 8px}
 .shop-toolbar2{display:flex;justify-content:flex-end;gap:14px;padding:0 18px 8px}
 .shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
+.shop-tripdetails{padding:4px 16px 10px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--b1);margin-bottom:4px}
+.shop-tripdetails .fld label{font-size:11px;color:var(--ink3);display:block;margin-bottom:3px}
 .shop-mini:active{opacity:.6}
 .shop-mini.on{color:var(--brand,#6e56f8)}
 .shop-tbtn{flex:1;font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 10px;color:var(--ink);cursor:pointer}
@@ -922,7 +924,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v153';
+const APP_VERSION='v154';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3417,11 +3419,24 @@ function renderShopDetail(){
     <div style="flex:1;min-width:0">
       <div style="font-size:24px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.name)}</div>
       <div style="font-size:12px;color:var(--ink2)">${totalRem} ${L==='fa'?'باقی‌مانده':'remaining'} · ${totalDone} ${L==='fa'?'خریداری‌شده':'purchased'}</div>
-      ${l.address?`<div class="shop-laddr" data-shop-maps="${l.id}" style="cursor:pointer">📍 ${esc(l.address)}</div>`:''}
-      ${(l.tripDate||l.tripTime)?`<div class="shop-laddr">🗓️ ${esc(l.tripDate||'')}${l.tripDate&&l.tripTime?' · ':''}${esc(l.tripTime||'')}</div>`:''}
-      ${l.tripNotes?`<div class="shop-laddr">📝 ${esc(l.tripNotes)}</div>`:''}
     </div>
     <button class="shop-lmenu" data-shop-menu="${l.id}" style="width:40px;height:40px" aria-label="options">⋯</button>
+  </div>
+  <div class="shop-tripdetails">
+    <div class="fld"><label>${L==='fa'?'فروشگاه / مکان':'Store / location'}</label>
+      <input class="finput" id="trip-loc" value="${esc(l.address||'')}" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}"></div>
+    ${l.address?`<div class="shop-laddr" data-shop-maps="${l.id}" style="cursor:pointer">📍 ${L==='fa'?'باز کردن در نقشه':'Open in Maps'}</div>`:''}
+    <div style="display:flex;gap:10px">
+      <div class="fld" style="flex:1"><label>${L==='fa'?'تاریخ':'Date'}</label>
+        <input class="finput" id="trip-date" type="date" value="${esc(l.tripDate||'')}"></div>
+      <div class="fld" style="flex:1"><label>${L==='fa'?'ساعت':'Time'}</label>
+        <input class="finput" id="trip-time" type="time" value="${esc(l.tripTime||'')}"></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'یادداشت خرید':'Trip notes'}</label>
+      <input class="finput" id="trip-notes" value="${esc(l.tripNotes||'')}" placeholder="${L==='fa'?'اختیاری':'Optional'}"></div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:var(--ink2);padding:4px 2px">
+      <input type="checkbox" id="trip-reminder" ${l.reminder?'checked':''}> ${L==='fa'?'یادآوری':'Reminder'}
+    </label>
   </div>
   ${(()=>{ if(!l.template)return ''; const cnt=shopListsArchived().filter(x=>x.template===l.template).length; if(!cnt)return '';
     return `<div class="sv-row" data-go-store-archive="${l.template}">
@@ -3611,40 +3626,19 @@ function openShopListMenu(id){
   document.getElementById('sm-close').onclick=()=>closeSheet();
   document.getElementById('sm-duplicate').onclick=()=>{closeSheet();shopDuplicateList(id);};
   document.getElementById('sm-rename').onclick=()=>{
-    let picked={address:l.address||'',lat:(l.lat!=null?l.lat:null),lon:(l.lon!=null?l.lon:null)};
     openSheet(`
-      <h3>${L==='fa'?'ویرایش لیست':'Edit list'}</h3>
+      <h3>${L==='fa'?'ویرایش نام':'Edit name'}</h3>
       <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
         <input class="finput" id="se-name" value="${esc(l.name)}" autofocus></div>
-      <div class="fld"><label>${L==='fa'?'فروشگاه / مکان':'Store / location'}</label>
-        <input class="finput" id="se-loc" value="${esc(l.address||'')}" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}"></div>
-      <div class="fld" style="display:flex;gap:10px">
-        <div style="flex:1"><label>${L==='fa'?'تاریخ':'Date'}</label>
-          <input class="finput" id="se-date" type="date" value="${esc(l.tripDate||'')}"></div>
-        <div style="flex:1"><label>${L==='fa'?'ساعت':'Time'}</label>
-          <input class="finput" id="se-time" type="time" value="${esc(l.tripTime||'')}"></div>
-      </div>
-      <div class="fld"><label>${L==='fa'?'یادداشت خرید':'Trip notes'}</label>
-        <input class="finput" id="se-notes" value="${esc(l.tripNotes||'')}" placeholder="${L==='fa'?'اختیاری':'Optional'}"></div>
-      <div class="fld"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="se-reminder" ${l.reminder?'checked':''}> ${L==='fa'?'یادآوری':'Reminder'}
-      </label></div>
       <div class="btn-row">
         <button class="btn btn-ghost" id="se-cancel">${tr('cancel')}</button>
         <button class="btn btn-primary" id="se-save">${tr('save')}</button>
       </div>`);
     setTimeout(()=>document.getElementById('se-name')?.focus(),100);
-    attachLocationAutocomplete(document.getElementById('se-loc'),(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon};});
     document.getElementById('se-cancel').onclick=()=>closeSheet();
     document.getElementById('se-save').onclick=()=>{
       const nn=(document.getElementById('se-name').value||'').trim();
       if(nn)l.name=nn;
-      const loc=shopResolveLoc(document.getElementById('se-loc').value,picked);
-      l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon;
-      l.tripDate=document.getElementById('se-date').value||'';
-      l.tripTime=document.getElementById('se-time').value||'';
-      l.tripNotes=(document.getElementById('se-notes').value||'').trim();
-      l.reminder=!!document.getElementById('se-reminder').checked; // inert: stored only, no notification/Tasks wiring
       l.updatedAt=new Date().toISOString();saveDB();closeSheet();render();
     };
   };
@@ -4727,6 +4721,19 @@ function bindScreen(){
   const saP=document.getElementById('sa-purchased'); if(saP)saP.onclick=()=>shopBulkPurchased();
   const saM=document.getElementById('sa-move'); if(saM)saM.onclick=()=>shopBulkMove();
   const saD=document.getElementById('sa-delete'); if(saD)saD.onclick=()=>shopBulkDelete();
+  (()=>{
+    const l=shopActiveList(); if(!l||shopView!=='detail')return;
+    const dEl=document.getElementById('trip-date'), tEl=document.getElementById('trip-time'),
+          nEl=document.getElementById('trip-notes'), rEl=document.getElementById('trip-reminder'),
+          locEl=document.getElementById('trip-loc');
+    let picked=null;
+    if(locEl) attachLocationAutocomplete(locEl,(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon}; const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); saveDB(); render();});
+    if(locEl) locEl.onblur=()=>{ const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); saveDB(); };
+    if(dEl) dEl.onchange=()=>{ l.tripDate=dEl.value||''; l.updatedAt=new Date().toISOString(); saveDB(); };
+    if(tEl) tEl.onchange=()=>{ l.tripTime=tEl.value||''; l.updatedAt=new Date().toISOString(); saveDB(); };
+    if(nEl) nEl.onblur=()=>{ l.tripNotes=(nEl.value||'').trim(); l.updatedAt=new Date().toISOString(); saveDB(); };
+    if(rEl) rEl.onchange=()=>{ l.reminder=!!rEl.checked; l.updatedAt=new Date().toISOString(); saveDB(); };
+  })();
   const shopSearchEl=document.getElementById('shop-search');
   const shopSuggestBox=document.getElementById('shop-suggest-box');
   if(shopSearchEl&&shopSuggestBox){
