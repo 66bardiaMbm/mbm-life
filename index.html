@@ -936,7 +936,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v157';
+const APP_VERSION='v159';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2994,6 +2994,7 @@ function renderShopArchiveView(){
     html+=`</div>`;
   }
   html+=`<div class="shop-actionbar">
+    ${shopIsStoreList(l)?`<button class="shop-act" id="archview-reuse">${L==='fa'?'استفاده از این لیست':'Reuse This List'}</button>`:''}
     <button class="shop-act danger" id="archview-delete">${L==='fa'?'حذف':'Delete'}</button>
     <button class="shop-act" id="archview-cancel">${tr('cancel')}</button>
   </div>`;
@@ -3527,6 +3528,7 @@ function openShopStoreEntry(s,lastList){
     <div class="btn-col">
       <button class="btn btn-primary" id="ss-reuse">${L==='fa'?'استفاده از لیست قبلی':'Reuse Last List'}</button>
       <button class="btn btn-ghost" id="ss-new">${L==='fa'?'لیست خالی جدید':'New Empty List'}</button>
+      ${lastList?`<button class="btn btn-ghost" id="ss-history">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'}</button>`:''}
       <button class="btn btn-ghost" id="ss-cancel">${tr('cancel')}</button>
     </div>`);
   document.getElementById('ss-cancel').onclick=()=>closeSheet();
@@ -3540,6 +3542,8 @@ function openShopStoreEntry(s,lastList){
     const id=shopNewEmptyList(s);
     openShopList(id);
   };
+  const ssHistory=document.getElementById('ss-history');
+  if(ssHistory)ssHistory.onclick=()=>{ closeSheet(); openArchivedTrips(s.key); };
 }
 // ── Custom Stores: permanent, same lifecycle as built-in stores ──
 function openCreateCustomStore(){
@@ -4773,6 +4777,18 @@ function bindScreen(){
   if(archViewCancel)archViewCancel.onclick=()=>{shopArchiveViewId=null;shopView='archive';render();window.scrollTo(0,0);};
   const archViewDelete=document.getElementById('archview-delete');
   if(archViewDelete)archViewDelete.onclick=()=>shopPermanentDelete(shopArchiveViewId);
+  const archViewReuse=document.getElementById('archview-reuse');
+  if(archViewReuse)archViewReuse.onclick=()=>{
+    const l=shopListsMap()[shopArchiveViewId]; if(!l)return;
+    const s=shopStore(l.template); if(!s)return;
+    const current=shopListsAll().find(x=>x.template===l.template);
+    if(current){
+      toast(L==='fa'?'یک لیست فعال از این فروشگاه از قبل هست. اول آن را کامل کن.':'A Current List for this store already exists. Complete it first.');
+      return;
+    }
+    const id=shopReuseLastList(s,l);
+    shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
+  };
   document.querySelectorAll('[data-shop-list]').forEach(el=>el.onclick=(e)=>{
     if(e.target.closest('[data-shop-menu]'))return;
     activeShopListId=el.dataset.shopList;shopView='detail';shopSearch='';shopResetSelect();render();window.scrollTo(0,0);});
