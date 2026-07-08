@@ -276,6 +276,8 @@ body.light .trow-title{color:var(--ink)}
 .shop-icopt:active{background:var(--s3)}
 .shop-items{display:flex;flex-direction:column;padding:2px 12px 24px}
 .shop-item{display:flex;align-items:center;gap:12px;padding:11px 8px;border-bottom:1px solid var(--b1);cursor:pointer}
+.shop-item-del{flex:none;width:32px;height:32px;border-radius:8px;border:none;background:none;color:var(--ink3);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.shop-item-del:active{background:var(--s3);color:var(--danger)}
 .shop-item:active{background:var(--s2)}
 .shop-check{width:26px;height:26px;flex:none;border-radius:50%;border:2px solid var(--b2,#3a3b46);background:none;color:#fff;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .shop-check.on{background:#22c55e;border-color:#22c55e}
@@ -312,6 +314,14 @@ body.light .trow-title{color:var(--ink)}
 .shop-act-complete{background:var(--brandg,var(--brand));color:#fff;border:none;padding:12px;font-size:14px}
 .shop-actioncount{font-size:13px;font-weight:700;color:var(--ink2);margin-right:auto}
 .shop-act{font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 11px;color:var(--ink);cursor:pointer}
+.shop-actionbar2{gap:12px}
+.shop-act2-row{display:flex;flex:1;justify-content:space-around}
+.shop-act2{display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;color:var(--ink);cursor:pointer;padding:4px 10px;flex:1}
+.shop-act2-ic{font-size:20px;line-height:1}
+.shop-act2-lbl{font-size:11px;color:var(--ink2);font-weight:600}
+.shop-act2.danger .shop-act2-ic,.shop-act2.danger .shop-act2-lbl{color:var(--danger)}
+.shop-act2:disabled{opacity:.4;cursor:default}
+.shop-act2:active:not(:disabled){opacity:.7}
 .shop-act:disabled{opacity:.4}
 .shop-act.danger{color:#ef4444;border-color:#ef444455}
 .shop-prows{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;margin:2px 0 4px}
@@ -958,7 +968,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v165';
+const APP_VERSION='v167';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3353,6 +3363,14 @@ function shopToggleSelectMode(){ shopSelectMode=!shopSelectMode; shopSel=new Set
 function shopToggleSel(id){ if(shopSel.has(id))shopSel.delete(id); else shopSel.add(id); render(); }
 function shopBulkPurchased(){ const now=new Date().toISOString(); shopSel.forEach(id=>{const it=shopItemsMap()[id]; if(it){it.purchased=true;it.updatedAt=now;}}); saveDB(); shopResetSelect(); render(); }
 function shopBulkDelete(){ shopSel.forEach(id=>{delete shopItemsMap()[id];}); saveDB(); shopResetSelect(); render(); toast(L==='fa'?'حذف شد':'Deleted'); }
+// Quick single-item delete straight from the row's trash icon — no need to
+// open the item editor or enter multi-select mode just to remove one thing.
+function shopDeleteSingleItem(id){
+  const it=shopItemsMap()[id]; if(!it)return;
+  delete shopItemsMap()[id];
+  saveDB(); render();
+  toast(L==='fa'?'حذف شد':'Deleted');
+}
 function shopBulkMove(){
   if(!shopSel.size)return;
   const targets=shopListsAll().filter(l=>l.id!==activeShopListId);
@@ -3477,6 +3495,7 @@ function renderShopDetail(){
       <button class="shop-check ${it.purchased?'on':''}" data-shop-toggle="${it.id}" aria-label="purchased">${it.purchased?'✓':''}</button>
       <div class="shop-ic">${esc(it.icon||shopItemIcon(it.name))}</div>
       <div class="shop-main"><div class="shop-name ${it.purchased?'done':''}">${esc(it.name)} ${favStar}</div>${meta}</div>
+      <button class="shop-item-del" data-shop-item-del="${it.id}" aria-label="${L==='fa'?'حذف':'Delete'}">🗑</button>
     </div>`;
   };
 
@@ -3550,11 +3569,16 @@ function renderShopDetail(){
   // Multi-select action bar
   if(shopSelectMode){
     const n=shopSel.size;
-    html+=`<div class="shop-actionbar">
+    const actBtn=(id,icon,label,danger)=>`<button class="shop-act2${danger?' danger':''}" id="${id}" ${n?'':'disabled'}>
+      <span class="shop-act2-ic">${icon}</span><span class="shop-act2-lbl">${label}</span>
+    </button>`;
+    html+=`<div class="shop-actionbar shop-actionbar2">
       <div class="shop-actioncount">${n} ${L==='fa'?'انتخاب‌شده':'selected'}</div>
-      <button class="shop-act" id="sa-purchased" ${n?'':'disabled'}>✓ ${L==='fa'?'خریداری‌شده':'Purchased'}</button>
-      <button class="shop-act" id="sa-move" ${n?'':'disabled'}>➜ ${L==='fa'?'انتقال':'Move'}</button>
-      <button class="shop-act danger" id="sa-delete" ${n?'':'disabled'}>🗑 ${L==='fa'?'حذف':'Delete'}</button>
+      <div class="shop-act2-row">
+        ${actBtn('sa-purchased','✓',L==='fa'?'خریداری‌شده':'Purchased')}
+        ${actBtn('sa-move','➜',L==='fa'?'انتقال':'Move')}
+        ${actBtn('sa-delete','🗑',L==='fa'?'حذف':'Delete',true)}
+      </div>
     </div>`;
   }else{
     // Always-visible, unmistakable way to finish this list — not buried in
@@ -3609,8 +3633,10 @@ function shopReuseLastList(s,lastList){
 function openShopStoreEntry(s,lastList){
   openSheet(`<h3>${esc(s.name)}</h3>
     <div class="btn-col">
-      <button class="btn btn-primary" id="ss-reuse">${L==='fa'?'استفاده از لیست قبلی':'Reuse Last List'}</button>
-      <button class="btn btn-ghost" id="ss-new">${L==='fa'?'لیست خالی جدید':'New Empty List'}</button>
+      <button class="btn btn-primary" id="ss-new">${L==='fa'?'لیست خالی جدید':'New Empty List'}</button>
+      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?'شروع کاملاً خالی':'Starts completely empty'}</div>
+      <button class="btn btn-ghost" id="ss-reuse">${L==='fa'?'استفاده از لیست قبلی':'Reuse Last List'}</button>
+      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?'همان آیتم‌های قبلی را کپی می‌کند':'Copies the same items from last time'}</div>
       ${lastList?`<button class="btn btn-ghost" id="ss-history">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'}</button>`:''}
       <button class="btn btn-ghost" id="ss-cancel">${tr('cancel')}</button>
     </div>`);
@@ -4845,8 +4871,9 @@ function bindScreen(){
   document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>openStore(el.dataset.pickStore));
   document.querySelectorAll('[data-shop-menu]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();openShopListMenu(el.dataset.shopMenu);});
   document.querySelectorAll('[data-shop-toggle]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();toggleShopItem(el.dataset.shopToggle);});
+  document.querySelectorAll('[data-shop-item-del]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();shopDeleteSingleItem(el.dataset.shopItemDel);});
   document.querySelectorAll('[data-shop-item]').forEach(el=>el.onclick=(e)=>{
-    if(e.target.closest('[data-shop-toggle]'))return;
+    if(e.target.closest('[data-shop-toggle]')||e.target.closest('[data-shop-item-del]'))return;
     openShopItemEditor(el.dataset.shopItem);});
   document.querySelectorAll('[data-shop-maps]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();shopOpenMaps(el.dataset.shopMaps);});
   document.querySelectorAll('[data-shop-builtin]').forEach(el=>el.onclick=()=>shopCreateFromBuiltin(el.dataset.shopBuiltin));
