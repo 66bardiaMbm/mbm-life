@@ -958,7 +958,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v162';
+const APP_VERSION='v163';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1347,9 +1347,28 @@ function _renderInner(){
   updateFab();
 }
 let _resizeT=null;
+let _lastWideLayout=isWideLayout();
 window.addEventListener('resize',()=>{
   clearTimeout(_resizeT);
-  _resizeT=setTimeout(()=>{ if(document.getElementById('app')&&document.getElementById('app').style.display!=='none') render(); },120);
+  _resizeT=setTimeout(()=>{
+    const appEl=document.getElementById('app');
+    if(!appEl||appEl.style.display==='none')return;
+    // Mobile browsers fire 'resize' when the on-screen keyboard opens/closes
+    // (the visual viewport HEIGHT shrinks) — a full render() at that moment
+    // would destroy and rebuild the very input the person is typing in,
+    // dropping focus and closing the keyboard mid-type. The sidebar/content
+    // split only depends on WIDTH, so only re-render when the width
+    // breakpoint actually changed; never on a height-only (keyboard) resize.
+    const nowWide=isWideLayout();
+    if(nowWide===_lastWideLayout)return;
+    _lastWideLayout=nowWide;
+    // Also never re-render while a text field is actively focused, even if
+    // width did change (e.g. a foldable unfolding mid-type) — better to keep
+    // typing uninterrupted than to snap the layout instantly.
+    const ae=document.activeElement;
+    if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'))return;
+    render();
+  },120);
 });
 // Central FAB control. The (+) is Task/Appointment-specific on the main screens.
 // On Life Hub it is hidden. On a module page it appears ONLY if that module is
@@ -3472,7 +3491,8 @@ function renderShopDetail(){
   </div>
   <div class="shop-tripdetails">
     <div class="fld"><label>${L==='fa'?'فروشگاه / مکان':'Store / location'}</label>
-      <div class="shop-loc-compact" id="trip-loc-compact">${l.address?('📍 '+esc(l.address)):(L==='fa'?'افزودن مکان':'Add location')} <span style="opacity:.5">✎</span></div></div>
+      <div class="shop-loc-compact" id="trip-loc-compact">${l.address?('📍 '+esc(l.address)):(L==='fa'?'افزودن مکان':'Add location')} <span style="opacity:.5">✎</span></div>
+      <input class="finput" id="trip-loc" value="${esc(l.address||'')}" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}" style="display:none"></div>
     ${l.address?`<div class="shop-laddr" data-shop-maps="${l.id}" style="cursor:pointer">📍 ${L==='fa'?'باز کردن در نقشه':'Open in Maps'}</div>`:''}
     <div style="display:flex;gap:10px">
       <div class="fld" style="flex:1"><label>${L==='fa'?'تاریخ':'Date'}</label>
@@ -4877,9 +4897,13 @@ function bindScreen(){
   (()=>{
     const l=shopActiveList(); if(!l||shopView!=='detail')return;
     const dEl=document.getElementById('trip-date'), tEl=document.getElementById('trip-time'),
-          nEl=document.getElementById('trip-notes');
+          nEl=document.getElementById('trip-notes'),
+          locEl=document.getElementById('trip-loc');
+    let picked=null;
     const locCompact=document.getElementById('trip-loc-compact');
-    if(locCompact) locCompact.onclick=()=>openShopLocationEditor(l);
+    if(locCompact&&locEl) locCompact.onclick=()=>{ locCompact.style.display='none'; locEl.style.display=''; locEl.focus(); };
+    if(locEl) attachLocationAutocomplete(locEl,(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon}; const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); saveDB(); render();});
+    if(locEl) locEl.onblur=()=>{ const before=l.address; const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); saveDB(); if(loc.address!==before) render(); else { locEl.style.display='none'; const c=document.getElementById('trip-loc-compact'); if(c)c.style.display=''; } };
     if(dEl) dEl.onchange=()=>{ l.tripDate=dEl.value||''; l.updatedAt=new Date().toISOString(); saveDB(); };
     if(tEl) tEl.onchange=()=>{ l.tripTime=tEl.value||''; l.updatedAt=new Date().toISOString(); saveDB(); };
     if(nEl) nEl.onblur=()=>{ l.tripNotes=(nEl.value||'').trim(); l.updatedAt=new Date().toISOString(); saveDB(); };
@@ -5887,106 +5911,6 @@ function ensureUserGeo(cb){
       cb(_userGeo);
     },
     {enableHighAccuracy:false,timeout:8000,maximumAge:300000});
-}
-
-// Same geocoding as attachLocationAutocomplete, but renders results as normal
-// in-flow children of a given container (e.g. inside a bottom sheet) instead
-// of an absolutely-positioned overlay — used where the picker must stay
-// contained within its own screen/sheet rather than floating detached.
-function attachLocationAutocompleteInto(inputEl,resultsEl,onSelect){
-  let _timer=null;
-  function setBox(html){ resultsEl.innerHTML=html; }
-  function showLoading(){ setBox(`<div style="padding:12px 14px;font-size:13px;color:var(--ink3)">🔍 ${L==='fa'?'در حال جستجو...':'Searching...'}</div>`); }
-  function showError(){ setBox(`<div style="padding:12px 14px;font-size:13px;color:var(--danger)">⚠ ${L==='fa'?'خطا در جستجو':'Search failed'}</div>`); }
-  function showResults(results){
-    const typed=inputEl.value.trim();
-    const numMatch=typed.match(/^\s*(\d+[A-Za-z]?)\s+/);
-    const typedNum=numMatch?numMatch[1]:null;
-    resultsEl.innerHTML='';
-    resultsEl.style.cssText='background:var(--s2);border:1px solid var(--b1);border-radius:12px;overflow:hidden';
-    let any=false;
-    (results||[]).slice(0,5).forEach(r=>{
-      any=true;
-      let label=r.display_name;
-      if(typedNum && !/^\s*\d/.test(label)) label=typedNum+' '+label;
-      const row=document.createElement('div');
-      row.style.cssText='padding:13px 14px;font-size:14px;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--b1)';
-      row.textContent=label;
-      row.onclick=()=>{ inputEl.value=label; onSelect({name:label,lat:parseFloat(r.lat),lon:parseFloat(r.lon)}); resultsEl.innerHTML=''; };
-      resultsEl.appendChild(row);
-    });
-    if(typed.length>=3){
-      const keep=document.createElement('div');
-      keep.style.cssText='padding:13px 14px;font-size:13px;color:var(--brand);cursor:pointer;font-weight:600';
-      keep.textContent=(L==='fa'?'✓ استفاده از متن دقیق: ':'✓ Use exactly: ')+typed;
-      keep.onclick=()=>{ inputEl.value=typed; onSelect({name:typed,lat:null,lon:null}); resultsEl.innerHTML=''; };
-      resultsEl.appendChild(keep);
-    }
-    if(!any && typed.length<3) setBox(`<div style="padding:12px 14px;font-size:13px;color:var(--ink3)">${L==='fa'?'نتیجه‌ای یافت نشد':'No results found'}</div>`);
-  }
-  inputEl.oninput=()=>{
-    clearTimeout(_timer);
-    const q=inputEl.value.trim();
-    if(q.length<2){resultsEl.innerHTML='';return;}
-    _timer=setTimeout(()=>{
-      showLoading();
-      function nominatim(geo){
-        let url=`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&q=${encodeURIComponent(q)}`;
-        if(geo){
-          const d=1.2;
-          url+=`&viewbox=${geo.lon-d},${geo.lat-d},${geo.lon+d},${geo.lat+d}&bounded=0`;
-          if(geo.cc)url+=`&countrycodes=${geo.cc}`;
-        }
-        return fetch(url,{headers:{'Accept':'application/json'}}).then(r=>r.json())
-          .then(list=>(list||[]).map(r=>({display_name:r.display_name,lat:r.lat,lon:r.lon})));
-      }
-      function photon(geo){
-        let url=`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6`;
-        if(geo)url+=`&lat=${geo.lat}&lon=${geo.lon}`;
-        return fetch(url).then(r=>r.json()).then(data=>(data.features||[]).map(f=>{
-          const p=f.properties;
-          const parts=[p.housenumber&&p.street?p.street+' '+p.housenumber:(p.name||p.street),p.city||p.town||p.village,p.state,p.country].filter(Boolean);
-          return {display_name:parts.join(', '),lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]};
-        }));
-      }
-      function run(geo){
-        nominatim(geo).then(results=>{
-          if(results&&results.length){showResults(results);}
-          else{photon(geo).then(r=>showResults(r)).catch(()=>showError());}
-        }).catch(()=>{photon(geo).then(r=>showResults(r)).catch(()=>showError());});
-      }
-      if(_userGeo){run(_userGeo);}
-      else{ run(null); ensureUserGeo(geo=>{if(geo&&q===inputEl.value.trim())run(geo);}); }
-    },350);
-  };
-}
-// Opens the Store/Location editor for a shopping list as a proper bottom
-// sheet — contained within the sheet layer, never detached/floating over the
-// page. Replaces the old inline compact->input toggle with an absolute-
-// positioned dropdown, which could visually break out of the layout.
-function openShopLocationEditor(l){
-  openSheet(`<h3>${L==='fa'?'فروشگاه / مکان':'Store / location'}</h3>
-    <input class="finput" id="loc-sheet-input" value="${esc(l.address||'')}" placeholder="${L==='fa'?'جستجوی فروشگاه یا آدرس':'Search store or address'}" autocomplete="off" style="width:100%">
-    <div id="loc-sheet-results" style="margin-top:8px"></div>
-    <div class="btn-row" style="margin-top:16px">
-      <button class="btn btn-ghost" id="loc-sheet-cancel">${tr('cancel')}</button>
-      ${l.address?`<button class="btn btn-danger" id="loc-sheet-clear">${L==='fa'?'حذف مکان':'Remove location'}</button>`:''}
-    </div>`);
-  setTimeout(()=>{ const inp=document.getElementById('loc-sheet-input'); if(inp){ inp.focus(); inp.select(); } },100);
-  attachLocationAutocompleteInto(
-    document.getElementById('loc-sheet-input'),
-    document.getElementById('loc-sheet-results'),
-    (r)=>{
-      l.address=r.name; l.lat=r.lat; l.lon=r.lon; l.updatedAt=new Date().toISOString(); saveDB();
-      closeSheet(); render();
-    }
-  );
-  document.getElementById('loc-sheet-cancel').onclick=()=>closeSheet();
-  const clearBtn=document.getElementById('loc-sheet-clear');
-  if(clearBtn)clearBtn.onclick=()=>{
-    l.address=''; l.lat=null; l.lon=null; l.updatedAt=new Date().toISOString(); saveDB();
-    closeSheet(); render();
-  };
 }
 function attachLocationAutocomplete(inputEl,onSelect){
   let _timer=null,_drop=null;
