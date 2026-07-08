@@ -967,7 +967,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v168';
+const APP_VERSION='v169';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3326,6 +3326,16 @@ function catalogueSuggest(query,domain,limit){
   }
   base.filter(p=>p.n.toLowerCase().startsWith(q)||(p.fa&&p.fa.startsWith(String(query||'').trim()))).forEach(push);
   base.filter(p=>hay(p).includes(q)).forEach(push);
+  // Fallback: the typed text is a whole phrase (e.g. a brand name like "Coca-
+  // Cola orange") that won't appear verbatim in a generic catalogue. Split it
+  // into words and match if any significant word (>=3 chars) is found in the
+  // product's name/alias/category text, so "cola" still surfaces "Soft drink".
+  if(out.length<limit){
+    const words=q.split(/[\s\-,]+/).filter(w=>w.length>=3);
+    if(words.length){
+      base.filter(p=>words.some(w=>hay(p).includes(w))).forEach(push);
+    }
+  }
   return out.slice(0,limit);
 }
 // ═══ end v151 catalogue data layer ═══
