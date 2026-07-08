@@ -311,7 +311,6 @@ body.light .trow-title{color:var(--ink)}
 .shop-actionbar{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0));z-index:50;display:flex;align-items:center;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0));background:var(--s1,#16171d);border-top:1px solid var(--b1)}
 @media (min-width:900px){.shop-actionbar{inset-inline-start:320px}}
 @media (min-width:1400px){.shop-actionbar{inset-inline-start:360px}}
-.shop-act-complete{background:var(--brandg,var(--brand));color:#fff;border:none;padding:12px;font-size:14px}
 .shop-actioncount{font-size:13px;font-weight:700;color:var(--ink2);margin-right:auto}
 .shop-act{font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 11px;color:var(--ink);cursor:pointer}
 .shop-actionbar2{gap:12px}
@@ -968,7 +967,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v167';
+const APP_VERSION='v168';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3580,15 +3579,6 @@ function renderShopDetail(){
         ${actBtn('sa-delete','🗑',L==='fa'?'حذف':'Delete',true)}
       </div>
     </div>`;
-  }else{
-    // Always-visible, unmistakable way to finish this list — not buried in
-    // the ⋯ menu. Completing moves it to History and clears the way for a
-    // fresh Current List next time this store is opened.
-    html+=`<div class="shop-actionbar">
-      <button class="shop-act shop-act-complete" id="sd-complete" style="flex:1;text-align:center;font-weight:700">
-        ✓ ${shopIsStoreList(l)?(L==='fa'?'تکمیل لیست':'Complete List'):(L==='fa'?'آرشیو لیست':'Archive List')}
-      </button>
-    </div>`;
   }
   return html;
 }
@@ -3802,6 +3792,7 @@ function openShopListMenu(id){
   openSheet(`
     <h3>${esc(l.name)}</h3>
     <div class="btn-col">
+      <button class="btn btn-primary" id="sm-complete">✓ ${shopIsStoreList(l)?(L==='fa'?'تکمیل خرید (انتقال به تاریخچه)':'Complete shopping (move to History)'):(L==='fa'?'آرشیو لیست':'Archive List')}</button>
       <button class="btn btn-ghost" id="sm-rename">${L==='fa'?'ویرایش':'Edit'}</button>
       <button class="btn btn-ghost" id="sm-duplicate">${L==='fa'?'کپی کردن':'Duplicate'}</button>
       ${(l.template&&shopListsArchived().filter(x=>x.template===l.template).length)?`<button class="btn btn-ghost" id="sm-archived-trips">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'} (${shopListsArchived().filter(x=>x.template===l.template).length})</button>`:''}
@@ -3809,6 +3800,7 @@ function openShopListMenu(id){
       <button class="btn btn-ghost" id="sm-close">${tr('cancel')}</button>
     </div>`);
   document.getElementById('sm-close').onclick=()=>closeSheet();
+  document.getElementById('sm-complete').onclick=()=>{ closeSheet(); shopCompleteList(l); };
   const smArchTrips=document.getElementById('sm-archived-trips');
   if(smArchTrips)smArchTrips.onclick=()=>{closeSheet();openArchivedTrips(l.template);};
   document.getElementById('sm-duplicate').onclick=()=>{closeSheet();shopDuplicateList(id);};
@@ -4886,8 +4878,6 @@ function bindScreen(){
   const saP=document.getElementById('sa-purchased'); if(saP)saP.onclick=()=>shopBulkPurchased();
   const saM=document.getElementById('sa-move'); if(saM)saM.onclick=()=>shopBulkMove();
   const saD=document.getElementById('sa-delete'); if(saD)saD.onclick=()=>shopBulkDelete();
-  const sdComplete=document.getElementById('sd-complete');
-  if(sdComplete)sdComplete.onclick=()=>{ const l=shopActiveList(); if(l)shopCompleteList(l); };
   (()=>{
     const l=shopActiveList(); if(!l||shopView!=='detail')return;
     const dEl=document.getElementById('trip-date'), tEl=document.getElementById('trip-time'),
