@@ -54,10 +54,6 @@ body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    >=900px (tablets landscape, desktop, laptop, iPad): persistent left
    sidebar (primary navigation + Lists) + a content pane that fills all
    remaining width. No centered narrow column, no dead space. */
-:root{--shop-cols:3}
-@media (min-width:640px){:root{--shop-cols:4}}
-@media (min-width:900px){:root{--shop-cols:5}}
-@media (min-width:1200px){:root{--shop-cols:6}}
 :root{--shell-w:480px}
 @media (min-width:640px){:root{--shell-w:600px}}
 #app{display:flex;flex-direction:column;height:100vh;width:100%;
@@ -264,7 +260,8 @@ body.light .trow-title{color:var(--ink)}
 .shop-laddr{font-size:12px;color:var(--ink2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shop-lmenu{width:36px;height:36px;flex:none;border:none;background:none;color:var(--ink2);font-size:20px;cursor:pointer;border-radius:8px}
 .shop-lmenu:active{background:var(--s3)}
-.shop-store-grid{display:grid;grid-template-columns:repeat(var(--shop-cols),1fr);gap:10px;padding:6px 16px 24px}
+.shop-store-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(140px,100%),1fr));gap:10px;padding:6px 16px 24px;width:100%;max-width:100%}
+.shop-store{min-width:0}
 @media (min-width:900px){.shop-list-wrap{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 12px}
   .shop-items{display:grid;grid-template-columns:repeat(2,1fr);gap:0 16px;align-content:start}
   .shop-sec{grid-column:1/-1}}
@@ -310,6 +307,9 @@ body.light .trow-title{color:var(--ink)}
 .shop-selbox.on{background:var(--brand,#6e56f8);border-color:var(--brand,#6e56f8)}
 .shop-item.sel{background:var(--brand,#6e56f8)12}
 .shop-actionbar{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0));z-index:50;display:flex;align-items:center;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0));background:var(--s1,#16171d);border-top:1px solid var(--b1)}
+@media (min-width:900px){.shop-actionbar{inset-inline-start:320px}}
+@media (min-width:1400px){.shop-actionbar{inset-inline-start:360px}}
+.shop-act-complete{background:var(--brandg,var(--brand));color:#fff;border:none;padding:12px;font-size:14px}
 .shop-actioncount{font-size:13px;font-weight:700;color:var(--ink2);margin-right:auto}
 .shop-act{font-size:13px;font-weight:600;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:9px 11px;color:var(--ink);cursor:pointer}
 .shop-act:disabled{opacity:.4}
@@ -958,7 +958,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v164';
+const APP_VERSION='v165';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1378,7 +1378,7 @@ function updateFab(){
   if(!fab)return;
   let show=false;
   if(screen==='lists'||screen==='today'||screen==='appts') show=true;
-  else if(screen==='module') show=(currentModule==='shopping')?((shopView==='archive'||shopView==='archiveView')?false:!(shopView==='detail'&&shopSelectMode)):moduleHasCreate(hubModule(currentModule));
+  else if(screen==='module') show=(currentModule==='shopping')?(shopView==='home'):moduleHasCreate(hubModule(currentModule));
   else show=false; // lifehub, profile, more, search, ...
   fab.style.display=show?'':'none';
 }
@@ -3507,6 +3507,7 @@ function renderShopDetail(){
   </div>
   <div style="padding:4px 16px 4px">
     <input class="finput" id="shop-search" placeholder="${L==='fa'?'افزودن محصول...':'Add a product…'}" value="${esc(shopSearch||'')}" style="width:100%" autocomplete="off">
+    <div style="font-size:11px;color:var(--ink3);padding:5px 2px 0">${L==='fa'?'برای افزودن Enter بزن یا چند مورد را با کاما جدا کن — نیازی به ذخیره نیست، خودکار اضافه می‌شود':'Press Enter to add, or separate several items with commas — no save needed, it adds instantly'}</div>
     <div id="shop-suggest-box" class="shop-prows" style="margin-top:6px">${shopSuggestRows(q,shopListDomain(l))}</div>
   </div>
   <div class="shop-toolbar2">
@@ -3555,6 +3556,15 @@ function renderShopDetail(){
       <button class="shop-act" id="sa-move" ${n?'':'disabled'}>➜ ${L==='fa'?'انتقال':'Move'}</button>
       <button class="shop-act danger" id="sa-delete" ${n?'':'disabled'}>🗑 ${L==='fa'?'حذف':'Delete'}</button>
     </div>`;
+  }else{
+    // Always-visible, unmistakable way to finish this list — not buried in
+    // the ⋯ menu. Completing moves it to History and clears the way for a
+    // fresh Current List next time this store is opened.
+    html+=`<div class="shop-actionbar">
+      <button class="shop-act shop-act-complete" id="sd-complete" style="flex:1;text-align:center;font-weight:700">
+        ✓ ${shopIsStoreList(l)?(L==='fa'?'تکمیل لیست':'Complete List'):(L==='fa'?'آرشیو لیست':'Archive List')}
+      </button>
+    </div>`;
   }
   return html;
 }
@@ -3564,6 +3574,15 @@ function shopCreateList({name,icon,color,template,address,lat,lon}){
   shopListsMap()[id]={id,name:name||'Shopping',icon:icon||'🛒',color:color||'#22c55e',template:template||null,address:address||'',lat:(lat!=null?lat:null),lon:(lon!=null?lon:null),createdAt:now,updatedAt:now,archivedAt:null};
   saveDB();
   return id;
+}
+// Completes (archives) a list — the ONE way this happens, whether triggered
+// from the ⋯ menu or the always-visible Complete List bar. Moves it to
+// History; the store then has no Current List until Reuse/New Empty runs.
+function shopCompleteList(l){
+  l.archivedAt=new Date().toISOString(); l.updatedAt=l.archivedAt; saveDB();
+  if(shopView==='detail'){ shopView='home'; activeShopListId=null; }
+  render(); window.scrollTo(0,0);
+  toast(shopIsStoreList(l)?(L==='fa'?'لیست تکمیل شد':'List completed'):(L==='fa'?'بایگانی شد':'Archived'));
 }
 // A brand-new, completely blank Current List for a Store (built-in or custom).
 // Everything starts empty: products, date, time, reminder, notes, location.
@@ -3702,10 +3721,12 @@ function openStore(storeKey){
   // 1. Current List already exists -> open it immediately.
   const current=shopListsAll().find(l=>l.template===storeKey);
   if(current){ openShopList(current.id); return; }
-  // 2. No Current List -> always show the two compact choices: Reuse Last
-  //    List / New Empty List (Reuse gracefully falls back to a blank list if
-  //    this store has no History yet).
+  // 2. No Current List. If this store has History, offer the Reuse Last
+  //    List / New Empty List choice. If there is truly nothing to reuse
+  //    (first-ever visit), skip the prompt — a "Reuse" option with nothing
+  //    behind it is just confusing — and start a New Empty List directly.
   const lastList=shopListsArchived().filter(l=>l.template===storeKey).sort((a,b)=>(b.archivedAt||'').localeCompare(a.archivedAt||''))[0]||null;
+  if(!lastList){ const id=shopNewEmptyList(s); openShopList(id); return; }
   openShopStoreEntry(s,lastList);
 }
 // Superseded by openStore() and openBuiltinList() above — both stores and
@@ -3758,7 +3779,6 @@ function openShopListMenu(id){
       <button class="btn btn-ghost" id="sm-rename">${L==='fa'?'ویرایش':'Edit'}</button>
       <button class="btn btn-ghost" id="sm-duplicate">${L==='fa'?'کپی کردن':'Duplicate'}</button>
       ${(l.template&&shopListsArchived().filter(x=>x.template===l.template).length)?`<button class="btn btn-ghost" id="sm-archived-trips">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'} (${shopListsArchived().filter(x=>x.template===l.template).length})</button>`:''}
-      <button class="btn btn-ghost" id="sm-archive">${shopIsStoreList(l)?(L==='fa'?'تکمیل لیست':'Complete List'):(L==='fa'?'آرشیو لیست':'Archive List')}</button>
       <button class="btn btn-danger" id="sm-delete">${L==='fa'?'حذف':'Delete'}</button>
       <button class="btn btn-ghost" id="sm-close">${tr('cancel')}</button>
     </div>`);
@@ -3783,13 +3803,7 @@ function openShopListMenu(id){
       l.updatedAt=new Date().toISOString();saveDB();closeSheet();render();
     };
   };
-  document.getElementById('sm-archive').onclick=()=>{
-    l.archivedAt=new Date().toISOString();l.updatedAt=l.archivedAt;saveDB();
-    closeSheet();
-    if(shopView==='detail'){shopView='home';activeShopListId=null;}
-    render();window.scrollTo(0,0);
-    toast(shopIsStoreList(l)?(L==='fa'?'لیست تکمیل شد':'List completed'):(L==='fa'?'بایگانی شد':'Archived'));
-  };
+
   document.getElementById('sm-delete').onclick=()=>{
     openSheet(`
       <h3>${L==='fa'?'حذف لیست؟':'Delete list?'}</h3>
@@ -3926,15 +3940,6 @@ function shopDomainExamples(domain){
     seenCat.add(p.c); names.push(p.n);
   }
   return names.length?names.join('&#10;'):'milk&#10;bread&#10;eggs';
-}
-// Single source of truth for adding products: the inline "Add a product…"
-// field on the list screen. The FAB just brings that field into view and
-// focuses it — it never opens a second, different way to add items.
-function shopFocusAddField(){
-  const el=document.getElementById('shop-search');
-  if(!el)return;
-  el.scrollIntoView({block:'center',behavior:'smooth'});
-  setTimeout(()=>el.focus(),150);
 }
 // Splits raw text on newlines/commas into item names and adds them all to
 // the list — used for both a pasted multi-line block and a normal Enter-key
@@ -4854,6 +4859,8 @@ function bindScreen(){
   const saP=document.getElementById('sa-purchased'); if(saP)saP.onclick=()=>shopBulkPurchased();
   const saM=document.getElementById('sa-move'); if(saM)saM.onclick=()=>shopBulkMove();
   const saD=document.getElementById('sa-delete'); if(saD)saD.onclick=()=>shopBulkDelete();
+  const sdComplete=document.getElementById('sd-complete');
+  if(sdComplete)sdComplete.onclick=()=>{ const l=shopActiveList(); if(l)shopCompleteList(l); };
   (()=>{
     const l=shopActiveList(); if(!l||shopView!=='detail')return;
     const dEl=document.getElementById('trip-date'), tEl=document.getElementById('trip-time'),
@@ -6223,7 +6230,7 @@ document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
 document.getElementById('fab').onclick=()=>{
   if(screen==='appts'){ openNewApptSheet(null); return; }
   if(screen==='module'){
-    if(currentModule==='shopping'){ (shopView==='detail'?shopFocusAddField:openNewShopSheet)(); return; }
+    if(currentModule==='shopping'){ openNewShopSheet(); return; }
     const m=hubModule(currentModule);
     if(moduleHasCreate(m)) m.onCreate();   // module's own create dialog (no Task dependency)
     return;                                 // never open New Task from a module
