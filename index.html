@@ -48,8 +48,12 @@ html,body{height:100%;background:var(--s0);color:var(--ink);
   overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 
-/* ── App shell ── */
-#app{display:flex;flex-direction:column;height:100vh;max-width:480px;
+/* ── App shell — responsive across phones, foldables, tablets, desktop ── */
+:root{--shell-w:480px;--shop-cols:3}
+@media (min-width:640px){:root{--shell-w:600px;--shop-cols:4}}
+@media (min-width:900px){:root{--shell-w:760px;--shop-cols:5}}
+@media (min-width:1200px){:root{--shell-w:960px;--shop-cols:6}}
+#app{display:flex;flex-direction:column;height:100vh;max-width:var(--shell-w);
   margin:0 auto;position:relative;overflow:hidden}
 #screen{flex:1;overflow-y:auto;overflow-x:hidden;
   -webkit-overflow-scrolling:touch;padding:0 0 82px}
@@ -243,12 +247,19 @@ body.light .trow-title{color:var(--ink)}
 .shop-laddr{font-size:12px;color:var(--ink2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shop-lmenu{width:36px;height:36px;flex:none;border:none;background:none;color:var(--ink2);font-size:20px;cursor:pointer;border-radius:8px}
 .shop-lmenu:active{background:var(--s3)}
-.shop-store-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:6px 16px 24px}
+.shop-store-grid{display:grid;grid-template-columns:repeat(var(--shop-cols),1fr);gap:10px;padding:6px 16px 24px}
+@media (min-width:900px){.shop-list-wrap{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 12px}
+  .shop-items{display:grid;grid-template-columns:repeat(2,1fr);gap:0 16px;align-content:start}
+  .shop-sec{grid-column:1/-1}}
 .shop-store{display:flex;flex-direction:column;align-items:center;gap:6px;background:var(--s2);border:1px solid var(--b1);border-radius:14px;padding:12px 6px;cursor:pointer;text-align:center}
 .shop-store:active{background:var(--s3)}
 .shop-store-ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px}
 .shop-store-n{font-size:11px;font-weight:600;color:var(--ink);line-height:1.2}
 .shop-store-custom{border-style:dashed}
+.shop-icogrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.shop-icopt{width:100%;aspect-ratio:1;border-radius:10px;border:1px solid var(--b1);background:var(--s2);font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.shop-icopt.on{border-color:var(--brand,#6e56f8);background:var(--brand,#6e56f8)18}
+.shop-icopt:active{background:var(--s3)}
 .shop-items{display:flex;flex-direction:column;padding:2px 12px 24px}
 .shop-item{display:flex;align-items:center;gap:12px;padding:11px 8px;border-bottom:1px solid var(--b1);cursor:pointer}
 .shop-item:active{background:var(--s2)}
@@ -406,7 +417,7 @@ body.light .trow-title{color:var(--ink)}
   backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px)}
 #sheet-bg.on{background:rgba(0,0,0,.55);pointer-events:all;
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-#sheet{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
+#sheet{position:fixed;bottom:0;left:0;right:0;max-width:var(--shell-w);margin:0 auto;
   background:var(--sheet);border-radius:28px 28px 0 0;
   border-top:1px solid var(--b1);z-index:451;
   transform:translateY(100%);
@@ -647,7 +658,7 @@ body.rtl .trow-content{text-align:right}
 /* ════════════════════════════
    TASK DETAIL PANEL
    ════════════════════════════ */
-#task-detail{position:fixed;inset:0;max-width:480px;margin:0 auto;
+#task-detail{position:fixed;inset:0;max-width:var(--shell-w);margin:0 auto;
   background:var(--s0);z-index:45;
   transform:translateX(100%);
   transition:transform .3s cubic-bezier(0.22,1,0.36,1);
@@ -719,7 +730,7 @@ body.rtl .trow-content{text-align:right}
 /* ════════════════════════════
    SEARCH SCREEN
    ════════════════════════════ */
-#search-screen{position:fixed;inset:0;max-width:480px;margin:0 auto;
+#search-screen{position:fixed;inset:0;max-width:var(--shell-w);margin:0 auto;
   background:var(--s0);z-index:44;
   transform:translateY(-8px);opacity:0;pointer-events:none;
   transition:opacity .2s,transform .2s}
@@ -766,7 +777,7 @@ body.rtl .trow-content{text-align:right}
    SYNC / TOAST / AUTH
    ════════════════════════════ */
 #sync-badge{position:fixed;top:env(safe-area-inset-top,0);right:0;left:0;
-  max-width:480px;margin:0 auto;z-index:60;pointer-events:none}
+  max-width:var(--shell-w);margin:0 auto;z-index:60;pointer-events:none}
 .sync-bar{font-size:12px;font-weight:700;padding:6px 16px;
   text-align:center;transition:opacity .3s}
 .sync-bar.synced{background:rgba(34,211,160,.15);color:var(--ok)}
@@ -775,7 +786,7 @@ body.rtl .trow-content{text-align:right}
 
 /* ── Update banner ── */
 #update-banner{position:fixed;top:0;left:0;right:0;z-index:500;
-  max-width:480px;margin:0 auto;
+  max-width:var(--shell-w);margin:0 auto;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;
   animation:ubDrop .35s cubic-bezier(.2,.8,.2,1)}
 @keyframes ubDrop{from{transform:translateY(-120%);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -925,7 +936,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v155';
+const APP_VERSION='v157';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2819,7 +2830,21 @@ function shopIconFor(name){
   if(!hit)hit=SHOP_SUGGEST.find(s=>s.n.toLowerCase().startsWith(n)||n.startsWith(s.n.toLowerCase()));
   return hit?hit.i:'🛒';
 }
-function shopStore(key){ return SHOP_STORES.find(s=>s.key===key)||null; }
+// Custom Stores: persistent, permanent entities exactly like built-in SHOP_STORES.
+// Stored under DB.entities.shopCustomStores = {id:{id,name,icon,color,createdAt}}.
+const SHOP_CUSTOM_ICONS=['🛒','🏬','🏪','🏭','🏠','🧰','🧴','🎁','📦','🧵','🍽️','🚗','🧸','🌿','🧊','💈','🧱','🖥️','🚲','⚙️'];
+function shopCustomStoresMap(){ if(!DB.entities.shopCustomStores)DB.entities.shopCustomStores={}; return DB.entities.shopCustomStores; }
+function shopCustomStoresAll(){ return Object.values(shopCustomStoresMap()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||'')); }
+function shopCustomStoreKey(id){ return 'custom_'+id; }
+// All stores (built-in + custom) as one uniform list of {key,name,icon,color,custom}.
+function shopAllStoreDefs(){
+  return SHOP_STORES.map(s=>Object.assign({custom:false},s))
+    .concat(shopCustomStoresAll().map(cs=>({key:shopCustomStoreKey(cs.id),name:cs.name,icon:cs.icon,color:cs.color,custom:true,customId:cs.id})));
+}
+function shopStore(key){ return shopAllStoreDefs().find(s=>s.key===key)||null; }
+// True only for a list that lives inside an actual Store (built-in or custom) —
+// as opposed to a builtin List template (Weekly/BBQ/...) or a fully custom list.
+function shopIsStoreList(l){ return !!(l&&l.template&&shopStore(l.template)); }
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
 function shopItemsMap(){ if(!DB.entities.shopItems)DB.entities.shopItems={}; return DB.entities.shopItems; }
 function shopListsAll(){ return Object.values(shopListsMap()).filter(l=>!l.archivedAt); }
@@ -2856,41 +2881,13 @@ function shopMergeListInto(sourceId,targetId,dispose,opts){
 function shopItemsFor(listId){ return Object.values(shopItemsMap()).filter(it=>it.listId===listId); }
 function shopActiveList(){ return activeShopListId?shopListsMap()[activeShopListId]:null; }
 
-// Restore an archived trip/list. Stores and builtin templates (weekly/bbq/...)
-// must keep exactly one ACTIVE list per template (the Phase 3 invariant) — if
-// one is already active, restoring the archived one would recreate that bug.
-// So: no conflict -> restore directly. Conflict -> merge into the active one,
-// or cancel. Custom lists (template=null) never conflict.
-function shopRestoreList(id){
-  const l=shopListsMap()[id]; if(!l||!l.archivedAt)return;
-  const conflict = l.template ? shopListsAll().find(x=>x.template===l.template) : null;
-  if(!conflict){
-    l.archivedAt=null; l.updatedAt=new Date().toISOString(); saveDB();
-    render(); window.scrollTo(0,0);
-    toast(L==='fa'?'بازیابی شد':'Restored');
-    return;
-  }
-  openSheet(`<h3>${L==='fa'?'یک لیست فعال از قبل هست':'An active trip already exists'}</h3>
-    <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?`«${esc(conflict.name)}» الان فعال است. آیتم‌های آرشیوشده به آن اضافه شوند؟`:`"${esc(conflict.name)}" is currently active. Merge the archived items into it?`}</p>
-    <div class="btn-col">
-      <button class="btn btn-primary" id="rc-merge">${L==='fa'?'ادغام با لیست فعال':'Merge into current trip'}</button>
-      <button class="btn btn-ghost" id="rc-cancel">${tr('cancel')}</button>
-    </div>`);
-  document.getElementById('rc-cancel').onclick=()=>closeSheet();
-  document.getElementById('rc-merge').onclick=()=>{
-    // dispose='delete': the archived trip has fulfilled its purpose, no shell left.
-    // mergeAddress=true, but the active trip's own address is never overwritten
-    // (shopMergeListInto only adopts source's address if target has none).
-    shopMergeListInto(id,conflict.id,'delete',{mergeAddress:true});
-    saveDB(); closeSheet(); render(); window.scrollTo(0,0);
-    toast(L==='fa'?'ادغام شد':'Merged');
-  };
-}
+// (List restore-to-active was removed: History is read-only — only "Reuse
+// Last List" from a Store's entry prompt can create a new Current List.)
 // Irreversible. Only ever reachable from the Archived Trips screen.
 function shopPermanentDelete(id){
   const l=shopListsMap()[id]; if(!l)return;
   openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3>
-    <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'این لیست و همه‌ی آیتم‌هایش برای همیشه حذف می‌شوند. این عمل بازگشت‌پذیر نیست.':'This trip and all its items will be permanently deleted. This cannot be undone.'}</p>
+    <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'این لیست و همه‌ی آیتم‌هایش برای همیشه حذف می‌شوند. این عمل بازگشت‌پذیر نیست.':'This list and all its items will be permanently deleted. This cannot be undone.'}</p>
     <div class="btn-row">
       <button class="btn btn-ghost" id="pd-cancel">${tr('cancel')}</button>
       <button class="btn btn-danger" id="pd-ok">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>
@@ -2927,7 +2924,7 @@ function renderShopArchived(){
   const scopeStore=filt?shopStore(filt):null;
   const all=shopListsArchived();
   const list=(filt?all.filter(l=>l.template===filt):all).sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
-  const title=scopeStore?`${scopeStore.name} — ${L==='fa'?'آرشیو':'Archived'}`:(L==='fa'?'آرشیو خرید':'Archived Trips');
+  const title=scopeStore?`${scopeStore.name} — ${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'}`:(L==='fa'?'تاریخچه':'History');
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="archive-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="flex:1;font-size:24px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(title)}</div>
@@ -2936,7 +2933,7 @@ function renderShopArchived(){
     html+=`<div class="hub-ph" style="padding:44px 28px">
       <div class="hub-ph-ic" style="background:var(--s3);color:var(--ink2)">🗄️</div>
       <div class="hub-ph-t">${L==='fa'?'آرشیوی نیست':'Nothing archived'}</div>
-      <div class="hub-ph-d">${scopeStore?(L==='fa'?`هنوز خریدی از «${esc(scopeStore.name)}» آرشیو نشده.`:`No trips from ${esc(scopeStore.name)} have been archived yet.`):(L==='fa'?'وقتی یک خرید را تمام کنی یا لیستی را آرشیو کنی، اینجا نشان داده می‌شود.':'Completed trips and archived lists will appear here.')}</div></div>`;
+      <div class="hub-ph-d">${scopeStore?(L==='fa'?`هنوز لیستی از «${esc(scopeStore.name)}» تکمیل نشده.`:`No completed lists from ${esc(scopeStore.name)} yet.`):(L==='fa'?'وقتی یک لیست را کامل کنی، اینجا نشان داده می‌شود.':'Completed lists will appear here.')}</div></div>`;
     return html;
   }
   html+=`<div class="shop-list-wrap">`;
@@ -2986,7 +2983,7 @@ function renderShopArchiveView(){
   </div>`;
   if(!items.length){
     html+=`<div class="hub-ph" style="padding:36px 28px"><div class="hub-ph-ic" style="background:var(--s3);color:var(--ink2)">🗄️</div>
-      <div class="hub-ph-t">${L==='fa'?'این خرید خالی بود':'This trip was empty'}</div></div>`;
+      <div class="hub-ph-t">${L==='fa'?'این لیست خالی بود':'This list was empty'}</div></div>`;
   }else{
     html+=`<div class="shop-items">`;
     html+=remaining.map(row).join('');
@@ -2997,7 +2994,6 @@ function renderShopArchiveView(){
     html+=`</div>`;
   }
   html+=`<div class="shop-actionbar">
-    <button class="shop-act" id="archview-restore">${L==='fa'?'بازیابی':'Restore'}</button>
     <button class="shop-act danger" id="archview-delete">${L==='fa'?'حذف':'Delete'}</button>
     <button class="shop-act" id="archview-cancel">${tr('cancel')}</button>
   </div>`;
@@ -3011,7 +3007,7 @@ function renderShopHome(){
     <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">${L==='fa'?'خرید':'Shopping'}</div>
   </div>
   <div class="hub-sec-label" style="padding:6px 20px">${L==='fa'?'فروشگاه‌ها':'Stores'}</div>
-  <div class="shop-store-grid">${SHOP_STORES.map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}<div class="shop-store" data-shop-custom="1"><div class="shop-store-ic" style="background:var(--s3);color:var(--ink2)">＋</div><div class="shop-store-n">${L==='fa'?'فروشگاه سفارشی':'Add custom store'}</div></div></div>
+  <div class="shop-store-grid">${shopAllStoreDefs().map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}<div class="shop-store" data-shop-custom="1"><div class="shop-store-ic" style="background:var(--s3);color:var(--ink2)">＋</div><div class="shop-store-n">${L==='fa'?'فروشگاه سفارشی':'Add custom store'}</div></div></div>
   <div class="hub-sec-label" style="padding:10px 20px 6px">${L==='fa'?'لیست‌ها':'Lists'}</div>`;
 
   if(lists.length){
@@ -3045,7 +3041,7 @@ function renderShopHome(){
   if(archCount>0){
     html+=`<div class="sv-row" data-go-archive="1">
       <div class="sv-icon"><div class="sv-icon-inner" style="background:var(--s3);color:var(--ink2)">🗄️</div></div>
-      <span class="sv-name">${L==='fa'?'آرشیو خرید':'Archived Trips'}</span>
+      <span class="sv-name">${L==='fa'?'تاریخچه':'History'}</span>
       <span class="sv-count">${archCount}</span>
       <span class="sv-count" style="opacity:.6">›</span>
     </div>`;
@@ -3438,7 +3434,7 @@ function renderShopDetail(){
       <div class="fld" style="flex:1"><label>${L==='fa'?'ساعت':'Time'}</label>
         <input class="finput" id="trip-time" type="time" value="${esc(l.tripTime||'')}"></div>
     </div>
-    <div class="fld"><label>${L==='fa'?'یادداشت خرید':'Trip notes'}</label>
+    <div class="fld"><label>${L==='fa'?'یادداشت':'Notes'}</label>
       <input class="finput" id="trip-notes" value="${esc(l.tripNotes||'')}" placeholder="${L==='fa'?'اختیاری':'Optional'}"></div>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:var(--ink2);padding:4px 2px">
       <input type="checkbox" id="trip-reminder" ${l.reminder?'checked':''}> ${L==='fa'?'یادآوری':'Reminder'}
@@ -3504,6 +3500,79 @@ function shopCreateList({name,icon,color,template,address,lat,lon}){
   saveDB();
   return id;
 }
+// A brand-new, completely blank Current List for a Store (built-in or custom).
+// Everything starts empty: products, date, time, reminder, notes, location.
+function shopNewEmptyList(s){
+  return shopCreateList({name:s.name,icon:s.icon,color:s.color,template:s.key});
+}
+// Reuse Last List: a NEW Current List that copies only the shopping items from
+// the most recently Completed List for this store. Date/time/reminder/notes/
+// location are never copied — they start empty. The Completed List itself is
+// left untouched in History.
+function shopReuseLastList(s,lastList){
+  const id=shopNewEmptyList(s);
+  if(!lastList)return id;
+  const now=new Date().toISOString();
+  shopItemsFor(lastList.id).forEach(it=>{
+    const iid=uid();
+    shopItemsMap()[iid]={id:iid,listId:id,name:it.name,icon:it.icon,qty:it.qty,unit:it.unit,category:it.category,note:it.note||'',purchased:false,createdAt:now,updatedAt:now};
+  });
+  saveDB();
+  return id;
+}
+// Compact two-choice prompt shown only when a Store has History but no Current
+// List right now.
+function openShopStoreEntry(s,lastList){
+  openSheet(`<h3>${esc(s.name)}</h3>
+    <div class="btn-col">
+      <button class="btn btn-primary" id="ss-reuse">${L==='fa'?'استفاده از لیست قبلی':'Reuse Last List'}</button>
+      <button class="btn btn-ghost" id="ss-new">${L==='fa'?'لیست خالی جدید':'New Empty List'}</button>
+      <button class="btn btn-ghost" id="ss-cancel">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('ss-cancel').onclick=()=>closeSheet();
+  document.getElementById('ss-reuse').onclick=()=>{
+    closeSheet();
+    const id=shopReuseLastList(s,lastList);
+    openShopList(id);
+  };
+  document.getElementById('ss-new').onclick=()=>{
+    closeSheet();
+    const id=shopNewEmptyList(s);
+    openShopList(id);
+  };
+}
+// ── Custom Stores: permanent, same lifecycle as built-in stores ──
+function openCreateCustomStore(){
+  let chosenIcon=SHOP_CUSTOM_ICONS[0];
+  const iconGrid=()=>SHOP_CUSTOM_ICONS.map(ic=>`<button type="button" class="shop-icopt${ic===chosenIcon?' on':''}" data-cs-icon="${ic}">${ic}</button>`).join('');
+  openSheet(`
+    <h3>${L==='fa'?'فروشگاه سفارشی':'Custom store'}</h3>
+    <div class="fld"><label>${L==='fa'?'نام':'Name'}</label>
+      <input class="finput" id="cs-name" placeholder="${L==='fa'?'مثلاً بازار محلی':'e.g. Local Market'}"></div>
+    <div class="fld"><label>${L==='fa'?'آیکون':'Icon'}</label>
+      <div class="shop-icogrid" id="cs-icogrid">${iconGrid()}</div></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="cs-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary" id="cs-save">${tr('save')}</button>
+    </div>`);
+  setTimeout(()=>document.getElementById('cs-name')?.focus(),100);
+  document.getElementById('cs-icogrid').onclick=(e)=>{
+    const btn=e.target.closest('[data-cs-icon]'); if(!btn)return;
+    chosenIcon=btn.dataset.csIcon;
+    document.querySelectorAll('#cs-icogrid .shop-icopt').forEach(b=>b.classList.toggle('on',b.dataset.csIcon===chosenIcon));
+  };
+  document.getElementById('cs-cancel').onclick=()=>closeSheet();
+  document.getElementById('cs-save').onclick=()=>{
+    const name=(document.getElementById('cs-name').value||'').trim();
+    if(!name){document.getElementById('cs-name').focus();return;}
+    const id=uid(), now=new Date().toISOString();
+    const colors=['#22c55e','#0a7dc2','#e01a22','#f7a800','#7ab800','#ec4899','#6e56f8','#0d5257'];
+    const color=colors[Math.abs(name.split('').reduce((a,c)=>a+c.charCodeAt(0),0))%colors.length];
+    shopCustomStoresMap()[id]={id,name,icon:chosenIcon,color,createdAt:now};
+    saveDB(); closeSheet();
+    openStore(shopCustomStoreKey(id));
+  };
+}
 // Open a shopping list's store location in Maps (same behaviour as task location).
 function shopOpenMaps(id){
   const l=shopListsMap()[id]; if(!l)return;
@@ -3543,7 +3612,7 @@ function openNewShopSheet(){
 }
 function openStorePicker(){
   openSheet(`<h3>${L==='fa'?'انتخاب فروشگاه':'Choose a store'}</h3>
-    <div class="shop-store-grid">${SHOP_STORES.map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}</div>`);
+    <div class="shop-store-grid">${shopAllStoreDefs().map(s=>`<div class="shop-store" data-pick-store="${s.key}"><div class="shop-store-ic" style="background:${s.color}18;color:${s.color}">${s.icon}</div><div class="shop-store-n">${esc(s.name)}</div></div>`).join('')}</div>`);
   document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>openStore(el.dataset.pickStore));
 }
 function openTemplatePicker(){
@@ -3562,12 +3631,14 @@ function openShopList(id){
 // now only used for the optional builtin List templates, not Stores).
 function openStore(storeKey){
   const s=shopStore(storeKey); if(!s)return;
-  let list=shopListsAll().find(l=>l.template===storeKey);
-  if(!list){
-    const id=shopCreateList({name:s.name,icon:s.icon,color:s.color,template:storeKey});
-    list=shopListsMap()[id];
-  }
-  openShopList(list.id);
+  // 1. Current List already exists -> open it immediately.
+  const current=shopListsAll().find(l=>l.template===storeKey);
+  if(current){ openShopList(current.id); return; }
+  // 2. No Current List -> always show the two compact choices: Reuse Last
+  //    List / New Empty List (Reuse gracefully falls back to a blank list if
+  //    this store has no History yet).
+  const lastList=shopListsArchived().filter(l=>l.template===storeKey).sort((a,b)=>(b.archivedAt||'').localeCompare(a.archivedAt||''))[0]||null;
+  openShopStoreEntry(s,lastList);
 }
 // Superseded by openStore() and openBuiltinList() above — both stores and
 // builtin templates now open-if-exists/create-if-not deterministically.
@@ -3618,8 +3689,8 @@ function openShopListMenu(id){
     <div class="btn-col">
       <button class="btn btn-ghost" id="sm-rename">${L==='fa'?'ویرایش':'Edit'}</button>
       <button class="btn btn-ghost" id="sm-duplicate">${L==='fa'?'کپی کردن':'Duplicate'}</button>
-      ${(l.template&&shopListsArchived().filter(x=>x.template===l.template).length)?`<button class="btn btn-ghost" id="sm-archived-trips">${L==='fa'?'آرشیو این فروشگاه':'Archived Trips'} (${shopListsArchived().filter(x=>x.template===l.template).length})</button>`:''}
-      <button class="btn btn-ghost" id="sm-archive">${(l.template&&SHOP_STORE_DOMAIN[l.template])?(L==='fa'?'اتمام خرید':'Complete Shopping Trip'):(L==='fa'?'آرشیو لیست':'Archive List')}</button>
+      ${(l.template&&shopListsArchived().filter(x=>x.template===l.template).length)?`<button class="btn btn-ghost" id="sm-archived-trips">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'} (${shopListsArchived().filter(x=>x.template===l.template).length})</button>`:''}
+      <button class="btn btn-ghost" id="sm-archive">${shopIsStoreList(l)?(L==='fa'?'تکمیل لیست':'Complete List'):(L==='fa'?'آرشیو لیست':'Archive List')}</button>
       <button class="btn btn-danger" id="sm-delete">${L==='fa'?'حذف':'Delete'}</button>
       <button class="btn btn-ghost" id="sm-close">${tr('cancel')}</button>
     </div>`);
@@ -3649,7 +3720,7 @@ function openShopListMenu(id){
     closeSheet();
     if(shopView==='detail'){shopView='home';activeShopListId=null;}
     render();window.scrollTo(0,0);
-    toast((l.template&&SHOP_STORE_DOMAIN[l.template])?(L==='fa'?'خرید تمام شد':'Trip completed'):(L==='fa'?'بایگانی شد':'Archived'));
+    toast(shopIsStoreList(l)?(L==='fa'?'لیست تکمیل شد':'List completed'):(L==='fa'?'بایگانی شد':'Archived'));
   };
   document.getElementById('sm-delete').onclick=()=>{
     openSheet(`
@@ -3769,7 +3840,8 @@ function shopProdCat(name){ const p=SHOP_PROD_BY_NAME[String(name||'').trim().to
 function shopProductSuggest(query,template){
   const q=String(query||'').trim().toLowerCase();
   if(q.length<2)return [];
-  const allowed=template?new Set(SHOP_STORE_GRP[template]||[]):null;
+  const grp=template?SHOP_STORE_GRP[template]:null;
+  const allowed=grp?new Set(grp):null;
   const base=SHOP_PRODUCTS.filter(p=>!allowed||allowed.has(p.g));
   const hay=p=>(p.n+' '+(p.a||'')).toLowerCase();
   const starts=base.filter(p=>p.n.toLowerCase().startsWith(q));
@@ -4699,15 +4771,13 @@ function bindScreen(){
   if(archViewBack)archViewBack.onclick=()=>{shopArchiveViewId=null;shopView='archive';render();window.scrollTo(0,0);};
   const archViewCancel=document.getElementById('archview-cancel');
   if(archViewCancel)archViewCancel.onclick=()=>{shopArchiveViewId=null;shopView='archive';render();window.scrollTo(0,0);};
-  const archViewRestore=document.getElementById('archview-restore');
-  if(archViewRestore)archViewRestore.onclick=()=>shopRestoreList(shopArchiveViewId);
   const archViewDelete=document.getElementById('archview-delete');
   if(archViewDelete)archViewDelete.onclick=()=>shopPermanentDelete(shopArchiveViewId);
   document.querySelectorAll('[data-shop-list]').forEach(el=>el.onclick=(e)=>{
     if(e.target.closest('[data-shop-menu]'))return;
     activeShopListId=el.dataset.shopList;shopView='detail';shopSearch='';shopResetSelect();render();window.scrollTo(0,0);});
   document.querySelectorAll('[data-shop-template]').forEach(el=>el.onclick=()=>openShopFromTemplate(el.dataset.shopTemplate));
-  document.querySelectorAll('[data-shop-custom]').forEach(el=>el.onclick=()=>openCreateShopList());
+  document.querySelectorAll('[data-shop-custom]').forEach(el=>el.onclick=()=>openCreateCustomStore());
   document.querySelectorAll('[data-pick-store]').forEach(el=>el.onclick=()=>openStore(el.dataset.pickStore));
   document.querySelectorAll('[data-shop-menu]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();openShopListMenu(el.dataset.shopMenu);});
   document.querySelectorAll('[data-shop-toggle]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();toggleShopItem(el.dataset.shopToggle);});
