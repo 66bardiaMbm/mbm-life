@@ -967,7 +967,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v169';
+const APP_VERSION='v170';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3630,25 +3630,30 @@ function shopReuseLastList(s,lastList){
 }
 // Compact two-choice prompt shown only when a Store has History but no Current
 // List right now.
-function openShopStoreEntry(s,lastList){
+function openShopStoreEntry(s,currentList,lastCompleted){
   openSheet(`<h3>${esc(s.name)}</h3>
     <div class="btn-col">
-      <button class="btn btn-primary" id="ss-new">${L==='fa'?'لیست خالی جدید':'New Empty List'}</button>
-      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?'شروع کاملاً خالی':'Starts completely empty'}</div>
-      <button class="btn btn-ghost" id="ss-reuse">${L==='fa'?'استفاده از لیست قبلی':'Reuse Last List'}</button>
-      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?'همان آیتم‌های قبلی را کپی می‌کند':'Copies the same items from last time'}</div>
-      ${lastList?`<button class="btn btn-ghost" id="ss-history">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'}</button>`:''}
+      ${currentList?`<button class="btn btn-primary" id="ss-open">${L==='fa'?'باز کردن لیست فعال':'Open Current List'}</button>
+      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?`ادامه‌ی همون لیستی که داشتی (${shopItemsFor(currentList.id).length} آیتم)`:`Continue where you left off (${shopItemsFor(currentList.id).length} items)`}</div>`:''}
+      <button class="btn ${currentList?'btn-ghost':'btn-primary'}" id="ss-new">${L==='fa'?'لیست خالی جدید':'Start New Empty List'}</button>
+      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?'کاملاً خالی — لیست فعال قبلی هم دست‌نخورده می‌مونه':'Starts completely empty — any existing list stays untouched'}</div>
+      ${lastCompleted?`<button class="btn btn-ghost" id="ss-reuse">${L==='fa'?'استفاده از آخرین لیست تکمیل‌شده':'Reuse Last Completed List'}</button>
+      <div style="font-size:12px;color:var(--ink3);margin:-4px 2px 4px">${L==='fa'?'فقط آیتم‌ها را کپی می‌کند':'Copies just the items'}</div>`:''}
+      ${lastCompleted?`<button class="btn btn-ghost" id="ss-history">${L==='fa'?'لیست‌های تکمیل‌شده':'Completed Lists'}</button>`:''}
       <button class="btn btn-ghost" id="ss-cancel">${tr('cancel')}</button>
     </div>`);
   document.getElementById('ss-cancel').onclick=()=>closeSheet();
-  document.getElementById('ss-reuse').onclick=()=>{
-    closeSheet();
-    const id=shopReuseLastList(s,lastList);
-    openShopList(id);
-  };
+  const ssOpen=document.getElementById('ss-open');
+  if(ssOpen)ssOpen.onclick=()=>{ closeSheet(); openShopList(currentList.id); };
   document.getElementById('ss-new').onclick=()=>{
     closeSheet();
     const id=shopNewEmptyList(s);
+    openShopList(id);
+  };
+  const ssReuse=document.getElementById('ss-reuse');
+  if(ssReuse)ssReuse.onclick=()=>{
+    closeSheet();
+    const id=shopReuseLastList(s,lastCompleted);
     openShopList(id);
   };
   const ssHistory=document.getElementById('ss-history');
@@ -3744,16 +3749,21 @@ function openShopList(id){
 // now only used for the optional builtin List templates, not Stores).
 function openStore(storeKey){
   const s=shopStore(storeKey); if(!s)return;
-  // 1. Current List already exists -> open it immediately.
-  const current=shopListsAll().find(l=>l.template===storeKey);
-  if(current){ openShopList(current.id); return; }
-  // 2. No Current List. If this store has History, offer the Reuse Last
-  //    List / New Empty List choice. If there is truly nothing to reuse
-  //    (first-ever visit), skip the prompt — a "Reuse" option with nothing
-  //    behind it is just confusing — and start a New Empty List directly.
-  const lastList=shopListsArchived().filter(l=>l.template===storeKey).sort((a,b)=>(b.archivedAt||'').localeCompare(a.archivedAt||''))[0]||null;
-  if(!lastList){ const id=shopNewEmptyList(s); openShopList(id); return; }
-  openShopStoreEntry(s,lastList);
+  // Store, Current List(s) and History are independent concepts:
+  //  - Store is just a permanent entry point.
+  //  - There can be MORE THAN ONE active (non-archived) list for a store —
+  //    starting a new one never touches/blocks/deletes an existing one.
+  //  - History is untouched read-only data.
+  const actives=shopListsAll().filter(l=>l.template===storeKey).sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
+  const mostRecentActive=actives[0]||null;
+  const lastCompleted=shopListsArchived().filter(l=>l.template===storeKey).sort((a,b)=>(b.archivedAt||'').localeCompare(a.archivedAt||''))[0]||null;
+  // Nothing at all yet for this store (first-ever visit, no active list, no
+  // history) -> nothing to choose between, just start a new empty list.
+  if(!mostRecentActive && !lastCompleted){ const id=shopNewEmptyList(s); openShopList(id); return; }
+  // Otherwise there's something to choose from -> always show the compact
+  // choice. Never silently auto-open, and never require deleting/archiving
+  // an existing list just to start a new one.
+  openShopStoreEntry(s,mostRecentActive,lastCompleted);
 }
 // Superseded by openStore() and openBuiltinList() above — both stores and
 // builtin templates now open-if-exists/create-if-not deterministically.
@@ -4839,29 +4849,6 @@ function bindScreen(){
   if(archViewReuse)archViewReuse.onclick=()=>{
     const l=shopListsMap()[shopArchiveViewId]; if(!l)return;
     const s=shopStore(l.template); if(!s)return;
-    const current=shopListsAll().find(x=>x.template===l.template);
-    if(current){
-      openSheet(`<h3>${L==='fa'?'یک لیست فعال از قبل هست':'A Current List already exists'}</h3>
-        <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?`«${esc(s.name)}» الان یک لیست فعال دارد. برای ساخت لیست جدید، اول آن را باز یا کامل کن.`:`${esc(s.name)} already has a Current List. Open it, or complete it first, before reusing this one.`}</p>
-        <div class="btn-col">
-          <button class="btn btn-primary" id="rc-open">${L==='fa'?'باز کردن لیست فعال':'Open Current List'}</button>
-          <button class="btn btn-ghost" id="rc-complete">${L==='fa'?'تکمیل لیست فعال':'Complete Current List'}</button>
-          <button class="btn btn-ghost" id="rc-cancel">${tr('cancel')}</button>
-        </div>`);
-      document.getElementById('rc-cancel').onclick=()=>closeSheet();
-      document.getElementById('rc-open').onclick=()=>{
-        closeSheet();
-        shopArchiveViewId=null; activeShopListId=current.id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
-      };
-      document.getElementById('rc-complete').onclick=()=>{
-        current.archivedAt=new Date().toISOString(); current.updatedAt=current.archivedAt; saveDB();
-        closeSheet();
-        const id=shopReuseLastList(s,l);
-        shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
-        toast(L==='fa'?'لیست تکمیل شد':'List completed');
-      };
-      return;
-    }
     const id=shopReuseLastList(s,l);
     shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
   };
