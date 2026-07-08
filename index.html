@@ -958,7 +958,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v163';
+const APP_VERSION='v164';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3348,7 +3348,6 @@ function shopQuickAddFav(name){
 
 // ── Multi-select ──
 let shopSelectMode=false, shopSel=new Set();
-var _shopAddDraft='';   // preserves the Add-Items textarea while the sheet is open
 function shopResetSelect(){ shopSelectMode=false; shopSel=new Set(); }
 function shopToggleSelectMode(){ shopSelectMode=!shopSelectMode; shopSel=new Set(); render(); }
 function shopToggleSel(id){ if(shopSel.has(id))shopSel.delete(id); else shopSel.add(id); render(); }
@@ -3928,67 +3927,28 @@ function shopDomainExamples(domain){
   }
   return names.length?names.join('&#10;'):'milk&#10;bread&#10;eggs';
 }
-function openAddShopItems(){
-  const l=shopActiveList(); if(!l)return;
-  const rows=(q)=>{
-    const isFaQuery=/[\u0600-\u06FF]/.test((q||'').trim());
-    const list=catalogueSuggest(q,shopListDomain(l),8);
-    if(!list.length)return '';
-    return list.map(p=>{
-      const em=SHOP_CAT_EMOJI[p.c]||'🛒';
-      const label=(isFaQuery&&p.fa)?p.fa:p.n;
-      return `<button type="button" class="shop-prow" data-prod="${esc(label)}">
-        <span class="shop-pthumb">${em}</span>
-        <span class="shop-pmain"><span class="shop-pname">${esc(label)}</span><span class="shop-pcat">${esc(p.c)}${p.s?' · '+esc(p.s):''}</span></span>
-        <span class="shop-padd">＋</span>
-      </button>`;
-    }).join('');
-  };
-  openSheet(`
-    <h3>${L==='fa'?'افزودن آیتم‌ها':'Add items'}</h3>
-    <div class="fld">
-      <label>${L==='fa'?'هر خط یک آیتم — می‌توانید چند مورد را با هم بچسبانید':'One item per line — paste many at once'}</label>
-      <textarea class="finput" id="si-text" rows="6" placeholder="${shopDomainExamples(shopListDomain(l))}" style="resize:vertical;line-height:1.6" autofocus></textarea>
-    </div>
-    <div id="si-sug" class="shop-prows"></div>
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="si-cancel">${tr('cancel')}</button>
-      <button class="btn btn-primary" id="si-save">${L==='fa'?'افزودن':'Add'}</button>
-    </div>`);
-  setTimeout(()=>document.getElementById('si-text')?.focus(),100);
-  const ta=document.getElementById('si-text');
-  const sug=document.getElementById('si-sug');
-  // Restore any in-progress draft (survives rerenders / keyboard / reopen).
-  if(_shopAddDraft){ ta.value=_shopAddDraft; }
-  const curLine=()=>{const p=ta.value.split('\n');return p[p.length-1];};
-  // Type-ahead: only after ≥2 chars on the CURRENT line; empty otherwise.
-  // Only updates the suggestion list — never rerenders the app or the textarea.
-  ta.oninput=()=>{ _shopAddDraft=ta.value; sug.innerHTML=rows(curLine()); };
-  // Tap a product → autocomplete ONLY the current line, then ready for the next.
-  sug.onclick=(e)=>{
-    const b=e.target.closest('.shop-prow'); if(!b)return;
-    const name=b.dataset.prod;
-    const val=ta.value; const idx=val.lastIndexOf('\n');
-    const head=idx>=0?val.slice(0,idx+1):'';
-    ta.value=head+name+'\n';
-    _shopAddDraft=ta.value;
-    sug.innerHTML='';
-    ta.focus();
-  };
-  document.getElementById('si-cancel').onclick=()=>{ _shopAddDraft=''; closeSheet(); };
-  document.getElementById('si-save').onclick=()=>{
-    const raw=ta.value||'';
-    const names=raw.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
-    if(!names.length){ _shopAddDraft=''; closeSheet(); return; }
-    const now=new Date().toISOString();
-    names.forEach(nm=>{
-      const id=uid();
-      shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:catalogueProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
-    });
-    _shopAddDraft='';
-    l.updatedAt=now;saveDB();closeSheet();render();window.scrollTo(0,0);
-    toast((L==='fa'?'افزوده شد: ':'Added ')+names.length);
-  };
+// Single source of truth for adding products: the inline "Add a product…"
+// field on the list screen. The FAB just brings that field into view and
+// focuses it — it never opens a second, different way to add items.
+function shopFocusAddField(){
+  const el=document.getElementById('shop-search');
+  if(!el)return;
+  el.scrollIntoView({block:'center',behavior:'smooth'});
+  setTimeout(()=>el.focus(),150);
+}
+// Splits raw text on newlines/commas into item names and adds them all to
+// the list — used for both a pasted multi-line block and a normal Enter-key
+// single add, so pasting many items still works from the one field.
+function shopAddItemsFromText(l,raw){
+  const names=(raw||'').split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
+  if(!names.length)return 0;
+  const now=new Date().toISOString();
+  names.forEach(nm=>{
+    const id=uid();
+    shopItemsMap()[id]={id,listId:l.id,name:nm,icon:shopItemIcon(nm),qty:1,unit:'ea',category:catalogueProdCat(nm),note:'',purchased:false,createdAt:now,updatedAt:now};
+  });
+  l.updatedAt=now; saveDB();
+  return names.length;
 }
 
 function openShopItemEditor(id){
@@ -4929,6 +4889,30 @@ function bindScreen(){
       }
       shopSearch='';
       render(); window.scrollTo(0,0);
+      const f=document.getElementById('shop-search'); if(f)f.focus();
+    };
+    // Enter commits the typed text as an item (or several, if it contains
+    // commas) without needing to tap a suggestion first.
+    shopSearchEl.onkeydown=(e)=>{
+      if(e.key!=='Enter')return;
+      e.preventDefault();
+      const l=shopActiveList(); if(!l)return;
+      const n=shopAddItemsFromText(l,shopSearchEl.value);
+      if(!n)return;
+      shopSearch=''; render(); window.scrollTo(0,0);
+      const f=document.getElementById('shop-search'); if(f)f.focus();
+    };
+    // Pasting a multi-line/comma-separated block (e.g. copied from a message)
+    // adds every item at once — the one field covers both single and bulk add.
+    shopSearchEl.onpaste=(e)=>{
+      const text=(e.clipboardData||window.clipboardData).getData('text');
+      if(!/[\n,]/.test(text||''))return; // plain single-item paste: let it type normally
+      e.preventDefault();
+      const l=shopActiveList(); if(!l)return;
+      const n=shopAddItemsFromText(l,text);
+      if(!n)return;
+      shopSearch=''; render(); window.scrollTo(0,0);
+      toast((L==='fa'?'افزوده شد: ':'Added ')+n);
       const f=document.getElementById('shop-search'); if(f)f.focus();
     };
   }
@@ -6239,7 +6223,7 @@ document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
 document.getElementById('fab').onclick=()=>{
   if(screen==='appts'){ openNewApptSheet(null); return; }
   if(screen==='module'){
-    if(currentModule==='shopping'){ (shopView==='detail'?openAddShopItems:openNewShopSheet)(); return; }
+    if(currentModule==='shopping'){ (shopView==='detail'?shopFocusAddField:openNewShopSheet)(); return; }
     const m=hubModule(currentModule);
     if(moduleHasCreate(m)) m.onCreate();   // module's own create dialog (no Task dependency)
     return;                                 // never open New Task from a module
