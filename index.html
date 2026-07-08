@@ -48,13 +48,30 @@ html,body{height:100%;background:var(--s0);color:var(--ink);
   overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 body.rtl{direction:rtl;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 
-/* ── App shell — responsive across phones, foldables, tablets, desktop ── */
-:root{--shell-w:480px;--shop-cols:3}
-@media (min-width:640px){:root{--shell-w:600px;--shop-cols:4}}
-@media (min-width:900px){:root{--shell-w:760px;--shop-cols:5}}
-@media (min-width:1200px){:root{--shell-w:960px;--shop-cols:6}}
-#app{display:flex;flex-direction:column;height:100vh;max-width:var(--shell-w);
-  margin:0 auto;position:relative;overflow:hidden}
+/* ── App shell — true responsive layout, not a scaled-up phone ──
+   <900px (phones, foldables, small tablets in portrait): single full-width
+   column, one screen at a time — the existing mobile pattern.
+   >=900px (tablets landscape, desktop, laptop, iPad): persistent left
+   sidebar (primary navigation + Lists) + a content pane that fills all
+   remaining width. No centered narrow column, no dead space. */
+:root{--shop-cols:3}
+@media (min-width:640px){:root{--shop-cols:4}}
+@media (min-width:900px){:root{--shop-cols:5}}
+@media (min-width:1200px){:root{--shop-cols:6}}
+:root{--shell-w:480px}
+@media (min-width:640px){:root{--shell-w:600px}}
+#app{display:flex;flex-direction:column;height:100vh;width:100%;
+  position:relative;overflow:hidden}
+#sidebar{display:none}
+@media (min-width:900px){
+  #app{flex-direction:row}
+  #sidebar{display:block;flex:0 0 320px;width:320px;height:100vh;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    border-inline-end:1px solid var(--b1);background:var(--s1)}
+  #sidebar::-webkit-scrollbar{display:none}
+  #screen{flex:1;min-width:0;max-width:none}
+}
+@media (min-width:1400px){#sidebar{flex-basis:360px;width:360px}}
 #screen{flex:1;overflow-y:auto;overflow-x:hidden;
   -webkit-overflow-scrolling:touch;padding:0 0 82px}
 #screen::-webkit-scrollbar{display:none}
@@ -778,6 +795,8 @@ body.rtl .trow-content{text-align:right}
    ════════════════════════════ */
 #sync-badge{position:fixed;top:env(safe-area-inset-top,0);right:0;left:0;
   max-width:var(--shell-w);margin:0 auto;z-index:60;pointer-events:none}
+@media (min-width:900px){#sync-badge{inset-inline-start:320px}}
+@media (min-width:1400px){#sync-badge{inset-inline-start:360px}}
 .sync-bar{font-size:12px;font-weight:700;padding:6px 16px;
   text-align:center;transition:opacity .3s}
 .sync-bar.synced{background:rgba(34,211,160,.15);color:var(--ok)}
@@ -789,6 +808,8 @@ body.rtl .trow-content{text-align:right}
   max-width:var(--shell-w);margin:0 auto;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;
   animation:ubDrop .35s cubic-bezier(.2,.8,.2,1)}
+@media (min-width:900px){#update-banner{inset-inline-start:320px}}
+@media (min-width:1400px){#update-banner{inset-inline-start:360px}}
 @keyframes ubDrop{from{transform:translateY(-120%);opacity:0}to{transform:translateY(0);opacity:1}}
 #update-banner.out{animation:ubUp .3s ease forwards}
 @keyframes ubUp{to{transform:translateY(-120%);opacity:0}}
@@ -877,6 +898,7 @@ body.rtl .trow-content{text-align:right}
 </div>
 
 <div id="app" style="display:none">
+  <div id="sidebar"></div>
   <div id="screen"></div>
   <button id="fab">＋</button>
 </div>
@@ -936,7 +958,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v159';
+const APP_VERSION='v161';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1294,12 +1316,27 @@ function render(){
     _showFatalError(err);
   }
 }
+function isWideLayout(){
+  return typeof window.matchMedia==='function' && window.matchMedia('(min-width:900px)').matches;
+}
 function _renderInner(){
   applyTheme();
   applyLang();
   const el=document.getElementById('screen');
+  const wide=isWideLayout();
+  const sb=document.getElementById('sidebar');
+  if(sb){
+    if(wide) sb.innerHTML=renderListsNav();
+    else sb.innerHTML='';
+  }
   if(screen==='today')el.innerHTML=renderToday();
-  else if(screen==='lists')el.innerHTML=renderLists();
+  else if(screen==='lists'){
+    // On wide screens the nav already lives in the sidebar — showing it again
+    // as the content pane would just duplicate it. Default the content pane
+    // to My Day instead, like a native tablet/desktop two-pane layout.
+    if(wide && tasksView!=='detail')el.innerHTML=renderToday();
+    else el.innerHTML=renderLists();
+  }
   else if(screen==='appts')el.innerHTML=renderAppts();
   else if(screen==='lifehub')el.innerHTML=renderLifeHub();
   else if(screen==='module')el.innerHTML=renderModule();
@@ -1309,6 +1346,11 @@ function _renderInner(){
   bindScreen();
   updateFab();
 }
+let _resizeT=null;
+window.addEventListener('resize',()=>{
+  clearTimeout(_resizeT);
+  _resizeT=setTimeout(()=>{ if(document.getElementById('app')&&document.getElementById('app').style.display!=='none') render(); },120);
+});
 // Central FAB control. The (+) is Task/Appointment-specific on the main screens.
 // On Life Hub it is hidden. On a module page it appears ONLY if that module is
 // ready and owns a create handler — so it never opens New Task by mistake.
@@ -1459,7 +1501,11 @@ function renderToday(){
    ══════════════════════════════════════════ */
 function renderLists(){
   if(tasksView==='detail')return renderListDetail();
-
+  return renderListsNav();
+}
+// The primary navigation + "My Lists" content — used both as the mobile
+// Lists screen and as the persistent sidebar content at tablet/desktop widths.
+function renderListsNav(){
   const ts=todayStr();
   const allT=activeTasks();
   const lists=active('lists');
@@ -4783,7 +4829,25 @@ function bindScreen(){
     const s=shopStore(l.template); if(!s)return;
     const current=shopListsAll().find(x=>x.template===l.template);
     if(current){
-      toast(L==='fa'?'یک لیست فعال از این فروشگاه از قبل هست. اول آن را کامل کن.':'A Current List for this store already exists. Complete it first.');
+      openSheet(`<h3>${L==='fa'?'یک لیست فعال از قبل هست':'A Current List already exists'}</h3>
+        <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?`«${esc(s.name)}» الان یک لیست فعال دارد. برای ساخت لیست جدید، اول آن را باز یا کامل کن.`:`${esc(s.name)} already has a Current List. Open it, or complete it first, before reusing this one.`}</p>
+        <div class="btn-col">
+          <button class="btn btn-primary" id="rc-open">${L==='fa'?'باز کردن لیست فعال':'Open Current List'}</button>
+          <button class="btn btn-ghost" id="rc-complete">${L==='fa'?'تکمیل لیست فعال':'Complete Current List'}</button>
+          <button class="btn btn-ghost" id="rc-cancel">${tr('cancel')}</button>
+        </div>`);
+      document.getElementById('rc-cancel').onclick=()=>closeSheet();
+      document.getElementById('rc-open').onclick=()=>{
+        closeSheet();
+        shopArchiveViewId=null; activeShopListId=current.id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
+      };
+      document.getElementById('rc-complete').onclick=()=>{
+        current.archivedAt=new Date().toISOString(); current.updatedAt=current.archivedAt; saveDB();
+        closeSheet();
+        const id=shopReuseLastList(s,l);
+        shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
+        toast(L==='fa'?'لیست تکمیل شد':'List completed');
+      };
       return;
     }
     const id=shopReuseLastList(s,l);
