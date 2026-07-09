@@ -299,6 +299,7 @@ body.light .trow-title{color:var(--ink)}
   background:var(--tabc,var(--s2));color:var(--tabtxt,var(--ink2));
   opacity:.72;transform:translateY(3px);transition:transform .12s,opacity .12s}
 .note-filter-chip.on{opacity:1;transform:translateY(0);box-shadow:0 -2px 10px rgba(0,0,0,.18)}
+.note-add-folder-chip{background:transparent!important;border:1.5px dashed var(--b2)!important;opacity:1!important;transform:translateY(3px)}
 .note-grid{column-count:1;column-gap:10px;padding:4px 20px 90px}
 @media (min-width:560px){.note-grid{column-count:2}}
 @media (min-width:900px){.note-grid{column-count:3}}
@@ -316,11 +317,42 @@ body.light .trow-title{color:var(--ink)}
 .note-card-when{font-size:11px;color:var(--ink3);margin-top:2px}
 .note-workspace{min-height:100%;padding-bottom:20px}
 .note-workspace[style*="cork"]{background-image:radial-gradient(rgba(0,0,0,.14) 1px,transparent 1.6px);background-size:9px 9px}
+/* Light workspace background needs its own readable palette — the rest of
+   MBM is dark-themed, so these tokens (white text, dark inputs/cards) would
+   otherwise render invisible on a white backdrop. */
+.note-workspace-light{--nink:#1a1b26;--nink2:#4a4d66;--nink3:#7a7d98;--nsurf:#fff;--nsurf2:#eceef4;--nborder:rgba(0,0,0,.1)}
+.note-workspace-light .pg-head>div,.note-workspace-light .hub-ph-t{color:var(--nink)}
+.note-workspace-light .ld-back,.note-workspace-light .ld-action-btn{color:var(--nink)}
+.note-workspace-light #note-search,.note-workspace-light .note-due-row input{
+  background:var(--nsurf);border-color:var(--nborder);color:var(--nink)}
+.note-workspace-light .shop-mini{color:var(--nink2)}
+.note-workspace-light .hub-ph-d{color:var(--nink2)}
+.note-workspace-light .note-card{background:var(--nsurf);border-color:var(--nborder);color:var(--nink)}
+.note-workspace-light .note-card-body{color:var(--nink2)}
+.note-workspace-light .note-card-when,.note-workspace-light .note-card-meta .chip{color:var(--nink3)}
+.note-workspace-light .note-card-meta .chip{background:var(--nsurf2)}
+.note-workspace-light .note-title-input,.note-workspace-light .note-body-input,
+.note-workspace-light .note-check-text,.note-workspace-light #note-tag-input{color:var(--nink)}
+.note-workspace-light .note-check-text.done{color:var(--nink3)}
+.note-workspace-light #note-tags-area .chip{background:var(--nsurf2);color:var(--nink2)}
+.note-workspace-light .note-due-row input{background:var(--nsurf);border-color:var(--nborder);color:var(--nink)}
+.note-workspace-light .ul-row{color:var(--nink)}
+.note-workspace-light .ul-row div[style*="var(--ink3)"]{color:var(--nink3)!important}
 .note-grid-list{column-count:1!important}
 .note-grid .note-card-body{font-size:var(--note-fs,15px)}
 .note-swatch-bar{display:flex;gap:8px;padding:6px 20px 2px;overflow-x:auto;scrollbar-width:none}
 .note-color-swatch.sm{width:26px;height:26px;flex:none}
-.note-card.drag-lift{opacity:.85;transform:scale(1.04)!important;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:10;position:relative;transition:none}
+.note-card.drag-lift{opacity:.9;transform:scale(1.05) rotate(0deg)!important;box-shadow:0 14px 34px rgba(0,0,0,.55);z-index:10;position:relative;transition:none}
+.note-card{transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s}
+/* List view: compact single-line rows instead of squeezed masonry cards */
+.note-grid-list .note-card{flex-direction:row;align-items:center;gap:12px;min-height:auto;padding:11px 14px;border-radius:12px}
+.note-grid-list .note-card-top{flex-direction:column-reverse;align-items:flex-end;gap:2px;order:3}
+.note-grid-list .note-card-body{-webkit-line-clamp:1;flex:1;order:2;margin:0}
+.note-grid-list .note-card-title{order:1;flex:none;max-width:40%}
+.note-grid-list .note-card-meta{order:4;margin:0;flex:none}
+.note-grid-list .note-card-when{display:none}
+.note-due-row{display:flex;gap:10px;padding:6px 20px 2px;align-items:center;flex-wrap:wrap}
+.note-due-row input[type=date],.note-due-row input[type=time]{flex:1;min-width:120px}
 .note-title-input{width:100%;background:none;border:none;font-size:22px;font-weight:800;color:var(--ink);outline:none;padding:6px 0}
 .note-body-input{width:100%;min-height:50vh;background:none;border:none;color:var(--ink);font-size:15px;line-height:1.6;outline:none;resize:vertical;font-family:inherit}
 .note-check-row{display:flex;align-items:center;gap:8px;padding:8px 8px}
@@ -1019,7 +1051,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v176';
+const APP_VERSION='v177';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1535,11 +1567,12 @@ function notePrefs(){
 // idea without copying the photo-texture look of the old apps.
 function noteWorkspaceBgStyle(){
   const bg=notePrefs().bg;
-  if(bg==='light')return 'background:#f2f2f7;color:#1a1b26';
+  if(bg==='light')return 'background:#f2f2f7';
   if(bg==='color')return 'background:linear-gradient(160deg,#1a1440,#3b1f5e 60%,#1a1440)';
   if(bg==='cork')return 'background:radial-gradient(circle at 20% 10%,#8a5a33,#6e4423 60%,#5c3a1e);background-size:auto;';
   return ''; // 'dark' = default MBM background
 }
+function noteWorkspaceClass(){ return notePrefs().bg==='light'?'note-workspace note-workspace-light':'note-workspace'; }
 
 /* ── Render engine ── */
 function _showFatalError(err){
@@ -3494,7 +3527,7 @@ function noteCardHTML(n){
       <div class="note-card-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
       <button class="star ${n.pinned?'on':''}" data-note-pin="${n.id}" aria-label="pin" style="width:28px;height:28px">★</button>
     </div>
-    <div class="note-card-body">${esc(notePreviewText(n))}</div>
+    ${notePreviewText(n)?`<div class="note-card-body">${esc(notePreviewText(n))}</div>`:''}
     <div class="note-card-meta">
       ${isChecklist?`<span class="chip">☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
       ${folder?`<span class="chip">📁 ${esc(folder.name)}</span>`:''}
@@ -3530,7 +3563,7 @@ function renderNotesHome(){
   const sortLabels={modified:L==='fa'?'آخرین ویرایش':'Last modified',created:L==='fa'?'تاریخ ساخت':'Created date',alpha:L==='fa'?'الفبایی':'Alphabetical',color:L==='fa'?'رنگ':'Color',manual:L==='fa'?'دستی':'Manual'};
   const filtersOn=!!(noteFilterColor||noteFilterType||noteFilterDated);
 
-  let html=`<div class="note-workspace" style="${noteWorkspaceBgStyle()}">
+  let html=`<div class="${noteWorkspaceClass()}" style="${noteWorkspaceBgStyle()}">
   <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="font-size:26px;font-weight:800">${L==='fa'?'یادداشت‌ها':'Notes'}</div>
@@ -3559,8 +3592,9 @@ function renderNotesHome(){
     <button class="note-filter-chip ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all" style="--tabc:#6e56f8;--tabtxt:#fff">${L==='fa'?'همه':'All'}</button>
     <button class="note-filter-chip ${noteFilterPinned?'on':''}" data-note-filter="pinned" style="--tabc:#eab308;--tabtxt:#1a1400">★ ${L==='fa'?'پین‌شده':'Pinned'}</button>
     ${folders.map(f=>`<button class="note-filter-chip ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}" style="--tabc:${f.color};--tabtxt:#fff">${esc(f.name)}</button>`).join('')}
-    <button class="note-filter-chip" data-note-new-folder="1" style="--tabc:var(--s3);--tabtxt:var(--ink2)">${L==='fa'?'+ پوشه':'+ Folder'}</button>
+    <button class="note-filter-chip note-add-folder-chip" data-note-new-folder="1" style="--tabc:transparent;--tabtxt:var(--ink2)">${L==='fa'?'+ پوشه':'+ Folder'}</button>
   </div>
+  <div style="height:2px;background:var(--b1);margin:0 20px 8px;border-radius:1px"></div>
   <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;gap:8px;flex-wrap:wrap">
     <div style="display:flex;gap:10px">
       <button class="shop-mini" id="note-sort-btn">${L==='fa'?'مرتب‌سازی':'Sort'}: ${sortLabels[noteSortMode]}</button>
@@ -3589,13 +3623,14 @@ function renderNotesHome(){
 function renderNoteList(mode){
   const items=(mode==='archive'?notesArchived():notesTrashed())
     .sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
-  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+  let html=`<div class="${noteWorkspaceClass()}" style="${noteWorkspaceBgStyle()}">
+  <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="note-list-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="font-size:22px;font-weight:800">${mode==='archive'?(L==='fa'?'آرشیو':'Archive'):(L==='fa'?'سطل زباله':'Trash')}</div>
   </div>`;
   if(!items.length){
     html+=`<div class="hub-ph"><div class="hub-ph-ic">${mode==='archive'?'▤':'🗑'}</div>
-      <div class="hub-ph-t">${mode==='archive'?(L==='fa'?'چیزی آرشیو نشده':'Nothing archived'):(L==='fa'?'سطل زباله خالی است':'Trash is empty')}</div></div>`;
+      <div class="hub-ph-t">${mode==='archive'?(L==='fa'?'چیزی آرشیو نشده':'Nothing archived'):(L==='fa'?'سطل زباله خالی است':'Trash is empty')}</div></div></div>`;
     return html;
   }
   html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
@@ -3611,20 +3646,21 @@ function renderNoteList(mode){
           <button class="shop-mini" style="color:var(--danger)" data-note-perm-delete="${n.id}">${L==='fa'?'حذف':'Delete'}</button>`}
     </div>`;
   });
-  html+=`</div>`;
+  html+=`</div></div>`;
   return html;
 }
 
 function renderNoteVersionHistory(){
   const n=noteItemsMap()[activeNoteId]; if(!n)return '';
   const versions=(n.versions||[]).slice().reverse(); // newest first
-  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+  let html=`<div class="${noteWorkspaceClass()}" style="${noteWorkspaceBgStyle()}">
+  <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="note-history-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="font-size:22px;font-weight:800">${L==='fa'?'تاریخچه‌ی نسخه‌ها':'Version History'}</div>
   </div>`;
   if(!versions.length){
     html+=`<div class="hub-ph"><div class="hub-ph-ic">⟳</div><div class="hub-ph-t">${L==='fa'?'هنوز نسخه‌ی قبلی‌ای نیست':'No previous versions yet'}</div>
-      <div class="hub-ph-d">${L==='fa'?'با ویرایش این یادداشت، نسخه‌های قبلی اینجا نگه داشته می‌شوند.':'As you edit this note, earlier versions will be kept here.'}</div></div>`;
+      <div class="hub-ph-d">${L==='fa'?'با ویرایش این یادداشت، نسخه‌های قبلی اینجا نگه داشته می‌شوند.':'As you edit this note, earlier versions will be kept here.'}</div></div></div>`;
     return html;
   }
   html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
@@ -3642,7 +3678,7 @@ function renderNoteVersionHistory(){
       <button class="shop-mini" data-note-restore-version="${realIndex}">${L==='fa'?'بازگردانی':'Restore'}</button>
     </div>`;
   });
-  html+=`</div>`;
+  html+=`</div></div>`;
   return html;
 }
 
@@ -3652,8 +3688,8 @@ function renderNoteDetail(){
   const isChecklist=n.kind==='checklist';
   const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
-  const pageBg=accent?`background:linear-gradient(${accent}3a,${accent}22 40%,transparent 220px);min-height:100%`:'';
-  let html=`<div style="${pageBg}">
+  const pageBg=accent?`background:linear-gradient(${accent}3a,${accent}22 40%,transparent 220px);min-height:100%`:`${noteWorkspaceBgStyle()};min-height:100%`;
+  let html=`<div class="${noteWorkspaceClass()}" style="${pageBg}">
   <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px${accent?`;border-inline-start:4px solid ${accent}`:''}">
     <button class="ld-back" id="note-detail-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="flex:1"></div>
@@ -3666,9 +3702,9 @@ function renderNoteDetail(){
   <div class="note-swatch-bar">
     ${NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch sm ${n.color===c?'on':''}" data-note-color-inline="${c||''}" style="background:${c||'var(--s3)'}"></button>`).join('')}
   </div>
-  <div style="display:flex;gap:10px;padding:6px 20px 2px;align-items:center">
-    <input type="date" class="finput" id="note-due-date" value="${esc(n.dueDate||'')}" style="flex:1">
-    <input type="time" class="finput" id="note-due-time" value="${esc(n.dueTime||'')}" style="flex:1">
+  <div class="note-due-row">
+    <input type="date" class="finput" id="note-due-date" value="${esc(n.dueDate||'')}">
+    <input type="time" class="finput" id="note-due-time" value="${esc(n.dueTime||'')}">
     ${voiceMicHTML('note')}
   </div>
   <label style="display:flex;align-items:center;gap:8px;cursor:not-allowed;font-size:13px;color:var(--ink3);padding:4px 22px;opacity:.55">
