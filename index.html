@@ -295,10 +295,16 @@ body.light .trow-title{color:var(--ink)}
 .note-filter-chip{flex:none;background:var(--s2);border:1px solid var(--b1);border-radius:20px;
   padding:7px 14px;font-size:13px;color:var(--ink2);cursor:pointer;white-space:nowrap}
 .note-filter-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
-.note-grid{display:grid;grid-template-columns:1fr;gap:10px;padding:4px 20px 90px}
-@media (min-width:560px){.note-grid{grid-template-columns:repeat(2,1fr)}}
-@media (min-width:900px){.note-grid{grid-template-columns:repeat(3,1fr)}}
-.note-card{background:var(--s2);border:1px solid var(--b1);border-radius:14px;padding:12px 14px;cursor:pointer;min-height:88px;display:flex;flex-direction:column;gap:6px}
+.note-grid{column-count:1;column-gap:10px;padding:4px 20px 90px}
+@media (min-width:560px){.note-grid{column-count:2}}
+@media (min-width:900px){.note-grid{column-count:3}}
+@media (min-width:1300px){.note-grid{column-count:4}}
+.note-card{background:var(--s2);border:1px solid var(--b1);border-radius:16px;padding:14px 15px;
+  cursor:pointer;min-height:88px;display:flex;flex-direction:column;gap:6px;
+  break-inside:avoid;margin:0 0 10px;
+  transition:transform .12s ease,box-shadow .12s ease;
+  transform:rotate(var(--tilt,0deg))}
+.note-card:active{transform:rotate(0deg) scale(.97);box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .note-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
 .note-card-title{font-size:15px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-card-body{font-size:13px;color:var(--ink2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
@@ -1001,7 +1007,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v172';
+const APP_VERSION='v173';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3283,9 +3289,14 @@ function renderNotes(){
 
 function noteCardHTML(n){
   const isChecklist=n.kind==='checklist';
-  const accent=n.color||'#6e56f8';
+  const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
-  return `<div class="note-card" data-note-open="${n.id}" style="border-inline-start:3px solid ${accent}">
+  // Deterministic (not random-per-render) slight tilt from the note's id, so
+  // cards don't jitter on every re-render — a small, playful, Keep-like touch.
+  let h=0; for(let i=0;i<n.id.length;i++)h=(h*31+n.id.charCodeAt(i))>>>0;
+  const tilt=((h%50)/10-2.5).toFixed(2); // -2.5deg .. +2.5deg
+  const bg=accent?`background:linear-gradient(${accent}22,${accent}22),var(--s2);border-color:${accent}55`:'';
+  return `<div class="note-card" data-note-open="${n.id}" style="--tilt:${tilt}deg;${bg}${accent?'':`border-inline-start:3px solid var(--b1)`}">
     <div class="note-card-top">
       <div class="note-card-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
       <button class="star ${n.pinned?'on':''}" data-note-pin="${n.id}" aria-label="pin" style="width:28px;height:28px">★</button>
