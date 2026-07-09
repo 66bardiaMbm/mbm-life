@@ -291,7 +291,63 @@ body.light .trow-title{color:var(--ink)}
 .shop-toolbar2{display:flex;justify-content:flex-end;gap:14px;padding:0 18px 8px}
 .shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
 
-/* ── Notes module ── */
+/* ── Notes corkboard workspace (reference design) ── */
+.note-workspace-board{min-height:100%;display:flex;flex-direction:column;padding-bottom:12px}
+.note-board-tabs{display:flex;gap:3px;overflow-x:auto;padding:6px 8px 0;scrollbar-width:none;align-items:flex-end}
+.note-board-tabs::-webkit-scrollbar{display:none}
+.board-tab{flex:none;border:none;cursor:pointer;white-space:nowrap;
+  border-radius:12px 12px 0 0;padding:9px 16px 8px;font-size:14px;font-weight:800;
+  background:linear-gradient(180deg,var(--tabc),color-mix(in srgb,var(--tabc) 70%,black));
+  color:#10240f;text-shadow:0 1px 0 rgba(255,255,255,.25);
+  opacity:.75;transform:translateY(3px);transition:all .12s}
+.board-tab.on{opacity:1;transform:translateY(0);box-shadow:0 -2px 8px rgba(0,0,0,.3)}
+.board-tab-add{padding:9px 14px;font-size:16px}
+.note-board-frame{flex:1;margin:0 6px;border-radius:6px;
+  background:linear-gradient(180deg,#f2f2f2,#cfcfcf);
+  padding:7px;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.note-board-inner{min-height:60vh;border-radius:3px;
+  background:radial-gradient(circle at 25% 15%,#c98d54,#a86f3c 55%,#8f5c2f);
+  background-image:radial-gradient(rgba(0,0,0,.16) 1px,transparent 1.7px);
+  background-size:8px 8px;padding-bottom:10px}
+.note-board-search{background:rgba(255,255,255,.9);border:1px solid rgba(0,0,0,.2);color:#2b1a0c;width:100%}
+.note-board-search::placeholder{color:#7a5a3a}
+.note-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;padding:10px}
+.note-board-actionbar{display:flex;justify-content:space-around;align-items:center;
+  padding:8px 6px 4px;gap:4px}
+.board-action{width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;
+  background:rgba(0,0,0,.22);color:#f4e6d2;font-size:17px;
+  display:flex;align-items:center;justify-content:center}
+.board-action:active{background:rgba(0,0,0,.4)}
+.board-action sup{font-size:9px;margin-left:1px}
+/* ── Sticky notes on the board ── */
+.sticky-note{position:relative;background:var(--paper);color:#1a1408;
+  border-radius:2px;padding:22px 10px 10px;min-height:120px;cursor:pointer;
+  display:flex;flex-direction:column;gap:5px;overflow:hidden;
+  box-shadow:2px 3px 7px rgba(0,0,0,.4);
+  transform:rotate(var(--tilt,0deg));transition:transform .14s,box-shadow .14s}
+.sticky-note:active{transform:rotate(0deg) scale(.97);box-shadow:2px 6px 14px rgba(0,0,0,.5)}
+.sticky-pin{position:absolute;top:5px;left:50%;transform:translateX(-50%);
+  width:13px;height:13px;border-radius:50%;
+  background:radial-gradient(circle at 33% 30%,color-mix(in srgb,var(--pin) 55%,white),var(--pin) 72%);
+  box-shadow:0 2px 3px rgba(0,0,0,.45),inset 0 -1px 2px rgba(0,0,0,.3);z-index:2}
+.sticky-top{display:flex;align-items:flex-start;justify-content:space-between;gap:4px}
+.sticky-title{font-size:14px;font-weight:800;color:#1a1408;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sticky-star{background:none;border:none;cursor:pointer;font-size:15px;
+  color:rgba(0,0,0,.25);padding:0;flex:none;line-height:1}
+.sticky-star.on{color:#d97706}
+.sticky-body{font-size:var(--note-fs,13px);color:#33281a;line-height:1.35;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+.sticky-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;
+  font-size:10px;color:#5a4a33;font-weight:600}
+.sticky-fold{position:absolute;right:0;bottom:0;width:0;height:0;
+  border-style:solid;border-width:0 0 16px 16px;
+  border-color:transparent transparent rgba(0,0,0,.13) transparent}
+.note-board.note-grid-list{grid-template-columns:1fr}
+.note-grid-list .sticky-note{min-height:auto;flex-direction:row;align-items:center;
+  gap:10px;padding:10px 12px;transform:none}
+.note-grid-list .sticky-pin,.note-grid-list .sticky-fold{display:none}
+.note-grid-list .sticky-body{-webkit-line-clamp:1;flex:1}
 .note-tabs-row{display:flex;gap:4px;overflow-x:auto;padding:0 16px;scrollbar-width:none;align-items:flex-end}
 .note-tabs-row::-webkit-scrollbar{display:none}
 .note-filter-chip{flex:none;border:none;border-radius:14px 14px 0 0;
@@ -306,9 +362,13 @@ body.light .trow-title{color:var(--ink)}
 @media (min-width:1300px){.note-grid{column-count:4}}
 .note-card{background:var(--s2);border:1px solid var(--b1);border-radius:16px;padding:14px 15px;
   cursor:pointer;min-height:88px;display:flex;flex-direction:column;gap:6px;
-  break-inside:avoid;margin:0 0 10px;overflow:hidden;
+  break-inside:avoid;margin:0 0 10px;overflow:hidden;position:relative;
   transition:transform .12s ease,box-shadow .12s ease;
   transform:rotate(var(--tilt,0deg))}
+.note-pin-dot{position:absolute;top:6px;left:50%;transform:translateX(-50%);width:10px;height:10px;
+  border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff8a8a,#c0392b 70%);
+  box-shadow:0 2px 3px rgba(0,0,0,.4);z-index:2}
+.note-grid-list .note-pin-dot{display:none}
 .note-card:active{transform:rotate(0deg) scale(.97);box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .note-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
 .note-card-title{font-size:15px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -342,7 +402,7 @@ body.light .trow-title{color:var(--ink)}
 .note-grid .note-card-body{font-size:var(--note-fs,15px)}
 .note-swatch-bar{display:flex;gap:8px;padding:6px 20px 2px;overflow-x:auto;scrollbar-width:none}
 .note-color-swatch.sm{width:26px;height:26px;flex:none}
-.note-card.drag-lift{opacity:.9;transform:scale(1.05) rotate(0deg)!important;box-shadow:0 14px 34px rgba(0,0,0,.55);z-index:10;position:relative;transition:none}
+.sticky-note.drag-lift,.note-card.drag-lift{opacity:.92;transform:scale(1.06) rotate(0deg)!important;box-shadow:0 14px 34px rgba(0,0,0,.55);z-index:10;position:relative;transition:none}
 .note-card{transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s}
 /* List view: compact single-line rows instead of squeezed masonry cards */
 .note-grid-list .note-card{flex-direction:row;align-items:center;gap:10px;min-height:auto;padding:12px 14px;border-radius:12px;transform:none!important}
@@ -355,8 +415,17 @@ body.light .trow-title{color:var(--ink)}
 .note-due-row input[type=date],.note-due-row input[type=time]{flex:1;min-width:120px}
 .note-topbar{display:flex;align-items:center;gap:8px;padding:12px 14px 6px}
 .note-topbar2{display:flex;align-items:center;gap:2px;padding:2px 10px 6px}
-.note-pill{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.25);
-  border-radius:10px;padding:6px 10px;cursor:pointer;color:inherit;font-size:13px;font-weight:600}
+.note-pill{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.45);
+  border-radius:10px;padding:6px 10px;cursor:pointer;color:#fff;font-size:13px;font-weight:700}
+/* On a coloured note, every control must be crisp white — not a washed-out tint. */
+.note-colored .note-title-input,.note-colored .note-body-input,.note-colored .note-check-text{color:#fff!important}
+.note-colored .note-title-input::placeholder,.note-colored .note-body-input::placeholder,
+.note-colored #note-tag-input::placeholder{color:rgba(255,255,255,.85)!important;opacity:1}
+.note-colored #note-tag-input{color:#fff!important}
+.note-colored .note-icon-btn{color:#fff!important}
+.note-colored .star{color:rgba(255,255,255,.9)}
+.note-colored .star.on{color:#ffd94a}
+.note-colored .chip{background:rgba(0,0,0,.3);color:#fff}
 .note-pill-swatch{width:16px;height:16px;border-radius:4px;background:var(--s2);flex:none}
 .note-pill-caret{font-size:10px;opacity:.8}
 .note-pill-folder{flex:1;justify-content:space-between;min-width:0}
@@ -1069,7 +1138,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v183';
+const APP_VERSION='v186';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1577,7 +1646,7 @@ let noteFilterType=null;     // filter: 'text'|'checklist'|null
 let noteFilterDated=null;    // filter: 'dated'|'reminder'|null
 // Workspace prefs persist in DB.meta.notePrefs = {bg,view,fontSize,defaultColor}
 function notePrefs(){
-  if(!DB.meta.notePrefs)DB.meta.notePrefs={bg:'dark',view:'grid',fontSize:15,defaultColor:null};
+  if(!DB.meta.notePrefs)DB.meta.notePrefs={bg:'cork',view:'grid',fontSize:15,defaultColor:null};
   return DB.meta.notePrefs;
 }
 // Background style for the Notes workspace. 'cork' is an MBM-styled warm
@@ -1738,14 +1807,13 @@ function renderToday(){
   // Dated shopping lists participate in Today exactly like dated tasks.
   // Undated lists are deliberately excluded so Today never fills with noise.
   const shopT=shopListsAsTasks().filter(t=>t.dueDate);
-  const noteT=notesAsTasks().filter(t=>t.dueDate);
   const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts)
-    .concat(shopT.filter(t=>t.dueDate<ts)).concat(noteT.filter(t=>t.dueDate<ts));
+    .concat(shopT.filter(t=>t.dueDate<ts));
   const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate))
-    .concat(shopT.filter(t=>t.dueDate===ts)).concat(noteT.filter(t=>t.dueDate===ts));
+    .concat(shopT.filter(t=>t.dueDate===ts));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
   const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts)
-    .concat(shopT.filter(t=>t.dueDate>ts)).concat(noteT.filter(t=>t.dueDate>ts));
+    .concat(shopT.filter(t=>t.dueDate>ts));
   // Today's appointments
   const todayAppts=Object.values(DB.entities.appts||{})
     .filter(a=>!a.archivedAt&&a.date===ts)
@@ -1839,13 +1907,12 @@ function renderListsNav(){
   const user=DB.meta;
 
   const shopT=shopListsAsTasks();   // active shopping lists, task-shaped
-  const noteT=notesAsTasks().filter(t=>t.dueDate); // dated notes only
   const svCounts={
-    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length + noteT.filter(t=>t.dueDate===ts).length,
+    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length,
     important:allT.filter(t=>!t.done&&t.pinned).length + shopT.filter(t=>t.pinned).length,
-    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length + noteT.filter(t=>t.dueDate>ts).length,
+    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length,
     assigned:allT.filter(t=>!t.done&&t.assigneeId&&t.assigneeId===DB.meta.userId).length,
-    all:allT.filter(t=>!t.done).length + shopT.length + noteT.length,
+    all:allT.filter(t=>!t.done).length + shopT.length,
   };
   const _sShow=DB.meta.smartShow||{};
   const _autoHide=DB.meta.autoHideSmart===true;
@@ -1991,10 +2058,6 @@ function renderListDetail(){
     // filter below. "assigned" is task-only (shopping lists have no assignee).
     if(activeSmartView!=='assigned'){
       tasks=tasks.concat(shopListsAsTasks());
-      // Notes join unified views ONLY when dated — an undated note is not a
-      // plan/commitment, so it stays inside the Notes module and out of the
-      // productivity views.
-      tasks=tasks.concat(notesAsTasks().filter(t=>t.dueDate));
     }
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
@@ -2085,26 +2148,6 @@ function taskRowFlat(t,isOverdue){
   const ts=todayStr();
   const over=t.dueDate&&t.dueDate<ts&&!t.done;
   // ── Shopping List row: same row chrome as a Task, shopping-specific wiring ──
-  // ── Note row: same chrome, opens the note editor; no checkbox (a note is
-  // not completable) — the icon slot shows the note glyph instead. ──
-  if(t.kind==='note'){
-    let nmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'یادداشت':'Note'}</span>`;
-    if(t.dueDate&&!over)nmeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
-    if(over)nmeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
-    const nOverStyle=over?'border-left:2px solid var(--danger);':'';
-    return `<div class="trow-flat" data-note-jump="${t.noteId}" style="${nOverStyle}">
-      <div class="trow-chk-wrap">
-        <div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:16px;color:${t.color}">${t.icon}</div>
-      </div>
-      <div class="trow-content">
-        <div class="trow-title" dir="auto">${esc(t.text)}</div>
-        <div class="trow-meta-row">${nmeta}</div>
-      </div>
-      <div class="trow-star-wrap">
-        <button class="star ${t.pinned?'on':''}" data-note-jump-pin="${t.noteId}">★</button>
-      </div>
-    </div>`;
-  }
   if(t.kind==='shop'){
     let smeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'خرید':'Shopping'}</span>`;
     const rem=shopItemsFor(t.shopId).filter(it=>!it.purchased).length;
@@ -3475,10 +3518,10 @@ function noteExitReorder(){ noteReorderMode=false; render(); }
 // release to persist. A short tap still opens the note as usual. Cancels
 // cleanly if the finger moves before the hold completes (i.e. a scroll).
 function bindNoteCardLongPressDrag(){
-  const grid=document.querySelector('.note-grid');
+  const grid=document.querySelector('.note-board');
   if(!grid)return;
   let holdTimer=null, lifted=null, startX=0, startY=0, moved=false;
-  const cards=()=>Array.from(grid.querySelectorAll('.note-card[data-note-open]'));
+  const cards=()=>Array.from(grid.querySelectorAll('.sticky-note[data-note-open]'));
   function persistOrder(){
     const ids=cards().map(c=>c.dataset.noteOpen);
     setViewOrder('notes',ids);
@@ -3490,7 +3533,7 @@ function bindNoteCardLongPressDrag(){
     if(lifted){lifted.classList.remove('drag-lift');lifted=null;}
   }
   grid.addEventListener('pointerdown',(e)=>{
-    const card=e.target.closest('.note-card[data-note-open]');
+    const card=e.target.closest('.sticky-note[data-note-open]');
     if(!card||e.target.closest('[data-note-pin]'))return;
     startX=e.clientX; startY=e.clientY; moved=false;
     holdTimer=setTimeout(()=>{
@@ -3508,7 +3551,7 @@ function bindNoteCardLongPressDrag(){
     }
     e.preventDefault();
     const under=document.elementFromPoint(e.clientX,e.clientY);
-    const target=under&&under.closest?under.closest('.note-card[data-note-open]'):null;
+    const target=under&&under.closest?under.closest('.sticky-note[data-note-open]'):null;
     if(target&&target!==lifted){
       const rect=target.getBoundingClientRect();
       const before=e.clientY<rect.top+rect.height/2;
@@ -3592,29 +3635,27 @@ function renderNotes(){
   return renderNotesHome();
 }
 
+const STICKY_PAPER=['#f7f07a','#ff9db1','#8ef2a5','#f2f2f2','#8ec9f7','#f7c94a','#f7f0b8','#f7b8c8'];
+const PIN_COLORS=['#1f8a3b','#c0392b','#1b3f8f','#e08a00','#7a2f8f'];
 function noteCardHTML(n){
   const isChecklist=n.kind==='checklist';
-  const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
-  const d=new Date(n.createdAt);
-  const whenStr=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-  // Deterministic (not random-per-render) slight tilt from the note's id, so
-  // cards don't jitter on every re-render — a small, playful, Keep-like touch.
   let h=0; for(let i=0;i<n.id.length;i++)h=(h*31+n.id.charCodeAt(i))>>>0;
-  const tilt=((h%50)/10-2.5).toFixed(2); // -2.5deg .. +2.5deg
-  const bg=accent?`background:linear-gradient(${accent}4a,${accent}4a),var(--s2);border-color:${accent}88`:'';
-  return `<div class="note-card" data-note-open="${n.id}" style="--tilt:${tilt}deg;${bg}${accent?'':`border-inline-start:3px solid var(--b1)`}">
-    <div class="note-card-top">
-      <div class="note-card-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
-      <button class="star ${n.pinned?'on':''}" data-note-pin="${n.id}" aria-label="pin" style="width:28px;height:28px">★</button>
+  const tilt=((h%70)/10-3.5).toFixed(2);
+  const paper=n.color||STICKY_PAPER[h%STICKY_PAPER.length];
+  const pin=PIN_COLORS[(h>>3)%PIN_COLORS.length];
+  return `<div class="sticky-note" data-note-open="${n.id}" style="--tilt:${tilt}deg;--paper:${paper};--pin:${pin}">
+    <div class="sticky-pin"></div>
+    <div class="sticky-top">
+      <div class="sticky-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
+      <button class="sticky-star ${n.pinned?'on':''}" data-note-pin="${n.id}" aria-label="pin">★</button>
     </div>
-    ${notePreviewText(n)?`<div class="note-card-body">${esc(notePreviewText(n))}</div>`:''}
-    <div class="note-card-meta">
-      ${isChecklist?`<span class="chip">☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
-      ${folder?`<span class="chip">📁 ${esc(folder.name)}</span>`:''}
-      ${(n.tags||[]).slice(0,3).map(t=>`<span class="chip">#${esc(t)}</span>`).join('')}
+    ${notePreviewText(n)?`<div class="sticky-body">${esc(notePreviewText(n))}</div>`:''}
+    <div class="sticky-meta">
+      ${isChecklist?`<span>☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
+      ${folder?`<span>📁 ${esc(folder.name)}</span>`:''}
     </div>
-    ${whenStr?`<div class="note-card-when">${esc(whenStr)}</div>`:''}
+    <div class="sticky-fold"></div>
   </div>`;
 }
 
@@ -3644,12 +3685,10 @@ function renderNotesHome(){
   const sortLabels={modified:L==='fa'?'آخرین ویرایش':'Last modified',created:L==='fa'?'تاریخ ساخت':'Created date',alpha:L==='fa'?'الفبایی':'Alphabetical',color:L==='fa'?'رنگ':'Color',manual:L==='fa'?'دستی':'Manual'};
   const filtersOn=!!(noteFilterColor||noteFilterType||noteFilterDated);
 
-  let html=`<div class="${noteWorkspaceClass()}" style="${noteWorkspaceBgStyle()}">
-  <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
-    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
-    <div style="font-size:26px;font-weight:800">${L==='fa'?'یادداشت‌ها':'Notes'}</div>
-    <div style="flex:1"></div>
-    <button class="ld-action-btn" id="note-workspace-settings" aria-label="workspace settings">⚙</button>
+  let html=`<div class="note-workspace-board">
+  <div style="display:flex;align-items:center;gap:6px;padding:8px 12px 0">
+    <button class="ld-back" id="module-back" style="width:36px;height:36px;flex:none">&#8249;</button>
+    <div style="font-size:18px;font-weight:800">${L==='fa'?'یادداشت‌ها':'Notes'}</div>
   </div>`;
 
   if(noteReorderMode){
@@ -3666,37 +3705,37 @@ function renderNotesHome(){
     return html;
   }
 
-  html+=`<div style="padding:0 20px 8px">
-    <input class="finput" id="note-search" placeholder="${L==='fa'?'جستجوی یادداشت...':'Search notes...'}" value="${esc(noteSearch)}" style="width:100%" autocomplete="off">
+  html+=`<div class="note-board-tabs">
+    <button class="board-tab ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all" style="--tabc:#2eb82e">${L==='fa'?'اصلی':'Main'}</button>
+    <button class="board-tab ${noteFilterPinned?'on':''}" data-note-filter="pinned" style="--tabc:#d4d422">★ ${L==='fa'?'پین':'Pinned'}</button>
+    ${folders.map(f=>`<button class="board-tab ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}" style="--tabc:${f.color}">${esc(f.name)}</button>`).join('')}
+    <button class="board-tab board-tab-add" data-note-new-folder="1" style="--tabc:#7a7a7a">＋</button>
+    <button class="board-tab ${noteView==='trash'?'on':''}" id="note-go-trash" style="--tabc:#9a9a8a">🗑 ${L==='fa'?'سطل':'Trash'}${trashedCount?` ${trashedCount}`:''}</button>
   </div>
-  <div class="note-tabs-row">
-    <button class="note-filter-chip ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all" style="--tabc:#6e56f8;--tabtxt:#fff">${L==='fa'?'همه':'All'}</button>
-    <button class="note-filter-chip ${noteFilterPinned?'on':''}" data-note-filter="pinned" style="--tabc:#eab308;--tabtxt:#1a1400">★ ${L==='fa'?'پین‌شده':'Pinned'}</button>
-    ${folders.map(f=>`<button class="note-filter-chip ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}" style="--tabc:${f.color};--tabtxt:#fff">${esc(f.name)}</button>`).join('')}
-    <button class="note-filter-chip note-add-folder-chip" data-note-new-folder="1" style="--tabc:transparent;--tabtxt:var(--ink2)">${L==='fa'?'+ پوشه':'+ Folder'}</button>
-  </div>
-  <div style="height:2px;background:var(--b1);margin:0 20px 8px;border-radius:1px"></div>
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;gap:8px;flex-wrap:wrap">
-    <div style="display:flex;gap:10px">
-      <button class="shop-mini" id="note-sort-btn">${L==='fa'?'مرتب‌سازی':'Sort'}: ${sortLabels[noteSortMode]}</button>
-      <button class="shop-mini ${filtersOn?'':''}" id="note-filters-btn" ${filtersOn?'style="color:var(--brand);font-weight:700"':''}>${L==='fa'?'فیلترها':'Filters'}${filtersOn?' ●':''}</button>
-      <button class="shop-mini" id="note-view-toggle">${prefs.view==='list'?(L==='fa'?'نما: لیست':'View: List'):(L==='fa'?'نما: گرید':'View: Grid')}</button>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="shop-mini" id="note-go-archive">${L==='fa'?'آرشیو':'Archive'}${archivedCount?` (${archivedCount})`:''}</button>
-      <button class="shop-mini" id="note-go-trash">${L==='fa'?'سطل زباله':'Trash'}${trashedCount?` (${trashedCount})`:''}</button>
-    </div>
-  </div>`;
+  <div class="note-board-frame">
+    <div class="note-board-inner">
+      <div style="padding:8px 10px 4px">
+        <input class="finput note-board-search" id="note-search" placeholder="${L==='fa'?'جستجو...':'Search...'}" value="${esc(noteSearch)}" autocomplete="off">
+      </div>`;
 
   if(!list.length){
     const anyFilter=noteSearch.trim()||filtersOn||noteFilterPinned||noteFilterFolder;
-    const reason=anyFilter?(L==='fa'?'نتیجه‌ای یافت نشد':'No matching notes'):(L==='fa'?'هنوز یادداشتی نیست':'No notes yet');
-    const sub=anyFilter?'':(L==='fa'?'با دکمه‌ی + یک یادداشت متنی یا چک‌لیست بساز':'Tap + to create a text note or checklist');
-    html+=`<div class="hub-ph"><div class="hub-ph-ic">✎</div><div class="hub-ph-t">${reason}</div>${sub?`<div class="hub-ph-d">${sub}</div>`:''}</div>`;
+    const reason=anyFilter?(L==='fa'?'نتیجه‌ای یافت نشد':'No matching notes'):(L==='fa'?'تخته خالی است':'The board is empty');
+    html+=`<div class="hub-ph"><div class="hub-ph-t" style="color:#5c3a1e">${reason}</div></div>`;
   }else{
-    html+=`<div class="note-grid ${prefs.view==='list'?'note-grid-list':''}" style="--note-fs:${prefs.fontSize||15}px">${list.map(noteCardHTML).join('')}</div>`;
+    html+=`<div class="note-board ${prefs.view==='list'?'note-grid-list':''}" style="--note-fs:${prefs.fontSize||15}px">${list.map(noteCardHTML).join('')}</div>`;
   }
-  html+=`</div>`;
+
+  html+=`    </div>
+    <div class="note-board-actionbar">
+      <button class="board-action" id="note-sort-btn" title="${L==='fa'?'مرتب‌سازی':'Sort'}">☰</button>
+      <button class="board-action" id="note-filters-btn" title="${L==='fa'?'فیلترها':'Filters'}"${filtersOn?' style="color:var(--brand)"':''}>⚑</button>
+      <button class="board-action" id="note-go-archive" title="${L==='fa'?'آرشیو':'Archive'}">▤${archivedCount?`<sup>${archivedCount}</sup>`:''}</button>
+      <button class="board-action" id="note-workspace-settings" title="${L==='fa'?'تنظیمات':'Settings'}">⚙</button>
+      <button class="board-action" id="note-view-toggle" title="${L==='fa'?'نما':'View'}">${prefs.view==='list'?'▦':'▤'}</button>
+    </div>
+  </div>
+  </div>`;
   return html;
 }
 
@@ -3775,27 +3814,34 @@ function renderNoteDetail(){
   const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
   const ui=_noteUIStateFor(n);
-  const pageBg=accent?`background:linear-gradient(${accent}cc,${accent}99);min-height:100%`:`${noteWorkspaceBgStyle()};min-height:100%`;
-  const iconColor=accent?'#fff':'var(--ink)';
-  let html=`<div class="${noteWorkspaceClass()}" style="${pageBg}">
+  const pageBg=accent?`background:${accent};min-height:100%`:`${noteWorkspaceBgStyle()};min-height:100%`;
+  const iconColor=accent?'#ffffff':'var(--ink)';
+  const svgCal=`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+  const svgAlarm=`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg>`;
+  const svgMenu=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`;
+  const svgInfo=`<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+  const svgBack=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
+  const svgDoc=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+  const svgCheck=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 12 11 15 16 9"/></svg>`;
+  let html=`<div class="${noteWorkspaceClass()}${accent?' note-colored':''}" style="${pageBg}">
   <div class="note-topbar">
     <button class="note-pill" id="note-color-pill" style="background:${accent||'var(--s3)'}">
       <span class="note-pill-swatch" style="background:${accent||'var(--s2)'}"></span><span class="note-pill-caret">▾</span>
     </button>
-    <button class="note-icon-btn" id="note-type-indicator" style="color:${iconColor}" title="${isChecklist?(L==='fa'?'چک‌لیست':'Checklist'):(L==='fa'?'متنی':'Text')}">${isChecklist?'☑':'📄'}</button>
+    <button class="note-icon-btn" id="note-type-indicator" style="color:${iconColor}" title="${isChecklist?(L==='fa'?'چک‌لیست':'Checklist'):(L==='fa'?'متنی':'Text')}">${isChecklist?svgCheck:svgDoc}</button>
     <button class="note-pill note-pill-folder" id="note-folder-pill">
       <span>${folder?esc(folder.name):(L==='fa'?'بدون پوشه':'No folder')}</span><span class="note-pill-caret">▾</span>
     </button>
   </div>
   <div class="note-topbar2">
-    <button class="note-icon-btn" id="note-detail-back" style="color:${iconColor}" aria-label="back" title="${L==='fa'?'بازگشت':'Back'}">&#8249;</button>
-    <button class="note-icon-btn" id="note-info-btn" style="color:${iconColor}" aria-label="info" title="${L==='fa'?'اطلاعات یادداشت':'Note info'}">ⓘ</button>
+    <button class="note-icon-btn" id="note-detail-back" style="color:${iconColor}" aria-label="back" title="${L==='fa'?'بازگشت':'Back'}">${svgBack}</button>
+    <button class="note-icon-btn" id="note-info-btn" style="color:${iconColor}" aria-label="info" title="${L==='fa'?'اطلاعات یادداشت':'Note info'}">${svgInfo}</button>
     <div style="flex:1"></div>
-    <button class="note-icon-btn" id="note-toggle-due" style="color:${iconColor}" aria-label="date" title="${L==='fa'?'تاریخ و ساعت':'Date & time'}">📅</button>
-    <button class="note-icon-btn" id="note-toggle-reminder" style="color:${iconColor};opacity:.5" aria-label="reminder" title="${L==='fa'?'یادآوری (به‌زودی)':'Reminder (coming soon)'}">⏰</button>
+    <button class="note-icon-btn" id="note-toggle-due" style="color:${iconColor}" aria-label="date" title="${L==='fa'?'تاریخ و ساعت':'Date & time'}">${svgCal}</button>
+    <button class="note-icon-btn" id="note-toggle-reminder" style="color:${iconColor};opacity:.6" aria-label="reminder" title="${L==='fa'?'یادآوری (به‌زودی)':'Reminder (coming soon)'}">${svgAlarm}</button>
     ${n.locked?`<span title="${L==='fa'?'قفل — فقط‌خواندنی':'Locked — read-only'}" style="color:${iconColor};font-size:16px;padding:0 4px">🔒</span>`:''}
-    <button class="star ${n.pinned?'on':''}" id="note-detail-pin" aria-label="pin" style="color:${iconColor}">★</button>
-    <button class="note-icon-btn" id="note-detail-menu" aria-label="options" style="color:${iconColor}">&#9776;</button>
+    <button class="star ${n.pinned?'on':''}" id="note-detail-pin" aria-label="pin" style="color:${accent?'#ffffff':''}">★</button>
+    <button class="note-icon-btn" id="note-detail-menu" aria-label="options" style="color:${iconColor}">${svgMenu}</button>
   </div>
   ${ui.showColor?`<div class="note-swatch-bar">
     ${NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch sm ${n.color===c?'on':''}" data-note-color-inline="${c||''}" style="background:${c||'var(--s3)'}"></button>`).join('')}
@@ -3829,7 +3875,7 @@ function renderNoteDetail(){
   html+=`<div id="note-tags-area" style="padding:0 20px 100px">
     <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
       ${(n.tags||[]).map(t=>`<span class="chip">#${esc(t)} <span data-note-tag-del="${esc(t)}" style="cursor:pointer;opacity:.7">✕</span></span>`).join('')}
-      <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:${accent?'rgba(255,255,255,.85)':'var(--ink2)'};font-size:12px;width:70px;outline:none">
+      <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:var(--ink2);font-size:12px;width:70px;outline:none">
     </div>
   </div>
   <div class="note-bottom-toolbar">
@@ -4034,21 +4080,6 @@ function shopListAsTask(l){
 }
 // Active (non-archived) shopping lists as task-shaped items.
 function shopListsAsTasks(){ return shopListsAll().map(shopListAsTask); }
-// Notes projected into the same task shape — dated notes then flow through
-// My Day / Planned / All with the exact same predicates as tasks & shopping.
-function noteAsTask(n){
-  if(!n)return null;
-  return {
-    id:'note:'+n.id, noteId:n.id, kind:'note',
-    text:n.title||(n.body||'').slice(0,40)||'Note',
-    dueDate:n.dueDate||'', dueTime:n.dueTime||'',
-    pinned:!!n.pinned, done:false,
-    notes:n.body||'', location:'', listId:null, priority:null,
-    icon:n.kind==='checklist'?'☑':'✎', color:n.color||'#6e56f8',
-    updatedAt:n.updatedAt||n.createdAt||''
-  };
-}
-function notesAsTasks(){ return notesActive().map(noteAsTask); }
 
 /* ═══════════════════════════════════════════════════════════════════
    VOICE INPUT — reuses the app's EXISTING real speech-to-text
@@ -6071,13 +6102,6 @@ function bindScreen(){
     e.stopPropagation();
     const l=shopListsMap()[el.dataset.shopComplete]; if(!l)return;
     shopCompleteList(l);});
-  document.querySelectorAll('[data-note-jump-pin]').forEach(el=>el.onclick=e=>{
-    e.stopPropagation(); noteTogglePin(el.dataset.noteJumpPin);});
-  document.querySelectorAll('[data-note-jump]').forEach(el=>el.onclick=e=>{
-    if(e.target.closest('[data-note-jump-pin]'))return;
-    screen='module'; currentModule='notes';
-    activeNoteId=el.dataset.noteJump; noteView='detail';
-    render(); window.scrollTo(0,0);});
   document.querySelectorAll('[data-shop-open]').forEach(el=>el.onclick=e=>{
     if(e.target.closest('[data-shop-pin]')||e.target.closest('[data-shop-complete]')||e.target.closest('[data-map]'))return;
     // Jump into the Shopping module focused on this list.
@@ -6153,7 +6177,7 @@ function bindScreen(){
         document.querySelectorAll('[data-note-sort]').forEach(el=>el.onclick=()=>{noteSortMode=el.dataset.noteSort;closeSheet();render();});
         document.getElementById('ns-reorder').onclick=()=>{
           closeSheet();
-          const ids=Array.from(document.querySelectorAll('.note-card[data-note-open]')).map(el=>el.dataset.noteOpen);
+          const ids=Array.from(document.querySelectorAll('.sticky-note[data-note-open]')).map(el=>el.dataset.noteOpen);
           const currentList=ids.map(id=>noteItemsMap()[id]).filter(Boolean);
           noteEnterReorder(currentList);
         };
@@ -6232,7 +6256,7 @@ function bindScreen(){
         });
         document.getElementById('ws-font').oninput=(e)=>{
           notePrefs().fontSize=parseInt(e.target.value,10)||15; saveDB();
-          const grid=document.querySelector('.note-grid'); if(grid)grid.style.setProperty('--note-fs',notePrefs().fontSize+'px');
+          const grid=document.querySelector('.note-board'); if(grid)grid.style.setProperty('--note-fs',notePrefs().fontSize+'px');
         };
         document.querySelectorAll('[data-ws-defcolor]').forEach(el=>el.onclick=()=>{
           notePrefs().defaultColor=el.dataset.wsDefcolor||null; saveDB(); closeSheet();
@@ -6343,7 +6367,7 @@ function bindScreen(){
       document.querySelectorAll('[data-note-color-inline]').forEach(el=>el.onclick=()=>{
         noteSetColor(activeNoteId, el.dataset.noteColorInline||null);
       });
-      // Date/time — dated notes flow into My Day/Planned via notesAsTasks()
+      // Date/time — stored on the note only (Notes are not part of My Day/Planned)
       const dueDateEl=document.getElementById('note-due-date');
       const dueTimeEl=document.getElementById('note-due-time');
       if(dueDateEl)dueDateEl.onchange=()=>noteSetDue(activeNoteId,dueDateEl.value,(dueTimeEl&&dueTimeEl.value)||'');
