@@ -24,7 +24,7 @@
    ═══════════════════════════════════ */
 :root{
   --s0:#0f0f14; --s1:#16161e; --s2:#1e1e2a; --s3:#26263a;
-  --ink:#f0f0f8; --ink2:#a0a0c0; --ink3:#606080;
+  --ink:#f0f0f8; --ink2:#d6d6ea; --ink3:#a8a8c8;
   --brand:#6e56f8; --brand2:#9d7bff;
   --brandg:linear-gradient(135deg,var(--brand),var(--brand2));
   --ok:#22d3a0; --warn:#f59e0b; --danger:#f43f5e; --info:#38bdf8;
@@ -314,6 +314,13 @@ body.light .trow-title{color:var(--ink)}
 .note-card-body{font-size:13px;color:var(--ink2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .note-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
 .note-card-when{font-size:11px;color:var(--ink3);margin-top:2px}
+.note-workspace{min-height:100%;padding-bottom:20px}
+.note-workspace[style*="cork"]{background-image:radial-gradient(rgba(0,0,0,.14) 1px,transparent 1.6px);background-size:9px 9px}
+.note-grid-list{column-count:1!important}
+.note-grid .note-card-body{font-size:var(--note-fs,15px)}
+.note-swatch-bar{display:flex;gap:8px;padding:6px 20px 2px;overflow-x:auto;scrollbar-width:none}
+.note-color-swatch.sm{width:26px;height:26px;flex:none}
+.note-card.drag-lift{opacity:.85;transform:scale(1.04)!important;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:10;position:relative;transition:none}
 .note-title-input{width:100%;background:none;border:none;font-size:22px;font-weight:800;color:var(--ink);outline:none;padding:6px 0}
 .note-body-input{width:100%;min-height:50vh;background:none;border:none;color:var(--ink);font-size:15px;line-height:1.6;outline:none;resize:vertical;font-family:inherit}
 .note-check-row{display:flex;align-items:center;gap:8px;padding:8px 8px}
@@ -1012,7 +1019,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v174';
+const APP_VERSION='v176';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1515,6 +1522,24 @@ let noteFilterFolder=null;   // folderId or null
 let noteFilterTag=null;      // tag string or null
 let noteFilterPinned=false;
 let noteReorderMode=false;
+let noteFilterColor=null;    // filter: exact note color, or null
+let noteFilterType=null;     // filter: 'text'|'checklist'|null
+let noteFilterDated=null;    // filter: 'dated'|'reminder'|null
+// Workspace prefs persist in DB.meta.notePrefs = {bg,view,fontSize,defaultColor}
+function notePrefs(){
+  if(!DB.meta.notePrefs)DB.meta.notePrefs={bg:'dark',view:'grid',fontSize:15,defaultColor:null};
+  return DB.meta.notePrefs;
+}
+// Background style for the Notes workspace. 'cork' is an MBM-styled warm
+// gradient + subtle dotted texture rendered in CSS — evokes the cork board
+// idea without copying the photo-texture look of the old apps.
+function noteWorkspaceBgStyle(){
+  const bg=notePrefs().bg;
+  if(bg==='light')return 'background:#f2f2f7;color:#1a1b26';
+  if(bg==='color')return 'background:linear-gradient(160deg,#1a1440,#3b1f5e 60%,#1a1440)';
+  if(bg==='cork')return 'background:radial-gradient(circle at 20% 10%,#8a5a33,#6e4423 60%,#5c3a1e);background-size:auto;';
+  return ''; // 'dark' = default MBM background
+}
 
 /* ── Render engine ── */
 function _showFatalError(err){
@@ -1662,13 +1687,14 @@ function renderToday(){
   // Dated shopping lists participate in Today exactly like dated tasks.
   // Undated lists are deliberately excluded so Today never fills with noise.
   const shopT=shopListsAsTasks().filter(t=>t.dueDate);
+  const noteT=notesAsTasks().filter(t=>t.dueDate);
   const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts)
-    .concat(shopT.filter(t=>t.dueDate<ts));
+    .concat(shopT.filter(t=>t.dueDate<ts)).concat(noteT.filter(t=>t.dueDate<ts));
   const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate))
-    .concat(shopT.filter(t=>t.dueDate===ts));
+    .concat(shopT.filter(t=>t.dueDate===ts)).concat(noteT.filter(t=>t.dueDate===ts));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
   const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts)
-    .concat(shopT.filter(t=>t.dueDate>ts));
+    .concat(shopT.filter(t=>t.dueDate>ts)).concat(noteT.filter(t=>t.dueDate>ts));
   // Today's appointments
   const todayAppts=Object.values(DB.entities.appts||{})
     .filter(a=>!a.archivedAt&&a.date===ts)
@@ -1762,12 +1788,13 @@ function renderListsNav(){
   const user=DB.meta;
 
   const shopT=shopListsAsTasks();   // active shopping lists, task-shaped
+  const noteT=notesAsTasks().filter(t=>t.dueDate); // dated notes only
   const svCounts={
-    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length,
+    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length + noteT.filter(t=>t.dueDate===ts).length,
     important:allT.filter(t=>!t.done&&t.pinned).length + shopT.filter(t=>t.pinned).length,
-    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length,
+    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length + noteT.filter(t=>t.dueDate>ts).length,
     assigned:allT.filter(t=>!t.done&&t.assigneeId&&t.assigneeId===DB.meta.userId).length,
-    all:allT.filter(t=>!t.done).length + shopT.length,
+    all:allT.filter(t=>!t.done).length + shopT.length + noteT.length,
   };
   const _sShow=DB.meta.smartShow||{};
   const _autoHide=DB.meta.autoHideSmart===true;
@@ -1911,7 +1938,13 @@ function renderListDetail(){
     bgPhoto=(DB.meta.smartPhoto&&DB.meta.smartPhoto[activeSmartView])||null;
     // Shopping Lists join the same pool as Tasks, then go through the SAME
     // filter below. "assigned" is task-only (shopping lists have no assignee).
-    if(activeSmartView!=='assigned') tasks=tasks.concat(shopListsAsTasks());
+    if(activeSmartView!=='assigned'){
+      tasks=tasks.concat(shopListsAsTasks());
+      // Notes join unified views ONLY when dated — an undated note is not a
+      // plan/commitment, so it stays inside the Notes module and out of the
+      // productivity views.
+      tasks=tasks.concat(notesAsTasks().filter(t=>t.dueDate));
+    }
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
     else if(activeSmartView==='planned')tasks=filterPlanned(tasks);
@@ -2001,6 +2034,26 @@ function taskRowFlat(t,isOverdue){
   const ts=todayStr();
   const over=t.dueDate&&t.dueDate<ts&&!t.done;
   // ── Shopping List row: same row chrome as a Task, shopping-specific wiring ──
+  // ── Note row: same chrome, opens the note editor; no checkbox (a note is
+  // not completable) — the icon slot shows the note glyph instead. ──
+  if(t.kind==='note'){
+    let nmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'یادداشت':'Note'}</span>`;
+    if(t.dueDate&&!over)nmeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
+    if(over)nmeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+    const nOverStyle=over?'border-left:2px solid var(--danger);':'';
+    return `<div class="trow-flat" data-note-jump="${t.noteId}" style="${nOverStyle}">
+      <div class="trow-chk-wrap">
+        <div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:16px;color:${t.color}">${t.icon}</div>
+      </div>
+      <div class="trow-content">
+        <div class="trow-title" dir="auto">${esc(t.text)}</div>
+        <div class="trow-meta-row">${nmeta}</div>
+      </div>
+      <div class="trow-star-wrap">
+        <button class="star ${t.pinned?'on':''}" data-note-jump-pin="${t.noteId}">★</button>
+      </div>
+    </div>`;
+  }
   if(t.kind==='shop'){
     let smeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'خرید':'Shopping'}</span>`;
     const rem=shopItemsFor(t.shopId).filter(it=>!it.purchased).length;
@@ -3131,13 +3184,21 @@ function noteCreate(kind){
   noteItemsMap()[id]={
     id,kind:kind==='checklist'?'checklist':'text',
     title:'',body:'',items:[],
-    color:null,folderId:null,tags:[],
+    color:notePrefs().defaultColor||null,folderId:noteFilterFolder||null,tags:[],
+    dueDate:'',dueTime:'',reminder:false,  // reminder stored but inactive (future-ready)
     pinned:false,archivedAt:null,trashedAt:null,
     createdAt:now,updatedAt:now,versions:[]
   };
   logActivity('created','note',id,{name:''});
   saveDB();
   return id;
+}
+function noteSetDue(id,date,time){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.dueDate=date||''; n.dueTime=time||'';
+  n.updatedAt=new Date().toISOString();
+  logActivity('edited','note',id,{name:n.title||''});
+  saveDB();
 }
 // Snapshot BEFORE a change is applied, so "restore" always brings back the
 // state as it existed at that point in time. Capped so history can't grow
@@ -3295,6 +3356,63 @@ function noteEnterReorder(list){
   noteReorderMode=true; render();
 }
 function noteExitReorder(){ noteReorderMode=false; render(); }
+// Direct long-press drag on the cards themselves (no menu step): press and
+// hold ~350ms to "lift" a card, drag it over another card to take its place,
+// release to persist. A short tap still opens the note as usual. Cancels
+// cleanly if the finger moves before the hold completes (i.e. a scroll).
+function bindNoteCardLongPressDrag(){
+  const grid=document.querySelector('.note-grid');
+  if(!grid)return;
+  let holdTimer=null, lifted=null, startX=0, startY=0, moved=false;
+  const cards=()=>Array.from(grid.querySelectorAll('.note-card[data-note-open]'));
+  function persistOrder(){
+    const ids=cards().map(c=>c.dataset.noteOpen);
+    setViewOrder('notes',ids);
+    noteSortMode='manual';
+    saveDB();
+  }
+  function cleanup(){
+    clearTimeout(holdTimer); holdTimer=null;
+    if(lifted){lifted.classList.remove('drag-lift');lifted=null;}
+  }
+  grid.addEventListener('pointerdown',(e)=>{
+    const card=e.target.closest('.note-card[data-note-open]');
+    if(!card||e.target.closest('[data-note-pin]'))return;
+    startX=e.clientX; startY=e.clientY; moved=false;
+    holdTimer=setTimeout(()=>{
+      lifted=card;
+      card.classList.add('drag-lift');
+      try{grid.setPointerCapture(e.pointerId);}catch(_){}
+      if(navigator.vibrate)try{navigator.vibrate(20);}catch(_){}
+    },350);
+  });
+  grid.addEventListener('pointermove',(e)=>{
+    if(!lifted){
+      // Finger moved before the hold completed -> it's a scroll, not a drag.
+      if(holdTimer&&(Math.abs(e.clientX-startX)>8||Math.abs(e.clientY-startY)>8)){clearTimeout(holdTimer);holdTimer=null;}
+      return;
+    }
+    e.preventDefault();
+    const under=document.elementFromPoint(e.clientX,e.clientY);
+    const target=under&&under.closest?under.closest('.note-card[data-note-open]'):null;
+    if(target&&target!==lifted){
+      const rect=target.getBoundingClientRect();
+      const before=e.clientY<rect.top+rect.height/2;
+      if(before)grid.insertBefore(lifted,target);
+      else grid.insertBefore(lifted,target.nextSibling);
+    }
+  });
+  let justDragged=false;
+  const finish=()=>{ if(lifted){persistOrder(); justDragged=true; setTimeout(()=>{justDragged=false;},400);} cleanup(); };
+  grid.addEventListener('pointerup',finish);
+  grid.addEventListener('pointercancel',cleanup);
+  // Right after a completed drag, swallow the trailing click so the note
+  // doesn't open from the same gesture.
+  grid.addEventListener('click',(e)=>{
+    if(justDragged){e.stopPropagation();e.preventDefault();}
+  },true);
+}
+
 function bindNoteReorder(){
   const doneBtn=document.getElementById('note-reorder-done');
   if(doneBtn)doneBtn.onclick=()=>noteExitReorder();
@@ -3387,6 +3505,7 @@ function noteCardHTML(n){
 }
 
 function renderNotesHome(){
+  const prefs=notePrefs();
   const allNotes=notesActive();
   const folders=noteFoldersAll();
   let list=allNotes.filter(n=>{
@@ -3398,6 +3517,10 @@ function renderNotesHome(){
     if(noteFilterPinned && !n.pinned)return false;
     if(noteFilterFolder && n.folderId!==noteFilterFolder)return false;
     if(noteFilterTag && !(n.tags||[]).includes(noteFilterTag))return false;
+    if(noteFilterColor && n.color!==noteFilterColor)return false;
+    if(noteFilterType && n.kind!==noteFilterType)return false;
+    if(noteFilterDated==='dated' && !n.dueDate)return false;
+    if(noteFilterDated==='reminder' && !n.reminder)return false;
     return true;
   }).sort((a,b)=>{
     if(DB.meta.starTop!==false && a.pinned!==b.pinned)return a.pinned?-1:1;
@@ -3405,10 +3528,14 @@ function renderNotesHome(){
   });
   const archivedCount=notesArchived().length, trashedCount=notesTrashed().length;
   const sortLabels={modified:L==='fa'?'آخرین ویرایش':'Last modified',created:L==='fa'?'تاریخ ساخت':'Created date',alpha:L==='fa'?'الفبایی':'Alphabetical',color:L==='fa'?'رنگ':'Color',manual:L==='fa'?'دستی':'Manual'};
+  const filtersOn=!!(noteFilterColor||noteFilterType||noteFilterDated);
 
-  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+  let html=`<div class="note-workspace" style="${noteWorkspaceBgStyle()}">
+  <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="font-size:26px;font-weight:800">${L==='fa'?'یادداشت‌ها':'Notes'}</div>
+    <div style="flex:1"></div>
+    <button class="ld-action-btn" id="note-workspace-settings" aria-label="workspace settings">⚙</button>
   </div>`;
 
   if(noteReorderMode){
@@ -3421,7 +3548,7 @@ function renderNotesHome(){
         <div class="trow-handle" data-handle="1">&#9776;</div>
         <div class="trow-content"><div class="trow-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div></div>
       </div>`).join('')}
-    </div>`;
+    </div></div>`;
     return html;
   }
 
@@ -3434,8 +3561,12 @@ function renderNotesHome(){
     ${folders.map(f=>`<button class="note-filter-chip ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}" style="--tabc:${f.color};--tabtxt:#fff">${esc(f.name)}</button>`).join('')}
     <button class="note-filter-chip" data-note-new-folder="1" style="--tabc:var(--s3);--tabtxt:var(--ink2)">${L==='fa'?'+ پوشه':'+ Folder'}</button>
   </div>
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;gap:8px">
-    <button class="shop-mini" id="note-sort-btn">${L==='fa'?'مرتب‌سازی':'Sort'}: ${sortLabels[noteSortMode]}</button>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;gap:8px;flex-wrap:wrap">
+    <div style="display:flex;gap:10px">
+      <button class="shop-mini" id="note-sort-btn">${L==='fa'?'مرتب‌سازی':'Sort'}: ${sortLabels[noteSortMode]}</button>
+      <button class="shop-mini ${filtersOn?'':''}" id="note-filters-btn" ${filtersOn?'style="color:var(--brand);font-weight:700"':''}>${L==='fa'?'فیلترها':'Filters'}${filtersOn?' ●':''}</button>
+      <button class="shop-mini" id="note-view-toggle">${prefs.view==='list'?(L==='fa'?'نما: لیست':'View: List'):(L==='fa'?'نما: گرید':'View: Grid')}</button>
+    </div>
     <div style="display:flex;gap:8px">
       <button class="shop-mini" id="note-go-archive">${L==='fa'?'آرشیو':'Archive'}${archivedCount?` (${archivedCount})`:''}</button>
       <button class="shop-mini" id="note-go-trash">${L==='fa'?'سطل زباله':'Trash'}${trashedCount?` (${trashedCount})`:''}</button>
@@ -3443,12 +3574,14 @@ function renderNotesHome(){
   </div>`;
 
   if(!list.length){
-    const reason=noteSearch.trim()?(L==='fa'?'نتیجه‌ای یافت نشد':'No matching notes'):(L==='fa'?'هنوز یادداشتی نیست':'No notes yet');
-    const sub=noteSearch.trim()?'':(L==='fa'?'با دکمه‌ی + یک یادداشت متنی یا چک‌لیست بساز':'Tap + to create a text note or checklist');
+    const anyFilter=noteSearch.trim()||filtersOn||noteFilterPinned||noteFilterFolder;
+    const reason=anyFilter?(L==='fa'?'نتیجه‌ای یافت نشد':'No matching notes'):(L==='fa'?'هنوز یادداشتی نیست':'No notes yet');
+    const sub=anyFilter?'':(L==='fa'?'با دکمه‌ی + یک یادداشت متنی یا چک‌لیست بساز':'Tap + to create a text note or checklist');
     html+=`<div class="hub-ph"><div class="hub-ph-ic">✎</div><div class="hub-ph-t">${reason}</div>${sub?`<div class="hub-ph-d">${sub}</div>`:''}</div>`;
   }else{
-    html+=`<div class="note-grid">${list.map(noteCardHTML).join('')}</div>`;
+    html+=`<div class="note-grid ${prefs.view==='list'?'note-grid-list':''}" style="--note-fs:${prefs.fontSize||15}px">${list.map(noteCardHTML).join('')}</div>`;
   }
+  html+=`</div>`;
   return html;
 }
 
@@ -3517,9 +3650,11 @@ function renderNoteDetail(){
   const n=noteItemsMap()[activeNoteId];
   if(!n){ noteView='home'; return renderNotesHome(); }
   const isChecklist=n.kind==='checklist';
-  const accent=n.color||'#6e56f8';
+  const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
-  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px;border-inline-start:4px solid ${accent}">
+  const pageBg=accent?`background:linear-gradient(${accent}3a,${accent}22 40%,transparent 220px);min-height:100%`:'';
+  let html=`<div style="${pageBg}">
+  <div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px${accent?`;border-inline-start:4px solid ${accent}`:''}">
     <button class="ld-back" id="note-detail-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="flex:1"></div>
     <button class="star ${n.pinned?'on':''}" id="note-detail-pin" aria-label="pin">★</button>
@@ -3527,7 +3662,18 @@ function renderNoteDetail(){
   </div>
   <div style="padding:4px 20px">
     <input class="note-title-input" id="note-title" placeholder="${L==='fa'?'عنوان':'Title'}" value="${esc(n.title)}" autocomplete="off">
-  </div>`;
+  </div>
+  <div class="note-swatch-bar">
+    ${NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch sm ${n.color===c?'on':''}" data-note-color-inline="${c||''}" style="background:${c||'var(--s3)'}"></button>`).join('')}
+  </div>
+  <div style="display:flex;gap:10px;padding:6px 20px 2px;align-items:center">
+    <input type="date" class="finput" id="note-due-date" value="${esc(n.dueDate||'')}" style="flex:1">
+    <input type="time" class="finput" id="note-due-time" value="${esc(n.dueTime||'')}" style="flex:1">
+    ${voiceMicHTML('note')}
+  </div>
+  <label style="display:flex;align-items:center;gap:8px;cursor:not-allowed;font-size:13px;color:var(--ink3);padding:4px 22px;opacity:.55">
+    <input type="checkbox" disabled ${n.reminder?'checked':''}> ${L==='fa'?'یادآوری (به‌زودی)':'Reminder (coming soon)'}
+  </label>`;
 
   if(isChecklist){
     const items=n.items||[];
@@ -3553,6 +3699,7 @@ function renderNoteDetail(){
       <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:var(--ink2);font-size:12px;width:70px;outline:none">
     </div>
     ${folder?`<div style="margin-top:8px;font-size:12px;color:var(--ink3)">📁 ${esc(folder.name)}</div>`:''}
+  </div>
   </div>`;
 
   return html;
@@ -3734,6 +3881,31 @@ function shopListAsTask(l){
 }
 // Active (non-archived) shopping lists as task-shaped items.
 function shopListsAsTasks(){ return shopListsAll().map(shopListAsTask); }
+// Notes projected into the same task shape — dated notes then flow through
+// My Day / Planned / All with the exact same predicates as tasks & shopping.
+function noteAsTask(n){
+  if(!n)return null;
+  return {
+    id:'note:'+n.id, noteId:n.id, kind:'note',
+    text:n.title||(n.body||'').slice(0,40)||'Note',
+    dueDate:n.dueDate||'', dueTime:n.dueTime||'',
+    pinned:!!n.pinned, done:false,
+    notes:n.body||'', location:'', listId:null, priority:null,
+    icon:n.kind==='checklist'?'☑':'✎', color:n.color||'#6e56f8',
+    updatedAt:n.updatedAt||n.createdAt||''
+  };
+}
+function notesAsTasks(){ return notesActive().map(noteAsTask); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   VOICE INPUT — reuses the app's EXISTING real speech-to-text
+   (attachVoiceInput, Web Speech API), already live on the task quick-add
+   mic. These helpers just standardize the button markup + wiring so
+   notes, shopping, and appointments get the same working mic.
+   ═══════════════════════════════════════════════════════════════════ */
+function voiceMicHTML(context){
+  return `<button type="button" class="qa-mic" id="mic-${context}" aria-label="voice input"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg></button>`;
+}
 // Toggle the star/favourite on a shopping list — the Shopping equivalent of
 // pinning a Task, so it surfaces in Important via the exact same filter.
 function shopToggleStar(id){
@@ -4394,7 +4566,10 @@ function renderShopDetail(){
     </label>
   </div>
   <div style="padding:4px 16px 4px">
-    <input class="finput" id="shop-search" placeholder="${L==='fa'?'افزودن محصول...':'Add a product…'}" value="${esc(shopSearch||'')}" style="width:100%" autocomplete="off">
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="finput" id="shop-search" placeholder="${L==='fa'?'افزودن محصول...':'Add a product…'}" value="${esc(shopSearch||'')}" style="flex:1" autocomplete="off">
+      ${voiceMicHTML('shop-item')}
+    </div>
     <div style="font-size:11px;color:var(--ink3);padding:5px 2px 0">${L==='fa'?'برای افزودن Enter بزن یا چند مورد را با کاما جدا کن — نیازی به ذخیره نیست، خودکار اضافه می‌شود':'Press Enter to add, or separate several items with commas — no save needed, it adds instantly'}</div>
     <div id="shop-suggest-box" class="shop-prows" style="margin-top:6px">${shopSuggestRows(q,shopListDomain(l))}</div>
   </div>
@@ -5058,7 +5233,10 @@ function openNewApptSheet(id,presetDate){
   const isEdit=!!a;
   openSheet(`<h3>${isEdit?(L==='fa'?'ویرایش قرار':'Edit Appointment'):tr('newAppt')}</h3>
     <div class="fld"><label>${tr('apptTitle')}</label>
-      <input class="finput" id="ap-title" value="${esc(a?.title||'')}" placeholder="${tr('apptTitle')}"></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="finput" id="ap-title" value="${esc(a?.title||'')}" placeholder="${tr('apptTitle')}" style="flex:1">
+        ${voiceMicHTML('appt-title')}
+      </div></div>
     <div class="fld"><label>${tr('apptDate')}</label>
       <input class="finput" id="ap-date" type="date" value="${a?.date||presetDate||''}"></div>
     <div style="display:flex;gap:10px">
@@ -5089,6 +5267,7 @@ function openNewApptSheet(id,presetDate){
       saveDB();closeSheet();render();toast(L==='fa'?'قرار حذف شد':'Deleted');
     };
   }
+  attachVoiceInput('mic-appt-title','ap-title');
   document.getElementById('ap-save').onclick=()=>{
     const title=document.getElementById('ap-title').value.trim();if(!title)return;
     const date=document.getElementById('ap-date').value;if(!date)return;
@@ -5739,6 +5918,13 @@ function bindScreen(){
     e.stopPropagation();
     const l=shopListsMap()[el.dataset.shopComplete]; if(!l)return;
     shopCompleteList(l);});
+  document.querySelectorAll('[data-note-jump-pin]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation(); noteTogglePin(el.dataset.noteJumpPin);});
+  document.querySelectorAll('[data-note-jump]').forEach(el=>el.onclick=e=>{
+    if(e.target.closest('[data-note-jump-pin]'))return;
+    screen='module'; currentModule='notes';
+    activeNoteId=el.dataset.noteJump; noteView='detail';
+    render(); window.scrollTo(0,0);});
   document.querySelectorAll('[data-shop-open]').forEach(el=>el.onclick=e=>{
     if(e.target.closest('[data-shop-pin]')||e.target.closest('[data-shop-complete]')||e.target.closest('[data-map]'))return;
     // Jump into the Shopping module focused on this list.
@@ -5823,6 +6009,87 @@ function bindScreen(){
       if(goArchive)goArchive.onclick=()=>{noteView='archive';render();window.scrollTo(0,0);};
       const goTrash=document.getElementById('note-go-trash');
       if(goTrash)goTrash.onclick=()=>{noteView='trash';render();window.scrollTo(0,0);};
+      // View toggle: grid <-> list
+      const viewToggle=document.getElementById('note-view-toggle');
+      if(viewToggle)viewToggle.onclick=()=>{
+        notePrefs().view=(notePrefs().view==='list')?'grid':'list';
+        saveDB(); render();
+      };
+      // Filters sheet: color / type / date / reminder
+      const filtersBtn=document.getElementById('note-filters-btn');
+      if(filtersBtn)filtersBtn.onclick=()=>{
+        openSheet(`<h3>${L==='fa'?'فیلترها':'Filters'}</h3>
+          <div class="fld"><label>${L==='fa'?'رنگ':'Color'}</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${NOTE_COLORS.filter(c=>c).map(c=>`<button type="button" class="note-color-swatch ${noteFilterColor===c?'on':''}" data-nf-color="${c}" style="background:${c}"></button>`).join('')}
+            </div></div>
+          <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
+            <div class="btn-row" style="margin-top:4px">
+              <button class="btn ${noteFilterType==='text'?'btn-primary':'btn-ghost'}" data-nf-type="text" style="flex:1">✎ ${L==='fa'?'متنی':'Text'}</button>
+              <button class="btn ${noteFilterType==='checklist'?'btn-primary':'btn-ghost'}" data-nf-type="checklist" style="flex:1">☑ ${L==='fa'?'چک‌لیست':'Checklist'}</button>
+            </div></div>
+          <div class="fld"><label>${L==='fa'?'زمان‌بندی':'Scheduling'}</label>
+            <div class="btn-row" style="margin-top:4px">
+              <button class="btn ${noteFilterDated==='dated'?'btn-primary':'btn-ghost'}" data-nf-dated="dated" style="flex:1">📅 ${L==='fa'?'تاریخ‌دار':'Dated'}</button>
+              <button class="btn ${noteFilterDated==='reminder'?'btn-primary':'btn-ghost'}" data-nf-dated="reminder" style="flex:1">⏰ ${L==='fa'?'یادآوری‌دار':'With reminder'}</button>
+            </div></div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" id="nf-clear">${L==='fa'?'پاک‌کردن فیلترها':'Clear filters'}</button>
+            <button class="btn btn-primary" id="nf-done">${L==='fa'?'اعمال':'Apply'}</button>
+          </div>`);
+        document.querySelectorAll('[data-nf-color]').forEach(el=>el.onclick=()=>{
+          noteFilterColor=(noteFilterColor===el.dataset.nfColor)?null:el.dataset.nfColor;
+          closeSheet(); render();
+        });
+        document.querySelectorAll('[data-nf-type]').forEach(el=>el.onclick=()=>{
+          noteFilterType=(noteFilterType===el.dataset.nfType)?null:el.dataset.nfType;
+          closeSheet(); render();
+        });
+        document.querySelectorAll('[data-nf-dated]').forEach(el=>el.onclick=()=>{
+          noteFilterDated=(noteFilterDated===el.dataset.nfDated)?null:el.dataset.nfDated;
+          closeSheet(); render();
+        });
+        document.getElementById('nf-clear').onclick=()=>{
+          noteFilterColor=null;noteFilterType=null;noteFilterDated=null;
+          closeSheet(); render();
+        };
+        document.getElementById('nf-done').onclick=()=>closeSheet();
+      };
+      // Workspace settings: background style, font size, default note color
+      const wsBtn=document.getElementById('note-workspace-settings');
+      if(wsBtn)wsBtn.onclick=()=>{
+        const p=notePrefs();
+        openSheet(`<h3>${L==='fa'?'تنظیمات فضای یادداشت':'Notes workspace'}</h3>
+          <div class="fld"><label>${L==='fa'?'پس‌زمینه':'Background'}</label>
+            <div class="btn-col">
+              <button class="btn ${p.bg==='dark'?'btn-primary':'btn-ghost'}" data-ws-bg="dark">${L==='fa'?'تیره (MBM)':'MBM dark'}</button>
+              <button class="btn ${p.bg==='light'?'btn-primary':'btn-ghost'}" data-ws-bg="light">${L==='fa'?'روشن':'Light'}</button>
+              <button class="btn ${p.bg==='color'?'btn-primary':'btn-ghost'}" data-ws-bg="color">${L==='fa'?'رنگی':'Coloured'}</button>
+              <button class="btn ${p.bg==='cork'?'btn-primary':'btn-ghost'}" data-ws-bg="cork">${L==='fa'?'تخته‌چوب‌پنبه':'Cork board'}</button>
+            </div></div>
+          <div class="fld"><label>${L==='fa'?'اندازه‌ی متن':'Text size'} (${p.fontSize||15}px)</label>
+            <input type="range" min="12" max="22" step="1" value="${p.fontSize||15}" id="ws-font" style="width:100%"></div>
+          <div class="fld"><label>${L==='fa'?'رنگ پیش‌فرض یادداشت جدید':'Default colour for new notes'}</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch ${p.defaultColor===c?'on':''}" data-ws-defcolor="${c||''}" style="background:${c||'var(--s3)'}"></button>`).join('')}
+            </div></div>
+          <div class="btn-row"><button class="btn btn-primary" id="ws-done" style="flex:1">${L==='fa'?'بستن':'Done'}</button></div>`);
+        document.querySelectorAll('[data-ws-bg]').forEach(el=>el.onclick=()=>{
+          notePrefs().bg=el.dataset.wsBg; saveDB(); closeSheet(); render();
+        });
+        document.getElementById('ws-font').oninput=(e)=>{
+          notePrefs().fontSize=parseInt(e.target.value,10)||15; saveDB();
+          const grid=document.querySelector('.note-grid'); if(grid)grid.style.setProperty('--note-fs',notePrefs().fontSize+'px');
+        };
+        document.querySelectorAll('[data-ws-defcolor]').forEach(el=>el.onclick=()=>{
+          notePrefs().defaultColor=el.dataset.wsDefcolor||null; saveDB(); closeSheet();
+        });
+        document.getElementById('ws-done').onclick=()=>closeSheet();
+      };
+      // Direct long-press drag on cards (the demanded interaction): hold a
+      // card ~350ms, then drag to reorder within the visible list. Switches
+      // to manual sort so the new order sticks.
+      bindNoteCardLongPressDrag();
     }
     if(noteView==='archive'||noteView==='trash'){
       const backBtn=document.getElementById('note-list-back');
@@ -5877,6 +6144,21 @@ function bindScreen(){
       document.querySelectorAll('[data-note-item-toggle]').forEach(el=>el.onclick=()=>noteChecklistToggle(activeNoteId,el.dataset.noteItemToggle));
       document.querySelectorAll('[data-note-item-del]').forEach(el=>el.onclick=()=>noteChecklistDelete(activeNoteId,el.dataset.noteItemDel));
       document.querySelectorAll('[data-note-item-edit]').forEach(el=>el.oninput=()=>noteChecklistEdit(activeNoteId,el.dataset.noteItemEdit,el.value));
+      // Inline color swatches on the editor page (always visible, no menu needed)
+      document.querySelectorAll('[data-note-color-inline]').forEach(el=>el.onclick=()=>{
+        noteSetColor(activeNoteId, el.dataset.noteColorInline||null);
+      });
+      // Date/time — dated notes flow into My Day/Planned via notesAsTasks()
+      const dueDateEl=document.getElementById('note-due-date');
+      const dueTimeEl=document.getElementById('note-due-time');
+      if(dueDateEl)dueDateEl.onchange=()=>noteSetDue(activeNoteId,dueDateEl.value,(dueTimeEl&&dueTimeEl.value)||'');
+      if(dueTimeEl)dueTimeEl.onchange=()=>noteSetDue(activeNoteId,(dueDateEl&&dueDateEl.value)||'',dueTimeEl.value);
+      // Voice input — reuses the app's real Web Speech implementation
+      if(n&&n.kind==='checklist'){
+        attachVoiceInput('mic-note','note-checklist-add');
+      }else{
+        attachVoiceInput('mic-note','note-body',(txt)=>noteSetBody(activeNoteId,txt));
+      }
       const tagInput=document.getElementById('note-tag-input');
       if(tagInput)tagInput.onkeydown=(e)=>{
         if(e.key!=='Enter'&&e.key!==',')return;
@@ -6011,6 +6293,7 @@ function bindScreen(){
       toast((L==='fa'?'افزوده شد: ':'Added ')+n);
       const f=document.getElementById('shop-search'); if(f)f.focus();
     };
+    attachVoiceInput('mic-shop-item','shop-search',(txt)=>{shopSearch=txt;});
   }
   // Account menu (tap name/avatar)
   const hubAcct=document.getElementById('hub-account');
