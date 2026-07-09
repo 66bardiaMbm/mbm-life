@@ -306,7 +306,7 @@ body.light .trow-title{color:var(--ink)}
 @media (min-width:1300px){.note-grid{column-count:4}}
 .note-card{background:var(--s2);border:1px solid var(--b1);border-radius:16px;padding:14px 15px;
   cursor:pointer;min-height:88px;display:flex;flex-direction:column;gap:6px;
-  break-inside:avoid;margin:0 0 10px;
+  break-inside:avoid;margin:0 0 10px;overflow:hidden;
   transition:transform .12s ease,box-shadow .12s ease;
   transform:rotate(var(--tilt,0deg))}
 .note-card:active{transform:rotate(0deg) scale(.97);box-shadow:0 6px 20px rgba(0,0,0,.25)}
@@ -346,14 +346,22 @@ body.light .trow-title{color:var(--ink)}
 .note-card{transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s}
 /* List view: compact single-line rows instead of squeezed masonry cards */
 .note-grid-list .note-card{flex-direction:row;align-items:center;gap:10px;min-height:auto;padding:12px 14px;border-radius:12px;transform:none!important}
-.note-grid-list .note-card-top{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;order:1}
-.note-grid-list .note-card-top .star{order:2;margin-inline-start:auto}
+.note-grid-list .note-card-top{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:6px;order:0}
 .note-grid-list .note-card-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:45%}
-.note-grid-list .note-card-body{-webkit-line-clamp:1;flex:1;min-width:0;order:0;margin:0}
+.note-grid-list .note-card-body{display:block;-webkit-line-clamp:unset;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;order:1;margin:0}
 .note-grid-list .note-card-meta{order:2;margin:0;flex:none;max-width:40%;overflow:hidden;flex-wrap:nowrap}
 .note-grid-list .note-card-when{display:none}
 .note-due-row{display:flex;gap:10px;padding:6px 20px 2px;align-items:center;flex-wrap:wrap}
 .note-due-row input[type=date],.note-due-row input[type=time]{flex:1;min-width:120px}
+.note-topbar{display:flex;align-items:center;gap:8px;padding:12px 14px 6px}
+.note-topbar2{display:flex;align-items:center;gap:2px;padding:2px 10px 6px}
+.note-pill{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.25);
+  border-radius:10px;padding:6px 10px;cursor:pointer;color:inherit;font-size:13px;font-weight:600}
+.note-pill-swatch{width:16px;height:16px;border-radius:4px;background:var(--s2);flex:none}
+.note-pill-caret{font-size:10px;opacity:.8}
+.note-pill-folder{flex:1;justify-content:space-between;min-width:0}
+.note-pill-folder span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#note-color-pill{width:auto}
 .note-icon-btn{width:38px;height:38px;flex:none;background:none;border:none;font-size:18px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;border-radius:50%}
 .note-icon-btn:active{background:rgba(128,128,128,.2)}
@@ -1061,7 +1069,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v181';
+const APP_VERSION='v183';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3767,19 +3775,27 @@ function renderNoteDetail(){
   const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
   const ui=_noteUIStateFor(n);
-  // Full-bleed page colour — a real sheet of colour, not a faint wash.
   const pageBg=accent?`background:linear-gradient(${accent}cc,${accent}99);min-height:100%`:`${noteWorkspaceBgStyle()};min-height:100%`;
   const iconColor=accent?'#fff':'var(--ink)';
   let html=`<div class="${noteWorkspaceClass()}" style="${pageBg}">
-  <div class="pg-head" style="display:flex;align-items:center;gap:2px;padding:16px 14px 4px">
-    <button class="ld-back" id="note-detail-back" style="width:40px;height:40px;flex:none;color:${iconColor}">&#8249;</button>
+  <div class="note-topbar">
+    <button class="note-pill" id="note-color-pill" style="background:${accent||'var(--s3)'}">
+      <span class="note-pill-swatch" style="background:${accent||'var(--s2)'}"></span><span class="note-pill-caret">▾</span>
+    </button>
+    <button class="note-icon-btn" id="note-type-indicator" style="color:${iconColor}" title="${isChecklist?(L==='fa'?'چک‌لیست':'Checklist'):(L==='fa'?'متنی':'Text')}">${isChecklist?'☑':'📄'}</button>
+    <button class="note-pill note-pill-folder" id="note-folder-pill">
+      <span>${folder?esc(folder.name):(L==='fa'?'بدون پوشه':'No folder')}</span><span class="note-pill-caret">▾</span>
+    </button>
+  </div>
+  <div class="note-topbar2">
+    <button class="note-icon-btn" id="note-detail-back" style="color:${iconColor}" aria-label="back" title="${L==='fa'?'بازگشت':'Back'}">&#8249;</button>
+    <button class="note-icon-btn" id="note-info-btn" style="color:${iconColor}" aria-label="info" title="${L==='fa'?'اطلاعات یادداشت':'Note info'}">ⓘ</button>
     <div style="flex:1"></div>
-    <button class="note-icon-btn" id="note-toggle-color" style="color:${iconColor}" aria-label="colour" title="${L==='fa'?'رنگ':'Colour'}">🎨</button>
     <button class="note-icon-btn" id="note-toggle-due" style="color:${iconColor}" aria-label="date" title="${L==='fa'?'تاریخ و ساعت':'Date & time'}">📅</button>
     <button class="note-icon-btn" id="note-toggle-reminder" style="color:${iconColor};opacity:.5" aria-label="reminder" title="${L==='fa'?'یادآوری (به‌زودی)':'Reminder (coming soon)'}">⏰</button>
     ${n.locked?`<span title="${L==='fa'?'قفل — فقط‌خواندنی':'Locked — read-only'}" style="color:${iconColor};font-size:16px;padding:0 4px">🔒</span>`:''}
     <button class="star ${n.pinned?'on':''}" id="note-detail-pin" aria-label="pin" style="color:${iconColor}">★</button>
-    <button class="ld-action-btn" id="note-detail-menu" aria-label="options" style="color:${iconColor}">&#8942;</button>
+    <button class="note-icon-btn" id="note-detail-menu" aria-label="options" style="color:${iconColor}">&#9776;</button>
   </div>
   ${ui.showColor?`<div class="note-swatch-bar">
     ${NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch sm ${n.color===c?'on':''}" data-note-color-inline="${c||''}" style="background:${c||'var(--s3)'}"></button>`).join('')}
@@ -3815,7 +3831,6 @@ function renderNoteDetail(){
       ${(n.tags||[]).map(t=>`<span class="chip">#${esc(t)} <span data-note-tag-del="${esc(t)}" style="cursor:pointer;opacity:.7">✕</span></span>`).join('')}
       <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:${accent?'rgba(255,255,255,.85)':'var(--ink2)'};font-size:12px;width:70px;outline:none">
     </div>
-    ${folder?`<button class="note-folder-chip" id="note-folder-jump" style="margin-top:8px">📁 ${esc(folder.name)}</button>`:''}
   </div>
   <div class="note-bottom-toolbar">
     ${voiceMicHTML('note')}
@@ -6265,8 +6280,40 @@ function bindScreen(){
       if(pinBtn)pinBtn.onclick=()=>noteTogglePin(activeNoteId);
       const menuBtn=document.getElementById('note-detail-menu');
       if(menuBtn)menuBtn.onclick=()=>openNoteMenu();
-      const toggleColorBtn=document.getElementById('note-toggle-color');
-      if(toggleColorBtn)toggleColorBtn.onclick=()=>{_noteUIState.showColor=!_noteUIState.showColor;render();};
+      const colorPillBtn=document.getElementById('note-color-pill');
+      if(colorPillBtn)colorPillBtn.onclick=()=>{_noteUIState.showColor=!_noteUIState.showColor;render();};
+      const folderPillBtn=document.getElementById('note-folder-pill');
+      if(folderPillBtn)folderPillBtn.onclick=()=>{
+        const n2=noteItemsMap()[activeNoteId]; if(!n2)return;
+        const folders=noteFoldersAll();
+        openSheet(`<h3>${L==='fa'?'انتخاب پوشه':'Choose a folder'}</h3>
+          <div class="btn-col">
+            <button class="btn ${!n2.folderId?'btn-primary':'btn-ghost'}" data-note-folder-pick="">${L==='fa'?'بدون پوشه':'No folder'}</button>
+            ${folders.map(f=>`<button class="btn ${n2.folderId===f.id?'btn-primary':'btn-ghost'}" data-note-folder-pick="${f.id}" style="${n2.folderId===f.id?'':`background:${f.color}22;color:${f.color}`}">${esc(f.name)}</button>`).join('')}
+            <button class="btn btn-ghost" id="nfp-new">${L==='fa'?'+ پوشه‌ی جدید':'+ New folder'}</button>
+            <button class="btn btn-ghost" id="nfp-cancel">${tr('cancel')}</button>
+          </div>`);
+        document.getElementById('nfp-cancel').onclick=()=>closeSheet();
+        document.querySelectorAll('[data-note-folder-pick]').forEach(el=>el.onclick=()=>{
+          noteSetFolder(activeNoteId, el.dataset.noteFolderPick||null); closeSheet();
+        });
+        document.getElementById('nfp-new').onclick=()=>{ closeSheet(); openNewNoteFolderSheet(); };
+      };
+      const noteInfoBtn=document.getElementById('note-info-btn');
+      if(noteInfoBtn)noteInfoBtn.onclick=()=>{
+        const n3=noteItemsMap()[activeNoteId]; if(!n3)return;
+        const wc=(n3.body||'').trim().split(/\s+/).filter(Boolean).length;
+        const cc=(n3.body||'').length;
+        const fmt=(iso)=>{const d=new Date(iso);return isNaN(d)?'—':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{dateStyle:'medium',timeStyle:'short'});};
+        openSheet(`<h3>${L==='fa'?'اطلاعات یادداشت':'Note info'}</h3>
+          <div style="font-size:14px;color:var(--ink2);line-height:2">
+            <div>${L==='fa'?'ساخته‌شده':'Created'}: ${fmt(n3.createdAt)}</div>
+            <div>${L==='fa'?'آخرین ویرایش':'Last modified'}: ${fmt(n3.updatedAt)}</div>
+            ${n3.kind==='text'?`<div>${L==='fa'?'تعداد کلمات':'Word count'}: ${wc} · ${L==='fa'?'کاراکتر':'characters'}: ${cc}</div>`:`<div>${L==='fa'?'موارد چک‌لیست':'Checklist items'}: ${(n3.items||[]).length}</div>`}
+          </div>
+          <div class="btn-row"><button class="btn btn-primary" id="ninfo-close" style="flex:1">${L==='fa'?'بستن':'Close'}</button></div>`);
+        document.getElementById('ninfo-close').onclick=()=>closeSheet();
+      };
       const toggleDueBtn=document.getElementById('note-toggle-due');
       if(toggleDueBtn)toggleDueBtn.onclick=()=>{_noteUIState.showDue=!_noteUIState.showDue;render();};
       const toggleReminderBtn=document.getElementById('note-toggle-reminder');
@@ -6275,8 +6322,6 @@ function bindScreen(){
       if(attachBtn)attachBtn.onclick=()=>toast(L==='fa'?'پیوست‌ها به‌زودی اضافه می‌شود':'Attachments coming soon');
       const formatBtn=document.getElementById('note-format-btn');
       if(formatBtn)formatBtn.onclick=()=>toast(L==='fa'?'فرمت‌بندی متن به‌زودی اضافه می‌شود':'Text formatting coming soon');
-      const folderJumpBtn=document.getElementById('note-folder-jump');
-      if(folderJumpBtn)folderJumpBtn.onclick=()=>openNoteMenu();
       const titleEl=document.getElementById('note-title');
       if(titleEl)titleEl.oninput=()=>noteSetTitle(activeNoteId,titleEl.value);
       const bodyEl=document.getElementById('note-body');
