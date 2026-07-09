@@ -292,9 +292,13 @@ body.light .trow-title{color:var(--ink)}
 .shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
 
 /* ── Notes module ── */
-.note-filter-chip{flex:none;background:var(--s2);border:1px solid var(--b1);border-radius:20px;
-  padding:7px 14px;font-size:13px;color:var(--ink2);cursor:pointer;white-space:nowrap}
-.note-filter-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.note-tabs-row{display:flex;gap:4px;overflow-x:auto;padding:0 16px;scrollbar-width:none;align-items:flex-end}
+.note-tabs-row::-webkit-scrollbar{display:none}
+.note-filter-chip{flex:none;border:none;border-radius:14px 14px 0 0;
+  padding:10px 18px 9px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;
+  background:var(--tabc,var(--s2));color:var(--tabtxt,var(--ink2));
+  opacity:.72;transform:translateY(3px);transition:transform .12s,opacity .12s}
+.note-filter-chip.on{opacity:1;transform:translateY(0);box-shadow:0 -2px 10px rgba(0,0,0,.18)}
 .note-grid{column-count:1;column-gap:10px;padding:4px 20px 90px}
 @media (min-width:560px){.note-grid{column-count:2}}
 @media (min-width:900px){.note-grid{column-count:3}}
@@ -309,6 +313,7 @@ body.light .trow-title{color:var(--ink)}
 .note-card-title{font-size:15px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-card-body{font-size:13px;color:var(--ink2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .note-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
+.note-card-when{font-size:11px;color:var(--ink3);margin-top:2px}
 .note-title-input{width:100%;background:none;border:none;font-size:22px;font-weight:800;color:var(--ink);outline:none;padding:6px 0}
 .note-body-input{width:100%;min-height:50vh;background:none;border:none;color:var(--ink);font-size:15px;line-height:1.6;outline:none;resize:vertical;font-family:inherit}
 .note-check-row{display:flex;align-items:center;gap:8px;padding:8px 8px}
@@ -1007,7 +1012,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v173';
+const APP_VERSION='v174';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1509,6 +1514,7 @@ let noteSortMode='modified'; // 'modified'|'created'|'alpha'|'color'
 let noteFilterFolder=null;   // folderId or null
 let noteFilterTag=null;      // tag string or null
 let noteFilterPinned=false;
+let noteReorderMode=false;
 
 /* ── Render engine ── */
 function _showFatalError(err){
@@ -1595,7 +1601,7 @@ function updateFab(){
   if(screen==='lists'||screen==='today'||screen==='appts') show=true;
   else if(screen==='module'){
     if(currentModule==='shopping') show=(shopView==='home');
-    else if(currentModule==='notes') show=(noteView==='home')&&moduleHasCreate(hubModule('notes'));
+    else if(currentModule==='notes') show=(noteView==='home')&&!noteReorderMode&&moduleHasCreate(hubModule('notes'));
     else show=moduleHasCreate(hubModule(currentModule));
   }
   else show=false; // lifehub, profile, more, search, ...
@@ -3257,9 +3263,11 @@ function noteRestoreVersion(id,versionIndex){
   n.title=v.title; n.body=v.body; n.items=JSON.parse(JSON.stringify(v.items||[]));
   n.updatedAt=new Date().toISOString(); saveDB(); render();
 }
+const NOTE_FOLDER_PALETTE=['#22c55e','#f59e0b','#0ea5e9','#ec4899','#ef4444','#8b5cf6','#14b8a6','#f97316'];
 function noteFolderCreate(name,color){
   const id=uid(), now=new Date().toISOString();
-  noteFoldersMap()[id]={id,name:(name||'').trim()||'Folder',color:color||'#6e56f8',createdAt:now,updatedAt:now,archivedAt:null};
+  const autoColor=NOTE_FOLDER_PALETTE[noteFoldersAll().length%NOTE_FOLDER_PALETTE.length];
+  noteFoldersMap()[id]={id,name:(name||'').trim()||'Folder',color:color||autoColor,createdAt:now,updatedAt:now,archivedAt:null};
   saveDB();
   return id;
 }
@@ -3274,7 +3282,72 @@ function notesSortFn(mode){
   if(mode==='alpha')return (a,b)=>(a.title||'').localeCompare(b.title||'');
   if(mode==='created')return (a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'');
   if(mode==='color')return (a,b)=>(a.color||'zzz').localeCompare(b.color||'zzz');
+  if(mode==='manual'){
+    const order=getViewOrder('notes');
+    const idx=id=>{const i=order.indexOf(id);return i===-1?9999:i;};
+    return (a,b)=>idx(a.id)-idx(b.id);
+  }
   return (a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''); // 'modified' default
+}
+function noteEnterReorder(list){
+  setViewOrder('notes', list.map(n=>n.id));
+  noteSortMode='manual';
+  noteReorderMode=true; render();
+}
+function noteExitReorder(){ noteReorderMode=false; render(); }
+function bindNoteReorder(){
+  const doneBtn=document.getElementById('note-reorder-done');
+  if(doneBtn)doneBtn.onclick=()=>noteExitReorder();
+  const listEl=document.getElementById('note-reorder-list');
+  if(!listEl)return;
+
+  let dragEl=null, startY=0;
+  function rowsArr(){return Array.from(listEl.querySelectorAll('[data-reorder]'));}
+
+  listEl.querySelectorAll('[data-handle]').forEach(handle=>{
+    handle.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      dragEl=handle.closest('[data-reorder]');
+      if(!dragEl)return;
+      const r=dragEl.getBoundingClientRect();
+      startY=e.clientY;
+      dragEl.classList.add('drag-active');
+      dragEl.style.width=r.width+'px';
+      try{handle.setPointerCapture(e.pointerId);}catch(_){}
+    });
+    handle.addEventListener('pointermove',e=>{
+      if(!dragEl)return;
+      e.preventDefault();
+      const dy=e.clientY-startY;
+      dragEl.style.transform='translateY('+dy+'px)';
+      const others=rowsArr().filter(r=>r!==dragEl);
+      for(const other of others){
+        const rect=other.getBoundingClientRect();
+        const mid=rect.top+rect.height/2;
+        const dragFollowsOther=other.compareDocumentPosition(dragEl)&Node.DOCUMENT_POSITION_FOLLOWING;
+        const dragPrecedesOther=other.compareDocumentPosition(dragEl)&Node.DOCUMENT_POSITION_PRECEDING;
+        if(e.clientY<mid && dragFollowsOther){
+          listEl.insertBefore(dragEl,other);
+          startY=e.clientY;dragEl.style.transform='translateY(0px)';break;
+        }
+        if(e.clientY>mid && dragPrecedesOther){
+          listEl.insertBefore(dragEl,other.nextSibling);
+          startY=e.clientY;dragEl.style.transform='translateY(0px)';break;
+        }
+      }
+    });
+    const endDrag=()=>{
+      if(!dragEl)return;
+      dragEl.classList.remove('drag-active');
+      dragEl.style.transform='';
+      dragEl.style.width='';
+      const ids=rowsArr().map(row=>row.dataset.nid);
+      setViewOrder('notes',ids);
+      dragEl=null;
+    };
+    handle.addEventListener('pointerup',endDrag);
+    handle.addEventListener('pointercancel',endDrag);
+  });
 }
 
 
@@ -3291,11 +3364,13 @@ function noteCardHTML(n){
   const isChecklist=n.kind==='checklist';
   const accent=n.color||null;
   const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
+  const d=new Date(n.createdAt);
+  const whenStr=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
   // Deterministic (not random-per-render) slight tilt from the note's id, so
   // cards don't jitter on every re-render — a small, playful, Keep-like touch.
   let h=0; for(let i=0;i<n.id.length;i++)h=(h*31+n.id.charCodeAt(i))>>>0;
   const tilt=((h%50)/10-2.5).toFixed(2); // -2.5deg .. +2.5deg
-  const bg=accent?`background:linear-gradient(${accent}22,${accent}22),var(--s2);border-color:${accent}55`:'';
+  const bg=accent?`background:linear-gradient(${accent}4a,${accent}4a),var(--s2);border-color:${accent}88`:'';
   return `<div class="note-card" data-note-open="${n.id}" style="--tilt:${tilt}deg;${bg}${accent?'':`border-inline-start:3px solid var(--b1)`}">
     <div class="note-card-top">
       <div class="note-card-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
@@ -3307,6 +3382,7 @@ function noteCardHTML(n){
       ${folder?`<span class="chip">📁 ${esc(folder.name)}</span>`:''}
       ${(n.tags||[]).slice(0,3).map(t=>`<span class="chip">#${esc(t)}</span>`).join('')}
     </div>
+    ${whenStr?`<div class="note-card-when">${esc(whenStr)}</div>`:''}
   </div>`;
 }
 
@@ -3328,20 +3404,35 @@ function renderNotesHome(){
     return notesSortFn(noteSortMode)(a,b);
   });
   const archivedCount=notesArchived().length, trashedCount=notesTrashed().length;
-  const sortLabels={modified:L==='fa'?'آخرین ویرایش':'Last modified',created:L==='fa'?'تاریخ ساخت':'Created date',alpha:L==='fa'?'الفبایی':'Alphabetical',color:L==='fa'?'رنگ':'Color'};
+  const sortLabels={modified:L==='fa'?'آخرین ویرایش':'Last modified',created:L==='fa'?'تاریخ ساخت':'Created date',alpha:L==='fa'?'الفبایی':'Alphabetical',color:L==='fa'?'رنگ':'Color',manual:L==='fa'?'دستی':'Manual'};
 
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="font-size:26px;font-weight:800">${L==='fa'?'یادداشت‌ها':'Notes'}</div>
-  </div>
-  <div style="padding:0 20px 8px">
+  </div>`;
+
+  if(noteReorderMode){
+    html+=`<div class="reorder-bar">
+      <span>${L==='fa'?'برای جابه‌جایی نگه‌دار و بکش':'Drag to reorder'}</span>
+      <button id="note-reorder-done">${L==='fa'?'تمام':'Done'}</button>
+    </div>
+    <div style="background:var(--s1);overflow:hidden" id="note-reorder-list">
+      ${list.map(n=>`<div class="trow-flat reordering" data-nid="${n.id}" data-reorder="1">
+        <div class="trow-handle" data-handle="1">&#9776;</div>
+        <div class="trow-content"><div class="trow-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div></div>
+      </div>`).join('')}
+    </div>`;
+    return html;
+  }
+
+  html+=`<div style="padding:0 20px 8px">
     <input class="finput" id="note-search" placeholder="${L==='fa'?'جستجوی یادداشت...':'Search notes...'}" value="${esc(noteSearch)}" style="width:100%" autocomplete="off">
   </div>
-  <div style="display:flex;gap:8px;overflow-x:auto;padding:0 20px 10px;scrollbar-width:none">
-    <button class="note-filter-chip ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all">${L==='fa'?'همه':'All'}</button>
-    <button class="note-filter-chip ${noteFilterPinned?'on':''}" data-note-filter="pinned">★ ${L==='fa'?'پین‌شده':'Pinned'}</button>
-    ${folders.map(f=>`<button class="note-filter-chip ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}">📁 ${esc(f.name)}</button>`).join('')}
-    <button class="note-filter-chip" data-note-new-folder="1">${L==='fa'?'+ پوشه':'+ Folder'}</button>
+  <div class="note-tabs-row">
+    <button class="note-filter-chip ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all" style="--tabc:#6e56f8;--tabtxt:#fff">${L==='fa'?'همه':'All'}</button>
+    <button class="note-filter-chip ${noteFilterPinned?'on':''}" data-note-filter="pinned" style="--tabc:#eab308;--tabtxt:#1a1400">★ ${L==='fa'?'پین‌شده':'Pinned'}</button>
+    ${folders.map(f=>`<button class="note-filter-chip ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}" style="--tabc:${f.color};--tabtxt:#fff">${esc(f.name)}</button>`).join('')}
+    <button class="note-filter-chip" data-note-new-folder="1" style="--tabc:var(--s3);--tabtxt:var(--ink2)">${L==='fa'?'+ پوشه':'+ Folder'}</button>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;gap:8px">
     <button class="shop-mini" id="note-sort-btn">${L==='fa'?'مرتب‌سازی':'Sort'}: ${sortLabels[noteSortMode]}</button>
@@ -3506,6 +3597,7 @@ function openNoteMenu(){
       ${n.archivedAt?`<button class="btn btn-ghost" id="nm-unarchive">${L==='fa'?'خارج از آرشیو':'Unarchive'}</button>`
         :`<button class="btn btn-ghost" id="nm-archive">${L==='fa'?'آرشیو':'Archive'}</button>`}
       <button class="btn btn-danger" id="nm-trash">${L==='fa'?'انتقال به سطل زباله':'Move to Trash'}</button>
+      <button class="btn btn-danger" id="nm-delete-now">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>
       <button class="btn btn-ghost" id="nm-cancel">${tr('cancel')}</button>
     </div>`);
   document.getElementById('nm-cancel').onclick=()=>closeSheet();
@@ -3519,6 +3611,21 @@ function openNoteMenu(){
   const nmUnarchive=document.getElementById('nm-unarchive');
   if(nmUnarchive)nmUnarchive.onclick=()=>{ closeSheet(); noteUnarchive(activeNoteId); noteView='home'; activeNoteId=null; render(); };
   document.getElementById('nm-trash').onclick=()=>{ closeSheet(); noteTrash(activeNoteId); noteView='home'; activeNoteId=null; render(); };
+  document.getElementById('nm-delete-now').onclick=()=>{
+    const delId=activeNoteId;
+    openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3>
+      <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'این یادداشت مستقیم و برای همیشه حذف می‌شود (بدون رفتن به سطل زباله). این عمل بازگشت‌پذیر نیست.':'This note will be deleted immediately and permanently (skipping Trash). This cannot be undone.'}</p>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="ndn-cancel">${tr('cancel')}</button>
+        <button class="btn btn-danger" id="ndn-ok">${L==='fa'?'حذف':'Delete'}</button>
+      </div>`);
+    document.getElementById('ndn-cancel').onclick=()=>closeSheet();
+    document.getElementById('ndn-ok').onclick=()=>{
+      closeSheet();
+      notePermanentDelete(delId);
+      noteView='home'; activeNoteId=null; render();
+    };
+  };
 }
 
 function openNewNoteFolderSheet(){
@@ -5663,6 +5770,7 @@ function bindScreen(){
   // ── Notes wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='notes'))return;
+    if(noteReorderMode){ bindNoteReorder(); return; }
     if(noteView==='home'){
       const searchEl=document.getElementById('note-search');
       if(searchEl){
@@ -5699,10 +5807,17 @@ function bindScreen(){
             <button class="btn ${noteSortMode==='created'?'btn-primary':'btn-ghost'}" data-note-sort="created">${L==='fa'?'تاریخ ساخت':'Created date'}</button>
             <button class="btn ${noteSortMode==='alpha'?'btn-primary':'btn-ghost'}" data-note-sort="alpha">${L==='fa'?'الفبایی':'Alphabetical'}</button>
             <button class="btn ${noteSortMode==='color'?'btn-primary':'btn-ghost'}" data-note-sort="color">${L==='fa'?'رنگ':'Color'}</button>
+            <button class="btn ${noteSortMode==='manual'?'btn-primary':'btn-ghost'}" id="ns-reorder">${L==='fa'?'مرتب‌سازی دستی (کشیدن)':'Manual order (drag)'}</button>
             <button class="btn btn-ghost" id="ns-cancel">${tr('cancel')}</button>
           </div>`);
         document.getElementById('ns-cancel').onclick=()=>closeSheet();
         document.querySelectorAll('[data-note-sort]').forEach(el=>el.onclick=()=>{noteSortMode=el.dataset.noteSort;closeSheet();render();});
+        document.getElementById('ns-reorder').onclick=()=>{
+          closeSheet();
+          const ids=Array.from(document.querySelectorAll('.note-card[data-note-open]')).map(el=>el.dataset.noteOpen);
+          const currentList=ids.map(id=>noteItemsMap()[id]).filter(Boolean);
+          noteEnterReorder(currentList);
+        };
       };
       const goArchive=document.getElementById('note-go-archive');
       if(goArchive)goArchive.onclick=()=>{noteView='archive';render();window.scrollTo(0,0);};
@@ -7283,6 +7398,8 @@ function onPop(){
   const acctOv=document.getElementById('acct-overlay');
   if(reorderMode){
     exitReorder();
+  } else if(noteReorderMode){
+    noteExitReorder();
   } else if(on('sheet')){
     closeSheet();_exitDialogOpen=false;
   } else if(setOv){
