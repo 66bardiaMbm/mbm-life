@@ -290,6 +290,28 @@ body.light .trow-title{color:var(--ink)}
 .shop-toolbar{display:flex;gap:8px;padding:0 16px 8px}
 .shop-toolbar2{display:flex;justify-content:flex-end;gap:14px;padding:0 18px 8px}
 .shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
+
+/* ── Notes module ── */
+.note-filter-chip{flex:none;background:var(--s2);border:1px solid var(--b1);border-radius:20px;
+  padding:7px 14px;font-size:13px;color:var(--ink2);cursor:pointer;white-space:nowrap}
+.note-filter-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.note-grid{display:grid;grid-template-columns:1fr;gap:10px;padding:4px 20px 90px}
+@media (min-width:560px){.note-grid{grid-template-columns:repeat(2,1fr)}}
+@media (min-width:900px){.note-grid{grid-template-columns:repeat(3,1fr)}}
+.note-card{background:var(--s2);border:1px solid var(--b1);border-radius:14px;padding:12px 14px;cursor:pointer;min-height:88px;display:flex;flex-direction:column;gap:6px}
+.note-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+.note-card-title{font-size:15px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-card-body{font-size:13px;color:var(--ink2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.note-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
+.note-title-input{width:100%;background:none;border:none;font-size:22px;font-weight:800;color:var(--ink);outline:none;padding:6px 0}
+.note-body-input{width:100%;min-height:50vh;background:none;border:none;color:var(--ink);font-size:15px;line-height:1.6;outline:none;resize:vertical;font-family:inherit}
+.note-check-row{display:flex;align-items:center;gap:8px;padding:8px 8px}
+.note-check-text{flex:1;background:none;border:none;color:var(--ink);font-size:15px;outline:none;padding:6px 4px}
+.note-check-text.done{text-decoration:line-through;color:var(--ink3)}
+.note-item-del{flex:none;width:30px;height:30px;border-radius:8px;border:none;background:none;color:var(--ink3);font-size:15px;cursor:pointer}
+.note-item-del:active{background:var(--s3);color:var(--danger)}
+.note-color-swatch{width:32px;height:32px;border-radius:50%;border:2px solid var(--b1);cursor:pointer}
+.note-color-swatch.on{border-color:var(--ink);box-shadow:0 0 0 2px var(--s0),0 0 0 4px var(--ink)}
 .shop-tripdetails{padding:4px 16px 10px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--b1);margin-bottom:4px}
 .shop-tripdetails .fld label{font-size:11px;color:var(--ink3);display:block;margin-bottom:3px}
 .shop-loc-compact{font-size:14px;color:var(--ink);background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:10px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
@@ -813,6 +835,18 @@ body.rtl .trow-content{text-align:right}
 .sync-bar.error{background:rgba(244,63,94,.15);color:var(--danger)}
 
 /* ── Update banner ── */
+#save-error-banner{display:none;position:fixed;left:0;right:0;bottom:0;z-index:900;
+  max-width:var(--shell-w);margin:0 auto;
+  background:#7f1d1d;color:#fff;padding:12px 16px;
+  padding-bottom:calc(12px + env(safe-area-inset-bottom,0));
+  font-size:13px;align-items:center;justify-content:space-between;gap:10px;
+  box-shadow:0 -2px 16px rgba(0,0,0,.4)}
+@media (min-width:900px){#save-error-banner{inset-inline-start:320px}}
+@media (min-width:1400px){#save-error-banner{inset-inline-start:360px}}
+#save-error-banner #save-error-text{flex:1}
+#save-error-banner #save-error-dismiss{flex:none;background:none;border:none;color:#fff;
+  font-size:16px;cursor:pointer;opacity:.8;padding:4px 6px}
+#save-error-banner #save-error-dismiss:active{opacity:1}
 #update-banner{position:fixed;top:0;left:0;right:0;z-index:500;
   max-width:var(--shell-w);margin:0 auto;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;
@@ -967,7 +1001,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v171';
+const APP_VERSION='v172';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1027,6 +1061,9 @@ function blankDB(){
                     //  createdAt,updatedAt,archivedAt}
       shopLists:{}, // {id,name,icon,color,template,address,createdAt,updatedAt,archivedAt}
       shopItems:{}, // {id,listId,name,icon,qty,unit,category,note,purchased,createdAt,updatedAt}
+      noteItems:{}, // {id,kind:'text'|'checklist',title,body,items[],color,folderId,tags[],
+                    //  pinned,archivedAt,trashedAt,createdAt,updatedAt,versions[]}
+      noteFolders:{}, // {id,name,color,createdAt,updatedAt,archivedAt}
     }
   };
 }
@@ -1050,7 +1087,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
@@ -1077,11 +1114,176 @@ function loadDB(){
 }
 function saveDB(){
   DB.meta._savedAt=new Date().toISOString();
-  try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}
+  persistDB();
   if(typeof syncPush==='function')syncPush();
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   PHASE 0 — DURABLE STORAGE (IndexedDB, replacing localStorage as the
+   primary store) + a single shared persistDB() so EVERY write path
+   (local edits, Firestore listeners, profile pull) goes through the
+   same durable, error-surfacing logic. Previously three different call
+   sites wrote straight to localStorage.setItem(KEY,...) independently,
+   each silently swallowing quota/errors — that silent failure is the
+   bug this section fixes.
+   ═══════════════════════════════════════════════════════════════════ */
+const IDB_NAME='mbmlife_idb_v1', IDB_STORE='kv', IDB_BLOB_KEY='dbBlob';
+let _idbHandle=null, idbReady=false;
+
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    if(!('indexedDB' in window)){reject(new Error('IndexedDB not supported'));return;}
+    const req=indexedDB.open(IDB_NAME,1);
+    req.onupgradeneeded=(e)=>{
+      const db=e.target.result;
+      if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess=(e)=>resolve(e.target.result);
+    req.onerror=(e)=>reject((e.target&&e.target.error)||new Error('IndexedDB open failed'));
+  });
+}
+function idbGet(key){
+  return new Promise((resolve,reject)=>{
+    if(!_idbHandle){reject(new Error('IndexedDB not open'));return;}
+    try{
+      const tx=_idbHandle.transaction(IDB_STORE,'readonly');
+      const req=tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error);
+    }catch(e){reject(e);}
+  });
+}
+function idbSet(key,value){
+  return new Promise((resolve,reject)=>{
+    if(!_idbHandle){reject(new Error('IndexedDB not open'));return;}
+    try{
+      const tx=_idbHandle.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).put(value,key);
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>reject(tx.error);
+      tx.onabort=()=>reject(tx.error||new Error('IndexedDB transaction aborted'));
+    }catch(e){reject(e);}
+  });
+}
+function idbDelete(key){
+  return new Promise((resolve)=>{
+    if(!_idbHandle){resolve();return;}
+    try{
+      const tx=_idbHandle.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>resolve();
+      tx.onabort=()=>resolve();
+    }catch(e){resolve();}
+  });
+}
+
+/* Visible save-error banner — replaces the old catch(e){} that hid failures. */
+function showSaveError(msg){
+  let el=document.getElementById('save-error-banner');
+  if(!el){
+    el=document.createElement('div');
+    el.id='save-error-banner';
+    el.innerHTML=`<span id="save-error-text"></span> <button id="save-error-dismiss" aria-label="dismiss">✕</button>`;
+    document.body.appendChild(el);
+    const dismiss=el.querySelector('#save-error-dismiss');
+    if(dismiss)dismiss.onclick=()=>{el.style.display='none';};
+  }
+  const textEl=el.querySelector('#save-error-text');
+  if(textEl)textEl.textContent=msg;
+  el.style.display='flex';
+}
+function clearSaveError(){
+  const el=document.getElementById('save-error-banner');
+  if(el)el.style.display='none';
+}
+
+/* Triggers a downloadable JSON backup of the given data — used once, right
+   before the first-ever migration into IndexedDB, so a copy of the user's
+   existing data exists outside the app regardless of how migration goes. */
+function downloadJSONBackup(dataObj,filenamePrefix){
+  try{
+    const blob=new Blob([JSON.stringify(dataObj)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`${filenamePrefix}_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    return true;
+  }catch(e){return false;}
+}
+
+// The one function every write path calls. Primary store = IndexedDB.
+// localStorage is kept ONLY as a last-resort fallback for browsers without
+// IndexedDB (or if a write genuinely fails), and failures are now visible.
+function persistDB(){
+  if(idbReady && _idbHandle){
+    idbSet(IDB_BLOB_KEY,DB).then(()=>clearSaveError()).catch(e=>{
+      console.error('IndexedDB save failed, falling back to localStorage:',e);
+      try{
+        localStorage.setItem(KEY,JSON.stringify(DB));
+        clearSaveError();
+      }catch(e2){
+        showSaveError(L==='fa'?'⚠ ذخیره‌سازی ناموفق بود — فضای ذخیره‌ی دستگاه پر است. داده‌های جدید ممکن است ذخیره نشوند.':'⚠ Save failed — device storage may be full. New changes may not be saved.');
+      }
+    });
+  }else{
+    try{
+      localStorage.setItem(KEY,JSON.stringify(DB));
+      clearSaveError();
+    }catch(e){
+      showSaveError(L==='fa'?'⚠ ذخیره‌سازی ناموفق بود — فضای ذخیره‌ی دستگاه پر است. داده‌های جدید ممکن است ذخیره نشوند.':'⚠ Save failed — device storage may be full. New changes may not be saved.');
+    }
+  }
+}
+
+// Called once at boot, right after the synchronous localStorage-based
+// loadDB() above. Opens IndexedDB, migrates existing localStorage data into
+// it (backing that data up to a downloadable file first), and from then on
+// persistDB() treats IndexedDB as primary. If IndexedDB already has newer
+// data than what loadDB() found (a device that's already migrated), that
+// newer copy wins and the UI re-renders with it.
+async function idbMigrateAndLoad(){
+  try{
+    _idbHandle=await idbOpen();
+  }catch(e){
+    console.warn('IndexedDB unavailable — staying on localStorage:',e);
+    idbReady=false;
+    return;
+  }
+  try{
+    const existing=await idbGet(IDB_BLOB_KEY);
+    if(existing && existing.entities){
+      const idbTime=(existing.meta&&existing.meta._savedAt)||'';
+      const curTime=(DB.meta&&DB.meta._savedAt)||'';
+      if(idbTime>=curTime){
+        DB.entities=existing.entities;
+        // Never let a stale IDB copy override the auth identity of the
+        // session currently signing in.
+        DB.meta=Object.assign({},existing.meta,{
+          userId:DB.meta.userId,displayName:DB.meta.displayName,
+          email:DB.meta.email,photoURL:DB.meta.photoURL
+        });
+        render();
+      }
+    }else{
+      // First run under IndexedDB: back up whatever localStorage had, then
+      // copy it in verbatim. Nothing is dropped.
+      downloadJSONBackup(DB,'mbmlife_backup_pre_idb_migration');
+      await idbSet(IDB_BLOB_KEY,DB);
+    }
+    idbReady=true;
+    clearSaveError();
+  }catch(e){
+    console.warn('IndexedDB migration failed — staying on localStorage:',e);
+    idbReady=false;
+  }
+}
+
+
 let DB=loadDB();
+idbMigrateAndLoad();
 
 // OBSOLETE — retired deliberately.
 // This one-time migration used to enforce "exactly one ACTIVE list per store",
@@ -1294,6 +1496,13 @@ let activeShopListId=null;
 let shopSearch='';
 let plannedFilter='all'; // 'overdue'|'today'|'tomorrow'|'week'|'later'|'all'
 let searchQuery='';
+let noteView='home';      // Notes: 'home' | 'detail' | 'archive' | 'trash' | 'history'
+let activeNoteId=null;
+let noteSearch='';
+let noteSortMode='modified'; // 'modified'|'created'|'alpha'|'color'
+let noteFilterFolder=null;   // folderId or null
+let noteFilterTag=null;      // tag string or null
+let noteFilterPinned=false;
 
 /* ── Render engine ── */
 function _showFatalError(err){
@@ -1378,7 +1587,11 @@ function updateFab(){
   if(!fab)return;
   let show=false;
   if(screen==='lists'||screen==='today'||screen==='appts') show=true;
-  else if(screen==='module') show=(currentModule==='shopping')?(shopView==='home'):moduleHasCreate(hubModule(currentModule));
+  else if(screen==='module'){
+    if(currentModule==='shopping') show=(shopView==='home');
+    else if(currentModule==='notes') show=(noteView==='home')&&moduleHasCreate(hubModule('notes'));
+    else show=moduleHasCreate(hubModule(currentModule));
+  }
   else show=false; // lifehub, profile, more, search, ...
   fab.style.display=show?'':'none';
 }
@@ -2874,7 +3087,7 @@ const HUB_MODULES=[
   // ready:false → placeholder page, "Coming soon" badge, NO create (+) button.
   // A future milestone flips ready:true and supplies createLabel + onCreate()
   // so the module gets its OWN independent FAB & create dialog (never New Task).
-  {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas',   ready:false, createLabel:'New Note',         onCreate:null},
+  {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas',   ready:true,  createLabel:'New Note',         onCreate:()=>openNewNoteSheet()},
   {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:true,  createLabel:'New Shopping List', onCreate:null},
   {id:'bills',    icon:'§',  color:'#f59e0b', title:'Bills',     desc:'Bills, subscriptions & due dates',  ready:false, createLabel:'New Bill',         onCreate:null},
   {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)',   ready:false, createLabel:'New Secure Item',  onCreate:null},
@@ -2887,6 +3100,433 @@ const HUB_MODULES=[
 // A module shows its own FAB only when it is ready AND defines a create handler.
 function moduleHasCreate(m){ return !!(m && m.ready && typeof m.onCreate==='function'); }
 function hubModule(id){ return HUB_MODULES.find(m=>m.id===id)||null; }
+
+// ═══════════════════════════ NOTES MODULE (Phase 1) ═══════════════════════
+// Text + checklist notes, folders, tags, colors, pin, archive, trash+restore,
+// basic version history. Auto-saves through the same persistDB()/IndexedDB
+// path as everything else (Phase 0) — no separate storage mechanism.
+const NOTE_COLORS=['#6e56f8','#ef4444','#f59e0b','#22c55e','#0ea5e9','#ec4899','#64748b',null];
+function noteItemsMap(){ if(!DB.entities.noteItems)DB.entities.noteItems={}; return DB.entities.noteItems; }
+function noteFoldersMap(){ if(!DB.entities.noteFolders)DB.entities.noteFolders={}; return DB.entities.noteFolders; }
+function noteFoldersAll(){ return Object.values(noteFoldersMap()).filter(f=>!f.archivedAt).sort((a,b)=>(a.name||'').localeCompare(b.name||'')); }
+// Active = not trashed, not archived (the normal working set).
+function notesActive(){ return Object.values(noteItemsMap()).filter(n=>!n.trashedAt&&!n.archivedAt); }
+function notesArchived(){ return Object.values(noteItemsMap()).filter(n=>n.archivedAt&&!n.trashedAt); }
+function notesTrashed(){ return Object.values(noteItemsMap()).filter(n=>!!n.trashedAt); }
+
+function noteCreate(kind){
+  const id=uid(), now=new Date().toISOString();
+  noteItemsMap()[id]={
+    id,kind:kind==='checklist'?'checklist':'text',
+    title:'',body:'',items:[],
+    color:null,folderId:null,tags:[],
+    pinned:false,archivedAt:null,trashedAt:null,
+    createdAt:now,updatedAt:now,versions:[]
+  };
+  logActivity('created','note',id,{name:''});
+  saveDB();
+  return id;
+}
+// Snapshot BEFORE a change is applied, so "restore" always brings back the
+// state as it existed at that point in time. Capped so history can't grow
+// unbounded on a phone; oldest entries drop off first.
+function noteSnapshot(n){
+  if(!Array.isArray(n.versions))n.versions=[];
+  n.versions.push({at:new Date().toISOString(),title:n.title,body:n.body,items:JSON.parse(JSON.stringify(n.items||[]))});
+  if(n.versions.length>20)n.versions=n.versions.slice(n.versions.length-20);
+}
+// Debounced autosave for title/body text fields — snapshots once per short
+// burst of typing (not on every keystroke), matching "instant auto-save,
+// no Save button" without spamming version history on every character.
+let _noteSaveTimers={};
+let _notePending={}; // id -> {title?, body?} — accumulated fields not yet written to DB
+function noteScheduleSave(id,field,value){
+  const n=noteItemsMap()[id]; if(!n)return;
+  if(!_notePending[id])_notePending[id]={};
+  _notePending[id][field]=value;
+  clearTimeout(_noteSaveTimers[id]);
+  _noteSaveTimers[id]=setTimeout(()=>noteFlushPending(id),500);
+}
+// Writes any pending debounced edits immediately. Called both by the debounce
+// timer itself and whenever the user navigates away from the note, so a fast
+// back-tap right after typing can never silently drop the last keystrokes.
+function noteFlushPending(id){
+  clearTimeout(_noteSaveTimers[id]);
+  delete _noteSaveTimers[id];
+  const pending=_notePending[id];
+  delete _notePending[id];
+  if(!pending)return;
+  const n=noteItemsMap()[id]; if(!n)return;
+  noteSnapshot(n);
+  if('title' in pending)n.title=pending.title;
+  if('body' in pending)n.body=pending.body;
+  n.updatedAt=new Date().toISOString();
+  logActivity('edited','note',id,{name:n.title||''});
+  saveDB();
+}
+function noteSetTitle(id,title){ noteScheduleSave(id,'title',title); }
+function noteSetBody(id,body){ noteScheduleSave(id,'body',body); }
+function noteTogglePin(id){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.pinned=!n.pinned; n.updatedAt=new Date().toISOString();
+  logActivity(n.pinned?'starred':'unstarred','note',id,{name:n.title||''});
+  saveDB(); render();
+}
+function noteSetColor(id,color){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.color=color; n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function noteSetFolder(id,folderId){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.folderId=folderId||null; n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function noteAddTag(id,tag){
+  const n=noteItemsMap()[id]; if(!n)return;
+  tag=(tag||'').trim(); if(!tag)return;
+  if(!Array.isArray(n.tags))n.tags=[];
+  if(!n.tags.includes(tag))n.tags.push(tag);
+  n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function noteRemoveTag(id,tag){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.tags=(n.tags||[]).filter(t=>t!==tag);
+  n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+// Checklist item operations — immediate save (discrete actions, not typing).
+function noteChecklistAdd(id,text){
+  const n=noteItemsMap()[id]; if(!n||n.kind!=='checklist')return;
+  text=(text||'').trim(); if(!text)return;
+  noteSnapshot(n);
+  if(!Array.isArray(n.items))n.items=[];
+  n.items.push({id:uid(),text,done:false});
+  n.updatedAt=new Date().toISOString(); saveDB();
+}
+function noteChecklistToggle(id,itemId){
+  const n=noteItemsMap()[id]; if(!n)return;
+  const it=(n.items||[]).find(i=>i.id===itemId); if(!it)return;
+  it.done=!it.done; n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function noteChecklistDelete(id,itemId){
+  const n=noteItemsMap()[id]; if(!n)return;
+  noteSnapshot(n);
+  n.items=(n.items||[]).filter(i=>i.id!==itemId);
+  n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function noteChecklistEdit(id,itemId,text){
+  const n=noteItemsMap()[id]; if(!n)return;
+  const it=(n.items||[]).find(i=>i.id===itemId); if(!it)return;
+  it.text=text; n.updatedAt=new Date().toISOString(); saveDB();
+}
+function noteArchive(id){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.archivedAt=new Date().toISOString(); n.updatedAt=n.archivedAt;
+  logActivity('archived','note',id,{name:n.title||''});
+  saveDB(); render();
+}
+function noteUnarchive(id){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.archivedAt=null; n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+// Trash is separate from Archive: Archive = "done with it but keep visible
+// history"; Trash = "meant to delete" with a Restore safety net before the
+// permanent-delete step.
+function noteTrash(id){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.trashedAt=new Date().toISOString(); n.updatedAt=n.trashedAt;
+  logActivity('deleted','note',id,{name:n.title||''});
+  saveDB(); render();
+}
+function noteRestore(id){
+  const n=noteItemsMap()[id]; if(!n)return;
+  n.trashedAt=null; n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function notePermanentDelete(id){
+  delete noteItemsMap()[id];
+  saveDB(); render();
+}
+function noteRestoreVersion(id,versionIndex){
+  const n=noteItemsMap()[id]; if(!n||!n.versions||!n.versions[versionIndex])return;
+  noteSnapshot(n); // the CURRENT state becomes a version too, so restoring is never a dead end
+  const v=n.versions[versionIndex];
+  n.title=v.title; n.body=v.body; n.items=JSON.parse(JSON.stringify(v.items||[]));
+  n.updatedAt=new Date().toISOString(); saveDB(); render();
+}
+function noteFolderCreate(name,color){
+  const id=uid(), now=new Date().toISOString();
+  noteFoldersMap()[id]={id,name:(name||'').trim()||'Folder',color:color||'#6e56f8',createdAt:now,updatedAt:now,archivedAt:null};
+  saveDB();
+  return id;
+}
+function notePreviewText(n){
+  if(n.kind==='checklist'){
+    const items=n.items||[];
+    return items.slice(0,3).map(i=>(i.done?'✓ ':'○ ')+i.text).join('  ·  ')+(items.length>3?' …':'');
+  }
+  return (n.body||'').replace(/\n+/g,' ').slice(0,140);
+}
+function notesSortFn(mode){
+  if(mode==='alpha')return (a,b)=>(a.title||'').localeCompare(b.title||'');
+  if(mode==='created')return (a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'');
+  if(mode==='color')return (a,b)=>(a.color||'zzz').localeCompare(b.color||'zzz');
+  return (a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''); // 'modified' default
+}
+
+
+/* ── Notes: top-level dispatcher ── */
+function renderNotes(){
+  if(noteView==='detail')return renderNoteDetail();
+  if(noteView==='archive')return renderNoteList('archive');
+  if(noteView==='trash')return renderNoteList('trash');
+  if(noteView==='history')return renderNoteVersionHistory();
+  return renderNotesHome();
+}
+
+function noteCardHTML(n){
+  const isChecklist=n.kind==='checklist';
+  const accent=n.color||'#6e56f8';
+  const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
+  return `<div class="note-card" data-note-open="${n.id}" style="border-inline-start:3px solid ${accent}">
+    <div class="note-card-top">
+      <div class="note-card-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
+      <button class="star ${n.pinned?'on':''}" data-note-pin="${n.id}" aria-label="pin" style="width:28px;height:28px">★</button>
+    </div>
+    <div class="note-card-body">${esc(notePreviewText(n))}</div>
+    <div class="note-card-meta">
+      ${isChecklist?`<span class="chip">☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
+      ${folder?`<span class="chip">📁 ${esc(folder.name)}</span>`:''}
+      ${(n.tags||[]).slice(0,3).map(t=>`<span class="chip">#${esc(t)}</span>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderNotesHome(){
+  const allNotes=notesActive();
+  const folders=noteFoldersAll();
+  let list=allNotes.filter(n=>{
+    if(noteSearch.trim()){
+      const q=noteSearch.trim().toLowerCase();
+      const hay=(n.title+' '+n.body+' '+(n.items||[]).map(i=>i.text).join(' ')+' '+(n.tags||[]).join(' ')).toLowerCase();
+      if(!hay.includes(q))return false;
+    }
+    if(noteFilterPinned && !n.pinned)return false;
+    if(noteFilterFolder && n.folderId!==noteFilterFolder)return false;
+    if(noteFilterTag && !(n.tags||[]).includes(noteFilterTag))return false;
+    return true;
+  }).sort((a,b)=>{
+    if(DB.meta.starTop!==false && a.pinned!==b.pinned)return a.pinned?-1:1;
+    return notesSortFn(noteSortMode)(a,b);
+  });
+  const archivedCount=notesArchived().length, trashedCount=notesTrashed().length;
+  const sortLabels={modified:L==='fa'?'آخرین ویرایش':'Last modified',created:L==='fa'?'تاریخ ساخت':'Created date',alpha:L==='fa'?'الفبایی':'Alphabetical',color:L==='fa'?'رنگ':'Color'};
+
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="font-size:26px;font-weight:800">${L==='fa'?'یادداشت‌ها':'Notes'}</div>
+  </div>
+  <div style="padding:0 20px 8px">
+    <input class="finput" id="note-search" placeholder="${L==='fa'?'جستجوی یادداشت...':'Search notes...'}" value="${esc(noteSearch)}" style="width:100%" autocomplete="off">
+  </div>
+  <div style="display:flex;gap:8px;overflow-x:auto;padding:0 20px 10px;scrollbar-width:none">
+    <button class="note-filter-chip ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all">${L==='fa'?'همه':'All'}</button>
+    <button class="note-filter-chip ${noteFilterPinned?'on':''}" data-note-filter="pinned">★ ${L==='fa'?'پین‌شده':'Pinned'}</button>
+    ${folders.map(f=>`<button class="note-filter-chip ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}">📁 ${esc(f.name)}</button>`).join('')}
+    <button class="note-filter-chip" data-note-new-folder="1">${L==='fa'?'+ پوشه':'+ Folder'}</button>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;gap:8px">
+    <button class="shop-mini" id="note-sort-btn">${L==='fa'?'مرتب‌سازی':'Sort'}: ${sortLabels[noteSortMode]}</button>
+    <div style="display:flex;gap:8px">
+      <button class="shop-mini" id="note-go-archive">${L==='fa'?'آرشیو':'Archive'}${archivedCount?` (${archivedCount})`:''}</button>
+      <button class="shop-mini" id="note-go-trash">${L==='fa'?'سطل زباله':'Trash'}${trashedCount?` (${trashedCount})`:''}</button>
+    </div>
+  </div>`;
+
+  if(!list.length){
+    const reason=noteSearch.trim()?(L==='fa'?'نتیجه‌ای یافت نشد':'No matching notes'):(L==='fa'?'هنوز یادداشتی نیست':'No notes yet');
+    const sub=noteSearch.trim()?'':(L==='fa'?'با دکمه‌ی + یک یادداشت متنی یا چک‌لیست بساز':'Tap + to create a text note or checklist');
+    html+=`<div class="hub-ph"><div class="hub-ph-ic">✎</div><div class="hub-ph-t">${reason}</div>${sub?`<div class="hub-ph-d">${sub}</div>`:''}</div>`;
+  }else{
+    html+=`<div class="note-grid">${list.map(noteCardHTML).join('')}</div>`;
+  }
+  return html;
+}
+
+// Shared list renderer for Archive and Trash — same card, different actions.
+function renderNoteList(mode){
+  const items=(mode==='archive'?notesArchived():notesTrashed())
+    .sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="note-list-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="font-size:22px;font-weight:800">${mode==='archive'?(L==='fa'?'آرشیو':'Archive'):(L==='fa'?'سطل زباله':'Trash')}</div>
+  </div>`;
+  if(!items.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic">${mode==='archive'?'▤':'🗑'}</div>
+      <div class="hub-ph-t">${mode==='archive'?(L==='fa'?'چیزی آرشیو نشده':'Nothing archived'):(L==='fa'?'سطل زباله خالی است':'Trash is empty')}</div></div>`;
+    return html;
+  }
+  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+  items.forEach(n=>{
+    html+=`<div class="ul-row" style="align-items:flex-start;padding:12px 20px">
+      <div style="flex:1;min-width:0;cursor:pointer" data-note-list-open="${n.id}">
+        <div style="font-size:15px;font-weight:600">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
+        <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(notePreviewText(n))}</div>
+      </div>
+      ${mode==='archive'
+        ?`<button class="shop-mini" data-note-unarchive="${n.id}">${L==='fa'?'بازگردانی':'Unarchive'}</button>`
+        :`<button class="shop-mini" data-note-restore="${n.id}">${L==='fa'?'بازگردانی':'Restore'}</button>
+          <button class="shop-mini" style="color:var(--danger)" data-note-perm-delete="${n.id}">${L==='fa'?'حذف':'Delete'}</button>`}
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
+function renderNoteVersionHistory(){
+  const n=noteItemsMap()[activeNoteId]; if(!n)return '';
+  const versions=(n.versions||[]).slice().reverse(); // newest first
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="note-history-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="font-size:22px;font-weight:800">${L==='fa'?'تاریخچه‌ی نسخه‌ها':'Version History'}</div>
+  </div>`;
+  if(!versions.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic">⟳</div><div class="hub-ph-t">${L==='fa'?'هنوز نسخه‌ی قبلی‌ای نیست':'No previous versions yet'}</div>
+      <div class="hub-ph-d">${L==='fa'?'با ویرایش این یادداشت، نسخه‌های قبلی اینجا نگه داشته می‌شوند.':'As you edit this note, earlier versions will be kept here.'}</div></div>`;
+    return html;
+  }
+  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+  versions.forEach((v,idxFromEnd)=>{
+    const realIndex=n.versions.length-1-idxFromEnd; // index into n.versions (oldest-first array)
+    const d=new Date(v.at);
+    const when=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const preview=v.items&&v.items.length?v.items.slice(0,2).map(i=>i.text).join(', '):(v.body||'').slice(0,80);
+    html+=`<div class="ul-row" style="align-items:flex-start;padding:12px 20px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:600">${esc(v.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
+        <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(preview)}</div>
+        <div style="font-size:11px;color:var(--ink3);margin-top:4px">${esc(when)}</div>
+      </div>
+      <button class="shop-mini" data-note-restore-version="${realIndex}">${L==='fa'?'بازگردانی':'Restore'}</button>
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
+function renderNoteDetail(){
+  const n=noteItemsMap()[activeNoteId];
+  if(!n){ noteView='home'; return renderNotesHome(); }
+  const isChecklist=n.kind==='checklist';
+  const accent=n.color||'#6e56f8';
+  const folder=n.folderId?noteFoldersMap()[n.folderId]:null;
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px;border-inline-start:4px solid ${accent}">
+    <button class="ld-back" id="note-detail-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1"></div>
+    <button class="star ${n.pinned?'on':''}" id="note-detail-pin" aria-label="pin">★</button>
+    <button class="ld-action-btn" id="note-detail-menu" aria-label="options">&#8942;</button>
+  </div>
+  <div style="padding:4px 20px">
+    <input class="note-title-input" id="note-title" placeholder="${L==='fa'?'عنوان':'Title'}" value="${esc(n.title)}" autocomplete="off">
+  </div>`;
+
+  if(isChecklist){
+    const items=n.items||[];
+    html+=`<div style="padding:4px 20px 8px">
+      <input class="finput" id="note-checklist-add" placeholder="${L==='fa'?'افزودن مورد...':'Add item...'}" style="width:100%" autocomplete="off">
+    </div>
+    <div id="note-checklist-list" style="padding:0 12px 90px">
+      ${items.map(it=>`<div class="note-check-row" data-note-item="${it.id}">
+        <button class="chk ${it.done?'on':''}" data-note-item-toggle="${it.id}"></button>
+        <input class="note-check-text ${it.done?'done':''}" data-note-item-edit="${it.id}" value="${esc(it.text)}">
+        <button class="note-item-del" data-note-item-del="${it.id}">🗑</button>
+      </div>`).join('')}
+    </div>`;
+  }else{
+    html+=`<div style="padding:8px 20px 90px">
+      <textarea class="note-body-input" id="note-body" placeholder="${L==='fa'?'شروع نوشتن...':'Start writing...'}">${esc(n.body)}</textarea>
+    </div>`;
+  }
+
+  html+=`<div style="padding:0 20px 90px" id="note-tags-area">
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+      ${(n.tags||[]).map(t=>`<span class="chip">#${esc(t)} <span data-note-tag-del="${esc(t)}" style="cursor:pointer;opacity:.7">✕</span></span>`).join('')}
+      <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:var(--ink2);font-size:12px;width:70px;outline:none">
+    </div>
+    ${folder?`<div style="margin-top:8px;font-size:12px;color:var(--ink3)">📁 ${esc(folder.name)}</div>`:''}
+  </div>`;
+
+  return html;
+}
+
+function openNewNoteSheet(){
+  openSheet(`<h3>${L==='fa'?'یادداشت جدید':'New note'}</h3>
+    <div class="btn-col">
+      <button class="btn btn-primary" id="nn-text">${L==='fa'?'یادداشت متنی':'Text note'}</button>
+      <button class="btn btn-ghost" id="nn-checklist">${L==='fa'?'چک‌لیست':'Checklist'}</button>
+      <button class="btn btn-ghost" id="nn-cancel">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('nn-cancel').onclick=()=>closeSheet();
+  document.getElementById('nn-text').onclick=()=>{
+    closeSheet();
+    const id=noteCreate('text');
+    activeNoteId=id; noteView='detail'; render();
+    setTimeout(()=>{const t=document.getElementById('note-title');if(t)t.focus();},150);
+  };
+  document.getElementById('nn-checklist').onclick=()=>{
+    closeSheet();
+    const id=noteCreate('checklist');
+    activeNoteId=id; noteView='detail'; render();
+    setTimeout(()=>{const t=document.getElementById('note-title');if(t)t.focus();},150);
+  };
+}
+
+function openNoteMenu(){
+  noteFlushPending(activeNoteId);
+  const n=noteItemsMap()[activeNoteId]; if(!n)return;
+  const colorSwatches=NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch ${n.color===c?'on':''}" data-note-color="${c||''}" style="background:${c||'var(--s2)'}"></button>`).join('');
+  openSheet(`<h3>${L==='fa'?'گزینه‌های یادداشت':'Note options'}</h3>
+    <div class="fld"><label>${L==='fa'?'رنگ':'Color'}</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${colorSwatches}</div></div>
+    <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
+      <select class="finput" id="note-folder-select">
+        <option value="">${L==='fa'?'بدون پوشه':'No folder'}</option>
+        ${noteFoldersAll().map(f=>`<option value="${f.id}" ${n.folderId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}
+      </select></div>
+    <div class="btn-col">
+      <button class="btn btn-ghost" id="nm-history">${L==='fa'?'تاریخچه‌ی نسخه‌ها':'Version history'}</button>
+      ${n.archivedAt?`<button class="btn btn-ghost" id="nm-unarchive">${L==='fa'?'خارج از آرشیو':'Unarchive'}</button>`
+        :`<button class="btn btn-ghost" id="nm-archive">${L==='fa'?'آرشیو':'Archive'}</button>`}
+      <button class="btn btn-danger" id="nm-trash">${L==='fa'?'انتقال به سطل زباله':'Move to Trash'}</button>
+      <button class="btn btn-ghost" id="nm-cancel">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('nm-cancel').onclick=()=>closeSheet();
+  document.querySelectorAll('[data-note-color]').forEach(el=>el.onclick=()=>{
+    noteSetColor(activeNoteId, el.dataset.noteColor||null); closeSheet();
+  });
+  document.getElementById('note-folder-select').onchange=(e)=>{ noteSetFolder(activeNoteId, e.target.value||null); };
+  document.getElementById('nm-history').onclick=()=>{ closeSheet(); noteView='history'; render(); };
+  const nmArchive=document.getElementById('nm-archive');
+  if(nmArchive)nmArchive.onclick=()=>{ closeSheet(); noteArchive(activeNoteId); noteView='home'; activeNoteId=null; render(); };
+  const nmUnarchive=document.getElementById('nm-unarchive');
+  if(nmUnarchive)nmUnarchive.onclick=()=>{ closeSheet(); noteUnarchive(activeNoteId); noteView='home'; activeNoteId=null; render(); };
+  document.getElementById('nm-trash').onclick=()=>{ closeSheet(); noteTrash(activeNoteId); noteView='home'; activeNoteId=null; render(); };
+}
+
+function openNewNoteFolderSheet(){
+  openSheet(`<h3>${L==='fa'?'پوشه‌ی جدید':'New folder'}</h3>
+    <input class="finput" id="nf-name" placeholder="${L==='fa'?'نام پوشه':'Folder name'}" style="width:100%" autocomplete="off">
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="nf-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary" id="nf-save">${tr('save')}</button>
+    </div>`);
+  setTimeout(()=>document.getElementById('nf-name')?.focus(),100);
+  document.getElementById('nf-cancel').onclick=()=>closeSheet();
+  document.getElementById('nf-save').onclick=()=>{
+    const name=(document.getElementById('nf-name').value||'').trim();
+    if(!name)return;
+    const id=noteFolderCreate(name);
+    closeSheet();
+    noteFilterFolder=id; noteFilterPinned=false; render();
+  };
+}
 
 // ═══════════════════════ SHOPPING MODULE (real MVP) ═══════════════════════
 // Local-only (persisted via saveDB → localStorage). It is NOT in the Firestore
@@ -3014,8 +3654,8 @@ function activityLabel(e){
     ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد'}
     :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred'};
   const kinds=L==='fa'
-    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار'}
-    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment'};
+    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت'}
+    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note'};
   return `${kinds[e.refType]||e.refType} ${n?'“'+n+'” ':''}${verbs[e.type]||e.type}`;
 }
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
@@ -4197,6 +4837,7 @@ function renderActivity(){
 function renderModule(){
   if(currentModule==='shopping') return renderShopping();
   if(currentModule==='activity') return renderActivity();
+  if(currentModule==='notes') return renderNotes();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -5007,7 +5648,120 @@ function bindScreen(){
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  // ── Notes wiring ──
+  (()=>{
+    if(!(screen==='module'&&currentModule==='notes'))return;
+    if(noteView==='home'){
+      const searchEl=document.getElementById('note-search');
+      if(searchEl){
+        searchEl.oninput=()=>{
+          noteSearch=searchEl.value;
+          clearTimeout(window._noteSearchT);
+          window._noteSearchT=setTimeout(()=>{
+            render();
+            const s=document.getElementById('note-search');
+            if(s){s.focus(); s.setSelectionRange(s.value.length,s.value.length);}
+          },250);
+        };
+      }
+      document.querySelectorAll('[data-note-open]').forEach(el=>el.onclick=(e)=>{
+        if(e.target.closest('[data-note-pin]'))return;
+        activeNoteId=el.dataset.noteOpen; noteView='detail'; render(); window.scrollTo(0,0);});
+      document.querySelectorAll('[data-note-pin]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();noteTogglePin(el.dataset.notePin);});
+      document.querySelectorAll('[data-note-filter]').forEach(el=>el.onclick=()=>{
+        const f=el.dataset.noteFilter;
+        noteFilterFolder=null;
+        noteFilterPinned=(f==='pinned');
+        render();});
+      document.querySelectorAll('[data-note-filter-folder]').forEach(el=>el.onclick=()=>{
+        noteFilterPinned=false;
+        noteFilterFolder=(noteFilterFolder===el.dataset.noteFilterFolder)?null:el.dataset.noteFilterFolder;
+        render();});
+      const newFolderBtn=document.querySelector('[data-note-new-folder]');
+      if(newFolderBtn)newFolderBtn.onclick=()=>openNewNoteFolderSheet();
+      const sortBtn=document.getElementById('note-sort-btn');
+      if(sortBtn)sortBtn.onclick=()=>{
+        openSheet(`<h3>${L==='fa'?'مرتب‌سازی بر اساس':'Sort by'}</h3>
+          <div class="btn-col">
+            <button class="btn ${noteSortMode==='modified'?'btn-primary':'btn-ghost'}" data-note-sort="modified">${L==='fa'?'آخرین ویرایش':'Last modified'}</button>
+            <button class="btn ${noteSortMode==='created'?'btn-primary':'btn-ghost'}" data-note-sort="created">${L==='fa'?'تاریخ ساخت':'Created date'}</button>
+            <button class="btn ${noteSortMode==='alpha'?'btn-primary':'btn-ghost'}" data-note-sort="alpha">${L==='fa'?'الفبایی':'Alphabetical'}</button>
+            <button class="btn ${noteSortMode==='color'?'btn-primary':'btn-ghost'}" data-note-sort="color">${L==='fa'?'رنگ':'Color'}</button>
+            <button class="btn btn-ghost" id="ns-cancel">${tr('cancel')}</button>
+          </div>`);
+        document.getElementById('ns-cancel').onclick=()=>closeSheet();
+        document.querySelectorAll('[data-note-sort]').forEach(el=>el.onclick=()=>{noteSortMode=el.dataset.noteSort;closeSheet();render();});
+      };
+      const goArchive=document.getElementById('note-go-archive');
+      if(goArchive)goArchive.onclick=()=>{noteView='archive';render();window.scrollTo(0,0);};
+      const goTrash=document.getElementById('note-go-trash');
+      if(goTrash)goTrash.onclick=()=>{noteView='trash';render();window.scrollTo(0,0);};
+    }
+    if(noteView==='archive'||noteView==='trash'){
+      const backBtn=document.getElementById('note-list-back');
+      if(backBtn)backBtn.onclick=()=>{noteView='home';render();window.scrollTo(0,0);};
+      document.querySelectorAll('[data-note-list-open]').forEach(el=>el.onclick=()=>{
+        activeNoteId=el.dataset.noteListOpen; noteView='detail'; render(); window.scrollTo(0,0);});
+      document.querySelectorAll('[data-note-unarchive]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();noteUnarchive(el.dataset.noteUnarchive);});
+      document.querySelectorAll('[data-note-restore]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();noteRestore(el.dataset.noteRestore);});
+      document.querySelectorAll('[data-note-perm-delete]').forEach(el=>el.onclick=(e)=>{
+        e.stopPropagation();
+        const id=el.dataset.notePermDelete;
+        openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3>
+          <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'?'این یادداشت برای همیشه حذف می‌شود. این عمل بازگشت‌پذیر نیست.':'This note will be permanently deleted. This cannot be undone.'}</p>
+          <div class="btn-row">
+            <button class="btn btn-ghost" id="npd-cancel">${tr('cancel')}</button>
+            <button class="btn btn-danger" id="npd-ok">${L==='fa'?'حذف':'Delete'}</button>
+          </div>`);
+        document.getElementById('npd-cancel').onclick=()=>closeSheet();
+        document.getElementById('npd-ok').onclick=()=>{closeSheet();notePermanentDelete(id);};
+      });
+    }
+    if(noteView==='history'){
+      const backBtn=document.getElementById('note-history-back');
+      if(backBtn)backBtn.onclick=()=>{noteView='detail';render();window.scrollTo(0,0);};
+      document.querySelectorAll('[data-note-restore-version]').forEach(el=>el.onclick=()=>{
+        noteRestoreVersion(activeNoteId, parseInt(el.dataset.noteRestoreVersion,10));
+        noteView='detail'; render();
+      });
+    }
+    if(noteView==='detail'){
+      const n=noteItemsMap()[activeNoteId];
+      const backBtn=document.getElementById('note-detail-back');
+      if(backBtn)backBtn.onclick=()=>{noteFlushPending(activeNoteId);noteView='home';activeNoteId=null;render();window.scrollTo(0,0);};
+      const pinBtn=document.getElementById('note-detail-pin');
+      if(pinBtn)pinBtn.onclick=()=>noteTogglePin(activeNoteId);
+      const menuBtn=document.getElementById('note-detail-menu');
+      if(menuBtn)menuBtn.onclick=()=>openNoteMenu();
+      const titleEl=document.getElementById('note-title');
+      if(titleEl)titleEl.oninput=()=>noteSetTitle(activeNoteId,titleEl.value);
+      const bodyEl=document.getElementById('note-body');
+      if(bodyEl)bodyEl.oninput=()=>noteSetBody(activeNoteId,bodyEl.value);
+      const addEl=document.getElementById('note-checklist-add');
+      if(addEl)addEl.onkeydown=(e)=>{
+        if(e.key!=='Enter')return;
+        e.preventDefault();
+        if(!addEl.value.trim())return;
+        noteChecklistAdd(activeNoteId,addEl.value);
+        addEl.value='';
+        render();
+        setTimeout(()=>{const a=document.getElementById('note-checklist-add'); if(a)a.focus();},50);
+      };
+      document.querySelectorAll('[data-note-item-toggle]').forEach(el=>el.onclick=()=>noteChecklistToggle(activeNoteId,el.dataset.noteItemToggle));
+      document.querySelectorAll('[data-note-item-del]').forEach(el=>el.onclick=()=>noteChecklistDelete(activeNoteId,el.dataset.noteItemDel));
+      document.querySelectorAll('[data-note-item-edit]').forEach(el=>el.oninput=()=>noteChecklistEdit(activeNoteId,el.dataset.noteItemEdit,el.value));
+      const tagInput=document.getElementById('note-tag-input');
+      if(tagInput)tagInput.onkeydown=(e)=>{
+        if(e.key!=='Enter'&&e.key!==',')return;
+        e.preventDefault();
+        const v=tagInput.value.replace(/,$/,'').trim();
+        if(v){noteAddTag(activeNoteId,v);}
+        tagInput.value='';
+      };
+      document.querySelectorAll('[data-note-tag-del]').forEach(el=>el.onclick=()=>noteRemoveTag(activeNoteId,el.dataset.noteTagDel));
+    }
+  })();
   // ── Shopping wiring ──
   const shopNewEmpty=document.getElementById('shop-new-empty');
   if(shopNewEmpty)shopNewEmpty.onclick=()=>openNewShopSheet();
@@ -5324,6 +6078,7 @@ function initAuth(){
       if(prevUid && prevUid!==user.uid){
         DB=seedDB(blankDB());
         try{localStorage.removeItem(KEY);}catch(e){}
+        idbDelete(IDB_BLOB_KEY);
       }
       FB.user=user;
       DB.meta.userId=user.uid;
@@ -5428,6 +6183,7 @@ function doSignOut(){
   // SECURITY: wipe this user's cached data from the device on sign-out.
   DB=seedDB(blankDB());
   try{localStorage.removeItem(KEY);}catch(e){}
+  idbDelete(IDB_BLOB_KEY);
   saveDB();
   FB.user=null;
   const finish=()=>showAuthScreen();
@@ -5453,7 +6209,7 @@ function startListeners(){
         if(ch.type==='removed')delete DB.entities[entity][ch.doc.id];
         else DB.entities[entity][ch.doc.id]=d;
       });
-      localStorage.setItem(KEY,JSON.stringify(DB));
+      persistDB();
       render();
     },()=>{});
 
@@ -5506,7 +6262,7 @@ function pullProfile(){
       if('avatar' in d && d.avatar!==DB.meta.avatar){DB.meta.avatar=d.avatar||null;changed=true;}
       if(d.displayName && d.displayName!==DB.meta.displayName){DB.meta.displayName=d.displayName;changed=true;}
       if(changed){
-        try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}
+        persistDB();
         render();
       }
     },()=>{});
@@ -6430,7 +7186,17 @@ if(FB.ready){
 
 
 // Nav
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden' && currentModule==='notes' && activeNoteId){
+    noteFlushPending(activeNoteId);
+  }
+});
+window.addEventListener('beforeunload',()=>{
+  if(currentModule==='notes' && activeNoteId) noteFlushPending(activeNoteId);
+});
+
 document.querySelectorAll('.nv').forEach(b=>b.onclick=()=>{
+  if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);
   screen=b.dataset.s;
   if(screen!=='lists'){tasksView='browser';activeListId=null;activeSmartView=null;}
   render();});
@@ -6532,6 +7298,13 @@ function onPop(){
   } else if(screen==='module' && currentModule==='shopping' && shopView==='detail'){
     // Shopping list detail → Shopping home.
     shopView='home';activeShopListId=null;shopResetSelect();render();
+  } else if(screen==='module' && currentModule==='notes' && noteView==='history'){
+    noteView='detail';render();
+  } else if(screen==='module' && currentModule==='notes' && (noteView==='archive'||noteView==='trash')){
+    noteView='home';render();
+  } else if(screen==='module' && currentModule==='notes' && noteView==='detail'){
+    if(activeNoteId)noteFlushPending(activeNoteId);
+    noteView='home';activeNoteId=null;render();
   } else if(screen==='module'){
     // Life Hub module page → back to the Life Hub grid.
     currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();screen='lifehub';render();
