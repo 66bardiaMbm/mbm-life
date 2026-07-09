@@ -967,7 +967,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v170';
+const APP_VERSION='v171';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1083,26 +1083,17 @@ function saveDB(){
 
 let DB=loadDB();
 
-// One-time migration (guarded by DB.meta.shopStoreDedupV1): before openStore()
-// existed, the old prompt-based flow could create more than one ACTIVE list
-// for the same store. For each store key, keep the OLDEST active list, move
-// every item and favourite from any other active list into it, then archive
-// (never delete) the now-empty duplicate — so no item is ever lost and the
-// duplicate's history/address is still recoverable via Archived Lists.
+// OBSOLETE — retired deliberately.
+// This one-time migration used to enforce "exactly one ACTIVE list per store",
+// merging any duplicates into the oldest one. The Shopping architecture now
+// treats Store, Current List and History as independent concepts and
+// explicitly ALLOWS several active lists for the same store (starting a new
+// empty Woolworths list must never touch an existing one). Running this would
+// silently merge and archive those legitimate lists, so it is now a no-op.
+// The guard flag is still set for any user who never ran it, so nothing
+// re-triggers later.
 function ensureShopStoreDedup(){
   if(DB.meta.shopStoreDedupV1)return;
-  const byStore={};
-  Object.values(shopListsMap()).forEach(l=>{
-    if(l.archivedAt||!l.template)return;
-    (byStore[l.template]=byStore[l.template]||[]).push(l);
-  });
-  Object.values(byStore).forEach(group=>{
-    if(group.length<2)return;
-    group.sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
-    const keep=group[0];
-    for(let i=1;i<group.length;i++) shopMergeListInto(group[i].id, keep.id, 'archive');
-    keep.updatedAt=new Date().toISOString();
-  });
   DB.meta.shopStoreDedupV1=true;
   saveDB();
 }
@@ -1443,10 +1434,16 @@ function applyLang(){
 function renderToday(){
   const ts=todayStr();
   const allT=activeTasks();
-  const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts);
-  const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate));
+  // Dated shopping lists participate in Today exactly like dated tasks.
+  // Undated lists are deliberately excluded so Today never fills with noise.
+  const shopT=shopListsAsTasks().filter(t=>t.dueDate);
+  const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts)
+    .concat(shopT.filter(t=>t.dueDate<ts));
+  const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate))
+    .concat(shopT.filter(t=>t.dueDate===ts));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
-  const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts);
+  const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts)
+    .concat(shopT.filter(t=>t.dueDate>ts));
   // Today's appointments
   const todayAppts=Object.values(DB.entities.appts||{})
     .filter(a=>!a.archivedAt&&a.date===ts)
@@ -1539,12 +1536,13 @@ function renderListsNav(){
   const lists=active('lists');
   const user=DB.meta;
 
+  const shopT=shopListsAsTasks();   // active shopping lists, task-shaped
   const svCounts={
-    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length,
-    important:allT.filter(t=>!t.done&&t.pinned).length,
-    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length,
+    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length,
+    important:allT.filter(t=>!t.done&&t.pinned).length + shopT.filter(t=>t.pinned).length,
+    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length,
     assigned:allT.filter(t=>!t.done&&t.assigneeId&&t.assigneeId===DB.meta.userId).length,
-    all:allT.filter(t=>!t.done).length,
+    all:allT.filter(t=>!t.done).length + shopT.length,
   };
   const _sShow=DB.meta.smartShow||{};
   const _autoHide=DB.meta.autoHideSmart===true;
@@ -1686,6 +1684,9 @@ function renderListDetail(){
     accentColor=_sc||svColors[activeSmartView]||'#6e56f8';
     bgGradient=(_sc===null&&DB.meta.smartColor&&activeSmartView in DB.meta.smartColor)?null:listBgGradient(accentColor);
     bgPhoto=(DB.meta.smartPhoto&&DB.meta.smartPhoto[activeSmartView])||null;
+    // Shopping Lists join the same pool as Tasks, then go through the SAME
+    // filter below. "assigned" is task-only (shopping lists have no assignee).
+    if(activeSmartView!=='assigned') tasks=tasks.concat(shopListsAsTasks());
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
     else if(activeSmartView==='planned')tasks=filterPlanned(tasks);
@@ -1706,7 +1707,7 @@ function renderListDetail(){
 
   // Reorder mode: only open tasks, ordered by current manual order, draggable
   if(reorderMode){
-    const ordered=openT; // already in view order from sortTasksForView
+    const ordered=openT.filter(t=>t.kind!=='shop'); // reorder is task-only
     return `
     <div class="ld-bg">
       <div class="ld-bg-layer ${bgPhoto?'has-photo':''}" style="${bgPhoto?`background-image:${bgPhoto};background-size:cover;background-position:center`:`background:${bgGradient||'var(--s2)'}`}"></div>
@@ -1774,6 +1775,28 @@ function renderListDetail(){
 function taskRowFlat(t,isOverdue){
   const ts=todayStr();
   const over=t.dueDate&&t.dueDate<ts&&!t.done;
+  // ── Shopping List row: same row chrome as a Task, shopping-specific wiring ──
+  if(t.kind==='shop'){
+    let smeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'خرید':'Shopping'}</span>`;
+    const rem=shopItemsFor(t.shopId).filter(it=>!it.purchased).length;
+    smeta+=`<span class="chip">${rem} ${L==='fa'?'باقی‌مانده':'remaining'}</span>`;
+    if(t.dueDate&&!over)smeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
+    if(over)smeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+    if(t.location)smeta+=`<span class="chip chip-loc" data-map="${encodeURIComponent(t.location)}" role="button">📍 ${esc(t.location.split(',')[0])}</span>`;
+    const sOverStyle=over?'border-left:2px solid var(--danger);':'';
+    return `<div class="trow-flat" data-shop-open="${t.shopId}" style="${sOverStyle}">
+      <div class="trow-chk-wrap">
+        <div class="chk" data-shop-complete="${t.shopId}" title="${L==='fa'?'تکمیل خرید':'Complete shopping'}"></div>
+      </div>
+      <div class="trow-content">
+        <div class="trow-title" dir="auto">${esc(t.text)}</div>
+        <div class="trow-meta-row">${smeta}</div>
+      </div>
+      <div class="trow-star-wrap">
+        <button class="star ${t.pinned?'on':''}" data-shop-pin="${t.shopId}">★</button>
+      </div>
+    </div>`;
+  }
   const pr=t.priority==='p1'?`<span class="pill p1">${tr('high')}</span>`:'';
   let meta='';
   // In smart views or Today, show list name for context
@@ -2858,6 +2881,7 @@ const HUB_MODULES=[
   {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records',    ready:false, createLabel:'New Document',     onCreate:null},
   {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings',         ready:false, createLabel:'New Trip',         onCreate:null},
   {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules',           ready:false, createLabel:'New Home Item',    onCreate:null},
+  {id:'activity', icon:'⟳', color:'#0ea5e9', title:'Activity',  desc:'Recent activity across the app',    ready:true,  createLabel:null,               onCreate:null},
   {id:'family',   icon:'♥',  color:'#ec4899', title:'Family',    desc:'Shared family space (future)',      ready:false, createLabel:'New Family Item',  onCreate:null}
 ];
 // A module shows its own FAB only when it is ready AND defines a create handler.
@@ -2919,6 +2943,81 @@ function shopStore(key){ return shopAllStoreDefs().find(s=>s.key===key)||null; }
 // True only for a list that lives inside an actual Store (built-in or custom) —
 // as opposed to a builtin List template (Weekly/BBQ/...) or a fully custom list.
 function shopIsStoreList(l){ return !!(l&&l.template&&shopStore(l.template)); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   SHOPPING ↔ PRODUCTIVITY ENGINE BRIDGE
+   Shopping Lists are projected into the SAME shape Tasks use, so every
+   existing filter (My Day / Important / Planned / All Tasks / Search)
+   operates on them with zero duplicated logic. The projection is a
+   read-only view; writes go back through the shopping entities.
+   Field mapping:  name→text  tripDate→dueDate  tripTime→dueTime
+                   pinned→pinned  archivedAt→done  tripNotes→notes
+                   address→location
+   ═══════════════════════════════════════════════════════════════════ */
+function shopListAsTask(l){
+  if(!l)return null;
+  return {
+    id:'shop:'+l.id,      // namespaced so it can never collide with a task id
+    shopId:l.id,
+    kind:'shop',          // the ONLY thing renderers branch on
+    text:l.name||'Shopping',
+    dueDate:l.tripDate||'',
+    dueTime:l.tripTime||'',
+    pinned:!!l.pinned,
+    done:!!l.archivedAt,
+    notes:l.tripNotes||'',
+    location:l.address||'',
+    listId:null,
+    priority:null,
+    icon:l.icon||'🛒',
+    color:l.color||'#22c55e',
+    updatedAt:l.updatedAt||l.createdAt||''
+  };
+}
+// Active (non-archived) shopping lists as task-shaped items.
+function shopListsAsTasks(){ return shopListsAll().map(shopListAsTask); }
+// Toggle the star/favourite on a shopping list — the Shopping equivalent of
+// pinning a Task, so it surfaces in Important via the exact same filter.
+function shopToggleStar(id){
+  const l=shopListsMap()[id]; if(!l)return;
+  l.pinned=!l.pinned; l.updatedAt=new Date().toISOString();
+  logActivity(l.pinned?'starred':'unstarred','shopList',l.id,{name:l.name});
+  saveDB(); render();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ACTIVITY LOG  (new subsystem — none existed before)
+   A single append-only event stream shared by every content type, so
+   Shopping, Tasks and Appointments all record history the same way.
+   ═══════════════════════════════════════════════════════════════════ */
+function activityMap(){ if(!DB.entities.activity)DB.entities.activity={}; return DB.entities.activity; }
+function activityAll(){
+  return Object.values(activityMap()).sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+}
+// type: created|edited|completed|reused|archived|deleted|starred|unstarred
+// refType: shopList|shopItem|task|appt
+function logActivity(type,refType,refId,meta){
+  const id=uid(), at=new Date().toISOString();
+  activityMap()[id]={id,type,refType,refId,at,meta:meta||{}};
+  // Cap the log so it can never grow unbounded on a phone.
+  const all=Object.values(activityMap());
+  if(all.length>300){
+    all.sort((a,b)=>(a.at||'').localeCompare(b.at||''));
+    all.slice(0,all.length-300).forEach(e=>{delete activityMap()[e.id];});
+  }
+  // NOTE: caller is responsible for saveDB() — logActivity is always invoked
+  // right before an existing saveDB(), so we don't double-write.
+}
+function activityLabel(e){
+  const n=(e.meta&&e.meta.name)?e.meta.name:'';
+  const verbs=L==='fa'
+    ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد'}
+    :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred'};
+  const kinds=L==='fa'
+    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار'}
+    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment'};
+  return `${kinds[e.refType]||e.refType} ${n?'“'+n+'” ':''}${verbs[e.type]||e.type}`;
+}
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
 function shopItemsMap(){ if(!DB.entities.shopItems)DB.entities.shopItems={}; return DB.entities.shopItems; }
 function shopListsAll(){ return Object.values(shopListsMap()).filter(l=>!l.archivedAt); }
@@ -2968,9 +3067,11 @@ function shopPermanentDelete(id){
     </div>`);
   document.getElementById('pd-cancel').onclick=()=>closeSheet();
   document.getElementById('pd-ok').onclick=()=>{
+    const _nm=(shopListsMap()[id]||{}).name||'';
     Object.keys(shopItemsMap()).forEach(iid=>{ if(shopItemsMap()[iid].listId===id) delete shopItemsMap()[iid]; });
     delete shopFavsMap()[id];
     delete shopListsMap()[id];
+    logActivity('deleted','shopList',id,{name:_nm});
     saveDB(); closeSheet();
     render(); window.scrollTo(0,0);
     toast(L==='fa'?'حذف شد':'Deleted');
@@ -3095,8 +3196,9 @@ function renderShopHome(){
         <div class="shop-lmain">
           <div class="shop-lname">${esc(l.name)}</div>
           <div class="shop-lmeta">${rem} ${L==='fa'?'باقی‌مانده':'remaining'}${done?` · ${done} ${L==='fa'?'خریداری‌شده':'purchased'}`:''}</div>
-          ${l.address?`<div class="shop-laddr">📍 ${esc(l.address)}</div>`:''}
+          ${(l.tripDate||l.address)?`<div class="shop-laddr">${[l.tripDate?shortDate(l.tripDate)+(l.tripTime?' · '+l.tripTime:''):null,l.address?'📍 '+esc(l.address):null].filter(Boolean).join(' · ')}</div>`:''}
         </div>
+        <button class="star ${l.pinned?'on':''}" data-shop-star="${l.id}" aria-label="star">★</button>
         <button class="shop-lmenu" data-shop-menu="${l.id}" aria-label="options">⋯</button>
       </div>`;
     });
@@ -3595,7 +3697,8 @@ function renderShopDetail(){
 // ── Create / edit shopping list ──
 function shopCreateList({name,icon,color,template,address,lat,lon}){
   const id=uid(), now=new Date().toISOString();
-  shopListsMap()[id]={id,name:name||'Shopping',icon:icon||'🛒',color:color||'#22c55e',template:template||null,address:address||'',lat:(lat!=null?lat:null),lon:(lon!=null?lon:null),createdAt:now,updatedAt:now,archivedAt:null};
+  shopListsMap()[id]={id,name:name||'Shopping',icon:icon||'🛒',color:color||'#22c55e',template:template||null,address:address||'',lat:(lat!=null?lat:null),lon:(lon!=null?lon:null),createdAt:now,updatedAt:now,archivedAt:null,pinned:false};
+  logActivity('created','shopList',id,{name:name||'Shopping'});
   saveDB();
   return id;
 }
@@ -3603,7 +3706,9 @@ function shopCreateList({name,icon,color,template,address,lat,lon}){
 // from the ⋯ menu or the always-visible Complete List bar. Moves it to
 // History; the store then has no Current List until Reuse/New Empty runs.
 function shopCompleteList(l){
-  l.archivedAt=new Date().toISOString(); l.updatedAt=l.archivedAt; saveDB();
+  l.archivedAt=new Date().toISOString(); l.updatedAt=l.archivedAt;
+  logActivity('completed','shopList',l.id,{name:l.name});
+  saveDB();
   if(shopView==='detail'){ shopView='home'; activeShopListId=null; }
   render(); window.scrollTo(0,0);
   toast(shopIsStoreList(l)?(L==='fa'?'لیست تکمیل شد':'List completed'):(L==='fa'?'بایگانی شد':'Archived'));
@@ -3625,6 +3730,7 @@ function shopReuseLastList(s,lastList){
     const iid=uid();
     shopItemsMap()[iid]={id:iid,listId:id,name:it.name,icon:it.icon,qty:it.qty,unit:it.unit,category:it.category,note:it.note||'',purchased:false,createdAt:now,updatedAt:now};
   });
+  logActivity('reused','shopList',id,{name:s.name});
   saveDB();
   return id;
 }
@@ -4057,8 +4163,40 @@ function renderLifeHub(){
   return html;
 }
 
+// ── Activity History screen: one shared timeline for every content type ──
+function renderActivity(){
+  const events=activityAll();
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="font-size:26px;font-weight:800">${L==='fa'?'فعالیت':'Activity'}</div>
+  </div>`;
+  if(!events.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic">⟳</div>
+      <div class="hub-ph-t">${L==='fa'?'هنوز فعالیتی نیست':'No activity yet'}</div>
+      <div class="hub-ph-d">${L==='fa'?'ساخت، ویرایش و تکمیل لیست‌های خرید اینجا ثبت می‌شود.':'Creating, editing and completing shopping lists will show up here.'}</div></div>`;
+    return html;
+  }
+  const icons={created:'＋',edited:'✎',completed:'✓',reused:'⟳',archived:'▤',deleted:'🗑',starred:'★',unstarred:'☆'};
+  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+  events.slice(0,100).forEach(e=>{
+    const d=new Date(e.at);
+    const when=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const clickable=(e.refType==='shopList'&&shopListsMap()[e.refId]&&!shopListsMap()[e.refId].archivedAt);
+    html+=`<div class="ul-row" ${clickable?`data-act-shop="${e.refId}" style="cursor:pointer"`:''}>
+      <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:var(--s3);color:var(--ink2);display:flex;align-items:center;justify-content:center;font-size:16px">${icons[e.type]||'•'}</div></div>
+      <div style="flex:1;padding:12px 0 12px 4px;min-width:0">
+        <div style="font-size:14px">${esc(activityLabel(e))}</div>
+        <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(when)}</div>
+      </div>
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
 function renderModule(){
   if(currentModule==='shopping') return renderShopping();
+  if(currentModule==='activity') return renderActivity();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -4226,7 +4364,7 @@ function _renderSearch(q){
       <div class="srch-empty-ic">
         <svg width="76" height="76" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
       </div>
-      <div class="srch-empty-text">${L==='fa'?'چه چیزی می‌خواهی پیدا کنی؟ می‌توانی در کارها، مراحل و یادداشت‌ها جستجو کنی':'What would you like to find? You can search within tasks, steps and notes'}</div>
+      <div class="srch-empty-text">${L==='fa'?'چه چیزی می‌خواهی پیدا کنی؟ می‌توانی در کارها، مراحل، یادداشت‌ها و خرید جستجو کنی':'What would you like to find? You can search tasks, steps, notes and shopping'}</div>
     </div>`;return;}
   const ql=q.toLowerCase();
   const tasks=activeTasks().filter(t=>
@@ -4238,10 +4376,44 @@ function _renderSearch(q){
     (a.title||'').toLowerCase().includes(ql)||
     (a.location||'').toLowerCase().includes(ql)||
     (a.notes||'').toLowerCase().includes(ql)));
-  if(!tasks.length&&!lists.length&&!appts.length){
+  // Shopping is a first-class content type in search, same as tasks/notes.
+  const shopLists=shopListsAll().filter(l=>
+    (l.name||'').toLowerCase().includes(ql)||
+    (l.tripNotes||'').toLowerCase().includes(ql)||
+    (l.address||'').toLowerCase().includes(ql));
+  const shopItems=Object.values(shopItemsMap()).filter(it=>{
+    const parent=shopListsMap()[it.listId];
+    if(!parent||parent.archivedAt)return false;   // don't surface archived history items
+    return (it.name||'').toLowerCase().includes(ql)||(it.category||'').toLowerCase().includes(ql);
+  }).slice(0,20);
+  if(!tasks.length&&!lists.length&&!appts.length&&!shopLists.length&&!shopItems.length){
     el.innerHTML=`<div class="srch-empty">${tr('noResults')}</div>`;return;}
   const ts=todayStr();
   let html='';
+  if(shopLists.length){
+    html+=`<div class="hub-sec-label">🛒 ${L==='fa'?'لیست‌های خرید':'Shopping lists'}</div>
+    <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
+      ${shopLists.map(l=>`<div class="ul-row" data-srch-shoplist="${l.id}" style="cursor:pointer">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:${l.color||'#22c55e'}">${l.icon||'🛒'}</div></div>
+        <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
+          <div style="font-size:15px;font-weight:500">${esc(l.name)}${l.pinned?' ★':''}</div>
+          <div style="font-size:12px;color:var(--ink3);margin-top:2px">${[shopItemsFor(l.id).filter(i=>!i.purchased).length+' '+(L==='fa'?'باقی‌مانده':'remaining'),l.tripDate?shortDate(l.tripDate):null,l.address?'📍 '+l.address.split(',')[0]:null].filter(Boolean).join(' · ')}</div>
+        </div>
+        <span style="color:var(--ink3);opacity:.4;padding-right:4px">›</span>
+      </div>`).join('')}
+    </div>`;}
+  if(shopItems.length){
+    html+=`<div class="hub-sec-label">🧺 ${L==='fa'?'آیتم‌های خرید':'Shopping items'}</div>
+    <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
+      ${shopItems.map(it=>{const parent=shopListsMap()[it.listId];return `<div class="ul-row" data-srch-shoplist="${it.listId}" style="cursor:pointer">
+        <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:18px">${esc(it.icon||'🛒')}</div></div>
+        <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
+          <div style="font-size:15px;font-weight:500${it.purchased?';text-decoration:line-through;color:var(--ink3)':''}">${esc(it.name)}</div>
+          <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(it.category||'')}${parent?' · '+esc(parent.name):''}</div>
+        </div>
+        <span style="color:var(--ink3);opacity:.4;padding-right:4px">›</span>
+      </div>`;}).join('')}
+    </div>`;}
   if(appts.length){
     html+=`<div class="hub-sec-label">◷ ${tr('appts')}</div>
     <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
@@ -4292,6 +4464,11 @@ function _renderSearch(q){
   el.querySelectorAll('[data-srch-appt]').forEach(e=>e.onclick=()=>{
     closeSearch();screen='appts';render();
     setTimeout(()=>openNewApptSheet(e.dataset.srchAppt),100);});
+  el.querySelectorAll('[data-srch-shoplist]').forEach(e=>e.onclick=()=>{
+    closeSearch();
+    screen='module'; currentModule='shopping';
+    activeShopListId=e.dataset.srchShoplist; shopView='detail'; shopSearch=''; shopResetSelect();
+    render(); window.scrollTo(0,0);});
 }
 /* ══════════════════════════════════════════
    SHEET ENGINE
@@ -4796,6 +4973,19 @@ function bindScreen(){
     e.stopPropagation();
     const t=DB.entities.tasks[el.dataset.pin];if(!t)return;
     t.pinned=!t.pinned;t.updatedAt=now();saveDB();render();});
+  // ── Shopping rows appearing inside smart views (My Day/Important/Planned/All) ──
+  document.querySelectorAll('[data-shop-pin]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation(); shopToggleStar(el.dataset.shopPin);});
+  document.querySelectorAll('[data-shop-complete]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();
+    const l=shopListsMap()[el.dataset.shopComplete]; if(!l)return;
+    shopCompleteList(l);});
+  document.querySelectorAll('[data-shop-open]').forEach(el=>el.onclick=e=>{
+    if(e.target.closest('[data-shop-pin]')||e.target.closest('[data-shop-complete]')||e.target.closest('[data-map]'))return;
+    // Jump into the Shopping module focused on this list.
+    screen='module'; currentModule='shopping';
+    activeShopListId=el.dataset.shopOpen; shopView='detail'; shopSearch=''; shopResetSelect();
+    render(); window.scrollTo(0,0);});
   // Task row → detail panel
   document.querySelectorAll('.trow-flat').forEach(el=>el.onclick=()=>{
     if(el.dataset.tid)openTaskDetail(el.dataset.tid);});
@@ -4852,8 +5042,13 @@ function bindScreen(){
     const id=shopReuseLastList(s,l);
     shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
   };
+  document.querySelectorAll('[data-act-shop]').forEach(el=>el.onclick=()=>{
+    screen='module'; currentModule='shopping';
+    activeShopListId=el.dataset.actShop; shopView='detail'; shopSearch=''; shopResetSelect();
+    render(); window.scrollTo(0,0);});
+  document.querySelectorAll('[data-shop-star]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();shopToggleStar(el.dataset.shopStar);});
   document.querySelectorAll('[data-shop-list]').forEach(el=>el.onclick=(e)=>{
-    if(e.target.closest('[data-shop-menu]'))return;
+    if(e.target.closest('[data-shop-menu]')||e.target.closest('[data-shop-star]'))return;
     activeShopListId=el.dataset.shopList;shopView='detail';shopSearch='';shopResetSelect();render();window.scrollTo(0,0);});
   document.querySelectorAll('[data-shop-template]').forEach(el=>el.onclick=()=>openShopFromTemplate(el.dataset.shopTemplate));
   document.querySelectorAll('[data-shop-custom]').forEach(el=>el.onclick=()=>openCreateCustomStore());
@@ -4884,10 +5079,10 @@ function bindScreen(){
     const locCompact=document.getElementById('trip-loc-compact');
     if(locCompact&&locEl) locCompact.onclick=()=>{ locCompact.style.display='none'; locEl.style.display=''; locEl.focus(); };
     if(locEl) attachLocationAutocomplete(locEl,(r)=>{picked={address:r.name,lat:r.lat,lon:r.lon}; const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); saveDB(); render();});
-    if(locEl) locEl.onblur=()=>{ const before=l.address; const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); saveDB(); if(loc.address!==before) render(); else { locEl.style.display='none'; const c=document.getElementById('trip-loc-compact'); if(c)c.style.display=''; } };
-    if(dEl) dEl.onchange=()=>{ l.tripDate=dEl.value||''; l.updatedAt=new Date().toISOString(); saveDB(); };
-    if(tEl) tEl.onchange=()=>{ l.tripTime=tEl.value||''; l.updatedAt=new Date().toISOString(); saveDB(); };
-    if(nEl) nEl.onblur=()=>{ l.tripNotes=(nEl.value||'').trim(); l.updatedAt=new Date().toISOString(); saveDB(); };
+    if(locEl) locEl.onblur=()=>{ const before=l.address; const loc=shopResolveLoc(locEl.value,picked); l.address=loc.address;l.lat=loc.lat;l.lon=loc.lon; l.updatedAt=new Date().toISOString(); if(loc.address!==before)logActivity('edited','shopList',l.id,{name:l.name}); saveDB(); if(loc.address!==before) render(); else { locEl.style.display='none'; const c=document.getElementById('trip-loc-compact'); if(c)c.style.display=''; } };
+    if(dEl) dEl.onchange=()=>{ l.tripDate=dEl.value||''; l.updatedAt=new Date().toISOString(); logActivity('edited','shopList',l.id,{name:l.name}); saveDB(); };
+    if(tEl) tEl.onchange=()=>{ l.tripTime=tEl.value||''; l.updatedAt=new Date().toISOString(); logActivity('edited','shopList',l.id,{name:l.name}); saveDB(); };
+    if(nEl) nEl.onblur=()=>{ const before=l.tripNotes||''; l.tripNotes=(nEl.value||'').trim(); l.updatedAt=new Date().toISOString(); if(l.tripNotes!==before)logActivity('edited','shopList',l.id,{name:l.name}); saveDB(); };
   })();
   const shopSearchEl=document.getElementById('shop-search');
   const shopSuggestBox=document.getElementById('shop-suggest-box');
