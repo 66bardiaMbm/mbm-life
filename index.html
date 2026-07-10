@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&family=Noto+Naskh+Arabic&family=Lalezar&family=Space+Mono&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&family=Noto+Naskh+Arabic&family=Lalezar&family=Space+Mono&family=Noto+Kufi+Arabic&family=Aref+Ruqaa&family=Markazi+Text&display=swap" rel="stylesheet">
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -329,8 +329,8 @@ body.light .trow-title{color:var(--ink)}
   border:1px solid rgba(0,0,0,.25)!important}
 .note-editor-page.dark-paper .note-pill{
   background:rgba(0,0,0,.3)!important;border-color:rgba(255,255,255,.35)!important}
-.note-editor-page .note-color-input-wrap{border-color:rgba(0,0,0,.35)}
-.note-editor-page.dark-paper .note-color-input-wrap{border-color:rgba(255,255,255,.45)}
+.note-editor-page .note-color-input-wrap{box-shadow:0 0 0 2px #fff,0 0 0 3.5px rgba(0,0,0,.55);border-color:transparent}
+.note-editor-page.dark-paper .note-color-input-wrap{box-shadow:0 0 0 2px #fff,0 0 0 3.5px rgba(0,0,0,.55);border-color:transparent}
 .note-editor-page>.note-topbar{padding-top:calc(12px + env(safe-area-inset-top,0))}
 .note-editor-page>.note-bottom-toolbar{padding-bottom:calc(10px + env(safe-area-inset-bottom,0))}
 @media (min-width:900px){.note-editor-page{left:320px!important;width:auto!important}}
@@ -346,7 +346,7 @@ body.light .trow-title{color:var(--ink)}
   background-size:100% 32px;background-position:0 41px;background-attachment:local;
   line-height:32px;padding:10px 20px;
   margin:0;resize:none;display:block;box-sizing:border-box}
-#note-checklist-list{background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
+.note-ruled-checklist{background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
   background-size:100% 32px;background-position:0 0;background-attachment:local}
 .note-check-add{width:100%;background:transparent;border:none;outline:none;
   font-size:18px;line-height:32px;height:32px;padding:0 20px;margin:0;opacity:.75;box-sizing:border-box}
@@ -357,10 +357,24 @@ body.light .trow-title{color:var(--ink)}
 .note-tags-area{flex:none;padding:6px 20px 10px}
 /* Colour picker: fixed box so it can never shift the header layout */
 .note-color-input-wrap{position:relative;width:36px;height:30px;min-width:36px;flex:0 0 36px;
-  border-radius:8px;overflow:hidden;border:1px solid rgba(128,128,128,.5);cursor:pointer}
-#note-color-input{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);
-  border:none;padding:0;cursor:pointer;background:none}
-/* Folder tabs now wrap onto multiple rows instead of scrolling off-screen — see canonical rule below */
+  border-radius:8px;overflow:hidden;border:1px solid rgba(128,128,128,.5);cursor:pointer;padding:0}
+.note-color-sheet-grid{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;padding:6px 0 4px}
+.note-color-sheet-swatch{width:44px;height:44px;border-radius:50%;border:2px solid rgba(128,128,128,.35);cursor:pointer;flex:0 0 44px}
+.note-color-sheet-swatch.on{border-color:var(--acc,#6d5efc);box-shadow:0 0 0 2px var(--acc,#6d5efc)}
+.note-color-sheet-swatch.custom{background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);
+  display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+/* Fixed-height folder switcher — replaces the old wrapping tab row so the
+   home screen never shrinks as folders are added. */
+.note-folder-bar{display:flex;align-items:center;gap:8px;padding:8px 12px 4px}
+.note-folder-select{flex:1;min-width:0;display:flex;align-items:center;gap:8px;
+  padding:9px 14px;border-radius:999px;border:1px solid rgba(128,128,128,.35);
+  background:var(--s1);cursor:pointer;font-size:15px;font-weight:700;color:inherit}
+.note-folder-select-dot{width:10px;height:10px;border-radius:50%;flex:0 0 10px}
+.note-folder-select-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:start}
+.note-folder-select-caret{opacity:.6;flex:0 0 auto}
+.note-filter-banner{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin:0 10px 4px;padding:8px 12px;border-radius:10px;background:#ffd94a;color:#3a2e00;
+  font-size:13px;font-weight:700;cursor:pointer}
 
 /* ── Notes corkboard workspace (reference design) ── */
 .note-workspace-board{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
@@ -1220,7 +1234,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v199';
+const APP_VERSION='v201';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1736,7 +1750,10 @@ const NOTE_FONTS={
   default:{label:{en:'Default',fa:'پیش‌فرض'},css:"Vazirmatn,Tahoma,system-ui,sans-serif"},
   naskh:{label:{en:'Classic',fa:'کلاسیک'},css:"'Noto Naskh Arabic',Vazirmatn,serif"},
   lalezar:{label:{en:'Bold display',fa:'ضخیم'},css:"'Lalezar',Vazirmatn,cursive"},
-  mono:{label:{en:'Monospace',fa:'تایپ‌رایتر'},css:"'Space Mono','Courier New',Vazirmatn,monospace"}
+  mono:{label:{en:'Monospace',fa:'تایپ‌رایتر'},css:"'Space Mono','Courier New',Vazirmatn,monospace"},
+  kufi:{label:{en:'Geometric',fa:'هندسی'},css:"'Noto Kufi Arabic',Vazirmatn,sans-serif"},
+  amiri:{label:{en:'Calligraphic',fa:'خوشنویسی'},css:"'Aref Ruqaa',Vazirmatn,serif"},
+  markazi:{label:{en:'Elegant',fa:'ظریف'},css:"'Markazi Text',Vazirmatn,serif"}
 };
 function noteFontCSS(id){ return (NOTE_FONTS[id]||NOTE_FONTS.default).css; }
 // Background style for the Notes workspace. 'cork' is an MBM-styled warm
@@ -3842,15 +3859,24 @@ function renderNotesHome(){
     return html;
   }
 
-  html+=`<div class="note-board-tabs">
-    <button class="board-tab ${(!noteFilterFolder&&!noteFilterPinned)?'on':''}" data-note-filter="all" style="--tabc:#2eb82e">${L==='fa'?'اصلی':'Main'}</button>
-    <button class="board-tab ${noteFilterPinned?'on':''}" data-note-filter="pinned" style="--tabc:#d4d422">★ ${L==='fa'?'پین':'Pinned'}</button>
-    ${folders.map(f=>`<button class="board-tab ${noteFilterFolder===f.id?'on':''}" data-note-filter-folder="${f.id}" style="--tabc:${f.color}">${esc(f.name)}</button>`).join('')}
-    <button class="board-tab board-tab-add" data-note-new-folder="1" style="--tabc:#7a7a7a">＋</button>
-    <button class="board-tab ${noteView==='trash'?'on':''}" id="note-go-trash" style="--tabc:#9a9a8a">🗑 ${L==='fa'?'سطل':'Trash'}${trashedCount?` ${trashedCount}`:''}</button>
-  </div>
-  <div class="note-board-frame">
+  html+=(()=>{
+    const curColor=noteFilterPinned?'#d4d422':(noteFilterFolder?((folders.find(f=>f.id===noteFilterFolder)||{}).color||'#7a7a7a'):'#2eb82e');
+    const curLabel=noteFilterPinned?`★ ${L==='fa'?'پین':'Pinned'}`:(noteFilterFolder?esc((folders.find(f=>f.id===noteFilterFolder)||{}).name||''):(L==='fa'?'اصلی':'Main'));
+    return `<div class="note-folder-bar">
+      <button class="note-folder-select" id="note-folder-select-btn">
+        <span class="note-folder-select-dot" style="background:${curColor}"></span>
+        <span class="note-folder-select-label">${curLabel}</span>
+        <span class="note-folder-select-caret">▾</span>
+      </button>
+      <button class="board-action" id="note-go-trash" title="${L==='fa'?'سطل':'Trash'}">🗑${trashedCount?` ${trashedCount}`:''}</button>
+    </div>`;
+  })();
+  html+=`<div class="note-board-frame">
     <div class="note-board-inner" style="${boardSurfaceStyle()}">
+      ${filtersOn?`<div class="note-filter-banner" id="note-filter-banner">
+        <span>${L==='fa'?'فیلتر فعال است — برای پاک‌کردن بزن':'A filter is active — tap to clear'}</span>
+        <span>✕</span>
+      </div>`:''}
       <div style="padding:8px 10px 4px">
         <input class="finput note-board-search" id="note-search" placeholder="${L==='fa'?'جستجو...':'Search...'}" value="${esc(noteSearch)}" autocomplete="off">
       </div>`;
@@ -3965,9 +3991,8 @@ function renderNoteDetail(){
   const svgCheck=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 12 11 15 16 9"/></svg>`;
   let html=`<div class="note-editor-page${isLightColor(paperColor)?'':' dark-paper'}" style="${pageBg};--ink:${ink}">
   <div class="note-topbar">
-    <label class="note-color-input-wrap" title="${L==='fa'?'رنگ کاغذ':'Paper colour'}">
-      <input type="color" id="note-color-input" value="${esc(paperColor)}">
-    </label>
+    <button type="button" class="note-color-input-wrap" id="note-color-btn" title="${L==='fa'?'رنگ کاغذ':'Paper colour'}" style="background:${esc(paperColor)}"></button>
+    <input type="color" id="note-color-input-hidden" value="${esc(paperColor)}" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
     <button class="note-icon-btn" id="note-type-indicator" style="color:${ink}" title="${isChecklist?(L==='fa'?'چک‌لیست':'Checklist'):(L==='fa'?'متنی':'Text')}">${isChecklist?svgCheck:svgDoc}</button>
     <button class="note-pill note-pill-folder" id="note-folder-pill" style="color:${ink};border-color:${ink}55">
       <span>${folder?esc(folder.name):(L==='fa'?'بدون پوشه':'No folder')}</span><span class="note-pill-caret">▾</span>
@@ -4000,7 +4025,7 @@ function renderNoteDetail(){
 
   if(isChecklist){
     const items=n.items||[];
-    html+=`<div class="note-ruled-area">
+    html+=`<div class="note-ruled-area note-ruled-checklist">
       ${n.locked?'':`<input class="note-check-add" id="note-checklist-add" dir="auto" placeholder="${L==='fa'?'افزودن مورد...':'Add item...'}" autocomplete="off" style="color:${ink}">`}
       <div id="note-checklist-list">
         ${items.map(it=>`<div class="note-check-row" data-note-item="${it.id}">
@@ -6410,17 +6435,37 @@ function bindScreen(){
           });
         };
       });
-      document.querySelectorAll('[data-note-filter]').forEach(el=>el.onclick=()=>{
-        const f=el.dataset.noteFilter;
-        noteFilterFolder=null;
-        noteFilterPinned=(f==='pinned');
-        render();});
-      document.querySelectorAll('[data-note-filter-folder]').forEach(el=>el.onclick=()=>{
-        noteFilterPinned=false;
-        noteFilterFolder=(noteFilterFolder===el.dataset.noteFilterFolder)?null:el.dataset.noteFilterFolder;
-        render();});
-      const newFolderBtn=document.querySelector('[data-note-new-folder]');
-      if(newFolderBtn)newFolderBtn.onclick=()=>openNewNoteFolderSheet();
+      const folderSelectBtn=document.getElementById('note-folder-select-btn');
+      if(folderSelectBtn)folderSelectBtn.onclick=()=>{
+        const folders=noteFoldersAll();
+        openSheet(`<h3>${L==='fa'?'پوشه‌ها':'Folders'}</h3>
+          <div class="btn-col">
+            <button class="btn ${(!noteFilterFolder&&!noteFilterPinned)?'btn-primary':'btn-ghost'}" data-note-filter="all">${L==='fa'?'اصلی':'Main'}</button>
+            <button class="btn ${noteFilterPinned?'btn-primary':'btn-ghost'}" data-note-filter="pinned">★ ${L==='fa'?'پین':'Pinned'}</button>
+            ${folders.map(f=>`<button class="btn ${noteFilterFolder===f.id?'btn-primary':'btn-ghost'}" data-note-filter-folder="${f.id}">${esc(f.name)}</button>`).join('')}
+            <button class="btn btn-ghost" data-note-new-folder="1">＋ ${L==='fa'?'پوشه‌ی جدید':'New folder'}</button>
+          </div>`);
+        document.querySelectorAll('[data-note-filter]').forEach(el=>el.onclick=()=>{
+          const f=el.dataset.noteFilter;
+          noteFilterFolder=null;
+          noteFilterPinned=(f==='pinned');
+          noteFilterColor=null;noteFilterType=null;noteFilterDated=null;
+          closeSheet(); render();
+        });
+        document.querySelectorAll('[data-note-filter-folder]').forEach(el=>el.onclick=()=>{
+          noteFilterPinned=false;
+          noteFilterFolder=(noteFilterFolder===el.dataset.noteFilterFolder)?null:el.dataset.noteFilterFolder;
+          noteFilterColor=null;noteFilterType=null;noteFilterDated=null;
+          closeSheet(); render();
+        });
+        const newFolderBtn2=document.querySelector('[data-note-new-folder]');
+        if(newFolderBtn2)newFolderBtn2.onclick=()=>{closeSheet();openNewNoteFolderSheet();};
+      };
+      const filterBanner=document.getElementById('note-filter-banner');
+      if(filterBanner)filterBanner.onclick=()=>{
+        noteFilterColor=null;noteFilterType=null;noteFilterDated=null;
+        render();
+      };
       const sortBtn=document.getElementById('note-sort-btn');
       if(sortBtn)sortBtn.onclick=()=>{
         openSheet(`<h3>${L==='fa'?'مرتب‌سازی بر اساس':'Sort by'}</h3>
@@ -6565,15 +6610,30 @@ function bindScreen(){
       if(pinBtn)pinBtn.onclick=()=>noteTogglePin(activeNoteId);
       const menuBtn=document.getElementById('note-detail-menu');
       if(menuBtn)menuBtn.onclick=()=>openNoteMenu();
-      const colorInput=document.getElementById('note-color-input');
-      if(colorInput){
-        // Live preview while dragging the picker; commit on change.
-        colorInput.oninput=(e)=>{
+      const colorBtn=document.getElementById('note-color-btn');
+      const colorHidden=document.getElementById('note-color-input-hidden');
+      if(colorBtn){
+        colorBtn.onclick=()=>{
+          const cur=(noteItemsMap()[activeNoteId]||{}).color;
+          openSheet(`<h3>${L==='fa'?'رنگ کاغذ':'Paper colour'}</h3>
+            <div class="note-color-sheet-grid">
+              ${NOTE_COLORS.filter(c=>c).map(c=>`<button type="button" class="note-color-sheet-swatch ${cur===c?'on':''}" data-note-page-color="${c}" style="background:${c}"></button>`).join('')}
+              <button type="button" class="note-color-sheet-swatch custom" id="note-color-custom-btn">${L==='fa'?'دلخواه':'Custom'}</button>
+            </div>`);
+          document.querySelectorAll('[data-note-page-color]').forEach(el=>el.onclick=()=>{
+            noteSetColor(activeNoteId,el.dataset.notePageColor); closeSheet(); render();
+          });
+          const customBtn=document.getElementById('note-color-custom-btn');
+          if(customBtn)customBtn.onclick=()=>{ closeSheet(); if(colorHidden)colorHidden.click(); };
+        };
+      }
+      if(colorHidden){
+        colorHidden.oninput=(e)=>{
           const v=e.target.value;
           const page=document.querySelector('.note-editor-page');
           if(page){page.style.background=v;page.style.setProperty('--ink',noteInk(v));}
         };
-        colorInput.onchange=(e)=>noteSetColor(activeNoteId,e.target.value);
+        colorHidden.onchange=(e)=>noteSetColor(activeNoteId,e.target.value);
       }
       const folderPillBtn=document.getElementById('note-folder-pill');
       if(folderPillBtn)folderPillBtn.onclick=()=>{
