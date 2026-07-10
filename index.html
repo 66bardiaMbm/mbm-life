@@ -297,6 +297,37 @@ body.light .trow-title{color:var(--ink)}
   width:100vw!important;height:100vh!important;height:100dvh!important;
   margin:0!important;padding:0!important;overflow:hidden!important;
   background:#ffffff;box-sizing:border-box}
+/* Editor controls must follow the paper colour, not the app's dark tokens,
+   otherwise they render as black boxes on a bright note. */
+.note-editor-page .finput{
+  background:rgba(255,255,255,.55)!important;
+  border:1px solid rgba(0,0,0,.25)!important;
+  color:var(--ink)!important}
+.note-editor-page.dark-paper .finput{
+  background:rgba(0,0,0,.28)!important;
+  border-color:rgba(255,255,255,.35)!important}
+.note-editor-page .qa-mic{
+  background:rgba(255,255,255,.55)!important;
+  border:1px solid rgba(0,0,0,.25)!important;
+  color:var(--ink)!important}
+.note-editor-page.dark-paper .qa-mic{
+  background:rgba(0,0,0,.28)!important;
+  border-color:rgba(255,255,255,.35)!important}
+.note-editor-page .qa-mic.recording{
+  color:#f43f5e!important;border-color:#f43f5e!important}
+.note-editor-page .chip{
+  background:rgba(255,255,255,.5)!important;color:var(--ink)!important}
+.note-editor-page.dark-paper .chip{background:rgba(0,0,0,.3)!important}
+.note-editor-page #note-tag-input::placeholder{color:var(--ink);opacity:.6}
+.note-editor-page .note-title-input::placeholder{color:var(--ink);opacity:.45}
+.note-editor-page .note-body-input::placeholder{color:var(--ink);opacity:.4}
+.note-editor-page .note-pill{
+  background:rgba(255,255,255,.45)!important;color:var(--ink)!important;
+  border:1px solid rgba(0,0,0,.25)!important}
+.note-editor-page.dark-paper .note-pill{
+  background:rgba(0,0,0,.3)!important;border-color:rgba(255,255,255,.35)!important}
+.note-editor-page .note-color-input-wrap{border-color:rgba(0,0,0,.35)}
+.note-editor-page.dark-paper .note-color-input-wrap{border-color:rgba(255,255,255,.45)}
 .note-editor-page>.note-topbar{padding-top:calc(12px + env(safe-area-inset-top,0))}
 .note-editor-page>.note-bottom-toolbar{padding-bottom:calc(10px + env(safe-area-inset-bottom,0))}
 @media (min-width:900px){.note-editor-page{left:320px!important;width:auto!important}}
@@ -1188,7 +1219,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v193';
+const APP_VERSION='v194';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3923,7 +3954,7 @@ function renderNoteDetail(){
   const svgBack=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
   const svgDoc=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
   const svgCheck=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 12 11 15 16 9"/></svg>`;
-  let html=`<div class="note-editor-page" style="${pageBg};--ink:${ink}">
+  let html=`<div class="note-editor-page${isLightColor(paperColor)?'':' dark-paper'}" style="${pageBg};--ink:${ink}">
   <div class="note-topbar">
     <label class="note-color-input-wrap" title="${L==='fa'?'رنگ کاغذ':'Paper colour'}">
       <input type="color" id="note-color-input" value="${esc(paperColor)}">
@@ -3965,14 +3996,14 @@ function renderNoteDetail(){
       <div id="note-checklist-list">
         ${items.map(it=>`<div class="note-check-row" data-note-item="${it.id}">
           <button class="chk ${it.done?'on':''}" data-note-item-toggle="${it.id}" ${n.locked?'disabled':''}></button>
-          <input class="note-check-text ${it.done?'done':''}" data-note-item-edit="${it.id}" dir="auto" value="${esc(it.text)}" style="color:${ink}" ${n.locked?'readonly':''}>
+          <input class="note-check-text ${it.done?'done':''}" data-note-item-edit="${it.id}" dir="auto" value="${esc(it.text)}" style="color:${ink};font-size:${notePrefs().fontSize||18}px" ${n.locked?'readonly':''}>
           ${n.locked?'':`<button class="note-item-del" data-note-item-del="${it.id}" style="color:${ink}">🗑</button>`}
         </div>`).join('')}
       </div>
     </div>`;
   }else{
     html+=`<div class="note-ruled-area">
-      <textarea class="note-body-input" id="note-body" dir="auto" style="color:${ink}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
+      <textarea class="note-body-input" id="note-body" dir="auto" style="color:${ink};font-size:${notePrefs().fontSize||18}px" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
     </div>`;
   }
 
@@ -3984,8 +4015,8 @@ function renderNoteDetail(){
   </div>
   <div class="note-bottom-toolbar">
     ${voiceMicHTML('note')}
-    <button class="note-icon-btn" id="note-attach-btn" style="opacity:.4" title="${L==='fa'?'پیوست (به‌زودی)':'Attach (coming soon)'}">📎</button>
-    <button class="note-icon-btn" id="note-format-btn" style="opacity:.4" title="${L==='fa'?'فرمت متن (به‌زودی)':'Text format (coming soon)'}">Aa</button>
+    <button class="note-icon-btn" id="note-attach-btn" style="color:${ink};opacity:.45" title="${L==='fa'?'پیوست (به‌زودی)':'Attach (coming soon)'}">📎</button>
+    <button class="note-icon-btn" id="note-format-btn" style="color:${ink}" title="${L==='fa'?'اندازه‌ی متن':'Text size'}">Aa</button>
   </div>
   </div>`;
 
@@ -6080,34 +6111,75 @@ function playCompletionSound(){
    ══════════════════════════════════════════ */
 // Reusable voice-to-text for any input + mic button pair.
 let _voiceRecog=null,_voiceActiveBtn=null;
+// User-selectable speech-recognition language (falls back to app language).
+const VOICE_LANGS=[
+  {code:'fa-IR',label:'فارسی'},
+  {code:'en-AU',label:'English (AU)'},
+  {code:'en-US',label:'English (US)'},
+  {code:'en-GB',label:'English (UK)'},
+  {code:'ar-SA',label:'العربية'},
+  {code:'tr-TR',label:'Türkçe'},
+  {code:'fr-FR',label:'Français'},
+  {code:'de-DE',label:'Deutsch'}
+];
+function voiceLang(){
+  return (DB.meta&&DB.meta.voiceLang)||((L==='fa')?'fa-IR':'en-AU');
+}
+function openVoiceLangSheet(){
+  const cur=voiceLang();
+  openSheet(`<h3>${L==='fa'?'زبان میکروفون':'Microphone language'}</h3>
+    <div class="btn-col">
+      ${VOICE_LANGS.map(v=>`<button class="btn ${cur===v.code?'btn-primary':'btn-ghost'}" data-vlang="${v.code}">${esc(v.label)}</button>`).join('')}
+      <button class="btn btn-ghost" id="vl-cancel">${tr('cancel')}</button>
+    </div>`);
+  document.getElementById('vl-cancel').onclick=()=>closeSheet();
+  document.querySelectorAll('[data-vlang]').forEach(b=>b.onclick=()=>{
+    DB.meta.voiceLang=b.dataset.vlang; saveDB(); closeSheet();
+    toast((L==='fa'?'زبان: ':'Language: ')+b.textContent);
+  });
+}
+
 function attachVoiceInput(micId,inputId,onText){
   const micBtn=document.getElementById(micId);
   const inp=document.getElementById(inputId);
   if(!micBtn||!inp)return;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  micBtn.oncontextmenu=(e)=>{e.preventDefault();openVoiceLangSheet();};
+  let _lpTimer=null;
+  micBtn._lpFired=false;
+  micBtn.onpointerdown=()=>{
+    micBtn._lpFired=false;
+    _lpTimer=setTimeout(()=>{_lpTimer=null;micBtn._lpFired=true;openVoiceLangSheet();},550);
+  };
+  const cancelLP=()=>{if(_lpTimer){clearTimeout(_lpTimer);_lpTimer=null;}};
+  micBtn.onpointerup=cancelLP; micBtn.onpointercancel=cancelLP; micBtn.onpointerleave=cancelLP;
   micBtn.onclick=()=>{
+    if(micBtn._lpFired){micBtn._lpFired=false;return;}  // long-press opened the picker; don't also record
     if(!SR){
       toast(L==='fa'
-        ?'جستجوی صوتی در این مرورگر/اپ پشتیبانی نمی‌شود'
+        ?'ورودی صوتی در این مرورگر/اپ پشتیبانی نمی‌شود'
         :'Voice input not supported in this browser/app');
       return;
     }
     // toggle off if already recording on this button
     if(_voiceActiveBtn===micBtn&&_voiceRecog){try{_voiceRecog.stop();}catch(_){}return;}
-    // stop any other active recognition
     if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
     try{
       const rec=new SR();
       _voiceRecog=rec;_voiceActiveBtn=micBtn;
-      rec.lang=(L==='fa')?'fa-IR':'en-US';
+      rec.lang=voiceLang();
       rec.interimResults=true;
       rec.maxAlternatives=1;
+      // Preserve whatever is already written; dictation APPENDS, never wipes.
+      const baseText=inp.value||'';
+      const needsSpace=baseText && !/\s$/.test(baseText);
       rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
       rec.onresult=(e)=>{
         let txt='';
         for(let i=0;i<e.results.length;i++)txt+=e.results[i][0].transcript;
-        inp.value=txt;
-        if(typeof onText==='function')onText(txt);
+        const merged=baseText+(needsSpace?' ':'')+txt;
+        inp.value=merged;
+        if(typeof onText==='function')onText(merged);
       };
       rec.onerror=(e)=>{
         micBtn.classList.remove('recording');
@@ -6501,7 +6573,30 @@ function bindScreen(){
       const attachBtn=document.getElementById('note-attach-btn');
       if(attachBtn)attachBtn.onclick=()=>toast(L==='fa'?'پیوست‌ها به‌زودی اضافه می‌شود':'Attachments coming soon');
       const formatBtn=document.getElementById('note-format-btn');
-      if(formatBtn)formatBtn.onclick=()=>toast(L==='fa'?'فرمت‌بندی متن به‌زودی اضافه می‌شود':'Text formatting coming soon');
+      if(formatBtn)formatBtn.onclick=()=>{
+        const cur=notePrefs().fontSize||18;
+        openSheet(`<h3>${L==='fa'?'اندازه‌ی متن':'Text size'}</h3>
+          <div class="fld">
+            <label><span id="fs-val">${cur}</span>px</label>
+            <input type="range" min="12" max="28" step="1" value="${cur}" id="fs-range" style="width:100%">
+          </div>
+          <div style="background:rgba(128,128,128,.12);border-radius:10px;padding:10px 12px;margin-bottom:10px">
+            <div id="fs-preview" style="font-size:${cur}px;line-height:32px">${L==='fa'?'نمونه‌ی متن یادداشت':'Sample note text'}</div>
+          </div>
+          <div class="btn-row"><button class="btn btn-primary" id="fs-done" style="flex:1">${L==='fa'?'بستن':'Done'}</button></div>`);
+        const range=document.getElementById('fs-range');
+        range.oninput=(e)=>{
+          const v=parseInt(e.target.value,10)||18;
+          document.getElementById('fs-val').textContent=v;
+          document.getElementById('fs-preview').style.fontSize=v+'px';
+          notePrefs().fontSize=v; saveDB();
+          const body=document.getElementById('note-body');
+          if(body)body.style.fontSize=v+'px';
+          const items=document.querySelectorAll('.note-check-text');
+          items.forEach(el=>el.style.fontSize=v+'px');
+        };
+        document.getElementById('fs-done').onclick=()=>closeSheet();
+      };
       const titleEl=document.getElementById('note-title');
       if(titleEl)titleEl.oninput=()=>noteSetTitle(activeNoteId,titleEl.value);
       const bodyEl=document.getElementById('note-body');
