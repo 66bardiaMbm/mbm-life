@@ -336,16 +336,18 @@ body.light .trow-title{color:var(--ink)}
 @media (min-width:900px){.note-editor-page{left:320px!important;width:auto!important}}
 @media (min-width:1400px){.note-editor-page{left:360px!important}}
 .note-editor-head{flex:none;padding:4px 20px 6px}
-.note-ruled-area{flex:1;min-height:0;overflow-y:auto;position:relative;
-  background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
-  background-size:100% 32px;background-position:0 9px;background-attachment:local}
+.note-ruled-area{flex:1;min-height:0;overflow-y:auto;position:relative}
 .note-editor-page{--note-line-color:rgba(0,0,0,.18)}
 .note-editor-page.dark-paper{--note-line-color:rgba(255,255,255,.16)}
 .note-body-input{width:100%;min-height:100%;background:transparent;
   border:none!important;outline:none!important;
   font-family:inherit;font-size:18px;
+  background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
+  background-size:100% 32px;background-position:0 41px;background-attachment:local;
   line-height:32px;padding:10px 20px;
   margin:0;resize:none;display:block;box-sizing:border-box}
+#note-checklist-list{background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
+  background-size:100% 32px;background-position:0 0;background-attachment:local}
 .note-check-add{width:100%;background:transparent;border:none;outline:none;
   font-size:18px;line-height:32px;height:32px;padding:0 20px;margin:0;opacity:.75;box-sizing:border-box}
 #note-checklist-list{padding:0 20px}
@@ -1218,7 +1220,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v198';
+const APP_VERSION='v199';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -6169,44 +6171,72 @@ function attachVoiceInput(micId,inputId,onText){
       return;
     }
     // toggle off if already recording on this button
-    if(_voiceActiveBtn===micBtn&&_voiceRecog){try{_voiceRecog.stop();}catch(_){}return;}
-    if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
-    try{
-      const rec=new SR();
-      _voiceRecog=rec;_voiceActiveBtn=micBtn;
-      rec.lang=voiceLang();
-      rec.interimResults=true;
-      rec.maxAlternatives=1;
-      // Preserve whatever is already written; dictation APPENDS, never wipes.
-      const baseText=inp.value||'';
-      const needsSpace=baseText && !/\s$/.test(baseText);
-      rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
-      rec.onresult=(e)=>{
-        let parts=[];
-        for(let i=0;i<e.results.length;i++){
-          const seg=(e.results[i][0].transcript||'').trim();
-          if(seg)parts.push(seg);
-        }
-        const txt=parts.join(' ');
-        const merged=baseText+(needsSpace?' ':'')+txt;
-        inp.value=merged;
-        if(typeof onText==='function')onText(merged);
-      };
-      rec.onerror=(e)=>{
-        micBtn.classList.remove('recording');
-        const err=e.error;
-        if(err==='not-allowed'||err==='service-not-allowed')
-          toast(L==='fa'?'دسترسی میکروفون رد شد. از تنظیمات اجازه دهید':'Microphone blocked. Allow it in settings');
-        else if(err==='no-speech')toast(L==='fa'?'صدایی شنیده نشد':'No speech detected');
-        else if(err==='audio-capture')toast(L==='fa'?'میکروفونی یافت نشد':'No microphone found');
-        else if(err!=='aborted')toast(L==='fa'?'خطای میکروفون':'Microphone error');
-      };
-      rec.onend=()=>{micBtn.classList.remove('recording');if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}};
-      rec.start();
-    }catch(err){
-      micBtn.classList.remove('recording');
-      toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable');
+    if(_voiceActiveBtn===micBtn&&_voiceRecog){
+      micBtn._userStopped=true;
+      try{_voiceRecog.stop();}catch(_){}
+      return;
     }
+    if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
+    micBtn._userStopped=false;
+    const startRecognition=()=>{
+      try{
+        const rec=new SR();
+        _voiceRecog=rec;_voiceActiveBtn=micBtn;
+        rec.lang=voiceLang();
+        rec.continuous=true;
+        rec.interimResults=true;
+        rec.maxAlternatives=1;
+        // Preserve whatever is already written; dictation APPENDS, never wipes.
+        // Re-read on every (re)start so a mid-session auto-restart continues
+        // from the latest text instead of overwriting it.
+        const baseText=inp.value||'';
+        const needsSpace=baseText && !/\s$/.test(baseText);
+        rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
+        rec.onresult=(e)=>{
+          let parts=[];
+          for(let i=0;i<e.results.length;i++){
+            const seg=(e.results[i][0].transcript||'').trim();
+            if(seg)parts.push(seg);
+          }
+          const txt=parts.join(' ');
+          const merged=baseText+(needsSpace?' ':'')+txt;
+          inp.value=merged;
+          if(typeof onText==='function')onText(merged);
+        };
+        rec.onerror=(e)=>{
+          const err=e.error;
+          if(err==='not-allowed'||err==='service-not-allowed'){
+            micBtn._userStopped=true;
+            micBtn.classList.remove('recording');
+            toast(L==='fa'?'دسترسی میکروفون رد شد. از تنظیمات اجازه دهید':'Microphone blocked. Allow it in settings');
+          }else if(err==='no-speech'){
+            // Silence timeout — not a real error; onend will auto-restart below.
+          }else if(err==='audio-capture'){
+            micBtn._userStopped=true;
+            micBtn.classList.remove('recording');
+            toast(L==='fa'?'میکروفونی یافت نشد':'No microphone found');
+          }else if(err!=='aborted'){
+            toast(L==='fa'?'خطای میکروفون':'Microphone error');
+          }
+        };
+        rec.onend=()=>{
+          // The browser can silently end a session after a pause even with
+          // continuous=true. Only treat it as truly finished if the user
+          // tapped the mic to stop, or an unrecoverable error already fired.
+          if(_voiceActiveBtn===micBtn&&!micBtn._userStopped){
+            setTimeout(startRecognition,150);
+          }else{
+            micBtn.classList.remove('recording');
+            if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
+          }
+        };
+        rec.start();
+      }catch(err){
+        micBtn.classList.remove('recording');
+        toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable');
+      }
+    };
+    startRecognition();
   };
 }
 
