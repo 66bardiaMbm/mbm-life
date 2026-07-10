@@ -292,31 +292,39 @@ body.light .trow-title{color:var(--ink)}
 .shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
 
 /* ── Notes editor: full-screen ruled notebook ── */
-.note-editor-page{position:fixed;inset:0;z-index:70;display:flex;flex-direction:column;
-  width:100vw!important;height:100vh!important;margin:0!important;overflow:hidden!important}
-@media (min-width:900px){.note-editor-page{inset-inline-start:320px;width:auto!important}}
-@media (min-width:1400px){.note-editor-page{inset-inline-start:360px}}
+.note-editor-page{position:fixed!important;top:0!important;left:0!important;right:0;bottom:0;
+  z-index:9999!important;display:flex;flex-direction:column;
+  width:100vw!important;height:100vh!important;height:100dvh!important;
+  margin:0!important;padding:0!important;overflow:hidden!important;
+  box-sizing:border-box}
+.note-editor-page>.note-topbar{padding-top:calc(12px + env(safe-area-inset-top,0))}
+.note-editor-page>.note-bottom-toolbar{padding-bottom:calc(10px + env(safe-area-inset-bottom,0))}
+@media (min-width:900px){.note-editor-page{left:320px!important;width:auto!important}}
+@media (min-width:1400px){.note-editor-page{left:360px!important}}
 .note-editor-head{flex:none;padding:4px 20px 6px}
 .note-ruled-area{flex:1;min-height:0;overflow-y:auto;position:relative;
-  background-image:linear-gradient(to bottom,rgba(0,0,0,.16) 1px,transparent 1px)!important;
-  background-size:100% 30px!important;background-position:0 0;
-  padding:0 20px}
-.note-body-input{width:100%;min-height:100%;background:transparent!important;border:none;outline:none;
-  font-family:inherit;font-size:16px;
-  line-height:30px!important;padding:0!important;margin:0;resize:none;display:block}
+  background-image:linear-gradient(#d1d1d1 1px,transparent 1px)!important;
+  background-size:100% 32px!important;background-position:0 0;
+  padding:0 20px!important}
+.note-body-input{width:100%;min-height:100%;background:transparent!important;
+  border:none!important;outline:none!important;
+  font-family:inherit;font-size:18px!important;
+  line-height:32px!important;padding:0!important;margin:0;resize:none;display:block}
 .note-check-add{width:100%;background:transparent;border:none;outline:none;
-  font-size:16px;line-height:30px;height:30px;padding:0;margin:0;opacity:.75}
-.note-check-row{display:flex;align-items:center;gap:8px;height:30px;padding:0}
-.note-check-text{flex:1;background:none;border:none;outline:none;font-size:15px;line-height:30px;padding:0}
+  font-size:18px;line-height:32px;height:32px;padding:0;margin:0;opacity:.75}
+.note-check-row{display:flex;align-items:center;gap:8px;height:32px;padding:0}
+.note-check-text{flex:1;background:none;border:none;outline:none;font-size:16px;line-height:32px;padding:0}
 .note-check-text.done{text-decoration:line-through;opacity:.55}
-.note-tags-area{flex:none;padding:6px 20px 72px}
-.note-color-input-wrap{position:relative;width:36px;height:30px;flex:none;
+.note-tags-area{flex:none;padding:6px 20px 10px}
+/* Colour picker: fixed box so it can never shift the header layout */
+.note-color-input-wrap{position:relative;width:36px;height:30px;min-width:36px;flex:0 0 36px;
   border-radius:8px;overflow:hidden;border:1px solid rgba(128,128,128,.5);cursor:pointer}
 #note-color-input{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);
   border:none;padding:0;cursor:pointer;background:none}
 /* Scrollable tabs — real class name in this app */
-.note-board-tabs{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto!important;
-  white-space:nowrap!important;scrollbar-width:none!important}
+.note-board-tabs{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;
+  overflow-x:auto!important;white-space:nowrap!important;width:100%!important;
+  scrollbar-width:none!important}
 .note-board-tabs::-webkit-scrollbar{display:none!important}
 
 /* ── Notes corkboard workspace (reference design) ── */
@@ -475,10 +483,9 @@ body.light .trow-title{color:var(--ink)}
 .note-icon-btn{width:38px;height:38px;flex:none;background:none;border:none;font-size:18px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;border-radius:50%}
 .note-icon-btn:active{background:rgba(128,128,128,.2)}
-.note-bottom-toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:4px;align-items:center;
-  padding:10px 16px calc(10px + env(safe-area-inset-bottom,0));background:var(--s1);border-top:1px solid var(--b1);z-index:20}
-@media (min-width:900px){.note-bottom-toolbar{inset-inline-start:320px}}
-@media (min-width:1400px){.note-bottom-toolbar{inset-inline-start:360px}}
+.note-bottom-toolbar{flex:none;display:flex;gap:4px;align-items:center;
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom,0));
+  background:rgba(0,0,0,.06);border-top:1px solid rgba(0,0,0,.12)}
 .note-folder-chip{background:rgba(0,0,0,.18);border:none;border-radius:20px;padding:6px 12px;
   font-size:12px;color:inherit;cursor:pointer}
 .note-title-input{width:100%;background:none;border:none;font-size:22px;font-weight:800;color:var(--ink);outline:none;padding:6px 0}
@@ -1179,7 +1186,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v189';
+const APP_VERSION='v190';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3940,7 +3947,7 @@ function renderNoteDetail(){
     <input type="time" class="finput" id="note-due-time" value="${esc(n.dueTime||'')}">
   </div>`:''}
   <div class="note-editor-head">
-    <input class="note-title-input" id="note-title" placeholder="${L==='fa'?'عنوان':'Title'}" value="${esc(n.title)}" autocomplete="off" style="color:${ink}" ${n.locked?'readonly':''}>
+    <input class="note-title-input" id="note-title" dir="auto" placeholder="${L==='fa'?'عنوان':'Title'}" value="${esc(n.title)}" autocomplete="off" style="color:${ink}" ${n.locked?'readonly':''}>
     <div class="note-editor-stamp" style="color:${ink};opacity:.6">
       ${(()=>{const c2=new Date(n.createdAt),u=new Date(n.updatedAt);
         const f=(d)=>isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -3953,18 +3960,18 @@ function renderNoteDetail(){
   if(isChecklist){
     const items=n.items||[];
     html+=`<div class="note-ruled-area">
-      ${n.locked?'':`<input class="note-check-add" id="note-checklist-add" placeholder="${L==='fa'?'افزودن مورد...':'Add item...'}" autocomplete="off" style="color:${ink}">`}
+      ${n.locked?'':`<input class="note-check-add" id="note-checklist-add" dir="auto" placeholder="${L==='fa'?'افزودن مورد...':'Add item...'}" autocomplete="off" style="color:${ink}">`}
       <div id="note-checklist-list">
         ${items.map(it=>`<div class="note-check-row" data-note-item="${it.id}">
           <button class="chk ${it.done?'on':''}" data-note-item-toggle="${it.id}" ${n.locked?'disabled':''}></button>
-          <input class="note-check-text ${it.done?'done':''}" data-note-item-edit="${it.id}" value="${esc(it.text)}" style="color:${ink}" ${n.locked?'readonly':''}>
+          <input class="note-check-text ${it.done?'done':''}" data-note-item-edit="${it.id}" dir="auto" value="${esc(it.text)}" style="color:${ink}" ${n.locked?'readonly':''}>
           ${n.locked?'':`<button class="note-item-del" data-note-item-del="${it.id}" style="color:${ink}">🗑</button>`}
         </div>`).join('')}
       </div>
     </div>`;
   }else{
     html+=`<div class="note-ruled-area">
-      <textarea class="note-body-input" id="note-body" style="color:${ink}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
+      <textarea class="note-body-input" id="note-body" dir="auto" style="color:${ink}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
     </div>`;
   }
 
