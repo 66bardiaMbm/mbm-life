@@ -324,6 +324,8 @@ body.light .trow-title{color:var(--ink)}
 .board-action sup{font-size:9px;margin-left:1px}
 /* ── Sticky notes on the board ── */
 .sticky-note{position:relative;background:var(--paper);color:#1a1408;
+  background-image:linear-gradient(rgba(0,0,0,.09) 1px,transparent 1px);
+  background-size:100% 30px;background-position:0 34px;
   border-radius:2px;padding:22px 10px 10px;min-height:120px;cursor:pointer;
   display:flex;flex-direction:column;gap:5px;overflow:hidden;
   box-shadow:2px 3px 7px rgba(0,0,0,.4);
@@ -339,6 +341,13 @@ body.light .trow-title{color:var(--ink)}
 .sticky-star{background:none;border:none;cursor:pointer;font-size:15px;
   color:rgba(0,0,0,.25);padding:0;flex:none;line-height:1}
 .sticky-star.on{color:#d97706}
+.sticky-menu{background:none;border:none;cursor:pointer;font-size:17px;font-weight:800;
+  color:rgba(0,0,0,.45);padding:0 2px;flex:none;line-height:1}
+.sticky-menu:active{color:#000}
+.sticky-when{font-size:10px;color:#4a3c28;font-weight:700;opacity:1;
+  background:rgba(255,255,255,.45);border-radius:5px;padding:1px 5px;align-self:flex-start}
+.sticky-note.locked{opacity:.85}
+.sticky-note.locked .sticky-body,.sticky-note.locked .sticky-title{pointer-events:none}
 .sticky-body{font-size:var(--note-fs,13px);color:#33281a;line-height:1.35;
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
 .sticky-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;
@@ -351,8 +360,7 @@ body.light .trow-title{color:var(--ink)}
 .board-theme-swatch{width:100%;height:54px;border-radius:8px;border:1px solid var(--b1)}
 .board-theme-label{font-size:11px;color:var(--ink2);font-weight:600}
 .sticky-due{background:rgba(0,0,0,.1);border-radius:6px;padding:1px 5px}
-.sticky-when{font-size:9px;color:#6b5a42;opacity:.85;margin-top:3px;font-weight:600}
-.note-grid-list .sticky-when{display:none}
+.note-grid-list .sticky-when{font-size:9px;padding:1px 4px}
 .sticky-fold{position:absolute;right:0;bottom:0;width:0;height:0;
   border-style:solid;border-width:0 0 16px 16px;
   border-color:transparent transparent rgba(0,0,0,.13) transparent}
@@ -1151,7 +1159,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v187';
+const APP_VERSION='v188';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3571,7 +3579,7 @@ function bindNoteCardLongPressDrag(){
   }
   grid.addEventListener('pointerdown',(e)=>{
     const card=e.target.closest('.sticky-note[data-note-open]');
-    if(!card||e.target.closest('[data-note-pin]'))return;
+    if(!card||e.target.closest('[data-note-pin]')||e.target.closest('[data-note-menu]'))return;
     startX=e.clientX; startY=e.clientY; moved=false;
     holdTimer=setTimeout(()=>{
       lifted=card;
@@ -3681,22 +3689,23 @@ function noteCardHTML(n){
   const tilt=((h%70)/10-3.5).toFixed(2);
   const paper=n.color||STICKY_PAPER[h%STICKY_PAPER.length];
   const pin=PIN_COLORS[(h>>3)%PIN_COLORS.length];
-  const d=new Date(n.createdAt);
-  const created=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  const stamp=new Date(n.updatedAt||n.createdAt);
+  const when=isNaN(stamp)?'':stamp.toLocaleString(L==='fa'?'fa-IR':'en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   const due=n.dueDate?`${shortDate(n.dueDate)}${n.dueTime?' '+n.dueTime:''}`:'';
-  return `<div class="sticky-note" data-note-open="${n.id}" style="--tilt:${tilt}deg;--paper:${paper};--pin:${pin}">
+  return `<div class="sticky-note${n.locked?' locked':''}" data-note-open="${n.id}" style="--tilt:${tilt}deg;--paper:${paper};--pin:${pin}">
     <div class="sticky-pin"></div>
     <div class="sticky-top">
-      <div class="sticky-title">${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
+      <div class="sticky-title">${n.locked?'🔒 ':''}${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
       <button class="sticky-star ${n.pinned?'on':''}" data-note-pin="${n.id}" aria-label="pin">★</button>
+      <button class="sticky-menu" data-note-menu="${n.id}" aria-label="options">⋯</button>
     </div>
+    ${when?`<div class="sticky-when">${esc(when)}</div>`:''}
     ${notePreviewText(n)?`<div class="sticky-body">${esc(notePreviewText(n))}</div>`:''}
     <div class="sticky-meta">
       ${isChecklist?`<span>☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
       ${folder?`<span>📁 ${esc(folder.name)}</span>`:''}
       ${due?`<span class="sticky-due">📅 ${esc(due)}</span>`:''}
     </div>
-    ${created?`<div class="sticky-when">${esc(created)}</div>`:''}
     <div class="sticky-fold"></div>
   </div>`;
 }
@@ -6198,9 +6207,51 @@ function bindScreen(){
         };
       }
       document.querySelectorAll('[data-note-open]').forEach(el=>el.onclick=(e)=>{
-        if(e.target.closest('[data-note-pin]'))return;
+        if(e.target.closest('[data-note-pin]')||e.target.closest('[data-note-menu]'))return;
         activeNoteId=el.dataset.noteOpen; noteView='detail'; render(); window.scrollTo(0,0);});
       document.querySelectorAll('[data-note-pin]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();noteTogglePin(el.dataset.notePin);});
+      document.querySelectorAll('[data-note-menu]').forEach(el=>el.onclick=(e)=>{
+        e.stopPropagation();
+        const id=el.dataset.noteMenu;
+        const n=noteItemsMap()[id]; if(!n)return;
+        openSheet(`<h3>${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</h3>
+          <div class="btn-col">
+            <button class="btn btn-ghost" id="qm-share">${L==='fa'?'اشتراک‌گذاری':'Share'}</button>
+            <button class="btn btn-ghost" id="qm-duplicate">${L==='fa'?'کپی':'Duplicate'}</button>
+            <button class="btn btn-ghost" id="qm-lock">${n.locked?(L==='fa'?'باز کردن قفل':'Unlock'):(L==='fa'?'قفل (فقط‌خواندنی)':'Lock (read-only)')}</button>
+            <button class="btn btn-ghost" id="qm-move">${L==='fa'?'انتقال به پوشه...':'Move to folder…'}</button>
+            <button class="btn btn-ghost" id="qm-archive">${n.archivedAt?(L==='fa'?'خارج از آرشیو':'Unarchive'):(L==='fa'?'آرشیو':'Archive')}</button>
+            <button class="btn btn-danger" id="qm-trash">${L==='fa'?'انتقال به سطل زباله':'Move to Trash'}</button>
+            <button class="btn btn-ghost" id="qm-cancel">${tr('cancel')}</button>
+          </div>`);
+        document.getElementById('qm-cancel').onclick=()=>closeSheet();
+        document.getElementById('qm-share').onclick=()=>{closeSheet();noteShare(id);};
+        document.getElementById('qm-duplicate').onclick=()=>{
+          closeSheet(); const nid=noteDuplicate(id);
+          if(nid)toast(L==='fa'?'کپی شد':'Duplicated');
+          render();
+        };
+        document.getElementById('qm-lock').onclick=()=>{closeSheet();noteToggleLock(id);};
+        document.getElementById('qm-archive').onclick=()=>{
+          closeSheet();
+          if(n.archivedAt)noteUnarchive(id); else noteArchive(id);
+        };
+        document.getElementById('qm-trash').onclick=()=>{closeSheet();noteTrash(id);};
+        document.getElementById('qm-move').onclick=()=>{
+          closeSheet();
+          const folders=noteFoldersAll();
+          openSheet(`<h3>${L==='fa'?'انتقال به پوشه':'Move to folder'}</h3>
+            <div class="btn-col">
+              <button class="btn ${!n.folderId?'btn-primary':'btn-ghost'}" data-qm-folder="">${L==='fa'?'بدون پوشه':'No folder'}</button>
+              ${folders.map(f=>`<button class="btn ${n.folderId===f.id?'btn-primary':'btn-ghost'}" data-qm-folder="${f.id}">${esc(f.name)}</button>`).join('')}
+              <button class="btn btn-ghost" id="qmf-cancel">${tr('cancel')}</button>
+            </div>`);
+          document.getElementById('qmf-cancel').onclick=()=>closeSheet();
+          document.querySelectorAll('[data-qm-folder]').forEach(b=>b.onclick=()=>{
+            noteSetFolder(id, b.dataset.qmFolder||null); closeSheet();
+          });
+        };
+      });
       document.querySelectorAll('[data-note-filter]').forEach(el=>el.onclick=()=>{
         const f=el.dataset.noteFilter;
         noteFilterFolder=null;
