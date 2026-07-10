@@ -328,7 +328,14 @@ body.light .trow-title{color:var(--ink)}
 .note-board-tabs::-webkit-scrollbar{display:none!important}
 
 /* ── Notes corkboard workspace (reference design) ── */
-.note-workspace-board{min-height:100%;height:100%;display:flex;flex-direction:column;padding-bottom:6px}
+.note-workspace-board{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
+  z-index:9998!important;width:100vw!important;height:100vh!important;height:100dvh!important;
+  margin:0!important;padding:0!important;overflow:hidden!important;
+  display:flex!important;flex-direction:column!important;box-sizing:border-box}
+@media (min-width:900px){.note-workspace-board{left:320px!important;width:auto!important}}
+@media (min-width:1400px){.note-workspace-board{left:360px!important}}
+.note-workspace-board>div:first-child{padding-top:calc(8px + env(safe-area-inset-top,0))!important}
+.note-board-actionbar{padding-bottom:calc(4px + env(safe-area-inset-bottom,0))!important}
 .note-board-tabs{display:flex;gap:3px;overflow-x:auto;padding:6px 8px 0;scrollbar-width:none;align-items:flex-end}
 .note-board-tabs::-webkit-scrollbar{display:none}
 .board-tab{flex:none;border:none;cursor:pointer;white-space:nowrap;
@@ -1186,7 +1193,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v190';
+const APP_VERSION='v191';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3745,7 +3752,6 @@ function noteCardHTML(n){
       <button class="sticky-menu" data-note-menu="${n.id}" aria-label="options">⋯</button>
     </div>
     ${when?`<div class="sticky-when">${esc(when)}</div>`:''}
-    ${notePreviewText(n)?`<div class="sticky-body">${esc(notePreviewText(n))}</div>`:''}
     <div class="sticky-meta">
       ${isChecklist?`<span>☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
       ${folder?`<span>📁 ${esc(folder.name)}</span>`:''}
@@ -8144,6 +8150,38 @@ document.getElementById('srch-input').addEventListener('keydown',e=>{
 
 // Voice search uses the shared attachVoiceInput helper
 attachVoiceInput('srch-mic','srch-input',function(txt){_renderSearch(txt);});
+</script>
+<script>
+(function forceUI(){
+  const style=document.createElement('style');
+  style.innerHTML=`
+    .note-editor-page,.note-workspace-board{
+      width:100vw !important; height:100vh !important; height:100dvh !important;
+      margin:0 !important; padding:0 !important; overflow:hidden !important;
+      position:fixed !important; top:0 !important; left:0 !important;
+      right:0 !important; bottom:0 !important; z-index:99999 !important;
+    }
+    .note-body-input{
+      background-image:linear-gradient(#d1d1d1 1px,transparent 1px) !important;
+      background-size:100% 32px !important;
+      line-height:32px !important;
+      padding:10px 20px !important;
+    }
+    .sticky-body{ display:none !important; }
+    .note-board-tabs{
+      display:flex !important; flex-wrap:nowrap !important;
+      overflow-x:auto !important; width:100% !important;
+    }
+    .note-board-tabs::-webkit-scrollbar{ display:none !important; }
+    @media (min-width:900px){
+      .note-editor-page,.note-workspace-board{ left:320px !important; width:auto !important; }
+    }
+    @media (min-width:1400px){
+      .note-editor-page,.note-workspace-board{ left:360px !important; }
+    }
+  `;
+  document.head.appendChild(style);
+})();
 </script>
 </body>
 </html>
