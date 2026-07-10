@@ -292,7 +292,7 @@ body.light .trow-title{color:var(--ink)}
 .shop-mini{background:none;border:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;padding:4px 2px}
 
 /* ── Notes corkboard workspace (reference design) ── */
-.note-workspace-board{min-height:100%;display:flex;flex-direction:column;padding-bottom:12px}
+.note-workspace-board{min-height:100%;height:100%;display:flex;flex-direction:column;padding-bottom:6px}
 .note-board-tabs{display:flex;gap:3px;overflow-x:auto;padding:6px 8px 0;scrollbar-width:none;align-items:flex-end}
 .note-board-tabs::-webkit-scrollbar{display:none}
 .board-tab{flex:none;border:none;cursor:pointer;white-space:nowrap;
@@ -302,22 +302,25 @@ body.light .trow-title{color:var(--ink)}
   opacity:.75;transform:translateY(3px);transition:all .12s}
 .board-tab.on{opacity:1;transform:translateY(0);box-shadow:0 -2px 8px rgba(0,0,0,.3)}
 .board-tab-add{padding:9px 14px;font-size:16px}
-.note-board-frame{flex:1;margin:0 6px;border-radius:6px;
+.note-board-frame{flex:1;display:flex;flex-direction:column;min-height:0;
+  margin:0 6px;border-radius:6px;
   background:linear-gradient(180deg,#f2f2f2,#cfcfcf);
   padding:7px;box-shadow:0 2px 10px rgba(0,0,0,.5)}
-.note-board-inner{min-height:60vh;border-radius:3px;
-  background:radial-gradient(circle at 25% 15%,#c98d54,#a86f3c 55%,#8f5c2f);
-  background-image:radial-gradient(rgba(0,0,0,.16) 1px,transparent 1.7px);
+.note-board-inner{flex:1;min-height:0;overflow-y:auto;border-radius:3px;
+  background:var(--board-bg,radial-gradient(circle at 25% 15%,#c98d54,#a86f3c 55%,#8f5c2f));
+  background-image:var(--board-tex,radial-gradient(rgba(0,0,0,.16) 1px,transparent 1.7px));
   background-size:8px 8px;padding-bottom:10px}
 .note-board-search{background:rgba(255,255,255,.9);border:1px solid rgba(0,0,0,.2);color:#2b1a0c;width:100%}
 .note-board-search::placeholder{color:#7a5a3a}
 .note-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;padding:10px}
-.note-board-actionbar{display:flex;justify-content:space-around;align-items:center;
-  padding:8px 6px 4px;gap:4px}
+.note-board-actionbar{flex:none;display:flex;justify-content:space-between;align-items:center;
+  padding:8px 6px 2px;gap:4px}
 .board-action{width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;
-  background:rgba(0,0,0,.22);color:#f4e6d2;font-size:17px;
+  background:rgba(0,0,0,.22);color:#f4e6d2;font-size:17px;flex:none;
   display:flex;align-items:center;justify-content:center}
 .board-action:active{background:rgba(0,0,0,.4)}
+.board-action-add{background:var(--brandg);color:#fff;font-size:24px;
+  box-shadow:0 3px 12px rgba(110,86,248,.5)}
 .board-action sup{font-size:9px;margin-left:1px}
 /* ── Sticky notes on the board ── */
 .sticky-note{position:relative;background:var(--paper);color:#1a1408;
@@ -340,6 +343,16 @@ body.light .trow-title{color:var(--ink)}
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
 .sticky-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;
   font-size:10px;color:#5a4a33;font-weight:600}
+.note-editor-stamp{font-size:11px;font-weight:600;padding:0 2px 4px;opacity:.9}
+.board-theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:10px}
+.board-theme-opt{background:none;border:2px solid transparent;border-radius:12px;padding:5px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:5px}
+.board-theme-opt.on{border-color:var(--brand)}
+.board-theme-swatch{width:100%;height:54px;border-radius:8px;border:1px solid var(--b1)}
+.board-theme-label{font-size:11px;color:var(--ink2);font-weight:600}
+.sticky-due{background:rgba(0,0,0,.1);border-radius:6px;padding:1px 5px}
+.sticky-when{font-size:9px;color:#6b5a42;opacity:.85;margin-top:3px;font-weight:600}
+.note-grid-list .sticky-when{display:none}
 .sticky-fold{position:absolute;right:0;bottom:0;width:0;height:0;
   border-style:solid;border-width:0 0 16px 16px;
   border-color:transparent transparent rgba(0,0,0,.13) transparent}
@@ -1138,7 +1151,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v186';
+const APP_VERSION='v187';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1652,6 +1665,30 @@ function notePrefs(){
 // Background style for the Notes workspace. 'cork' is an MBM-styled warm
 // gradient + subtle dotted texture rendered in CSS — evokes the cork board
 // idea without copying the photo-texture look of the old apps.
+// Board surface themes for the Notes corkboard. Each returns CSS custom
+// properties consumed by .note-board-inner.
+const BOARD_THEMES={
+  cork:{ label:{en:'Cork board',fa:'چوب‌پنبه'},
+    bg:'radial-gradient(circle at 25% 15%,#c98d54,#a86f3c 55%,#8f5c2f)',
+    tex:'radial-gradient(rgba(0,0,0,.16) 1px,transparent 1.7px)'},
+  slate:{ label:{en:'Dark slate',fa:'تخته تیره'},
+    bg:'linear-gradient(160deg,#2b2f36,#1b1e24)',
+    tex:'radial-gradient(rgba(255,255,255,.06) 1px,transparent 1.7px)'},
+  paper:{ label:{en:'Light paper',fa:'کاغذ روشن'},
+    bg:'linear-gradient(180deg,#f6f2e8,#e7e0d0)',
+    tex:'radial-gradient(rgba(0,0,0,.09) 1px,transparent 1.7px)'},
+  felt:{ label:{en:'Green felt',fa:'نمد سبز'},
+    bg:'radial-gradient(circle at 30% 20%,#2f6b45,#1f4d31 60%,#173d27)',
+    tex:'radial-gradient(rgba(255,255,255,.07) 1px,transparent 1.7px)'},
+  denim:{ label:{en:'Blue denim',fa:'آبی'},
+    bg:'radial-gradient(circle at 30% 20%,#33507a,#22355a 60%,#1a2a48)',
+    tex:'radial-gradient(rgba(255,255,255,.07) 1px,transparent 1.7px)'}
+};
+function boardTheme(){ return BOARD_THEMES[notePrefs().bg]||BOARD_THEMES.cork; }
+function boardSurfaceStyle(){
+  const t=boardTheme();
+  return `--board-bg:${t.bg};--board-tex:${t.tex}`;
+}
 function noteWorkspaceBgStyle(){
   const bg=notePrefs().bg;
   if(bg==='light')return 'background:#f2f2f7';
@@ -1746,7 +1783,7 @@ function updateFab(){
   if(screen==='lists'||screen==='today'||screen==='appts') show=true;
   else if(screen==='module'){
     if(currentModule==='shopping') show=(shopView==='home');
-    else if(currentModule==='notes') show=(noteView==='home')&&!noteReorderMode&&moduleHasCreate(hubModule('notes'));
+    else if(currentModule==='notes') show=false; // Notes has its own Add button in the board action bar
     else show=moduleHasCreate(hubModule(currentModule));
   }
   else show=false; // lifehub, profile, more, search, ...
@@ -3644,6 +3681,9 @@ function noteCardHTML(n){
   const tilt=((h%70)/10-3.5).toFixed(2);
   const paper=n.color||STICKY_PAPER[h%STICKY_PAPER.length];
   const pin=PIN_COLORS[(h>>3)%PIN_COLORS.length];
+  const d=new Date(n.createdAt);
+  const created=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  const due=n.dueDate?`${shortDate(n.dueDate)}${n.dueTime?' '+n.dueTime:''}`:'';
   return `<div class="sticky-note" data-note-open="${n.id}" style="--tilt:${tilt}deg;--paper:${paper};--pin:${pin}">
     <div class="sticky-pin"></div>
     <div class="sticky-top">
@@ -3654,7 +3694,9 @@ function noteCardHTML(n){
     <div class="sticky-meta">
       ${isChecklist?`<span>☑ ${(n.items||[]).filter(i=>i.done).length}/${(n.items||[]).length}</span>`:''}
       ${folder?`<span>📁 ${esc(folder.name)}</span>`:''}
+      ${due?`<span class="sticky-due">📅 ${esc(due)}</span>`:''}
     </div>
+    ${created?`<div class="sticky-when">${esc(created)}</div>`:''}
     <div class="sticky-fold"></div>
   </div>`;
 }
@@ -3713,7 +3755,7 @@ function renderNotesHome(){
     <button class="board-tab ${noteView==='trash'?'on':''}" id="note-go-trash" style="--tabc:#9a9a8a">🗑 ${L==='fa'?'سطل':'Trash'}${trashedCount?` ${trashedCount}`:''}</button>
   </div>
   <div class="note-board-frame">
-    <div class="note-board-inner">
+    <div class="note-board-inner" style="${boardSurfaceStyle()}">
       <div style="padding:8px 10px 4px">
         <input class="finput note-board-search" id="note-search" placeholder="${L==='fa'?'جستجو...':'Search...'}" value="${esc(noteSearch)}" autocomplete="off">
       </div>`;
@@ -3729,10 +3771,11 @@ function renderNotesHome(){
   html+=`    </div>
     <div class="note-board-actionbar">
       <button class="board-action" id="note-sort-btn" title="${L==='fa'?'مرتب‌سازی':'Sort'}">☰</button>
-      <button class="board-action" id="note-filters-btn" title="${L==='fa'?'فیلترها':'Filters'}"${filtersOn?' style="color:var(--brand)"':''}>⚑</button>
+      <button class="board-action" id="note-filters-btn" title="${L==='fa'?'فیلترها':'Filters'}"${filtersOn?' style="color:#ffd94a"':''}>⚑</button>
       <button class="board-action" id="note-go-archive" title="${L==='fa'?'آرشیو':'Archive'}">▤${archivedCount?`<sup>${archivedCount}</sup>`:''}</button>
-      <button class="board-action" id="note-workspace-settings" title="${L==='fa'?'تنظیمات':'Settings'}">⚙</button>
+      <button class="board-action" id="note-board-theme" title="${L==='fa'?'تم تخته':'Board theme'}">🎨</button>
       <button class="board-action" id="note-view-toggle" title="${L==='fa'?'نما':'View'}">${prefs.view==='list'?'▦':'▤'}</button>
+      <button class="board-action board-action-add" id="note-board-add" title="${L==='fa'?'یادداشت جدید':'New note'}">＋</button>
     </div>
   </div>
   </div>`;
@@ -3852,6 +3895,13 @@ function renderNoteDetail(){
   </div>`:''}
   <div style="padding:6px 20px 0">
     <input class="note-title-input" id="note-title" placeholder="${L==='fa'?'عنوان':'Title'}" value="${esc(n.title)}" autocomplete="off" style="color:${accent?'#fff':'var(--ink)'}" ${n.locked?'readonly':''}>
+    <div class="note-editor-stamp" style="color:${accent?'rgba(255,255,255,.9)':'var(--ink3)'}">
+      ${(()=>{const c=new Date(n.createdAt),u=new Date(n.updatedAt);
+        const f=(d)=>isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+        const parts=[`${L==='fa'?'ساخته‌شده':'Created'}: ${f(c)}`];
+        if(n.updatedAt&&n.updatedAt!==n.createdAt)parts.push(`${L==='fa'?'ویرایش':'Edited'}: ${f(u)}`);
+        return esc(parts.join('  ·  '));})()}
+    </div>
   </div>`;
 
   if(isChecklist){
@@ -6233,26 +6283,28 @@ function bindScreen(){
         document.getElementById('nf-done').onclick=()=>closeSheet();
       };
       // Workspace settings: background style, font size, default note color
-      const wsBtn=document.getElementById('note-workspace-settings');
+      const addBtn=document.getElementById('note-board-add');
+      if(addBtn)addBtn.onclick=()=>openNewNoteSheet();
+      const wsBtn=document.getElementById('note-board-theme');
       if(wsBtn)wsBtn.onclick=()=>{
         const p=notePrefs();
-        openSheet(`<h3>${L==='fa'?'تنظیمات فضای یادداشت':'Notes workspace'}</h3>
-          <div class="fld"><label>${L==='fa'?'پس‌زمینه':'Background'}</label>
-            <div class="btn-col">
-              <button class="btn ${p.bg==='dark'?'btn-primary':'btn-ghost'}" data-ws-bg="dark">${L==='fa'?'تیره (MBM)':'MBM dark'}</button>
-              <button class="btn ${p.bg==='light'?'btn-primary':'btn-ghost'}" data-ws-bg="light">${L==='fa'?'روشن':'Light'}</button>
-              <button class="btn ${p.bg==='color'?'btn-primary':'btn-ghost'}" data-ws-bg="color">${L==='fa'?'رنگی':'Coloured'}</button>
-              <button class="btn ${p.bg==='cork'?'btn-primary':'btn-ghost'}" data-ws-bg="cork">${L==='fa'?'تخته‌چوب‌پنبه':'Cork board'}</button>
-            </div></div>
-          <div class="fld"><label>${L==='fa'?'اندازه‌ی متن':'Text size'} (${p.fontSize||15}px)</label>
+        openSheet(`<h3>${L==='fa'?'تم تخته':'Board theme'}</h3>
+          <div class="board-theme-grid">
+            ${Object.keys(BOARD_THEMES).map(k=>{const t=BOARD_THEMES[k];
+              return `<button type="button" class="board-theme-opt ${p.bg===k?'on':''}" data-board-theme="${k}">
+                <span class="board-theme-swatch" style="background:${t.bg};background-image:${t.tex};background-size:8px 8px"></span>
+                <span class="board-theme-label">${esc(t.label[L]||t.label.en)}</span>
+              </button>`;}).join('')}
+          </div>
+          <div class="fld" style="margin-top:14px"><label>${L==='fa'?'اندازه‌ی متن':'Text size'} (${p.fontSize||15}px)</label>
             <input type="range" min="12" max="22" step="1" value="${p.fontSize||15}" id="ws-font" style="width:100%"></div>
           <div class="fld"><label>${L==='fa'?'رنگ پیش‌فرض یادداشت جدید':'Default colour for new notes'}</label>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               ${NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch ${p.defaultColor===c?'on':''}" data-ws-defcolor="${c||''}" style="background:${c||'var(--s3)'}"></button>`).join('')}
             </div></div>
           <div class="btn-row"><button class="btn btn-primary" id="ws-done" style="flex:1">${L==='fa'?'بستن':'Done'}</button></div>`);
-        document.querySelectorAll('[data-ws-bg]').forEach(el=>el.onclick=()=>{
-          notePrefs().bg=el.dataset.wsBg; saveDB(); closeSheet(); render();
+        document.querySelectorAll('[data-board-theme]').forEach(el=>el.onclick=()=>{
+          notePrefs().bg=el.dataset.boardTheme; saveDB(); closeSheet(); render();
         });
         document.getElementById('ws-font').oninput=(e)=>{
           notePrefs().fontSize=parseInt(e.target.value,10)||15; saveDB();
