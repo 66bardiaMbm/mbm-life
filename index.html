@@ -334,13 +334,15 @@ body.light .trow-title{color:var(--ink)}
 @media (min-width:1400px){.note-editor-page{left:360px!important}}
 .note-editor-head{flex:none;padding:4px 20px 6px}
 .note-ruled-area{flex:1;min-height:0;overflow-y:auto;position:relative}
+.note-editor-page{--note-line-color:rgba(0,0,0,.18)}
+.note-editor-page.dark-paper{--note-line-color:rgba(255,255,255,.16)}
 .note-body-input{width:100%;min-height:100%;
   border:none!important;outline:none!important;
   font-family:inherit;font-size:18px!important;
-  background-image:linear-gradient(#d1d1d1 1px,transparent 1px)!important;
-  background-size:100% 32px!important;
+  background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
+  background-size:100% 32px;
   background-position:0 41px;background-attachment:local;
-  line-height:32px!important;padding:10px 20px!important;
+  line-height:32px;padding:10px 20px;
   margin:0;resize:none;display:block;box-sizing:border-box}
 .note-check-add{width:100%;background:transparent;border:none;outline:none;
   font-size:18px;line-height:32px;height:32px;padding:0 20px;margin:0;opacity:.75;box-sizing:border-box}
@@ -466,7 +468,7 @@ body.light .trow-title{color:var(--ink)}
 .note-card:active{transform:rotate(0deg) scale(.97);box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .note-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
 .note-card-title{font-size:15px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.note-card-body{font-size:13px;color:var(--ink2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.note-card-body{font-size:13px;color:var(--ink2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .note-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
 .note-card-when{font-size:11px;color:var(--ink3);margin-top:2px}
 .note-workspace{min-height:100%;padding-bottom:20px}
@@ -1219,7 +1221,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v194';
+const APP_VERSION='v195';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -6175,8 +6177,12 @@ function attachVoiceInput(micId,inputId,onText){
       const needsSpace=baseText && !/\s$/.test(baseText);
       rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
       rec.onresult=(e)=>{
-        let txt='';
-        for(let i=0;i<e.results.length;i++)txt+=e.results[i][0].transcript;
+        let parts=[];
+        for(let i=0;i<e.results.length;i++){
+          const seg=(e.results[i][0].transcript||'').trim();
+          if(seg)parts.push(seg);
+        }
+        const txt=parts.join(' ');
         const merged=baseText+(needsSpace?' ':'')+txt;
         inp.value=merged;
         if(typeof onText==='function')onText(merged);
