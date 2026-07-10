@@ -358,10 +358,11 @@ body.light .trow-title{color:var(--ink)}
 /* Colour picker: fixed box so it can never shift the header layout */
 .note-color-input-wrap{position:relative;width:36px;height:30px;min-width:36px;flex:0 0 36px;
   border-radius:8px;overflow:hidden;border:1px solid rgba(128,128,128,.5);cursor:pointer;padding:0}
-.note-color-sheet-grid{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;padding:6px 0 4px}
-.note-color-sheet-swatch{width:44px;height:44px;border-radius:50%;border:2px solid rgba(128,128,128,.35);cursor:pointer;flex:0 0 44px}
-.note-color-sheet-swatch.on{border-color:var(--acc,#6d5efc);box-shadow:0 0 0 2px var(--acc,#6d5efc)}
+.note-color-sheet-grid{display:flex;flex-direction:column;gap:8px;padding:6px 0 4px}
+.note-color-sheet-swatch{width:100%;height:48px;border-radius:10px;border:2px solid rgba(128,128,128,.35);cursor:pointer;display:block}
+.note-color-sheet-swatch.on{border-color:#fff;box-shadow:0 0 0 2px var(--acc,#6d5efc)}
 .note-color-sheet-swatch.custom{background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);
+  display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)}
   display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 /* Fixed-height folder switcher — replaces the old wrapping tab row so the
    home screen never shrinks as folders are added. */
@@ -1234,7 +1235,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v201';
+const APP_VERSION='v203';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -6203,6 +6204,11 @@ function attachVoiceInput(micId,inputId,onText){
     }
     if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
     micBtn._userStopped=false;
+    // Captured ONCE for the whole dictation action (not re-read from inp.value
+    // on every auto-restart) so an unfinished interim guess can never get
+    // locked in as the new base and re-appended — that was the repeat bug.
+    let committedText=inp.value||'';
+    let needsSpace=committedText && !/\s$/.test(committedText);
     const startRecognition=()=>{
       try{
         const rec=new SR();
@@ -6211,22 +6217,22 @@ function attachVoiceInput(micId,inputId,onText){
         rec.continuous=true;
         rec.interimResults=true;
         rec.maxAlternatives=1;
-        // Preserve whatever is already written; dictation APPENDS, never wipes.
-        // Re-read on every (re)start so a mid-session auto-restart continues
-        // from the latest text instead of overwriting it.
-        const baseText=inp.value||'';
-        const needsSpace=baseText && !/\s$/.test(baseText);
+        let lastFinalText='';
         rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
         rec.onresult=(e)=>{
-          let parts=[];
+          let finalParts=[],interim='';
           for(let i=0;i<e.results.length;i++){
             const seg=(e.results[i][0].transcript||'').trim();
-            if(seg)parts.push(seg);
+            if(!seg)continue;
+            if(e.results[i].isFinal)finalParts.push(seg);
+            else interim=seg; // only the trailing in-progress guess matters
           }
-          const txt=parts.join(' ');
-          const merged=baseText+(needsSpace?' ':'')+txt;
-          inp.value=merged;
-          if(typeof onText==='function')onText(merged);
+          lastFinalText=finalParts.join(' ');
+          const sep1=needsSpace?' ':'';
+          const sep2=(lastFinalText&&interim)?' ':'';
+          const preview=committedText+sep1+lastFinalText+sep2+interim;
+          inp.value=preview;
+          if(typeof onText==='function')onText(preview);
         };
         rec.onerror=(e)=>{
           const err=e.error;
@@ -6245,6 +6251,15 @@ function attachVoiceInput(micId,inputId,onText){
           }
         };
         rec.onend=()=>{
+          // Fold only the FINALIZED text from this session into the committed
+          // base; a trailing, never-finalized interim guess is dropped so it
+          // can't be duplicated by the next session's own interim results.
+          if(lastFinalText){
+            committedText=committedText+(needsSpace?' ':'')+lastFinalText;
+            needsSpace=committedText && !/\s$/.test(committedText);
+            inp.value=committedText;
+            if(typeof onText==='function')onText(committedText);
+          }
           // The browser can silently end a session after a pause even with
           // continuous=true. Only treat it as truly finished if the user
           // tapped the mic to stop, or an unrecoverable error already fired.
