@@ -1241,7 +1241,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v207';
+const APP_VERSION='v208';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -6215,36 +6215,42 @@ function attachVoiceInput(micId,inputId,onText){
     // toggle off if already recording on this button
     if(_voiceActiveBtn===micBtn&&_voiceRecog){
       micBtn._userStopped=true;
+      // The field already shows baseText + current session transcript (snapshot),
+      // so it is the source of truth — nothing to lose on stop.
       try{_voiceRecog.stop();}catch(_){}
       return;
     }
     if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
     micBtn._userStopped=false;
-    // SNAPSHOT MODEL (repeat-proof):
-    // baseText is captured once and never changes during a session. On every
-    // result event we read the ENTIRE current transcript fresh from the results
-    // array and set the field to `baseText + fullTranscript`. We never append —
-    // we rebuild — so a word physically cannot be added twice no matter how the
-    // engine re-delivers or accumulates results.
-    const baseText=inp.value||'';
-    const baseNeedsSpace=baseText && !/\s$/.test(baseText);
+    // Repeat-proof continuous dictation:
+    //  • baseText  = text that existed before this dictation + everything already
+    //                finalized in PREVIOUS sub-sessions. Updated once per session end.
+    //  • Within a session we REBUILD the field as baseText + fullTranscript on every
+    //    event (snapshot), so re-delivered/duplicated results can't stack up.
+    //  • continuous=true keeps the mic open (no 1–2s cutoffs). If the engine ends a
+    //    session anyway, we fold that session's final transcript into baseText ONCE
+    //    and auto-restart, so words are never lost and never doubled.
+    let baseText=inp.value||'';
     const startRecognition=()=>{
       try{
         const rec=new SR();
         _voiceRecog=rec;_voiceActiveBtn=micBtn;
         rec.lang=voiceLang();
-        rec.continuous=false;      // one utterance per session; avoids stale accumulation
+        rec.continuous=true;       // stay open; no premature cutoff
         rec.interimResults=true;
         rec.maxAlternatives=1;
+        let sessionTranscript='';  // full text produced in THIS session
+        const sep=()=> (baseText && !/\s$/.test(baseText)) ? ' ' : '';
         rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
         rec.onresult=(e)=>{
-          // Rebuild the full transcript from scratch every time.
+          // Rebuild this session's transcript from scratch every event.
           let full='';
           for(let i=0;i<e.results.length;i++){
-            const seg=(e.results[i][0].transcript||'').trim();
-            if(seg)full=full?(full+' '+seg):seg;
+            const s=(e.results[i][0].transcript||'').trim();
+            if(s)full=full?(full+' '+s):s;
           }
-          const val=baseText+(baseNeedsSpace&&full?' ':'')+full;
+          sessionTranscript=full;
+          const val=baseText+(full?sep():'')+full;
           inp.value=val;
           if(typeof onText==='function')onText(val);
         };
@@ -6263,8 +6269,21 @@ function attachVoiceInput(micId,inputId,onText){
           }
         };
         rec.onend=()=>{
-          micBtn.classList.remove('recording');
-          if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
+          // Fold this session's transcript into baseText exactly once.
+          if(sessionTranscript){
+            baseText=baseText+(sep())+sessionTranscript;
+            sessionTranscript='';
+            inp.value=baseText;
+            if(typeof onText==='function')onText(baseText);
+          }
+          // Auto-restart so a silent engine-cutoff doesn't stop dictation, UNLESS
+          // the user tapped the mic to stop or an unrecoverable error fired.
+          if(_voiceActiveBtn===micBtn && !micBtn._userStopped){
+            setTimeout(startRecognition,120);
+          }else{
+            micBtn.classList.remove('recording');
+            if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
+          }
         };
         rec.start();
       }catch(err){
