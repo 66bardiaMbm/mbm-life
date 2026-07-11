@@ -329,8 +329,7 @@ body.light .trow-title{color:var(--ink)}
   border:1px solid rgba(0,0,0,.25)!important}
 .note-editor-page.dark-paper .note-pill{
   background:rgba(0,0,0,.3)!important;border-color:rgba(255,255,255,.35)!important}
-.note-editor-page .note-color-input-wrap{box-shadow:0 0 0 2px #fff,0 0 0 3.5px rgba(0,0,0,.55);border-color:transparent}
-.note-editor-page.dark-paper .note-color-input-wrap{box-shadow:0 0 0 2px #fff,0 0 0 3.5px rgba(0,0,0,.55);border-color:transparent}
+
 .note-editor-page>.note-topbar{padding-top:calc(12px + env(safe-area-inset-top,0))}
 .note-editor-page>.note-bottom-toolbar{padding-bottom:calc(10px + env(safe-area-inset-bottom,0))}
 @media (min-width:900px){.note-editor-page{left:320px!important;width:auto!important}}
@@ -357,7 +356,11 @@ body.light .trow-title{color:var(--ink)}
 .note-tags-area{flex:none;padding:6px 20px 10px}
 /* Colour picker: fixed box so it can never shift the header layout */
 .note-color-input-wrap{position:relative;width:36px;height:30px;min-width:36px;flex:0 0 36px;
-  border-radius:8px;overflow:hidden;border:1px solid rgba(128,128,128,.5);cursor:pointer;padding:0}
+  border-radius:8px;overflow:visible;border:1px solid rgba(128,128,128,.5);cursor:pointer;padding:0;
+  background:#e9e9ee;display:flex;align-items:center;justify-content:center}
+.note-color-btn-icon{font-size:15px;line-height:1;pointer-events:none}
+.note-color-btn-dot{position:absolute;bottom:-3px;right:-3px;width:12px;height:12px;border-radius:50%;
+  border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);pointer-events:none}
 .note-color-sheet-grid{display:flex;flex-direction:column;gap:8px;padding:6px 0 4px}
 .note-color-sheet-swatch{width:100%;height:48px;border-radius:10px;border:2px solid rgba(128,128,128,.35);cursor:pointer;display:block}
 .note-color-sheet-swatch.on{border-color:#fff;box-shadow:0 0 0 2px var(--acc,#6d5efc)}
@@ -376,6 +379,9 @@ body.light .trow-title{color:var(--ink)}
 .note-filter-banner{display:flex;align-items:center;justify-content:space-between;gap:8px;
   margin:0 10px 4px;padding:8px 12px;border-radius:10px;background:#ffd94a;color:#3a2e00;
   font-size:13px;font-weight:700;cursor:pointer}
+.note-folder-row{display:flex;align-items:stretch;gap:6px}
+.note-folder-row-del{flex:0 0 40px;border:none;background:rgba(239,68,68,.12);color:#ef4444;
+  border-radius:10px;font-size:15px;cursor:pointer}
 
 /* ── Notes corkboard workspace (reference design) ── */
 .note-workspace-board{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
@@ -1235,7 +1241,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v203';
+const APP_VERSION='v205';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3638,6 +3644,13 @@ function noteFolderCreate(name,color){
   saveDB();
   return id;
 }
+function noteFolderDelete(id){
+  const map=noteItemsMap();
+  Object.values(map).forEach(n=>{ if(n.folderId===id){ n.folderId=null; n.updatedAt=new Date().toISOString(); } });
+  delete noteFoldersMap()[id];
+  if(noteFilterFolder===id)noteFilterFolder=null;
+  saveDB();
+}
 function notePreviewText(n){
   if(n.kind==='checklist'){
     const items=n.items||[];
@@ -3897,7 +3910,7 @@ function renderNotesHome(){
       <button class="board-action" id="note-go-archive" title="${L==='fa'?'آرشیو':'Archive'}">▤${archivedCount?`<sup>${archivedCount}</sup>`:''}</button>
       <button class="board-action" id="note-board-theme" title="${L==='fa'?'تم تخته':'Board theme'}">🎨</button>
       <button class="board-action" id="note-view-toggle" title="${L==='fa'?'نما':'View'}">${prefs.view==='list'?'▦':'▤'}</button>
-      <button class="board-action board-action-add" id="note-board-add" title="${L==='fa'?'یادداشت جدید':'New note'}">＋</button>
+      <button class="board-action board-action-add" id="note-board-add" title="${L==='fa'?'یادداشت جدید':'New note'}">🗒️</button>
     </div>
   </div>
   </div>`;
@@ -3992,7 +4005,10 @@ function renderNoteDetail(){
   const svgCheck=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 12 11 15 16 9"/></svg>`;
   let html=`<div class="note-editor-page${isLightColor(paperColor)?'':' dark-paper'}" style="${pageBg};--ink:${ink}">
   <div class="note-topbar">
-    <button type="button" class="note-color-input-wrap" id="note-color-btn" title="${L==='fa'?'رنگ کاغذ':'Paper colour'}" style="background:${esc(paperColor)}"></button>
+    <button type="button" class="note-color-input-wrap" id="note-color-btn" title="${L==='fa'?'رنگ کاغذ':'Paper colour'}">
+      <span class="note-color-btn-icon">🎨</span>
+      <span class="note-color-btn-dot" style="background:${esc(paperColor)}"></span>
+    </button>
     <input type="color" id="note-color-input-hidden" value="${esc(paperColor)}" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
     <button class="note-icon-btn" id="note-type-indicator" style="color:${ink}" title="${isChecklist?(L==='fa'?'چک‌لیست':'Checklist'):(L==='fa'?'متنی':'Text')}">${isChecklist?svgCheck:svgDoc}</button>
     <button class="note-pill note-pill-folder" id="note-folder-pill" style="color:${ink};border-color:${ink}55">
@@ -6457,7 +6473,10 @@ function bindScreen(){
           <div class="btn-col">
             <button class="btn ${(!noteFilterFolder&&!noteFilterPinned)?'btn-primary':'btn-ghost'}" data-note-filter="all">${L==='fa'?'اصلی':'Main'}</button>
             <button class="btn ${noteFilterPinned?'btn-primary':'btn-ghost'}" data-note-filter="pinned">★ ${L==='fa'?'پین':'Pinned'}</button>
-            ${folders.map(f=>`<button class="btn ${noteFilterFolder===f.id?'btn-primary':'btn-ghost'}" data-note-filter-folder="${f.id}">${esc(f.name)}</button>`).join('')}
+            ${folders.map(f=>`<div class="note-folder-row">
+              <button class="btn ${noteFilterFolder===f.id?'btn-primary':'btn-ghost'}" data-note-filter-folder="${f.id}" style="flex:1">${esc(f.name)}</button>
+              <button class="note-folder-row-del" data-note-folder-del="${f.id}" title="${L==='fa'?'حذف پوشه':'Delete folder'}">🗑</button>
+            </div>`).join('')}
             <button class="btn btn-ghost" data-note-new-folder="1">＋ ${L==='fa'?'پوشه‌ی جدید':'New folder'}</button>
           </div>`);
         document.querySelectorAll('[data-note-filter]').forEach(el=>el.onclick=()=>{
@@ -6472,6 +6491,26 @@ function bindScreen(){
           noteFilterFolder=(noteFilterFolder===el.dataset.noteFilterFolder)?null:el.dataset.noteFilterFolder;
           noteFilterColor=null;noteFilterType=null;noteFilterDated=null;
           closeSheet(); render();
+        });
+        document.querySelectorAll('[data-note-folder-del]').forEach(el=>el.onclick=(ev)=>{
+          ev.stopPropagation();
+          const fid=el.dataset.noteFolderDel;
+          const f=noteFoldersMap()[fid];
+          const count=Object.values(noteItemsMap()).filter(n=>n.folderId===fid).length;
+          openSheet(`<h3>${L==='fa'?'حذف پوشه؟':'Delete folder?'}</h3>
+            <p style="color:var(--ink2);font-size:14px;line-height:1.5;margin:0 0 8px">${L==='fa'
+              ?`پوشه‌ی «${esc(f?f.name:'')}» حذف می‌شود.${count?` ${count} یادداشت داخلش به «بدون پوشه» منتقل می‌شن.`:''} این عمل بازگشت‌پذیر نیست.`
+              :`The folder "${esc(f?f.name:'')}" will be deleted.${count?` ${count} note(s) inside it will move to "No folder".`:''} This cannot be undone.`}</p>
+            <div class="btn-row">
+              <button class="btn btn-ghost" id="nfd-cancel">${tr('cancel')}</button>
+              <button class="btn btn-danger" id="nfd-ok">${L==='fa'?'حذف':'Delete'}</button>
+            </div>`,{stack:true});
+          document.getElementById('nfd-cancel').onclick=()=>closeSheet({back:true});
+          document.getElementById('nfd-ok').onclick=()=>{
+            noteFolderDelete(fid);
+            closeSheet();
+            render();
+          };
         });
         const newFolderBtn2=document.querySelector('[data-note-new-folder]');
         if(newFolderBtn2)newFolderBtn2.onclick=()=>{closeSheet();openNewNoteFolderSheet();};
