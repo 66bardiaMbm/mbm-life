@@ -370,6 +370,15 @@ body.light .trow-title{color:var(--ink)}
 /* Fixed-height folder switcher — replaces the old wrapping tab row so the
    home screen never shrinks as folders are added. */
 .note-folder-bar{display:flex;align-items:center;gap:8px;padding:8px 12px 4px}
+.note-select-bar{background:rgba(109,94,252,.14);border-radius:12px;margin:4px 8px 0;padding:6px 10px}
+.note-select-count{flex:1;font-weight:700;font-size:15px}
+.note-select-del{color:#ef4444}
+.sticky-note.select-mode{cursor:pointer}
+.sticky-note.selected{outline:3px solid #6d5efc;outline-offset:2px}
+.sticky-select-check{position:absolute;top:6px;left:6px;width:24px;height:24px;border-radius:50%;
+  background:#6d5efc;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;z-index:3;
+  box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.sticky-note:not(.selected) .sticky-select-check{background:rgba(255,255,255,.85);border:2px solid #6d5efc}
 .note-folder-select{flex:1;min-width:0;display:flex;align-items:center;gap:8px;
   padding:9px 14px;border-radius:999px;border:1px solid rgba(128,128,128,.35);
   background:var(--s1);cursor:pointer;font-size:15px;font-weight:700;color:inherit}
@@ -1241,7 +1250,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v208';
+const APP_VERSION='v209';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1744,6 +1753,8 @@ let noteFilterFolder=null;   // folderId or null
 let noteFilterTag=null;      // tag string or null
 let noteFilterPinned=false;
 let noteReorderMode=false;
+let noteSelectMode=false;        // Gmail-style multi-select on the notes board
+let noteSelectedIds=[];          // ids currently ticked in select mode
 let noteFilterColor=null;    // filter: exact note color, or null
 let noteFilterType=null;     // filter: 'text'|'checklist'|null
 let noteFilterDated=null;    // filter: 'dated'|'reminder'|null
@@ -3699,6 +3710,17 @@ function bindNoteCardLongPressDrag(){
     if(!card||e.target.closest('[data-note-pin]')||e.target.closest('[data-note-menu]'))return;
     startX=e.clientX; startY=e.clientY; moved=false;
     holdTimer=setTimeout(()=>{
+      if(!noteSelectMode){
+        // First long-press: enter selection mode and tick this card.
+        const id=card.dataset.noteOpen;
+        noteSelectMode=true;
+        if(noteSelectedIds.indexOf(id)<0)noteSelectedIds.push(id);
+        if(navigator.vibrate)try{navigator.vibrate(20);}catch(_){}
+        holdTimer=null;
+        render();
+        return;
+      }
+      // Already in selection mode: long-press lifts the card for drag-reorder.
       lifted=card;
       card.classList.add('drag-lift');
       try{grid.setPointerCapture(e.pointerId);}catch(_){}
@@ -3810,7 +3832,9 @@ function noteCardHTML(n){
   const stamp=new Date(n.updatedAt||n.createdAt);
   const when=isNaN(stamp)?'':stamp.toLocaleString(L==='fa'?'fa-IR':'en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   const due=n.dueDate?`${shortDate(n.dueDate)}${n.dueTime?' '+n.dueTime:''}`:'';
-  return `<div class="sticky-note${n.locked?' locked':''}" data-note-open="${n.id}" style="--tilt:${tilt}deg;--paper:${paper};--pin:${pin};--cardink:${cardInk}">
+  const selected=noteSelectMode && noteSelectedIds.indexOf(n.id)>=0;
+  return `<div class="sticky-note${n.locked?' locked':''}${noteSelectMode?' select-mode':''}${selected?' selected':''}" data-note-open="${n.id}" style="--tilt:${tilt}deg;--paper:${paper};--pin:${pin};--cardink:${cardInk}">
+    ${noteSelectMode?`<div class="sticky-select-check">${selected?'✓':''}</div>`:''}
     <div class="sticky-pin"></div>
     <div class="sticky-top">
       <div class="sticky-title">${n.locked?'🔒 ':''}${esc(n.title||(L==='fa'?'(بدون عنوان)':'(untitled)'))}</div>
@@ -3874,6 +3898,13 @@ function renderNotesHome(){
   }
 
   html+=(()=>{
+    if(noteSelectMode){
+      return `<div class="note-folder-bar note-select-bar">
+        <button class="board-action" id="note-select-cancel" title="${L==='fa'?'بستن':'Close'}">✕</button>
+        <span class="note-select-count">${noteSelectedIds.length} ${L==='fa'?'انتخاب شده':'selected'}</span>
+        <button class="board-action note-select-del" id="note-select-delete" title="${L==='fa'?'انتقال به سطل':'Move to Trash'}">🗑</button>
+      </div>`;
+    }
     const curColor=noteFilterPinned?'#d4d422':(noteFilterFolder?((folders.find(f=>f.id===noteFilterFolder)||{}).color||'#7a7a7a'):'#2eb82e');
     const curLabel=noteFilterPinned?`★ ${L==='fa'?'پین':'Pinned'}`:(noteFilterFolder?esc((folders.find(f=>f.id===noteFilterFolder)||{}).name||''):(L==='fa'?'اصلی':'Main'));
     return `<div class="note-folder-bar">
@@ -6222,68 +6253,59 @@ function attachVoiceInput(micId,inputId,onText){
     }
     if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
     micBtn._userStopped=false;
-    // Repeat-proof continuous dictation:
-    //  • baseText  = text that existed before this dictation + everything already
-    //                finalized in PREVIOUS sub-sessions. Updated once per session end.
-    //  • Within a session we REBUILD the field as baseText + fullTranscript on every
-    //    event (snapshot), so re-delivered/duplicated results can't stack up.
-    //  • continuous=true keeps the mic open (no 1–2s cutoffs). If the engine ends a
-    //    session anyway, we fold that session's final transcript into baseText ONCE
-    //    and auto-restart, so words are never lost and never doubled.
-    let baseText=inp.value||'';
+    // Index-based dictation. committedText never re-reads spoken words; each
+    // finalized result entry is appended EXACTLY ONCE, tracked by how many
+    // finalized entries we've already consumed. Interim (in-progress) text is
+    // shown live but not committed until finalized. No auto-restart loop, since
+    // restarting a continuous recognizer re-delivered old words -> repetition.
+    let committedText=inp.value||'';
+    let takenFinals=0;               // count of finalized results already appended
+    const sep=()=> (committedText && !/\s$/.test(committedText)) ? ' ' : '';
     const startRecognition=()=>{
       try{
         const rec=new SR();
         _voiceRecog=rec;_voiceActiveBtn=micBtn;
         rec.lang=voiceLang();
-        rec.continuous=true;       // stay open; no premature cutoff
+        rec.continuous=true;
         rec.interimResults=true;
         rec.maxAlternatives=1;
-        let sessionTranscript='';  // full text produced in THIS session
-        const sep=()=> (baseText && !/\s$/.test(baseText)) ? ' ' : '';
         rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
         rec.onresult=(e)=>{
-          // Rebuild this session's transcript from scratch every event.
-          let full='';
-          for(let i=0;i<e.results.length;i++){
-            const s=(e.results[i][0].transcript||'').trim();
-            if(s)full=full?(full+' '+s):s;
+          // Append any finalized results we haven't consumed yet.
+          for(let i=takenFinals;i<e.results.length;i++){
+            if(e.results[i].isFinal){
+              const seg=(e.results[i][0].transcript||'').trim();
+              if(seg) committedText=committedText+sep()+seg;
+              takenFinals=i+1;
+            }
           }
-          sessionTranscript=full;
-          const val=baseText+(full?sep():'')+full;
+          // Build the live interim tail from the last (unfinalized) result only.
+          let interim='';
+          const last=e.results[e.results.length-1];
+          if(last && !last.isFinal){
+            interim=(last[0].transcript||'').trim();
+          }
+          const val=committedText+(interim?sep():'')+interim;
           inp.value=val;
           if(typeof onText==='function')onText(val);
         };
         rec.onerror=(e)=>{
           const err=e.error;
           if(err==='not-allowed'||err==='service-not-allowed'){
-            micBtn._userStopped=true;
-            micBtn.classList.remove('recording');
+            micBtn._userStopped=true;micBtn.classList.remove('recording');
             toast(L==='fa'?'دسترسی میکروفون رد شد. از تنظیمات اجازه دهید':'Microphone blocked. Allow it in settings');
           }else if(err==='audio-capture'){
-            micBtn._userStopped=true;
-            micBtn.classList.remove('recording');
+            micBtn._userStopped=true;micBtn.classList.remove('recording');
             toast(L==='fa'?'میکروفونی یافت نشد':'No microphone found');
           }else if(err!=='aborted'&&err!=='no-speech'){
             toast(L==='fa'?'خطای میکروفون':'Microphone error');
           }
         };
         rec.onend=()=>{
-          // Fold this session's transcript into baseText exactly once.
-          if(sessionTranscript){
-            baseText=baseText+(sep())+sessionTranscript;
-            sessionTranscript='';
-            inp.value=baseText;
-            if(typeof onText==='function')onText(baseText);
-          }
-          // Auto-restart so a silent engine-cutoff doesn't stop dictation, UNLESS
-          // the user tapped the mic to stop or an unrecoverable error fired.
-          if(_voiceActiveBtn===micBtn && !micBtn._userStopped){
-            setTimeout(startRecognition,120);
-          }else{
-            micBtn.classList.remove('recording');
-            if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
-          }
+          // Commit the field as-is; do NOT auto-restart (that re-fed old words).
+          committedText=inp.value||committedText;
+          micBtn.classList.remove('recording');
+          if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
         };
         rec.start();
       }catch(err){
@@ -6421,7 +6443,15 @@ function bindScreen(){
       }
       document.querySelectorAll('[data-note-open]').forEach(el=>el.onclick=(e)=>{
         if(e.target.closest('[data-note-pin]')||e.target.closest('[data-note-menu]'))return;
-        activeNoteId=el.dataset.noteOpen; noteView='detail'; render(); window.scrollTo(0,0);});
+        const id=el.dataset.noteOpen;
+        if(noteSelectMode){
+          const idx=noteSelectedIds.indexOf(id);
+          if(idx>=0)noteSelectedIds.splice(idx,1); else noteSelectedIds.push(id);
+          if(noteSelectedIds.length===0)noteSelectMode=false; // auto-exit when nothing selected
+          render();
+          return;
+        }
+        activeNoteId=id; noteView='detail'; render(); window.scrollTo(0,0);});
       document.querySelectorAll('[data-note-pin]').forEach(el=>el.onclick=(e)=>{e.stopPropagation();noteTogglePin(el.dataset.notePin);});
       document.querySelectorAll('[data-note-menu]').forEach(el=>el.onclick=(e)=>{
         e.stopPropagation();
@@ -6465,6 +6495,18 @@ function bindScreen(){
           });
         };
       });
+      const selCancel=document.getElementById('note-select-cancel');
+      if(selCancel)selCancel.onclick=()=>{noteSelectMode=false;noteSelectedIds=[];render();};
+      const selDelete=document.getElementById('note-select-delete');
+      if(selDelete)selDelete.onclick=()=>{
+        if(!noteSelectedIds.length){noteSelectMode=false;render();return;}
+        const ids=noteSelectedIds.slice();
+        ids.forEach(id=>{const n=noteItemsMap()[id];if(n){n.trashedAt=new Date().toISOString();n.updatedAt=n.trashedAt;}});
+        logActivity('deleted','note',ids[0],{name:''});
+        noteSelectMode=false;noteSelectedIds=[];
+        saveDB();render();
+        toast(L==='fa'?`${ids.length} یادداشت به سطل رفت`:`${ids.length} moved to Trash`);
+      };
       const folderSelectBtn=document.getElementById('note-folder-select-btn');
       if(folderSelectBtn)folderSelectBtn.onclick=()=>{
         const folders=noteFoldersAll();
