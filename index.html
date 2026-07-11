@@ -341,6 +341,7 @@ body.light .trow-title{color:var(--ink)}
 .note-body-input{width:100%;min-height:100%;background:transparent;
   border:none!important;outline:none!important;
   font-family:inherit;font-size:18px;
+  white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;
   background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
   background-size:100% 32px;background-position:0 41px;background-attachment:local;
   line-height:32px;padding:10px 20px;
@@ -1250,7 +1251,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v209';
+const APP_VERSION='v211';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1840,7 +1841,14 @@ function _showFatalError(err){
   </div>`;
 }
 
+let _renderDeferred=false;
 function render(){
+  // Guard: don't rebuild the DOM while voice dictation is actively writing into
+  // the note editor — it would detach the textarea the recognizer is targeting.
+  if(VOICE && VOICE.state!=='IDLE' && VOICE.btn && screen==='module' && currentModule==='notes' && noteView==='detail'){
+    _renderDeferred=true;
+    return;
+  }
   try{
     _renderInner();
   }catch(err){
@@ -6192,7 +6200,25 @@ function playCompletionSound(){
    QUICK ADD (FAB)
    ══════════════════════════════════════════ */
 // Reusable voice-to-text for any input + mic button pair.
-let _voiceRecog=null,_voiceActiveBtn=null;
+// ── Dictation controller ──────────────────────────────────────────────
+// Single source of truth for voice input. Deterministic state machine with a
+// generation id so stale recognizer callbacks are ignored, and a stored restart
+// timer so manual stop can always cancel a pending auto-restart.
+//   States: IDLE | STARTING | LISTENING | STOPPING | RESTART_PENDING
+const VOICE={
+  state:'IDLE',
+  gen:0,               // increments every time we (re)start or stop; callbacks compare against this
+  rec:null,            // current SpeechRecognition instance
+  btn:null,            // mic button element driving the current dictation
+  inputId:null,        // id of the target field
+  onText:null,         // optional commit callback
+  baseText:'',         // text locked in before the current session
+  sessionFull:'',      // transcript produced in the current session
+  restartTimer:null,   // pending auto-restart timer id (nullable)
+  DEBUG:false,         // flip on to emit lifecycle logs
+  log(...a){ if(this.state==='__never__'){} if(VOICE.DEBUG){ try{console.log('[VOICE]','gen='+VOICE.gen,'state='+VOICE.state,...a);}catch(_){}} if(window.__voiceLog){window.__voiceLog.push('gen='+VOICE.gen+' state='+VOICE.state+' '+a.join(' '));} }
+};
+let _voiceRecog=null,_voiceActiveBtn=null; // legacy aliases kept in sync for any external checks
 // User-selectable speech-recognition language (falls back to app language).
 const VOICE_LANGS=[
   {code:'fa-IR',label:'فارسی'},
@@ -6243,78 +6269,135 @@ function attachVoiceInput(micId,inputId,onText){
         :'Voice input not supported in this browser/app');
       return;
     }
-    // toggle off if already recording on this button
-    if(_voiceActiveBtn===micBtn&&_voiceRecog){
-      micBtn._userStopped=true;
-      // The field already shows baseText + current session transcript (snapshot),
-      // so it is the source of truth — nothing to lose on stop.
-      try{_voiceRecog.stop();}catch(_){}
+    // Toggle OFF: base the decision on STATE, never on _voiceRecog being non-null.
+    // This is the fix for "stop during the restart window starts a new session":
+    // LISTENING/STARTING/RESTART_PENDING all mean "a dictation is in progress".
+    if(VOICE.btn===micBtn && (VOICE.state==='LISTENING'||VOICE.state==='STARTING'||VOICE.state==='RESTART_PENDING')){
+      voiceStop(micBtn,inputId);
       return;
     }
-    if(_voiceRecog){try{_voiceRecog.stop();}catch(_){}}
-    micBtn._userStopped=false;
-    // Index-based dictation. committedText never re-reads spoken words; each
-    // finalized result entry is appended EXACTLY ONCE, tracked by how many
-    // finalized entries we've already consumed. Interim (in-progress) text is
-    // shown live but not committed until finalized. No auto-restart loop, since
-    // restarting a continuous recognizer re-delivered old words -> repetition.
-    let committedText=inp.value||'';
-    let takenFinals=0;               // count of finalized results already appended
-    const sep=()=> (committedText && !/\s$/.test(committedText)) ? ' ' : '';
-    const startRecognition=()=>{
-      try{
-        const rec=new SR();
-        _voiceRecog=rec;_voiceActiveBtn=micBtn;
-        rec.lang=voiceLang();
-        rec.continuous=true;
-        rec.interimResults=true;
-        rec.maxAlternatives=1;
-        rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
-        rec.onresult=(e)=>{
-          // Append any finalized results we haven't consumed yet.
-          for(let i=takenFinals;i<e.results.length;i++){
-            if(e.results[i].isFinal){
-              const seg=(e.results[i][0].transcript||'').trim();
-              if(seg) committedText=committedText+sep()+seg;
-              takenFinals=i+1;
-            }
-          }
-          // Build the live interim tail from the last (unfinalized) result only.
-          let interim='';
-          const last=e.results[e.results.length-1];
-          if(last && !last.isFinal){
-            interim=(last[0].transcript||'').trim();
-          }
-          const val=committedText+(interim?sep():'')+interim;
-          inp.value=val;
-          if(typeof onText==='function')onText(val);
-        };
-        rec.onerror=(e)=>{
-          const err=e.error;
-          if(err==='not-allowed'||err==='service-not-allowed'){
-            micBtn._userStopped=true;micBtn.classList.remove('recording');
-            toast(L==='fa'?'دسترسی میکروفون رد شد. از تنظیمات اجازه دهید':'Microphone blocked. Allow it in settings');
-          }else if(err==='audio-capture'){
-            micBtn._userStopped=true;micBtn.classList.remove('recording');
-            toast(L==='fa'?'میکروفونی یافت نشد':'No microphone found');
-          }else if(err!=='aborted'&&err!=='no-speech'){
-            toast(L==='fa'?'خطای میکروفون':'Microphone error');
-          }
-        };
-        rec.onend=()=>{
-          // Commit the field as-is; do NOT auto-restart (that re-fed old words).
-          committedText=inp.value||committedText;
-          micBtn.classList.remove('recording');
-          if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
-        };
-        rec.start();
-      }catch(err){
-        micBtn.classList.remove('recording');
-        toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable');
-      }
-    };
-    startRecognition();
+    // If a dictation is running on a DIFFERENT button/field, fully stop it first.
+    if(VOICE.state!=='IDLE'){ voiceStop(VOICE.btn,VOICE.inputId); }
+
+    // Begin a fresh dictation for this button/field.
+    const liveInput=()=>document.getElementById(inputId)||inp;
+    VOICE.btn=micBtn; VOICE.inputId=inputId; VOICE.onText=onText;
+    VOICE.baseText=(liveInput().value)||'';
+    VOICE.sessionFull='';
+    voiceStartSession(SR,inputId,inp);
   };
+}
+
+// Separator helper: add a space only if base is non-empty and doesn't already end in whitespace.
+function _voiceSep(base){ return (base && !/\s$/.test(base)) ? ' ' : ''; }
+
+// Start (or auto-restart) a recognition session. Bumps the generation so any
+// callbacks from a previous recognizer are ignored.
+function voiceStartSession(SR,inputId,fallbackNode){
+  const myGen = ++VOICE.gen;
+  VOICE.state='STARTING';
+  VOICE.log('startSession');
+  const liveInput=()=>document.getElementById(inputId)||fallbackNode;
+  let rec;
+  try{ rec=new SR(); }
+  catch(err){ VOICE.state='IDLE'; VOICE.rec=null; _voiceRecog=null;_voiceActiveBtn=null;
+    if(VOICE.btn)VOICE.btn.classList.remove('recording');
+    toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable'); return; }
+  VOICE.rec=rec; _voiceRecog=rec; _voiceActiveBtn=VOICE.btn;
+  rec.lang=voiceLang(); rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+
+  rec.onstart=()=>{
+    if(myGen!==VOICE.gen){VOICE.log('onstart IGNORED (stale gen='+myGen+')');return;}
+    VOICE.state='LISTENING';
+    if(VOICE.btn)VOICE.btn.classList.add('recording');
+    toast(L==='fa'?'بگویید...':'Listening...');
+    VOICE.log('onstart');
+  };
+  rec.onresult=(e)=>{
+    if(myGen!==VOICE.gen){VOICE.log('onresult IGNORED (stale gen='+myGen+')');return;}   // stale callback guard
+    let full='';
+    for(let i=0;i<e.results.length;i++){
+      const seg=(e.results[i][0].transcript||'').trim();
+      if(seg)full=full?(full+' '+seg):seg;
+    }
+    VOICE.sessionFull=full;
+    const val=VOICE.baseText+(full?_voiceSep(VOICE.baseText):'')+full;
+    liveInput().value=val;
+    if(typeof VOICE.onText==='function')VOICE.onText(val);
+    VOICE.log('onresult resultIndex='+e.resultIndex+' text="'+full+'"');
+  };
+  rec.onerror=(e)=>{
+    if(myGen!==VOICE.gen){VOICE.log('onerror IGNORED (stale gen='+myGen+')');return;}
+    const err=e.error;
+    VOICE.log('onerror '+err);
+    if(err==='not-allowed'||err==='service-not-allowed'){
+      toast(L==='fa'?'دسترسی میکروفون رد شد. از تنظیمات اجازه دهید':'Microphone blocked. Allow it in settings');
+      voiceStop(VOICE.btn,inputId);
+    }else if(err==='audio-capture'){
+      toast(L==='fa'?'میکروفونی یافت نشد':'No microphone found');
+      voiceStop(VOICE.btn,inputId);
+    }else if(err!=='aborted'&&err!=='no-speech'){
+      toast(L==='fa'?'خطای میکروفون':'Microphone error');
+    }
+  };
+  rec.onend=()=>{
+    if(myGen!==VOICE.gen){VOICE.log('onend IGNORED (stale gen='+myGen+')');return;}   // stale callback guard
+    // Fold this session's transcript into baseText exactly once.
+    if(VOICE.sessionFull){
+      VOICE.baseText=VOICE.baseText+_voiceSep(VOICE.baseText)+VOICE.sessionFull;
+      VOICE.sessionFull='';
+      liveInput().value=VOICE.baseText;
+      if(typeof VOICE.onText==='function')VOICE.onText(VOICE.baseText);
+    }
+    VOICE.log('onend');
+    // Only auto-restart if we are still meant to be dictating (state not STOPPING).
+    if(VOICE.state==='STOPPING'){
+      _voiceFinalize(inputId);
+      return;
+    }
+    VOICE.state='RESTART_PENDING';
+    VOICE.restartTimer=setTimeout(()=>{
+      VOICE.restartTimer=null;
+      if(VOICE.state!=='RESTART_PENDING'){VOICE.log('restart aborted (state changed)');return;}
+      voiceStartSession(SR,inputId,fallbackNode);
+    },150);
+    VOICE.log('restart scheduled timer='+VOICE.restartTimer);
+  };
+  try{ rec.start(); }
+  catch(err){ VOICE.log('start() threw '+ (err&&err.message)); }
+}
+
+// Deterministic stop: cancel any pending restart FIRST, mark STOPPING, then stop
+// the recognizer. The generation bump guarantees no straggler callback from the
+// old recognizer can touch the editor.
+function voiceStop(btn,inputId){
+  VOICE.log('STOP requested');
+  // 1) Cancel pending auto-restart so it can never fire after a manual stop.
+  if(VOICE.restartTimer){ clearTimeout(VOICE.restartTimer); VOICE.restartTimer=null; VOICE.log('restart cancelled'); }
+  VOICE.state='STOPPING';
+  // 2) Invalidate the current generation so any in-flight callbacks are ignored.
+  VOICE.gen++;
+  // 3) Stop the recognizer (async on Android; the gen guard covers stragglers).
+  const rec=VOICE.rec;
+  if(rec){ try{rec.stop();}catch(_){} }
+  // 4) Finalize deterministically HERE. We do NOT wait for the recognizer's onend,
+  //    because the generation bump above intentionally makes that onend a no-op
+  //    (stale-guard). Relying on it would leave the machine stuck in STOPPING.
+  _voiceFinalize(inputId);
+}
+
+// Return to IDLE, commit text to state, and flush any deferred render.
+function _voiceFinalize(inputId){
+  VOICE.state='IDLE';
+  if(VOICE.btn)VOICE.btn.classList.remove('recording');
+  VOICE.rec=null; _voiceRecog=null; _voiceActiveBtn=null;
+  VOICE.log('finalize -> IDLE');
+  // Commit dictated text immediately (bypass 500ms debounce) so a deferred render
+  // rebuilds the field from fresh state, not stale DB content.
+  if(typeof activeNoteId!=='undefined' && activeNoteId && typeof noteFlushPending==='function'){
+    try{noteFlushPending(activeNoteId);}catch(_){}
+  }
+  if(_renderDeferred){_renderDeferred=false;render();}
 }
 
 function quickAdd(){
