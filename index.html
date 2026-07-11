@@ -335,15 +335,16 @@ body.light .trow-title{color:var(--ink)}
 @media (min-width:900px){.note-editor-page{left:320px!important;width:auto!important}}
 @media (min-width:1400px){.note-editor-page{left:360px!important}}
 .note-editor-head{flex:none;padding:4px 20px 6px}
-.note-ruled-area{flex:1;min-height:0;overflow-y:auto;position:relative}
+.note-ruled-area{flex:1;min-height:0;min-width:0;max-width:100%;overflow-y:auto;overflow-x:hidden;position:relative}
 .note-editor-page{--note-line-color:rgba(0,0,0,.18)}
 .note-editor-page.dark-paper{--note-line-color:rgba(255,255,255,.16)}
-.note-body-input{width:100%;min-height:100%;background:transparent;
+.note-body-input{width:100%;max-width:100%;min-width:0;min-height:100%;background:transparent;
   border:none!important;outline:none!important;
   font-family:inherit;font-size:18px;
-  white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;
+  white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;
+  overflow-x:hidden!important;overflow-y:auto;
   background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
-  background-size:100% 32px;background-position:0 41px;background-attachment:local;
+  background-size:100% 32px;background-position:0 41px;
   line-height:32px;padding:10px 20px;
   margin:0;resize:none;display:block;box-sizing:border-box}
 .note-ruled-checklist{background-image:linear-gradient(var(--note-line-color) 1px,transparent 1px);
@@ -1251,7 +1252,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v211';
+const APP_VERSION='v212';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4092,8 +4093,9 @@ function renderNoteDetail(){
       </div>
     </div>`;
   }else{
+    const _bodyDir = /[\u0600-\u06FF]/.test(n.body||'') ? 'rtl' : (/[A-Za-z]/.test(n.body||'') ? 'ltr' : (L==='fa'?'rtl':'ltr'));
     html+=`<div class="note-ruled-area">
-      <textarea class="note-body-input" id="note-body" dir="auto" style="color:${ink};font-size:${notePrefs().fontSize||18}px;font-family:${noteFontCSS(notePrefs().fontFamily)}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
+      <textarea class="note-body-input" id="note-body" dir="${_bodyDir}" wrap="soft" style="color:${ink};font-size:${notePrefs().fontSize||18}px;font-family:${noteFontCSS(notePrefs().fontFamily)};direction:${_bodyDir}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
     </div>`;
   }
 
@@ -6304,7 +6306,11 @@ function voiceStartSession(SR,inputId,fallbackNode){
     if(VOICE.btn)VOICE.btn.classList.remove('recording');
     toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable'); return; }
   VOICE.rec=rec; _voiceRecog=rec; _voiceActiveBtn=VOICE.btn;
-  rec.lang=voiceLang(); rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.lang=voiceLang(); rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
+  // committedCount = number of result entries already appended to baseText.
+  // Ensures each FINAL result is appended exactly once, and interim previews
+  // are shown on top of the committed text but never permanently added twice.
+  let committedCount=0;
 
   rec.onstart=()=>{
     if(myGen!==VOICE.gen){VOICE.log('onstart IGNORED (stale gen='+myGen+')');return;}
@@ -6315,16 +6321,23 @@ function voiceStartSession(SR,inputId,fallbackNode){
   };
   rec.onresult=(e)=>{
     if(myGen!==VOICE.gen){VOICE.log('onresult IGNORED (stale gen='+myGen+')');return;}   // stale callback guard
-    let full='';
-    for(let i=0;i<e.results.length;i++){
-      const seg=(e.results[i][0].transcript||'').trim();
-      if(seg)full=full?(full+' '+seg):seg;
+    // 1) Append any NEW finalized results exactly once (tracked by index).
+    for(let i=committedCount;i<e.results.length;i++){
+      if(e.results[i].isFinal){
+        const seg=(e.results[i][0].transcript||'').trim();
+        if(seg){ VOICE.baseText=VOICE.baseText+_voiceSep(VOICE.baseText)+seg; }
+        committedCount=i+1;
+      }
     }
-    VOICE.sessionFull=full;
-    const val=VOICE.baseText+(full?_voiceSep(VOICE.baseText):'')+full;
+    // 2) Temporary interim preview from the trailing non-final result only.
+    let interim='';
+    const last=e.results[e.results.length-1];
+    if(last && !last.isFinal){ interim=(last[0].transcript||'').trim(); }
+    // 3) Show committed base + interim preview (interim is NEVER committed here).
+    const val=VOICE.baseText+(interim?_voiceSep(VOICE.baseText):'')+interim;
     liveInput().value=val;
     if(typeof VOICE.onText==='function')VOICE.onText(val);
-    VOICE.log('onresult resultIndex='+e.resultIndex+' text="'+full+'"');
+    VOICE.log('onresult idx='+e.resultIndex+' committed='+committedCount+' interim="'+interim+'"');
   };
   rec.onerror=(e)=>{
     if(myGen!==VOICE.gen){VOICE.log('onerror IGNORED (stale gen='+myGen+')');return;}
@@ -6342,26 +6355,14 @@ function voiceStartSession(SR,inputId,fallbackNode){
   };
   rec.onend=()=>{
     if(myGen!==VOICE.gen){VOICE.log('onend IGNORED (stale gen='+myGen+')');return;}   // stale callback guard
-    // Fold this session's transcript into baseText exactly once.
-    if(VOICE.sessionFull){
-      VOICE.baseText=VOICE.baseText+_voiceSep(VOICE.baseText)+VOICE.sessionFull;
-      VOICE.sessionFull='';
-      liveInput().value=VOICE.baseText;
-      if(typeof VOICE.onText==='function')VOICE.onText(VOICE.baseText);
-    }
-    VOICE.log('onend');
-    // Only auto-restart if we are still meant to be dictating (state not STOPPING).
-    if(VOICE.state==='STOPPING'){
-      _voiceFinalize(inputId);
-      return;
-    }
-    VOICE.state='RESTART_PENDING';
-    VOICE.restartTimer=setTimeout(()=>{
-      VOICE.restartTimer=null;
-      if(VOICE.state!=='RESTART_PENDING'){VOICE.log('restart aborted (state changed)');return;}
-      voiceStartSession(SR,inputId,fallbackNode);
-    },150);
-    VOICE.log('restart scheduled timer='+VOICE.restartTimer);
+    // baseText already holds every finalized result; drop any trailing interim
+    // that never finalized, and commit.
+    liveInput().value=VOICE.baseText;
+    if(typeof VOICE.onText==='function')VOICE.onText(VOICE.baseText);
+    VOICE.log('onend (auto-restart DISABLED) -> finalize');
+    // AUTO-RESTART DISABLED for reliability: the session ends dictation. The user
+    // taps the mic again to continue. Guarantees no reinsertion of old speech.
+    _voiceFinalize(inputId);
   };
   try{ rec.start(); }
   catch(err){ VOICE.log('start() threw '+ (err&&err.message)); }
