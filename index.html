@@ -1241,7 +1241,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v205';
+const APP_VERSION='v206';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -6222,9 +6222,17 @@ function attachVoiceInput(micId,inputId,onText){
     micBtn._userStopped=false;
     // Captured ONCE for the whole dictation action (not re-read from inp.value
     // on every auto-restart) so an unfinished interim guess can never get
-    // locked in as the new base and re-appended — that was the repeat bug.
+    // committedText = everything already locked in (previous text + finalized
+    // speech). interimText = the current in-progress guess, shown live but never
+    // committed until the engine finalizes it. Each finalized segment is folded
+    // in exactly ONCE, keyed off event.resultIndex, so nothing is double-counted.
     let committedText=inp.value||'';
-    let needsSpace=committedText && !/\s$/.test(committedText);
+    const paint=(interim)=>{
+      const needsSp=committedText && !/\s$/.test(committedText);
+      const val=committedText+(needsSp&&interim?' ':'')+(interim||'');
+      inp.value=val;
+      if(typeof onText==='function')onText(val);
+    };
     const startRecognition=()=>{
       try{
         const rec=new SR();
@@ -6233,22 +6241,32 @@ function attachVoiceInput(micId,inputId,onText){
         rec.continuous=true;
         rec.interimResults=true;
         rec.maxAlternatives=1;
-        let lastFinalText='';
+        // Per-session guard: how many result entries we've already folded into
+        // committedText. The engine re-sends the whole cumulative results array
+        // on every event, so without this we'd re-append the same finals over
+        // and over — that is the repetition bug.
+        let sessionFinalCount=0;
         rec.onstart=()=>{micBtn.classList.add('recording');toast(L==='fa'?'بگویید...':'Listening...');};
         rec.onresult=(e)=>{
-          let finalParts=[],interim='';
+          let interim='';
           for(let i=0;i<e.results.length;i++){
-            const seg=(e.results[i][0].transcript||'').trim();
-            if(!seg)continue;
-            if(e.results[i].isFinal)finalParts.push(seg);
-            else interim=seg; // only the trailing in-progress guess matters
+            const res=e.results[i];
+            const seg=(res[0].transcript||'').trim();
+            if(res.isFinal){
+              // Commit each finalized entry exactly once, keyed by its index.
+              if(i>=sessionFinalCount && seg){
+                const needsSp=committedText && !/\s$/.test(committedText);
+                committedText=committedText+(needsSp?' ':'')+seg;
+              }
+            }else if(seg){
+              interim=interim?(interim+' '+seg):seg;
+            }
           }
-          lastFinalText=finalParts.join(' ');
-          const sep1=needsSpace?' ':'';
-          const sep2=(lastFinalText&&interim)?' ':'';
-          const preview=committedText+sep1+lastFinalText+sep2+interim;
-          inp.value=preview;
-          if(typeof onText==='function')onText(preview);
+          // Everything up to the last contiguous final is now committed.
+          let fc=0;
+          for(let i=0;i<e.results.length;i++){ if(e.results[i].isFinal)fc=i+1; else break; }
+          if(fc>sessionFinalCount)sessionFinalCount=fc;
+          paint(interim);
         };
         rec.onerror=(e)=>{
           const err=e.error;
@@ -6267,24 +6285,9 @@ function attachVoiceInput(micId,inputId,onText){
           }
         };
         rec.onend=()=>{
-          // Fold only the FINALIZED text from this session into the committed
-          // base; a trailing, never-finalized interim guess is dropped so it
-          // can't be duplicated by the next session's own interim results.
-          if(lastFinalText){
-            committedText=committedText+(needsSpace?' ':'')+lastFinalText;
-            needsSpace=committedText && !/\s$/.test(committedText);
-            inp.value=committedText;
-            if(typeof onText==='function')onText(committedText);
-          }
-          // The browser can silently end a session after a pause even with
-          // continuous=true. Only treat it as truly finished if the user
-          // tapped the mic to stop, or an unrecoverable error already fired.
-          if(_voiceActiveBtn===micBtn&&!micBtn._userStopped){
-            setTimeout(startRecognition,150);
-          }else{
-            micBtn.classList.remove('recording');
-            if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
-          }
+          paint('');
+          micBtn.classList.remove('recording');
+          if(_voiceActiveBtn===micBtn){_voiceRecog=null;_voiceActiveBtn=null;}
         };
         rec.start();
       }catch(err){
