@@ -539,8 +539,12 @@ body.light .trow-title{color:var(--ink)}
 .note-grid-list .note-card-body{display:block;-webkit-line-clamp:unset;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;order:1;margin:0}
 .note-grid-list .note-card-meta{order:2;margin:0;flex:none;max-width:40%;overflow:hidden;flex-wrap:nowrap}
 .note-grid-list .note-card-when{display:none}
-.note-due-row{display:flex;gap:10px;padding:6px 20px 2px;align-items:center;flex-wrap:wrap}
-.note-due-row input[type=date],.note-due-row input[type=time]{flex:1;min-width:120px}
+.note-due-row{display:flex;gap:10px;padding:10px 14px;margin:6px 16px 4px;align-items:flex-end;flex-wrap:wrap;
+  background:rgba(109,94,252,.1);border:1px solid rgba(109,94,252,.35);border-radius:12px}
+.note-due-row input[type=date],.note-due-row input[type=time]{flex:1;min-width:120px;
+  background:#fff!important;color:#1a1a1a!important;border:1.5px solid #6d5efc!important;border-radius:8px;
+  padding:9px 10px;font-size:15px;-webkit-appearance:none;appearance:none}
+.note-due-row label{color:#6d5efc!important;font-weight:600}
 .note-topbar{display:flex;align-items:center;gap:8px;padding:12px 14px 6px}
 .note-topbar2{display:flex;align-items:center;gap:2px;padding:2px 10px 6px}
 .note-pill{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.45);
@@ -1253,7 +1257,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v217';
+const APP_VERSION='v218';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4103,11 +4107,11 @@ function renderNoteDetail(){
   </div>
   ${ui.showDue?`<div class="note-due-row">
     <div style="flex:1;min-width:0">
-      <label style="display:block;font-size:12px;opacity:.7;margin:0 2px 3px;color:${ink}">${L==='fa'?'تاریخ':'Date'}</label>
+      <label style="display:block;font-size:12px;margin:0 2px 4px">${L==='fa'?'تاریخ':'Date'}</label>
       <input type="date" class="finput" id="note-due-date" value="${esc(n.dueDate||'')}">
     </div>
     <div style="flex:1;min-width:0">
-      <label style="display:block;font-size:12px;opacity:.7;margin:0 2px 3px;color:${ink}">${L==='fa'?'ساعت':'Time'}</label>
+      <label style="display:block;font-size:12px;margin:0 2px 4px">${L==='fa'?'ساعت':'Time'}</label>
       <input type="time" class="finput" id="note-due-time" value="${esc(n.dueTime||'')}">
     </div>
   </div>`:''}
