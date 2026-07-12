@@ -356,6 +356,7 @@ body.light .trow-title{color:var(--ink)}
 .note-check-text{flex:1;background:none;border:none;outline:none;font-size:16px;line-height:32px;padding:0}
 .note-check-text.done{text-decoration:line-through;opacity:.55}
 .note-tags-area{flex:none;padding:6px 20px 10px}
+.note-tag-chip{display:inline-flex;align-items:center;font-size:13px;padding:3px 9px;border-radius:12px;border:1px solid;background:rgba(128,128,128,.1)}
 /* Colour picker: fixed box so it can never shift the header layout */
 .note-color-input-wrap{position:relative;width:36px;height:30px;min-width:36px;flex:0 0 36px;
   border-radius:8px;overflow:visible;border:1px solid rgba(128,128,128,.5);cursor:pointer;padding:0;
@@ -1252,7 +1253,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v214';
+const APP_VERSION='v215';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4143,8 +4144,8 @@ function renderNoteDetail(){
 
   html+=`<div id="note-tags-area" class="note-tags-area">
     <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-      ${(n.tags||[]).map(t=>`<span class="chip" style="color:${ink}">#${esc(t)} <span data-note-tag-del="${esc(t)}" style="cursor:pointer;opacity:.7">✕</span></span>`).join('')}
-      <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:${ink};opacity:.75;font-size:12px;width:70px;outline:none">
+      ${(n.tags||[]).map(t=>`<span class="note-tag-chip" style="color:${ink};border-color:${ink}44">#${esc(t)} <span data-note-tag-del="${esc(t)}" style="cursor:pointer;opacity:.6;margin-inline-start:2px">✕</span></span>`).join('')}
+      <input id="note-tag-input" placeholder="${L==='fa'?'+ برچسب':'+ tag'}" style="background:none;border:none;color:${ink};opacity:.85;font-size:13px;min-width:90px;flex:1;outline:none">
     </div>
   </div>
   <div class="note-bottom-toolbar">
