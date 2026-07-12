@@ -1336,7 +1336,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v220';
+const APP_VERSION='v221';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -3595,6 +3595,7 @@ const PAY_TYPE_META={
 
 // Built-in categories (req 2). Custom categories are stored in DB.meta.payCategories.
 const PAY_BUILTIN_CATEGORIES=['Electricity','Water','Gas','Internet','Phone','Rent','Insurance','Subscription','Loan','Instalment','Membership','Rates / Council','Medical','Education','Transport','Other'];
+const PAY_TITLE_SUGGEST=['Electricity','Water','Gas','Internet','Mobile','Phone','Rent','Mortgage','Insurance','Health Insurance','Car Insurance','Home Insurance','Netflix','Spotify','Apple','Apple Music','iCloud','Google','Google One','Microsoft','Microsoft 365','Amazon','Amazon Prime','YouTube Premium','Disney+','Gym','Credit Card','Car Registration','Fuel','Tax','Income Tax','GST','School Fees','Childcare','Council Rates','Strata','Loan Repayment','Car Loan','Personal Loan','Phone Plan','Broadband'];
 function payCategoriesAll(){
   const custom=(DB.meta.payCategories||[]);
   const seen={}, out=[];
@@ -4092,10 +4093,8 @@ function payOpenEditor(id){
   const folders=payFoldersAll();
   openSheet(`<h3>${editing?(L==='fa'?'ویرایش پرداخت':'Edit payment'):(L==='fa'?'پرداخت جدید':'New payment')}</h3>
     <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
-      <div class="qa-input-row">
-        <input class="finput" id="pay-f-title" value="${esc(p.title||'')}" placeholder="${L==='fa'?'مثلاً برق':'e.g. Electricity'}">
-        ${voiceMicHTML('pay-title')}
-      </div>
+      <input class="finput" id="pay-f-title" list="pay-title-list" autocomplete="off" value="${esc(p.title||'')}" placeholder="${L==='fa'?'مثلاً برق':'e.g. Electricity'}">
+      <datalist id="pay-title-list">${PAY_TITLE_SUGGEST.map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist>
     </div>
     <div class="fld pay-form-grid">
       <div class="pay-fg-amt"><label>${L==='fa'?'مبلغ':'Amount'}</label>
@@ -4161,7 +4160,6 @@ function payOpenEditor(id){
   });
   const recSel=document.getElementById('pay-f-rec');
   recSel.onchange=()=>{ document.getElementById('pay-f-rule-wrap').style.display=recSel.value==='custom'?'':'none'; };
-  attachVoiceInput('mic-pay-title','pay-f-title');
   attachVoiceInput('mic-pay-notes','pay-f-notes');
   // Currency select with custom option
   const curSel=document.getElementById('pay-f-currency');
@@ -4210,10 +4208,12 @@ function payOpenEditor(id){
       color:selColor
     };
     if(!data.title){ toast(L==='fa'?'عنوان لازم است':'Title required'); return; }
+    if(data.category)payRememberCategory(data.category);
     if(editing){ payUpdate(id,data); }
     else{ const nid=payCreate(data); payActiveId=nid; }
+    DB.meta.payDefaultCurrency=data.currency;
+    saveDB();
     closeSheet();
-    if(DB.meta.payDefaultCurrency!==data.currency && !editing){ /* remember last used currency */ DB.meta.payDefaultCurrency=data.currency; saveDB(); }
     render();
   };
 }
