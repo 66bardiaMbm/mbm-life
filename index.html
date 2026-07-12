@@ -1253,7 +1253,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v215';
+const APP_VERSION='v217';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -6305,7 +6305,7 @@ function attachVoiceInput(micId,inputId,onText){
     // Toggle OFF: base the decision on STATE, never on _voiceRecog being non-null.
     // This is the fix for "stop during the restart window starts a new session":
     // LISTENING/STARTING/RESTART_PENDING all mean "a dictation is in progress".
-    if(VOICE.btn===micBtn && (VOICE.state==='LISTENING'||VOICE.state==='STARTING'||VOICE.state==='RESTART_PENDING')){
+    if(VOICE.btn===micBtn && (VOICE.state==='LISTENING'||VOICE.state==='STARTING')){
       voiceStop(micBtn,inputId);
       return;
     }
@@ -6356,7 +6356,7 @@ function voiceStartSession(SR,inputId,fallbackNode){
     if(VOICE.btn)VOICE.btn.classList.remove('recording');
     toast(L==='fa'?'میکروفون در دسترس نیست':'Microphone unavailable'); return; }
   VOICE.rec=rec; _voiceRecog=rec; _voiceActiveBtn=VOICE.btn;
-  rec.lang=voiceLang(); rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.lang=voiceLang(); rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
   let committedCount=0;   // finalized result entries already inserted (this session)
   const wasRestart=!!VOICE._restarted; VOICE._restarted=false;
   let restartSeeded=!wasRestart;   // if restarted, seed committedCount on first event
@@ -6455,22 +6455,14 @@ function voiceStartSession(SR,inputId,fallbackNode){
     // Drop any trailing interim that never finalized.
     const node=liveInput();
     if(VOICE.interimLen>0){ showInterim(node,''); }
-    VOICE.log('onend');
-    if(VOICE.state==='STOPPING'){ _voiceFinalize(inputId); return; }
-    // Fully detach THIS recognizer before restarting so it can never deliver more.
-    try{ rec.onresult=null; rec.onend=null; rec.onstart=null; rec.onerror=null; rec.abort(); }catch(_){}
+    VOICE.log('onend -> finalize (no auto-restart)');
+    // NO AUTO-RESTART. The session ends here (engine silence/timeout or user stop).
+    // Because we never restart, the engine can never re-deliver previously
+    // recognized words — repetition is structurally impossible. To keep dictating,
+    // the user taps the mic again (a fresh session starts from the cursor).
+    try{ rec.onresult=null; rec.onend=null; rec.onstart=null; rec.onerror=null; }catch(_){}
     VOICE.rec=null;
-    VOICE.state='RESTART_PENDING';
-    if(VOICE.btn){ VOICE.btn.classList.remove('recording'); VOICE.btn.classList.add('restarting'); }
-    VOICE.restartTimer=setTimeout(()=>{
-      VOICE.restartTimer=null;
-      if(VOICE.state!=='RESTART_PENDING'){VOICE.log('restart aborted (state changed)');return;}
-      if(VOICE.btn){ VOICE.btn.classList.remove('restarting'); }
-      // Mark restart so the new session seeds committedCount past any carried-over results.
-      VOICE._restarted=true;
-      voiceStartSession(SR,inputId,fallbackNode);
-    },300);
-    VOICE.log('restart scheduled timer='+VOICE.restartTimer);
+    _voiceFinalize(inputId);
   };
   try{ rec.start(); }
   catch(err){ VOICE.log('start() threw '+ (err&&err.message)); }
