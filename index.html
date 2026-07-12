@@ -372,6 +372,35 @@ body.light .trow-title{color:var(--ink)}
   display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 /* Fixed-height folder switcher — replaces the old wrapping tab row so the
    home screen never shrinks as folders are added. */
+.pay-dash{display:flex;gap:8px;padding:4px 16px 8px}
+.pay-dash-card{flex:1;background:var(--s1);border:1px solid var(--b1);border-left:3px solid var(--pc,#6e56f8);border-radius:12px;padding:10px 12px;min-width:0}
+.pay-dash-k{font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pay-dash-v{font-size:15px;font-weight:800;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pay-mini-row{display:flex;gap:8px;padding:0 16px 8px}
+.pay-mini{flex:1;text-align:center;font-size:11px;color:var(--ink3);background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:6px 2px}
+.pay-mini-n{display:block;font-size:17px;font-weight:800;color:var(--ink)}
+.pay-mini-over .pay-mini-n{color:#ef4444}
+.pay-chips{display:flex;gap:6px;padding:0 16px 8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.pay-chip{flex:none;background:var(--s2);border:1px solid var(--b1);color:var(--ink2);border-radius:16px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap}
+.pay-chip.on{background:#f59e0b;border-color:#f59e0b;color:#fff}
+.pay-list{background:var(--s1);border-top:1px solid var(--b1)}
+.pay-row{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--b1);cursor:pointer}
+.pay-row-ic{width:38px;height:38px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.pay-row-main{flex:1;min-width:0}
+.pay-row-title{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pay-row-meta{display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;align-items:center}
+.pay-badge{font-size:11px;border:1px solid;border-radius:6px;padding:1px 6px}
+.pay-mchip{font-size:11px;color:var(--ink3);background:var(--s3);border-radius:6px;padding:1px 6px}
+.pay-row-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
+.pay-row-amt{font-size:15px;font-weight:800;white-space:nowrap}
+.pay-paid-btn{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--b2);background:none;color:var(--ink3);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.pay-paid-btn.on{background:#22c55e;border-color:#22c55e;color:#fff}
+.pay-detail-hero{display:flex;align-items:center;gap:14px;background:var(--s1);border:1px solid var(--b1);border-radius:14px;padding:16px}
+.pay-detail-rows{margin-top:12px;background:var(--s1);border:1px solid var(--b1);border-radius:14px;overflow:hidden}
+.pay-drow{display:flex;justify-content:space-between;gap:12px;padding:11px 14px;border-bottom:1px solid var(--b1)}
+.pay-drow:last-child{border-bottom:none}
+.pay-drow-k{font-size:13px;color:var(--ink3);flex:none}
+.pay-drow-v{font-size:14px;font-weight:600;text-align:right;min-width:0;word-break:break-word}
 .note-folder-bar{display:flex;align-items:center;gap:8px;padding:8px 12px 4px}
 .note-select-bar{background:rgba(109,94,252,.14);border-radius:12px;margin:4px 8px 0;padding:6px 10px}
 .note-select-count{flex:1;font-weight:700;font-size:15px}
@@ -1257,7 +1286,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v218';
+const APP_VERSION='v219';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1322,6 +1351,8 @@ function blankDB(){
       noteItems:{}, // {id,kind:'text'|'checklist',title,body,items[],color,folderId,tags[],
                     //  pinned,archivedAt,trashedAt,createdAt,updatedAt,versions[]}
       noteFolders:{}, // {id,name,color,createdAt,updatedAt,archivedAt}
+      payments:{},    // Payment Center — see PAYMENT DATA MODEL comment below
+      payFolders:{},  // {id,name,color,createdAt,updatedAt,archivedAt}
     }
   };
 }
@@ -1345,7 +1376,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
@@ -1756,6 +1787,11 @@ let plannedFilter='all'; // 'overdue'|'today'|'tomorrow'|'week'|'later'|'all'
 let searchQuery='';
 let noteView='home';      // Notes: 'home' | 'detail' | 'archive' | 'trash' | 'history'
 let activeNoteId=null;
+let payView='home';       // Payments: 'home' | 'detail' | 'editor' | 'archive' | 'trash' | 'history'
+let payActiveId=null;
+let payFilter='all';      // all | pending | overdue | paid | archived | trash
+let paySearch='';
+let payListLimit=50;      // lazy rendering window (req 11)
 let noteSearch='';
 let noteSortMode='modified'; // 'modified'|'created'|'alpha'|'color'
 let noteFilterFolder=null;   // folderId or null
@@ -2264,6 +2300,7 @@ function renderListDetail(){
     // filter below. "assigned" is task-only (shopping lists have no assignee).
     if(activeSmartView!=='assigned'){
       tasks=tasks.concat(shopListsAsTasks());
+      tasks=tasks.concat(paymentsAsTasks());
     }
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
@@ -2372,6 +2409,28 @@ function taskRowFlat(t,isOverdue){
       </div>
       <div class="trow-star-wrap">
         <button class="star ${t.pinned?'on':''}" data-shop-pin="${t.shopId}">★</button>
+      </div>
+    </div>`;
+  }
+  // ── Payment row: same chrome as a Task, payment-specific wiring ──
+  if(t.kind==='pay'){
+    const p=paymentsMap()[t.payId];
+    const st=p?payDerivedStatus(p):'pending';
+    let pmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'پرداخت':'Payment'}</span>`;
+    pmeta+=`<span class="chip">${payFmt(t.amount,t.currency)}</span>`;
+    if(t.dueDate&&!over)pmeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
+    if(over)pmeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+    const pOverStyle=over?'border-left:2px solid var(--danger);':'';
+    return `<div class="trow-flat${t.done?' done':''}" data-pay-open-task="${t.payId}" style="${pOverStyle}">
+      <div class="trow-chk-wrap">
+        <div class="chk${t.done?' on':''}" data-pay-complete="${t.payId}" title="${L==='fa'?'علامت پرداخت':'Mark paid'}"></div>
+      </div>
+      <div class="trow-content">
+        <div class="trow-title" dir="auto">${esc(t.text)}</div>
+        <div class="trow-meta-row">${pmeta}</div>
+      </div>
+      <div class="trow-star-wrap">
+        <button class="star ${t.pinned?'on':''}" data-pay-pin="${t.payId}">★</button>
       </div>
     </div>`;
   }
@@ -3445,16 +3504,625 @@ function renderApptCalendar(all){
   </div>`;
 }
 
-// ═══════════ LIFE HUB (foundation only — modules are placeholders) ═══════════
-// Scalable module registry. Future milestones fill in each module's real page;
-// nothing here touches Tasks, Auth, Sync, or the Back model beyond navigation.
+// ═══════════════════════════════════════════════════════════════════════
+//  PAYMENT CENTER  (Life Hub module — production build)
+//  Architecture mirrors Tasks/Shopping/Notes:
+//    • entity map (DB.entities.payments) + folders (DB.entities.payFolders)
+//    • PaymentService: the ONLY place financial totals are computed
+//    • controllers: create/edit/lifecycle (never compute totals in UI)
+//    • projection: payAsTask() → joins My Day / Planned / All / Search
+//    • version history (payments[].versions[]) consistent with Notes
+//
+//  PAYMENT DATA MODEL (DB.entities.payments[id]):
+//   id,title,type,category,amount,currency,dueDate,dueTime,
+//   recurrence,recurrenceRule,status,paidDate,priority,starred,
+//   folderId,tags[],color,notes,archivedAt,deletedAt,createdAt,updatedAt,
+//   versions[], seq,
+//   future-ready (declared, unused): attachments[],receiptMeta,ocrMeta,
+//   aiMeta,notifMeta,calendarMeta,syncVersion,conflictMeta
+// ═══════════════════════════════════════════════════════════════════════
+const PAY_TYPES=['bill','subscription','rent','insurance','loan','instalment','membership','one-off','custom'];
+const PAY_RECURRENCE=['none','weekly','fortnightly','monthly','quarterly','yearly','custom'];
+const PAY_STATUS=['pending','paid','overdue'];
+const PAY_COLORS=['#f59e0b','#22c55e','#6e56f8','#ef4444','#3b82f6','#ec4899','#06b6d4','#a855f7'];
+const PAY_TYPE_META={
+  bill:{icon:'§',en:'Bill',fa:'قبض'},
+  subscription:{icon:'↻',en:'Subscription',fa:'اشتراک'},
+  rent:{icon:'⌂',en:'Rent',fa:'اجاره'},
+  insurance:{icon:'☂',en:'Insurance',fa:'بیمه'},
+  loan:{icon:'₪',en:'Loan',fa:'وام'},
+  instalment:{icon:'◑',en:'Instalment',fa:'قسط'},
+  membership:{icon:'♦',en:'Membership',fa:'عضویت'},
+  'one-off':{icon:'•',en:'One-off',fa:'یک‌بار'},
+  custom:{icon:'◆',en:'Custom',fa:'دلخواه'}
+};
+
+function paymentsMap(){ if(!DB.entities.payments)DB.entities.payments={}; return DB.entities.payments; }
+function payFoldersMap(){ if(!DB.entities.payFolders)DB.entities.payFolders={}; return DB.entities.payFolders; }
+function payFoldersAll(){ return Object.values(payFoldersMap()).filter(f=>!f.archivedAt&&!f.deletedAt); }
+
+// Live (not archived, not trashed) payments.
+function paymentsAll(){ return Object.values(paymentsMap()).filter(p=>!p.archivedAt&&!p.deletedAt); }
+function paymentsArchived(){ return Object.values(paymentsMap()).filter(p=>p.archivedAt&&!p.deletedAt); }
+function paymentsTrashed(){ return Object.values(paymentsMap()).filter(p=>p.deletedAt); }
+
+// Derive live status from stored status + due date (overdue is computed, never stale).
+function payDerivedStatus(p){
+  if(p.status==='paid')return 'paid';
+  const ts=todayStr();
+  if(p.dueDate && p.dueDate<ts)return 'overdue';
+  return 'pending';
+}
+
+/* ── PaymentService: the ONLY place totals are computed (req 2, 16) ──
+   Heavy loops are O(n) single passes; safe for 10k records because we never
+   build intermediate arrays per-metric — one reduce covers the dashboard. */
+const PaymentService={
+  _monthKey(dateStr){ return (dateStr||'').slice(0,7); },
+  currentMonthKey(){ return todayStr().slice(0,7); },
+  // Single-pass dashboard aggregation. Returns totals grouped by currency so
+  // multi-currency never sums apples to oranges (req 14).
+  dashboard(monthKey){
+    monthKey=monthKey||this.currentMonthKey();
+    const ts=todayStr();
+    const weekEnd=_addDays(ts,7);
+    const out={
+      committed:{}, paid:{}, remaining:{},   // maps: currency -> amount
+      dueToday:[], dueThisWeek:[], overdue:[], upcoming:[], paidList:[],
+      counts:{dueToday:0,dueThisWeek:0,overdue:0,upcoming:0,paid:0}
+    };
+    const add=(m,cur,amt)=>{ cur=cur||'—'; m[cur]=(m[cur]||0)+(Number(amt)||0); };
+    for(const p of paymentsAll()){
+      const st=payDerivedStatus(p);
+      const inMonth=this._monthKey(p.dueDate)===monthKey;
+      if(inMonth){
+        add(out.committed,p.currency,p.amount);
+        if(st==='paid') add(out.paid,p.currency,p.amount);
+        else add(out.remaining,p.currency,p.amount);
+      }
+      if(st==='paid'){ out.paidList.push(p); out.counts.paid++; }
+      else if(st==='overdue'){ out.overdue.push(p); out.counts.overdue++; }
+      else {
+        if(p.dueDate===ts){ out.dueToday.push(p); out.counts.dueToday++; }
+        if(p.dueDate>=ts && p.dueDate<=weekEnd){ out.dueThisWeek.push(p); out.counts.dueThisWeek++; }
+        if(p.dueDate>ts){ out.upcoming.push(p); out.counts.upcoming++; }
+      }
+    }
+    return out;
+  },
+  // Format a currency map like {AUD:120, USD:9} → "A$120.00 · $9.00"-ish.
+  formatMap(map){
+    const keys=Object.keys(map||{});
+    if(!keys.length)return payFmt(0,DB.meta.payDefaultCurrency||'AUD');
+    return keys.map(c=>payFmt(map[c],c)).join(' · ');
+  }
+};
+
+// Currency formatter (multi-currency; no hardcoded AUD — default configurable).
+function payFmt(amount,currency){
+  currency=currency||DB.meta.payDefaultCurrency||'AUD';
+  const n=Number(amount)||0;
+  try{ return new Intl.NumberFormat(L==='fa'?'fa-IR':'en-AU',{style:'currency',currency,currencyDisplay:'narrowSymbol'}).format(n); }
+  catch(_){ return n.toFixed(2)+' '+currency; }
+}
+
+/* ── Recurrence: compute NEXT occurrence date without duplicating entries ──
+   Marking a recurring payment paid advances its own dueDate to the next cycle
+   and reopens it (status pending) — we mutate the single record forward rather
+   than spawning historical clones (req 3). */
+function payNextDue(dateStr,recurrence,rule){
+  if(!dateStr)return dateStr;
+  const d=new Date(dateStr+'T00:00:00');
+  if(isNaN(d))return dateStr;
+  switch(recurrence){
+    case 'weekly': d.setDate(d.getDate()+7); break;
+    case 'fortnightly': d.setDate(d.getDate()+14); break;
+    case 'monthly': d.setMonth(d.getMonth()+1); break;
+    case 'quarterly': d.setMonth(d.getMonth()+3); break;
+    case 'yearly': d.setFullYear(d.getFullYear()+1); break;
+    case 'custom': {
+      const days=parseInt(rule,10); d.setDate(d.getDate()+(isNaN(days)?30:days)); break;
+    }
+    default: return dateStr; // 'none'
+  }
+  return d.toISOString().slice(0,10);
+}
+
+// Snapshot for version history (mirrors Notes' noteSnapshot).
+function paySnapshot(p){
+  if(!p.versions)p.versions=[];
+  p.versions.push({
+    at:now(),
+    title:p.title, amount:p.amount, currency:p.currency, type:p.type,
+    category:p.category, dueDate:p.dueDate, dueTime:p.dueTime,
+    recurrence:p.recurrence, recurrenceRule:p.recurrenceRule,
+    status:p.status, paidDate:p.paidDate, priority:p.priority,
+    starred:p.starred, folderId:p.folderId, tags:(p.tags||[]).slice(),
+    color:p.color, notes:p.notes
+  });
+  if(p.versions.length>50)p.versions=p.versions.slice(-50);
+}
+function payRestoreVersion(id,index){
+  const p=paymentsMap()[id]; if(!p||!p.versions||!p.versions[index])return;
+  paySnapshot(p);
+  const v=p.versions[index];
+  ['title','amount','currency','type','category','dueDate','dueTime','recurrence','recurrenceRule','status','paidDate','priority','starred','folderId','color','notes'].forEach(k=>{ if(k in v)p[k]=v[k]; });
+  p.tags=(v.tags||[]).slice();
+  p.updatedAt=now();
+  logActivity('edited','payment',id,{name:p.title||''});
+  saveDB(); render();
+}
+
+let _paySeqTop=(function(){ let mx=0; try{for(const id in (DB.entities.payments||{})){const s=DB.entities.payments[id].seq;if(typeof s==='number'&&s>mx)mx=s;}}catch(e){} return mx; })();
+
+// ── Controllers (lifecycle). None compute totals. All persist + log. ──
+function payCreate(data){
+  data=data||{};
+  const ts=now();
+  const id=uid();
+  const p={
+    id, seq:++_paySeqTop,
+    title:data.title||'', type:PAY_TYPES.includes(data.type)?data.type:'bill',
+    category:data.category||'', amount:Number(data.amount)||0,
+    currency:data.currency||DB.meta.payDefaultCurrency||'AUD',
+    dueDate:data.dueDate||'', dueTime:data.dueTime||'',
+    recurrence:PAY_RECURRENCE.includes(data.recurrence)?data.recurrence:'none',
+    recurrenceRule:data.recurrenceRule||'',
+    status:'pending', paidDate:null,
+    priority:data.priority||'none', starred:!!data.starred,
+    folderId:data.folderId||null, tags:data.tags||[],
+    color:data.color||'#f59e0b', notes:data.notes||'',
+    archivedAt:null, deletedAt:null, createdAt:ts, updatedAt:ts,
+    versions:[],
+    // future-ready (declared, intentionally unused this build):
+    attachments:[], receiptMeta:null, ocrMeta:null, aiMeta:null,
+    notifMeta:null, calendarMeta:null, syncVersion:1, conflictMeta:null
+  };
+  paymentsMap()[id]=p;
+  logActivity('created','payment',id,{name:p.title||''});
+  saveDB();
+  return id;
+}
+function payUpdate(id,patch){
+  const p=paymentsMap()[id]; if(!p)return;
+  paySnapshot(p);
+  Object.keys(patch||{}).forEach(k=>{ p[k]=patch[k]; });
+  p.updatedAt=now(); p.syncVersion=(p.syncVersion||1)+1;
+  logActivity('edited','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payMarkPaid(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  paySnapshot(p);
+  const ts=now();
+  if(p.recurrence && p.recurrence!=='none'){
+    // Advance the SAME record to its next occurrence; do not clone history.
+    p.dueDate=payNextDue(p.dueDate,p.recurrence,p.recurrenceRule);
+    p.status='pending'; p.paidDate=null;
+  }else{
+    p.status='paid'; p.paidDate=ts;
+  }
+  p.updatedAt=ts;
+  logActivity('paid','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payReopen(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  paySnapshot(p);
+  p.status='pending'; p.paidDate=null; p.updatedAt=now();
+  logActivity('reopened','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payDuplicate(id){
+  const p=paymentsMap()[id]; if(!p)return null;
+  const copy=payCreate({
+    title:(p.title||'')+(L==='fa'?' (کپی)':' (copy)'),
+    type:p.type, category:p.category, amount:p.amount, currency:p.currency,
+    dueDate:p.dueDate, dueTime:p.dueTime, recurrence:p.recurrence,
+    recurrenceRule:p.recurrenceRule, priority:p.priority, starred:p.starred,
+    folderId:p.folderId, tags:(p.tags||[]).slice(), color:p.color, notes:p.notes
+  });
+  return copy;
+}
+function payArchive(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  p.archivedAt=now(); p.updatedAt=p.archivedAt;
+  logActivity('archived','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payUnarchive(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  p.archivedAt=null; p.updatedAt=now();
+  logActivity('restored','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payTrash(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  p.deletedAt=now(); p.updatedAt=p.deletedAt;
+  logActivity('deleted','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payRestore(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  p.deletedAt=null; p.updatedAt=now();
+  logActivity('restored','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payPermanentDelete(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  logActivity('permanently_deleted','payment',id,{name:p.title||''});
+  delete paymentsMap()[id];
+  saveDB();
+}
+function payToggleStar(id){
+  const p=paymentsMap()[id]; if(!p)return;
+  p.starred=!p.starred; p.updatedAt=now();
+  logActivity(p.starred?'starred':'unstarred','payment',id,{name:p.title||''});
+  saveDB();
+}
+function payFolderCreate(name){
+  const id=uid(), ts=now();
+  payFoldersMap()[id]={id,name:name||'Folder',color:PAY_COLORS[payFoldersAll().length%PAY_COLORS.length],createdAt:ts,updatedAt:ts,archivedAt:null,deletedAt:null};
+  saveDB(); return id;
+}
+
+// ── Projection: a payment shaped as a task, so it flows through the SAME
+//    My Day / Planned / All / Search pipeline (req 4). Never duplicates filter logic.
+function payAsTask(p){
+  if(!p)return null;
+  return {
+    id:'pay:'+p.id, payId:p.id, kind:'pay',
+    text:p.title||(L==='fa'?'پرداخت':'Payment'),
+    dueDate:p.dueDate||'', dueTime:p.dueTime||'',
+    pinned:!!p.starred, done:payDerivedStatus(p)==='paid',
+    notes:p.notes||'', location:'', listId:null, priority:p.priority||null,
+    icon:(PAY_TYPE_META[p.type]||{}).icon||'§', color:p.color||'#f59e0b',
+    amount:p.amount, currency:p.currency
+  };
+}
+function paymentsAsTasks(){ return paymentsAll().map(payAsTask); }
+
+/* ═══════════ PAYMENT CENTER — UI ═══════════ */
+function payTypeLabel(t){ const m=PAY_TYPE_META[t]||PAY_TYPE_META.custom; return L==='fa'?m.fa:m.en; }
+function payRecLabel(r){
+  const en={none:'One-off',weekly:'Weekly',fortnightly:'Fortnightly',monthly:'Monthly',quarterly:'Quarterly',yearly:'Yearly',custom:'Custom'};
+  const fa={none:'یک‌بار',weekly:'هفتگی',fortnightly:'دوهفته',monthly:'ماهانه',quarterly:'فصلی',yearly:'سالانه',custom:'دلخواه'};
+  return (L==='fa'?fa:en)[r]||r;
+}
+
+// Apply the current filter + search to the payment pool (single source of filter logic).
+function payFilteredList(){
+  let list;
+  if(payFilter==='archived')list=paymentsArchived();
+  else if(payFilter==='trash')list=paymentsTrashed();
+  else{
+    list=paymentsAll();
+    if(payFilter==='pending')list=list.filter(p=>payDerivedStatus(p)==='pending');
+    else if(payFilter==='overdue')list=list.filter(p=>payDerivedStatus(p)==='overdue');
+    else if(payFilter==='paid')list=list.filter(p=>payDerivedStatus(p)==='paid');
+  }
+  const q=(paySearch||'').trim().toLowerCase();
+  if(q){
+    list=list.filter(p=>{
+      const folder=p.folderId?(payFoldersMap()[p.folderId]||{}).name:'';
+      return (p.title||'').toLowerCase().includes(q)
+        || (p.category||'').toLowerCase().includes(q)
+        || (p.notes||'').toLowerCase().includes(q)
+        || (p.tags||[]).some(t=>String(t).toLowerCase().includes(q))
+        || String(p.amount||'').includes(q)
+        || String(folder||'').toLowerCase().includes(q);
+    });
+  }
+  // Sort: starred first, then by due date ascending, undated last.
+  list.sort((a,b)=>{
+    if(!!b.starred!==!!a.starred)return b.starred?1:-1;
+    const ad=a.dueDate||'9999', bd=b.dueDate||'9999';
+    if(ad!==bd)return ad<bd?-1:1;
+    return (a.title||'').localeCompare(b.title||'');
+  });
+  return list;
+}
+
+function renderPayments(){
+  if(payView==='detail') return payRenderDetail();
+  if(payView==='history') return payRenderHistory();
+  return payRenderHome();
+}
+
+function payRenderHome(){
+  const d=PaymentService.dashboard();
+  const filtered=payFilteredList();
+  const shown=filtered.slice(0,payListLimit);
+  const chips=[
+    ['all',L==='fa'?'همه':'All'],
+    ['pending',L==='fa'?'در انتظار':'Pending'],
+    ['overdue',L==='fa'?'گذشته':'Overdue'],
+    ['paid',L==='fa'?'پرداخت‌شده':'Paid'],
+    ['archived',L==='fa'?'بایگانی':'Archived'],
+    ['trash',L==='fa'?'سطل':'Trash']
+  ];
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">§ ${L==='fa'?'مرکز پرداخت':'Payment Center'}</div>
+    <button class="hbtn" id="pay-new" style="width:40px;height:40px;border-radius:12px;background:var(--s2);border:1px solid var(--b1);color:var(--ink);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">＋</button>
+  </div>`;
+
+  // Dashboard cards (all numbers from PaymentService — UI never computes).
+  html+=`<div class="pay-dash">
+    <div class="pay-dash-card" style="--pc:#6e56f8">
+      <div class="pay-dash-k">${L==='fa'?'تعهد این ماه':'Committed'}</div>
+      <div class="pay-dash-v">${PaymentService.formatMap(d.committed)}</div>
+    </div>
+    <div class="pay-dash-card" style="--pc:#22c55e">
+      <div class="pay-dash-k">${L==='fa'?'پرداخت‌شده':'Paid'}</div>
+      <div class="pay-dash-v">${PaymentService.formatMap(d.paid)}</div>
+    </div>
+    <div class="pay-dash-card" style="--pc:#f59e0b">
+      <div class="pay-dash-k">${L==='fa'?'باقی‌مانده':'Remaining'}</div>
+      <div class="pay-dash-v">${PaymentService.formatMap(d.remaining)}</div>
+    </div>
+  </div>
+  <div class="pay-mini-row">
+    <div class="pay-mini"><span class="pay-mini-n">${d.counts.dueToday}</span>${L==='fa'?'امروز':'Today'}</div>
+    <div class="pay-mini"><span class="pay-mini-n">${d.counts.dueThisWeek}</span>${L==='fa'?'این هفته':'This week'}</div>
+    <div class="pay-mini pay-mini-over"><span class="pay-mini-n">${d.counts.overdue}</span>${L==='fa'?'گذشته':'Overdue'}</div>
+    <div class="pay-mini"><span class="pay-mini-n">${d.counts.upcoming}</span>${L==='fa'?'آینده':'Upcoming'}</div>
+  </div>`;
+
+  // Search + filter chips
+  html+=`<div style="padding:4px 16px 8px">
+    <input id="pay-search" class="finput" placeholder="${L==='fa'?'جستجوی پرداخت‌ها...':'Search payments...'}" value="${esc(paySearch)}" style="width:100%;box-sizing:border-box">
+  </div>
+  <div class="pay-chips">${chips.map(c=>`<button class="pay-chip${payFilter===c[0]?' on':''}" data-pay-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
+
+  // List (lazy window)
+  if(!filtered.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#f59e0b18;color:#f59e0b">§</div>
+      <div class="hub-ph-t">${L==='fa'?'پرداختی نیست':'No payments'}</div>
+      <div class="hub-ph-d">${L==='fa'?'برای افزودن قبض، اشتراک، اجاره و... دکمه + را بزنید.':'Tap + to add a bill, subscription, rent and more.'}</div></div>`;
+  }else{
+    html+=`<div class="pay-list" id="pay-list">${shown.map(payRowHTML).join('')}</div>`;
+    if(filtered.length>shown.length){
+      html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="pay-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
+    }
+  }
+  return html;
+}
+
+function payRowHTML(p){
+  const st=payDerivedStatus(p);
+  const meta=PAY_TYPE_META[p.type]||PAY_TYPE_META.custom;
+  const stColor=st==='paid'?'#22c55e':st==='overdue'?'#ef4444':'#f59e0b';
+  const stLabel=st==='paid'?(L==='fa'?'پرداخت‌شده':'Paid'):st==='overdue'?(L==='fa'?'گذشته':'Overdue'):(L==='fa'?'در انتظار':'Pending');
+  const inTrash=!!p.deletedAt, inArchive=!!p.archivedAt;
+  return `<div class="pay-row" data-pay-open="${p.id}">
+    <div class="pay-row-ic" style="background:${p.color||'#f59e0b'}22;color:${p.color||'#f59e0b'}">${meta.icon}</div>
+    <div class="pay-row-main">
+      <div class="pay-row-title" dir="auto">${esc(p.title||(L==='fa'?'بدون عنوان':'Untitled'))}${p.starred?' <span style="color:#e0a800">★</span>':''}</div>
+      <div class="pay-row-meta">
+        <span class="pay-badge" style="color:${stColor};border-color:${stColor}55">${stLabel}</span>
+        ${p.dueDate?`<span class="pay-mchip">${shortDate(p.dueDate)}${p.dueTime?' '+esc(p.dueTime):''}</span>`:''}
+        ${p.recurrence&&p.recurrence!=='none'?`<span class="pay-mchip">↻ ${payRecLabel(p.recurrence)}</span>`:''}
+        ${p.category?`<span class="pay-mchip">${esc(p.category)}</span>`:''}
+      </div>
+    </div>
+    <div class="pay-row-right">
+      <div class="pay-row-amt">${payFmt(p.amount,p.currency)}</div>
+      ${(!inTrash&&!inArchive)?`<button class="pay-paid-btn${st==='paid'?' on':''}" data-pay-toggle="${p.id}" title="${st==='paid'?stLabel:(L==='fa'?'علامت پرداخت':'Mark paid')}">${st==='paid'?'✓':'○'}</button>`:''}
+    </div>
+  </div>`;
+}
+
+function payRenderDetail(){
+  const p=paymentsMap()[payActiveId];
+  if(!p){ payView='home'; return payRenderHome(); }
+  const st=payDerivedStatus(p);
+  const meta=PAY_TYPE_META[p.type]||PAY_TYPE_META.custom;
+  const folder=p.folderId?(payFoldersMap()[p.folderId]||{}).name:'';
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="pay-detail-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:20px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.title||'')}</div>
+    <button class="note-icon-btn" id="pay-star" style="color:${p.starred?'#e0a800':'var(--ink)'}">★</button>
+    <button class="note-icon-btn" id="pay-menu" aria-label="options"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+  </div>`;
+  html+=`<div style="padding:0 16px 20px">
+    <div class="pay-detail-hero" style="border-color:${p.color||'#f59e0b'}55">
+      <div class="pay-row-ic" style="background:${p.color||'#f59e0b'}22;color:${p.color||'#f59e0b'};width:52px;height:52px;font-size:24px">${meta.icon}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:26px;font-weight:800">${payFmt(p.amount,p.currency)}</div>
+        <div style="font-size:13px;color:var(--ink3)">${payTypeLabel(p.type)}${p.category?' · '+esc(p.category):''}</div>
+      </div>
+    </div>
+    <div class="pay-detail-rows">
+      ${payDetailRow(L==='fa'?'وضعیت':'Status', st==='paid'?(L==='fa'?'پرداخت‌شده':'Paid'):st==='overdue'?(L==='fa'?'گذشته':'Overdue'):(L==='fa'?'در انتظار':'Pending'))}
+      ${p.dueDate?payDetailRow(L==='fa'?'سررسید':'Due', shortDate(p.dueDate)+(p.dueTime?' '+esc(p.dueTime):'')):''}
+      ${payDetailRow(L==='fa'?'تکرار':'Repeat', payRecLabel(p.recurrence)+(p.recurrence==='custom'&&p.recurrenceRule?' ('+esc(p.recurrenceRule)+'d)':''))}
+      ${p.paidDate?payDetailRow(L==='fa'?'تاریخ پرداخت':'Paid on', shortDate(p.paidDate.slice(0,10))):''}
+      ${folder?payDetailRow(L==='fa'?'پوشه':'Folder', esc(folder)):''}
+      ${(p.tags&&p.tags.length)?payDetailRow(L==='fa'?'برچسب‌ها':'Tags', p.tags.map(t=>'#'+esc(t)).join(' ')):''}
+      ${p.notes?payDetailRow(L==='fa'?'یادداشت':'Notes', esc(p.notes)):''}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      ${st==='paid'
+        ? `<button class="btn btn-ghost" id="pay-reopen" style="flex:1">${L==='fa'?'بازکردن':'Reopen'}</button>`
+        : `<button class="btn btn-primary" id="pay-markpaid" style="flex:1">${L==='fa'?'علامت پرداخت':'Mark paid'}</button>`}
+      <button class="btn btn-ghost" id="pay-edit" style="flex:1">${L==='fa'?'ویرایش':'Edit'}</button>
+    </div>
+  </div>`;
+  return html;
+}
+function payDetailRow(k,v){ return `<div class="pay-drow"><span class="pay-drow-k">${k}</span><span class="pay-drow-v" dir="auto">${v}</span></div>`; }
+
+function payRenderHistory(){
+  const p=paymentsMap()[payActiveId];
+  if(!p){ payView='home'; return payRenderHome(); }
+  const versions=(p.versions||[]).slice().reverse();
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="pay-hist-back" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:22px;font-weight:800">${L==='fa'?'تاریخچه نسخه‌ها':'Version history'}</div>
+  </div>`;
+  if(!versions.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic">◷</div><div class="hub-ph-t">${L==='fa'?'نسخه‌ای نیست':'No versions yet'}</div></div>`;
+    return html;
+  }
+  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+  versions.forEach((v,i)=>{
+    const realIndex=(p.versions.length-1)-i;
+    const d=new Date(v.at);
+    const when=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    html+=`<div class="ul-row">
+      <div style="flex:1;padding:12px 0 12px 14px;min-width:0">
+        <div style="font-size:14px" dir="auto">${esc(v.title||'')} — ${payFmt(v.amount,v.currency)}</div>
+        <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(when)}</div>
+      </div>
+      <button class="shop-mini" data-pay-restore-ver="${realIndex}" style="margin-right:12px">${L==='fa'?'بازگردانی':'Restore'}</button>
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
+// Editor (create/edit) as a bottom sheet.
+function payOpenEditor(id){
+  const editing=!!id;
+  const p=editing?paymentsMap()[id]:{
+    title:'',type:'bill',category:'',amount:'',currency:DB.meta.payDefaultCurrency||'AUD',
+    dueDate:'',dueTime:'',recurrence:'none',recurrenceRule:'',priority:'none',
+    starred:false,folderId:null,tags:[],color:'#f59e0b',notes:''
+  };
+  if(editing&&!p){ return; }
+  const folders=payFoldersAll();
+  openSheet(`<h3>${editing?(L==='fa'?'ویرایش پرداخت':'Edit payment'):(L==='fa'?'پرداخت جدید':'New payment')}</h3>
+    <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
+      <div class="qa-input-row">
+        <input class="finput" id="pay-f-title" value="${esc(p.title||'')}" placeholder="${L==='fa'?'مثلاً برق':'e.g. Electricity'}">
+        ${voiceMicHTML('pay-title')}
+      </div>
+    </div>
+    <div class="fld" style="display:flex;gap:8px">
+      <div style="flex:1"><label>${L==='fa'?'مبلغ':'Amount'}</label>
+        <input class="finput" id="pay-f-amount" type="number" inputmode="decimal" value="${esc(String(p.amount||''))}" placeholder="0.00"></div>
+      <div style="width:110px"><label>${L==='fa'?'ارز':'Currency'}</label>
+        <input class="finput" id="pay-f-currency" value="${esc(p.currency||'AUD')}" placeholder="AUD"></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
+      <select class="finput" id="pay-f-type">${PAY_TYPES.map(t=>`<option value="${t}" ${p.type===t?'selected':''}>${payTypeLabel(t)}</option>`).join('')}</select>
+    </div>
+    <div class="fld"><label>${L==='fa'?'دسته':'Category'}</label>
+      <div class="qa-input-row">
+        <input class="finput" id="pay-f-category" value="${esc(p.category||'')}" placeholder="${L==='fa'?'اختیاری':'optional'}">
+        ${voiceMicHTML('pay-category')}
+      </div>
+    </div>
+    <div class="fld" style="display:flex;gap:8px">
+      <div style="flex:1"><label>${L==='fa'?'تاریخ سررسید':'Due date'}</label>
+        <input class="finput" id="pay-f-date" type="date" value="${esc(p.dueDate||'')}"></div>
+      <div style="width:120px"><label>${L==='fa'?'ساعت':'Time'}</label>
+        <input class="finput" id="pay-f-time" type="time" value="${esc(p.dueTime||'')}"></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'تکرار':'Repeat'}</label>
+      <select class="finput" id="pay-f-rec">${PAY_RECURRENCE.map(r=>`<option value="${r}" ${p.recurrence===r?'selected':''}>${payRecLabel(r)}</option>`).join('')}</select>
+    </div>
+    <div class="fld" id="pay-f-rule-wrap" style="${p.recurrence==='custom'?'':'display:none'}">
+      <label>${L==='fa'?'فاصله سفارشی (روز)':'Custom interval (days)'}</label>
+      <input class="finput" id="pay-f-rule" type="number" inputmode="numeric" value="${esc(String(p.recurrenceRule||''))}" placeholder="30">
+    </div>
+    <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
+      <select class="finput" id="pay-f-folder">
+        <option value="">${L==='fa'?'بدون پوشه':'No folder'}</option>
+        ${folders.map(f=>`<option value="${f.id}" ${p.folderId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="fld"><label>${L==='fa'?'یادداشت':'Notes'}</label>
+      <div class="qa-input-row">
+        <input class="finput" id="pay-f-notes" value="${esc(p.notes||'')}" placeholder="${L==='fa'?'اختیاری':'optional'}">
+        ${voiceMicHTML('pay-notes')}
+      </div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'رنگ':'Colour'}</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="pay-f-colors">
+        ${PAY_COLORS.map(c=>`<button type="button" class="note-color-swatch ${p.color===c?'on':''}" data-pay-color="${c}" style="background:${c}"></button>`).join('')}
+      </div>
+    </div>
+    <div class="btn-col" style="margin-top:8px">
+      <button class="btn btn-primary" id="pay-f-save">${editing?(L==='fa'?'ذخیره':'Save'):(L==='fa'?'افزودن':'Add')}</button>
+      <button class="btn btn-ghost" id="pay-f-cancel">${tr('cancel')}</button>
+    </div>`);
+
+  let selColor=p.color||'#f59e0b';
+  document.querySelectorAll('[data-pay-color]').forEach(el=>el.onclick=()=>{
+    selColor=el.dataset.payColor;
+    document.querySelectorAll('[data-pay-color]').forEach(x=>x.classList.remove('on'));
+    el.classList.add('on');
+  });
+  const recSel=document.getElementById('pay-f-rec');
+  recSel.onchange=()=>{ document.getElementById('pay-f-rule-wrap').style.display=recSel.value==='custom'?'':'none'; };
+  attachVoiceInput('mic-pay-title','pay-f-title');
+  attachVoiceInput('mic-pay-category','pay-f-category');
+  attachVoiceInput('mic-pay-notes','pay-f-notes');
+  document.getElementById('pay-f-cancel').onclick=()=>closeSheet();
+  document.getElementById('pay-f-save').onclick=()=>{
+    const data={
+      title:document.getElementById('pay-f-title').value.trim(),
+      amount:document.getElementById('pay-f-amount').value,
+      currency:(document.getElementById('pay-f-currency').value.trim()||'AUD').toUpperCase(),
+      type:document.getElementById('pay-f-type').value,
+      category:document.getElementById('pay-f-category').value.trim(),
+      dueDate:document.getElementById('pay-f-date').value,
+      dueTime:document.getElementById('pay-f-time').value,
+      recurrence:document.getElementById('pay-f-rec').value,
+      recurrenceRule:document.getElementById('pay-f-rule')?document.getElementById('pay-f-rule').value:'',
+      folderId:document.getElementById('pay-f-folder').value||null,
+      notes:document.getElementById('pay-f-notes').value.trim(),
+      color:selColor
+    };
+    if(!data.title){ toast(L==='fa'?'عنوان لازم است':'Title required'); return; }
+    if(editing){ payUpdate(id,data); }
+    else{ const nid=payCreate(data); payActiveId=nid; }
+    closeSheet();
+    if(DB.meta.payDefaultCurrency!==data.currency && !editing){ /* remember last used currency */ DB.meta.payDefaultCurrency=data.currency; saveDB(); }
+    render();
+  };
+}
+
+function payOpenMenu(){
+  const p=paymentsMap()[payActiveId]; if(!p)return;
+  openSheet(`<h3>${L==='fa'?'گزینه‌ها':'Options'}</h3>
+    <div class="btn-col">
+      <button class="btn btn-ghost" id="pm-dup">${L==='fa'?'تکثیر':'Duplicate'}</button>
+      <button class="btn btn-ghost" id="pm-history">${L==='fa'?'تاریخچه نسخه‌ها':'Version history'}</button>
+      ${p.archivedAt?`<button class="btn btn-ghost" id="pm-unarchive">${L==='fa'?'خروج از بایگانی':'Unarchive'}</button>`
+                    :`<button class="btn btn-ghost" id="pm-archive">${L==='fa'?'بایگانی':'Archive'}</button>`}
+      ${p.deletedAt?`<button class="btn btn-ghost" id="pm-restore">${L==='fa'?'بازگردانی':'Restore'}</button>
+                     <button class="btn btn-danger" id="pm-perm">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>`
+                   :`<button class="btn btn-danger" id="pm-trash">${L==='fa'?'انتقال به سطل':'Move to Trash'}</button>`}
+      <button class="btn btn-ghost" id="pm-cancel">${tr('cancel')}</button>
+    </div>`);
+  const bind=(id,fn)=>{ const el=document.getElementById(id); if(el)el.onclick=fn; };
+  bind('pm-dup',()=>{ const nid=payDuplicate(payActiveId); closeSheet(); if(nid){payActiveId=nid;} render(); });
+  bind('pm-history',()=>{ closeSheet(); payView='history'; render(); });
+  bind('pm-archive',()=>{ payArchive(payActiveId); closeSheet(); payView='home'; render(); });
+  bind('pm-unarchive',()=>{ payUnarchive(payActiveId); closeSheet(); render(); });
+  bind('pm-trash',()=>{ payTrash(payActiveId); closeSheet(); payView='home'; render(); });
+  bind('pm-restore',()=>{ payRestore(payActiveId); closeSheet(); render(); });
+  bind('pm-perm',()=>{ closeSheet(); openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3>
+    <p style="padding:0 4px 8px;color:var(--ink3)">${L==='fa'?'این عمل قابل بازگشت نیست.':'This cannot be undone.'}</p>
+    <div class="btn-col"><button class="btn btn-danger" id="pm-perm2">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>
+    <button class="btn btn-ghost" id="pm-perm-cancel">${tr('cancel')}</button></div>`);
+    document.getElementById('pm-perm2').onclick=()=>{ payPermanentDelete(payActiveId); closeSheet(); payView='home'; payActiveId=null; render(); };
+    document.getElementById('pm-perm-cancel').onclick=()=>closeSheet();
+  });
+  bind('pm-cancel',()=>closeSheet());
+}
+
+
 const HUB_MODULES=[
   // ready:false → placeholder page, "Coming soon" badge, NO create (+) button.
   // A future milestone flips ready:true and supplies createLabel + onCreate()
   // so the module gets its OWN independent FAB & create dialog (never New Task).
   {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas',   ready:true,  createLabel:'New Note',         onCreate:()=>openNewNoteSheet()},
   {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:true,  createLabel:'New Shopping List', onCreate:null},
-  {id:'bills',    icon:'§',  color:'#f59e0b', title:'Bills',     desc:'Bills, subscriptions & due dates',  ready:false, createLabel:'New Bill',         onCreate:null},
+  {id:'payments', icon:'§',  color:'#f59e0b', title:'Payment Center', desc:'Bills, subscriptions, rent, loans & more', ready:true, createLabel:'New Payment', onCreate:()=>payOpenEditor(null)},
   {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)',   ready:false, createLabel:'New Secure Item',  onCreate:null},
   {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records',    ready:false, createLabel:'New Document',     onCreate:null},
   {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings',         ready:false, createLabel:'New Trip',         onCreate:null},
@@ -4387,11 +5055,11 @@ function logActivity(type,refType,refId,meta){
 function activityLabel(e){
   const n=(e.meta&&e.meta.name)?e.meta.name:'';
   const verbs=L==='fa'
-    ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد'}
-    :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred'};
+    ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد',paid:'پرداخت شد',reopened:'باز شد',restored:'بازگردانی شد',permanently_deleted:'برای همیشه حذف شد'}
+    :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred',paid:'marked paid',reopened:'reopened',restored:'restored',permanently_deleted:'permanently deleted'};
   const kinds=L==='fa'
-    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت'}
-    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note'};
+    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت',payment:'پرداخت'}
+    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note',payment:'Payment'};
   return `${kinds[e.refType]||e.refType} ${n?'“'+n+'” ':''}${verbs[e.type]||e.type}`;
 }
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
@@ -5577,6 +6245,7 @@ function renderModule(){
   if(currentModule==='shopping') return renderShopping();
   if(currentModule==='activity') return renderActivity();
   if(currentModule==='notes') return renderNotes();
+  if(currentModule==='payments') return renderPayments();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -5770,7 +6439,17 @@ function _renderSearch(q){
     if(!parent||parent.archivedAt)return false;   // don't surface archived history items
     return (it.name||'').toLowerCase().includes(ql)||(it.category||'').toLowerCase().includes(ql);
   }).slice(0,20);
-  if(!tasks.length&&!lists.length&&!appts.length&&!shopLists.length&&!shopItems.length){
+  // Payments are a first-class content type in search too.
+  const payments=paymentsAll().filter(p=>{
+    const folder=p.folderId?(payFoldersMap()[p.folderId]||{}).name:'';
+    return (p.title||'').toLowerCase().includes(ql)
+      || (p.category||'').toLowerCase().includes(ql)
+      || (p.notes||'').toLowerCase().includes(ql)
+      || (p.tags||[]).some(t=>String(t).toLowerCase().includes(ql))
+      || String(p.amount||'').includes(ql)
+      || String(folder||'').toLowerCase().includes(ql);
+  }).slice(0,20);
+  if(!tasks.length&&!lists.length&&!appts.length&&!shopLists.length&&!shopItems.length&&!payments.length){
     el.innerHTML=`<div class="srch-empty">${tr('noResults')}</div>`;return;}
   const ts=todayStr();
   let html='';
@@ -5837,8 +6516,20 @@ function _renderSearch(q){
           <div class="trow-star-wrap"><button class="star${t.pinned?' on':''}" data-pin="${t.id}">★</button></div>
         </div>`;}).join('')}
     </div>`;}
+  if(payments.length){
+    html+=`<div class="hub-sec-label">§ ${L==='fa'?'پرداخت‌ها':'Payments'}</div>
+    <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
+      ${payments.map(p=>{const st=payDerivedStatus(p);const over=st==='overdue';return `<div class="ul-row" data-srch-payid="${p.id}" style="cursor:pointer">
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:${p.color||'#f59e0b'}">${(PAY_TYPE_META[p.type]||{}).icon||'§'}</div></div>
+        <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
+          <div style="font-size:15px;font-weight:500${st==='paid'?';text-decoration:line-through;color:var(--ink3)':''}" dir="auto">${esc(p.title)}${p.starred?' ★':''}</div>
+          <div style="font-size:12px;color:var(--ink3);margin-top:2px">${[payFmt(p.amount,p.currency),p.dueDate?shortDate(p.dueDate):null,over?(L==='fa'?'سررسید گذشته':'overdue'):null].filter(Boolean).join(' · ')}</div>
+        </div>
+        <span style="color:var(--ink3);opacity:.4;padding-right:4px">›</span>
+      </div>`;}).join('')}
+    </div>`;}
   el.innerHTML=html;
-  el.querySelectorAll('[data-chk]').forEach(e=>e.onclick=ev=>{ev.stopPropagation();completeTask(e.dataset.chk);_renderSearch(q);});
+  el.querySelectorAll('[data-srch-payid]').forEach(e=>e.onclick=()=>{ closeSearch(); screen='module'; currentModule='payments'; payView='detail'; payActiveId=e.dataset.srchPayid; render(); });
   el.querySelectorAll('[data-pin]').forEach(e=>e.onclick=ev=>{
     ev.stopPropagation();const t=DB.entities.tasks[e.dataset.pin];if(!t)return;
     t.pinned=!t.pinned;t.updatedAt=now();saveDB();_renderSearch(q);});
@@ -6614,6 +7305,14 @@ function bindScreen(){
     screen='module'; currentModule='shopping';
     activeShopListId=el.dataset.shopOpen; shopView='detail'; shopSearch=''; shopResetSelect();
     render(); window.scrollTo(0,0);});
+  // Projected payment rows (My Day / Planned / All)
+  document.querySelectorAll('[data-pay-pin]').forEach(el=>el.onclick=e=>{ e.stopPropagation(); payToggleStar(el.dataset.payPin); render(); });
+  document.querySelectorAll('[data-pay-complete]').forEach(el=>el.onclick=e=>{ e.stopPropagation();
+    const p=paymentsMap()[el.dataset.payComplete]; if(!p)return;
+    if(payDerivedStatus(p)==='paid')payReopen(p.id); else payMarkPaid(p.id); render();});
+  document.querySelectorAll('[data-pay-open-task]').forEach(el=>el.onclick=e=>{
+    if(e.target.closest('[data-pay-pin]')||e.target.closest('[data-pay-complete]'))return;
+    screen='module'; currentModule='payments'; payActiveId=el.dataset.payOpenTask; payView='detail'; render(); window.scrollTo(0,0);});
   // Task row → detail panel
   document.querySelectorAll('.trow-flat').forEach(el=>el.onclick=()=>{
     if(el.dataset.tid)openTaskDetail(el.dataset.tid);});
@@ -6636,6 +7335,53 @@ function bindScreen(){
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   const moduleBack=document.getElementById('module-back');
   if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  // ── Payment Center wiring ──
+  (()=>{
+    if(!(screen==='module'&&currentModule==='payments'))return;
+    const nb=document.getElementById('pay-new');
+    if(nb)nb.onclick=()=>payOpenEditor(null);
+    if(payView==='home'){
+      const se=document.getElementById('pay-search');
+      if(se)se.oninput=()=>{
+        paySearch=se.value; payListLimit=50;
+        clearTimeout(window._paySearchT);
+        window._paySearchT=setTimeout(()=>{ render(); const s=document.getElementById('pay-search'); if(s){s.focus(); s.setSelectionRange(s.value.length,s.value.length);} },250);
+      };
+      document.querySelectorAll('[data-pay-filter]').forEach(el=>el.onclick=()=>{ payFilter=el.dataset.payFilter; payListLimit=50; render(); });
+      document.querySelectorAll('[data-pay-open]').forEach(el=>el.onclick=(e)=>{
+        if(e.target.closest('[data-pay-toggle]'))return;
+        payActiveId=el.dataset.payOpen; payView='detail'; render(); window.scrollTo(0,0);
+      });
+      document.querySelectorAll('[data-pay-toggle]').forEach(el=>el.onclick=(e)=>{
+        e.stopPropagation();
+        const p=paymentsMap()[el.dataset.payToggle];
+        if(!p)return;
+        if(payDerivedStatus(p)==='paid')payReopen(p.id); else payMarkPaid(p.id);
+        render();
+      });
+      const more=document.getElementById('pay-more');
+      if(more)more.onclick=()=>{ payListLimit+=50; render(); };
+    }
+    if(payView==='detail'){
+      const b=document.getElementById('pay-detail-back');
+      if(b)b.onclick=()=>{ payView='home'; render(); window.scrollTo(0,0); };
+      const star=document.getElementById('pay-star');
+      if(star)star.onclick=()=>{ payToggleStar(payActiveId); render(); };
+      const menu=document.getElementById('pay-menu');
+      if(menu)menu.onclick=()=>payOpenMenu();
+      const mp=document.getElementById('pay-markpaid');
+      if(mp)mp.onclick=()=>{ payMarkPaid(payActiveId); render(); };
+      const ro=document.getElementById('pay-reopen');
+      if(ro)ro.onclick=()=>{ payReopen(payActiveId); render(); };
+      const ed=document.getElementById('pay-edit');
+      if(ed)ed.onclick=()=>payOpenEditor(payActiveId);
+    }
+    if(payView==='history'){
+      const b=document.getElementById('pay-hist-back');
+      if(b)b.onclick=()=>{ payView='detail'; render(); };
+      document.querySelectorAll('[data-pay-restore-ver]').forEach(el=>el.onclick=()=>payRestoreVersion(payActiveId,parseInt(el.dataset.payRestoreVer,10)));
+    }
+  })();
   // ── Notes wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='notes'))return;
