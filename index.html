@@ -1252,7 +1252,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v213';
+const APP_VERSION='v214';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1279,6 +1279,8 @@ const KEY='mbmlife_platform_v1';
   // gesture rebuilds a clean Back state (no stale entries from a prior session).
   var onResume=function(){ if(document.visibilityState==='visible'){ _exitingApp=false; _guards=0; window.addEventListener('popstate', onPop); } };
   document.addEventListener('visibilitychange', onResume);
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof voiceHardStop==='function') voiceHardStop(); });
+  window.addEventListener('pagehide', ()=>{ if(typeof voiceHardStop==='function') voiceHardStop(); });
   window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
 })();
 
@@ -1850,6 +1852,12 @@ function _noteEditorFocused(){
   return ae.id==='note-body'||ae.id==='note-title'||ae.id==='note-checklist-add'||ae.classList.contains('note-check-text');
 }
 function render(){
+  // Background-listening guard: if dictation is running but we're navigating away
+  // from the note editor, hard-stop it (covers Back, module switch, sign-out, etc.).
+  if(VOICE && VOICE.state!=='IDLE' && VOICE.inputId==='note-body' &&
+     !(screen==='module' && currentModule==='notes' && noteView==='detail')){
+    if(typeof voiceHardStop==='function') voiceHardStop();
+  }
   // Guard 1: don't rebuild the DOM while voice dictation is actively writing into
   // the note editor — it would detach the textarea the recognizer is targeting.
   if(VOICE && VOICE.state!=='IDLE' && VOICE.btn && screen==='module' && currentModule==='notes' && noteView==='detail'){
@@ -3537,6 +3545,16 @@ function noteSetColor(id,color){
   const n=noteItemsMap()[id]; if(!n)return;
   n.color=color; n.updatedAt=new Date().toISOString(); saveDB(); render();
 }
+function noteCycleTextDir(id){
+  const n=noteItemsMap()[id]; if(!n)return;
+  const order=['auto','rtl','ltr'];
+  const cur=n.textDir||'auto';
+  n.textDir=order[(order.indexOf(cur)+1)%order.length];
+  n.updatedAt=new Date().toISOString(); saveDB(); render();
+  toast(L==='fa'
+    ? ('جهت: '+(n.textDir==='auto'?'خودکار':n.textDir==='rtl'?'راست‌به‌چپ':'چپ‌به‌راست'))
+    : ('Direction: '+(n.textDir==='auto'?'Auto':n.textDir==='rtl'?'RTL':'LTR')));
+}
 function noteSetFolder(id,folderId){
   const n=noteItemsMap()[id]; if(!n)return;
   n.folderId=folderId||null; n.updatedAt=new Date().toISOString(); saveDB(); render();
@@ -4068,7 +4086,6 @@ function renderNoteDetail(){
       <span class="note-color-btn-dot" style="background:${esc(paperColor)}"></span>
     </button>
     <input type="color" id="note-color-input-hidden" value="${esc(paperColor)}" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
-    <button class="note-icon-btn" id="note-type-indicator" style="color:${ink}" title="${isChecklist?(L==='fa'?'چک‌لیست':'Checklist'):(L==='fa'?'متنی':'Text')}">${isChecklist?svgCheck:svgDoc}</button>
     <button class="note-pill note-pill-folder" id="note-folder-pill" style="color:${ink};border-color:${ink}55">
       <span>${folder?esc(folder.name):(L==='fa'?'بدون پوشه':'No folder')}</span><span class="note-pill-caret">▾</span>
     </button>
@@ -4077,7 +4094,8 @@ function renderNoteDetail(){
     <button class="note-icon-btn" id="note-detail-back" style="color:${ink}" aria-label="back" title="${L==='fa'?'بازگشت':'Back'}">${svgBack}</button>
     <button class="note-icon-btn" id="note-info-btn" style="color:${ink}" aria-label="info" title="${L==='fa'?'اطلاعات یادداشت':'Note info'}">${svgInfo}</button>
     <div style="flex:1"></div>
-    <button class="note-icon-btn" id="note-toggle-due" style="color:${ink}" aria-label="date" title="${L==='fa'?'تاریخ و ساعت':'Date & time'}">${svgCal}</button>
+    <button class="note-icon-btn" id="note-toggle-dir" style="color:${ink}" aria-label="direction" title="${L==='fa'?'جهت متن':'Text direction'}">${(n.textDir||'auto')==='rtl'?'⇤':(n.textDir||'auto')==='ltr'?'⇥':'⇆'}</button>
+    <button class="note-icon-btn${ui.showDue?' on':''}" id="note-toggle-due" style="color:${ui.showDue?'#6d5efc':ink}" aria-label="date" title="${L==='fa'?'تاریخ و ساعت':'Date & time'}">${svgCal}</button>
     ${n.locked?`<span title="${L==='fa'?'قفل — فقط‌خواندنی':'Locked — read-only'}" style="color:${ink};font-size:16px;padding:0 4px">🔒</span>`:''}
     <button class="star ${n.pinned?'on':''}" id="note-detail-pin" aria-label="pin" style="color:${n.pinned?'#e0a800':ink}">★</button>
     <button class="note-icon-btn" id="note-detail-menu" aria-label="options" style="color:${ink}">${svgMenu}</button>
@@ -4116,9 +4134,10 @@ function renderNoteDetail(){
       </div>
     </div>`;
   }else{
-    const _bodyDir = /[\u0600-\u06FF]/.test(n.body||'') ? 'rtl' : (/[A-Za-z]/.test(n.body||'') ? 'ltr' : (L==='fa'?'rtl':'ltr'));
+    const _dirPref = n.textDir || 'auto';   // 'auto' | 'rtl' | 'ltr'
+    const _dirAttr = _dirPref==='auto' ? 'auto' : _dirPref;
     html+=`<div class="note-ruled-area">
-      <textarea class="note-body-input" id="note-body" dir="${_bodyDir}" wrap="soft" style="color:${ink};font-size:${notePrefs().fontSize||18}px;font-family:${noteFontCSS(notePrefs().fontFamily)};direction:${_bodyDir}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
+      <textarea class="note-body-input" id="note-body" dir="${_dirAttr}" wrap="soft" style="color:${ink};font-size:${notePrefs().fontSize||18}px;font-family:${noteFontCSS(notePrefs().fontFamily)}" ${n.locked?'readonly':''} spellcheck="false">${esc(n.body)}</textarea>
     </div>`;
   }
 
@@ -4163,15 +4182,7 @@ function openNewNoteSheet(){
 function openNoteMenu(){
   noteFlushPending(activeNoteId);
   const n=noteItemsMap()[activeNoteId]; if(!n)return;
-  const colorSwatches=NOTE_COLORS.map(c=>`<button type="button" class="note-color-swatch ${n.color===c?'on':''}" data-note-color="${c||''}" style="background:${c||'var(--s2)'}"></button>`).join('');
   openSheet(`<h3>${L==='fa'?'گزینه‌های یادداشت':'Note options'}</h3>
-    <div class="fld"><label>${L==='fa'?'رنگ':'Color'}</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${colorSwatches}</div></div>
-    <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
-      <select class="finput" id="note-folder-select">
-        <option value="">${L==='fa'?'بدون پوشه':'No folder'}</option>
-        ${noteFoldersAll().map(f=>`<option value="${f.id}" ${n.folderId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}
-      </select></div>
     <div class="btn-col">
       <button class="btn btn-ghost" id="nm-share">${L==='fa'?'اشتراک‌گذاری':'Share'}</button>
       <button class="btn btn-ghost" id="nm-duplicate">${L==='fa'?'کپی یادداشت':'Duplicate note'}</button>
@@ -4197,10 +4208,6 @@ function openNoteMenu(){
     noteCreateAppointment(activeNoteId);
     toast(L==='fa'?'قرار ساخته شد':'Appointment created');
   };
-  document.querySelectorAll('[data-note-color]').forEach(el=>el.onclick=()=>{
-    noteSetColor(activeNoteId, el.dataset.noteColor||null); closeSheet();
-  });
-  document.getElementById('note-folder-select').onchange=(e)=>{ noteSetFolder(activeNoteId, e.target.value||null); };
   document.getElementById('nm-history').onclick=()=>{ closeSheet(); noteView='history'; render(); };
   const nmArchive=document.getElementById('nm-archive');
   if(nmArchive)nmArchive.onclick=()=>{ closeSheet(); noteArchive(activeNoteId); noteView='home'; activeNoteId=null; render(); };
@@ -6350,6 +6357,8 @@ function voiceStartSession(SR,inputId,fallbackNode){
   VOICE.rec=rec; _voiceRecog=rec; _voiceActiveBtn=VOICE.btn;
   rec.lang=voiceLang(); rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
   let committedCount=0;   // finalized result entries already inserted (this session)
+  const wasRestart=!!VOICE._restarted; VOICE._restarted=false;
+  let restartSeeded=!wasRestart;   // if restarted, seed committedCount on first event
 
   // Insert `text` into the LIVE field at VOICE.insertPos, advance the anchor and
   // the cursor. Reads the live value each call so manual edits are preserved.
@@ -6399,6 +6408,16 @@ function voiceStartSession(SR,inputId,fallbackNode){
   rec.onresult=(e)=>{
     if(myGen!==VOICE.gen){VOICE.log('onresult IGNORED (stale gen='+myGen+')');return;}   // stale callback guard
     const node=liveInput();
+    // On a restarted session, the engine may carry over the previous session's
+    // finalized results. Seed committedCount past them ONCE so they're not
+    // reinserted — only new speech after the restart is appended.
+    if(!restartSeeded){
+      let finals=0;
+      for(let i=0;i<e.results.length;i++){ if(e.results[i].isFinal)finals=i+1; else break; }
+      committedCount=finals;
+      restartSeeded=true;
+      VOICE.log('restart seeded committedCount='+committedCount);
+    }
     // Remove any interim preview before inserting finals, so it can't be double-counted.
     if(VOICE.interimLen>0){ showInterim(node,''); }
     // Insert each NEW finalized result exactly once (tracked by index).
@@ -6436,18 +6455,18 @@ function voiceStartSession(SR,inputId,fallbackNode){
     const node=liveInput();
     if(VOICE.interimLen>0){ showInterim(node,''); }
     VOICE.log('onend');
-    // SAFE CONTINUOUS DICTATION: if the engine ended on its own (pause/timeout)
-    // and the user hasn't stopped, restart via the cancellable timer. Because
-    // each restart starts a FRESH recognizer with an empty results array and we
-    // insert only NEW finals (committedCount resets per session, and we never
-    // re-read the field as a transcript), no previous words are re-inserted.
     if(VOICE.state==='STOPPING'){ _voiceFinalize(inputId); return; }
+    // Fully detach THIS recognizer before restarting so it can never deliver more.
+    try{ rec.onresult=null; rec.onend=null; rec.onstart=null; rec.onerror=null; rec.abort(); }catch(_){}
+    VOICE.rec=null;
     VOICE.state='RESTART_PENDING';
     if(VOICE.btn){ VOICE.btn.classList.remove('recording'); VOICE.btn.classList.add('restarting'); }
     VOICE.restartTimer=setTimeout(()=>{
       VOICE.restartTimer=null;
       if(VOICE.state!=='RESTART_PENDING'){VOICE.log('restart aborted (state changed)');return;}
       if(VOICE.btn){ VOICE.btn.classList.remove('restarting'); }
+      // Mark restart so the new session seeds committedCount past any carried-over results.
+      VOICE._restarted=true;
       voiceStartSession(SR,inputId,fallbackNode);
     },300);
     VOICE.log('restart scheduled timer='+VOICE.restartTimer);
@@ -6466,12 +6485,36 @@ function voiceStop(btn,inputId){
   VOICE.state='STOPPING';
   // 2) Invalidate the current generation so any in-flight callbacks are ignored.
   VOICE.gen++;
-  // 3) Stop the recognizer (async on Android; the gen guard covers stragglers).
+  // 3) DETACH the old recognizer's handlers so a late Android onend/onresult
+  //    can never touch the app or trigger a restart, then abort() AND stop().
   const rec=VOICE.rec;
-  if(rec){ try{rec.stop();}catch(_){} }
-  // 4) Finalize deterministically HERE. We do NOT wait for the recognizer's onend,
-  //    because the generation bump above intentionally makes that onend a no-op
-  //    (stale-guard). Relying on it would leave the machine stuck in STOPPING.
+  if(rec){
+    try{ rec.onresult=null; rec.onend=null; rec.onstart=null; rec.onerror=null; }catch(_){}
+    try{ rec.abort(); }catch(_){}
+    try{ rec.stop();  }catch(_){}
+  }
+  // 4) Clear the active recognizer reference and finalize deterministically.
+  VOICE.rec=null; _voiceRecog=null; _voiceActiveBtn=null;
+  _voiceFinalize(inputId);
+}
+
+// Global hard-stop used when leaving the note / switching screens / signing out /
+// hiding the app. Guarantees no background listening under any exit path.
+function voiceHardStop(){
+  if(!VOICE || VOICE.state==='IDLE') return;
+  VOICE.log('HARD STOP (leave/back/hide)');
+  const inputId=VOICE.inputId;
+  if(VOICE.restartTimer){ clearTimeout(VOICE.restartTimer); VOICE.restartTimer=null; }
+  VOICE.state='STOPPING';
+  VOICE.gen++;
+  const rec=VOICE.rec;
+  if(rec){
+    try{ rec.onresult=null; rec.onend=null; rec.onstart=null; rec.onerror=null; }catch(_){}
+    try{ rec.abort(); }catch(_){}
+    try{ rec.stop();  }catch(_){}
+  }
+  VOICE.rec=null; _voiceRecog=null; _voiceActiveBtn=null;
+  if(VOICE.btn){ VOICE.btn.classList.remove('recording','restarting'); }
   _voiceFinalize(inputId);
 }
 
@@ -6919,6 +6962,8 @@ function bindScreen(){
           <div class="btn-row"><button class="btn btn-primary" id="ninfo-close" style="flex:1">${L==='fa'?'بستن':'Close'}</button></div>`);
         document.getElementById('ninfo-close').onclick=()=>closeSheet();
       };
+      const toggleDirBtn=document.getElementById('note-toggle-dir');
+      if(toggleDirBtn)toggleDirBtn.onclick=()=>noteCycleTextDir(activeNoteId);
       const toggleDueBtn=document.getElementById('note-toggle-due');
       if(toggleDueBtn)toggleDueBtn.onclick=()=>{_noteUIState.showDue=!_noteUIState.showDue;render();};
       const formatBtn=document.getElementById('note-format-btn');
@@ -7412,6 +7457,7 @@ function showAuthScreen(){
 
 /* ── Sign out without relying on reload ── */
 function doSignOut(){
+  if(typeof voiceHardStop==='function')voiceHardStop();
   stopListeners();
   try{removeDeviceToken();}catch(e){}
   DB.meta.userId=null;
