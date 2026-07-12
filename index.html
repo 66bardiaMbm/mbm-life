@@ -393,8 +393,58 @@ body.light .trow-title{color:var(--ink)}
 .pay-mchip{font-size:11px;color:var(--ink3);background:var(--s3);border-radius:6px;padding:1px 6px}
 .pay-row-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
 .pay-row-amt{font-size:15px;font-weight:800;white-space:nowrap}
-.pay-paid-btn{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--b2);background:none;color:var(--ink3);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.pay-paid-btn{display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:6px 12px;border-radius:18px;border:1.5px solid var(--b2);background:none;color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.pay-paid-btn .pay-paid-ic{font-size:13px;line-height:1}
 .pay-paid-btn.on{background:#22c55e;border-color:#22c55e;color:#fff}
+.pay-paid-btn:focus-visible{outline:2px solid #6d5efc;outline-offset:2px}
+.pay-fab{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom));width:58px;height:58px;border-radius:50%;background:#f59e0b;color:#fff;border:none;font-size:28px;line-height:1;box-shadow:0 6px 20px rgba(245,158,11,.45);cursor:pointer;z-index:50;display:flex;align-items:center;justify-content:center}
+.pay-fab:focus-visible{outline:3px solid #6d5efc;outline-offset:2px}
+.pay-head-add{display:none}
+.pay-row-ic svg{width:20px;height:20px}
+.pay-detail-hero .pay-row-ic svg{width:26px;height:26px}
+.pay-chips{scrollbar-width:none}
+.pay-chips::-webkit-scrollbar{display:none}
+.pay-chip{min-height:34px}
+.pay-chip:focus-visible{outline:2px solid #6d5efc;outline-offset:2px}
+.pay-list{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+@media (min-width:768px){
+  .pay-fab{display:none}
+  .pay-head-add{display:inline-flex}
+  .pay-chips{flex-wrap:wrap;overflow-x:visible}
+  .pay-list{padding-bottom:24px}
+}
+@media (min-width:1024px){
+  .pay-dash,.pay-mini-row,.pay-chips,.pay-list,.pay-head{max-width:1000px;margin-inline:auto}
+  .pay-dash-card{padding:14px 16px}
+  .pay-dash-v{font-size:18px}
+}
+@media (min-width:1280px){
+  .pay-dash,.pay-mini-row,.pay-chips,.pay-list,.pay-head{max-width:1120px}
+}
+.pay-select-btn{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:start;cursor:pointer}
+.pay-select-caret{opacity:.6;margin-inline-start:8px}
+.pay-cur-list{max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.pay-cur-row{display:flex;align-items:center;gap:10px;width:100%;padding:11px 8px;background:none;border:none;border-bottom:1px solid var(--b1);color:var(--ink);cursor:pointer;text-align:start;min-height:44px}
+.pay-cur-sym{width:32px;flex:none;font-weight:700;text-align:center}
+.pay-cur-code{width:46px;flex:none;font-weight:600;color:var(--ink2)}
+.pay-cur-name{flex:1;min-width:0;color:var(--ink3);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pay-cur-row:focus-visible{outline:2px solid #6d5efc;outline-offset:-2px}
+.pay-form-grid{display:flex;gap:8px}
+.pay-fg-amt{flex:1;min-width:0}
+.pay-fg-cur{width:130px;flex:none}
+@media (min-width:768px){
+  .pay-fab{display:none}
+  .pay-head-add{display:inline-flex}
+  .pay-chips{flex-wrap:wrap;overflow-x:visible}
+  .pay-list{padding-bottom:24px}
+}
+@media (min-width:1024px){
+  .pay-dash,.pay-mini-row,.pay-chips,.pay-list,.pay-head{max-width:1000px;margin-inline:auto}
+  .pay-dash-card{padding:14px 16px}
+}
+@media (min-width:1280px){
+  .pay-dash,.pay-mini-row,.pay-chips,.pay-list,.pay-head{max-width:1120px}
+}
 .pay-detail-hero{display:flex;align-items:center;gap:14px;background:var(--s1);border:1px solid var(--b1);border-radius:14px;padding:16px}
 .pay-detail-rows{margin-top:12px;background:var(--s1);border:1px solid var(--b1);border-radius:14px;overflow:hidden}
 .pay-drow{display:flex;justify-content:space-between;gap:12px;padding:11px 14px;border-bottom:1px solid var(--b1)}
@@ -1286,7 +1336,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v219';
+const APP_VERSION='v220';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2416,7 +2466,7 @@ function taskRowFlat(t,isOverdue){
   if(t.kind==='pay'){
     const p=paymentsMap()[t.payId];
     const st=p?payDerivedStatus(p):'pending';
-    let pmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'پرداخت':'Payment'}</span>`;
+    let pmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}"><span style="display:inline-flex;vertical-align:middle">${paySvg(13)}</span> ${L==='fa'?'پرداخت':'Payment'}</span>`;
     pmeta+=`<span class="chip">${payFmt(t.amount,t.currency)}</span>`;
     if(t.dueDate&&!over)pmeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
     if(over)pmeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
@@ -3525,6 +3575,12 @@ const PAY_TYPES=['bill','subscription','rent','insurance','loan','instalment','m
 const PAY_RECURRENCE=['none','weekly','fortnightly','monthly','quarterly','yearly','custom'];
 const PAY_STATUS=['pending','paid','overdue'];
 const PAY_COLORS=['#f59e0b','#22c55e','#6e56f8','#ef4444','#3b82f6','#ec4899','#06b6d4','#a855f7'];
+
+// Clean SVG financial icon (wallet) — renders identically on every OS,
+// replacing the § glyph everywhere (Life Hub card, header, rows, search, activity).
+function paySvg(size){ size=size||20; return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 10h18"/><circle cx="17" cy="14" r="1.4"/></svg>`; }
+const PAY_ICON_SVG=paySvg(20);
+
 const PAY_TYPE_META={
   bill:{icon:'§',en:'Bill',fa:'قبض'},
   subscription:{icon:'↻',en:'Subscription',fa:'اشتراک'},
@@ -3536,6 +3592,46 @@ const PAY_TYPE_META={
   'one-off':{icon:'•',en:'One-off',fa:'یک‌بار'},
   custom:{icon:'◆',en:'Custom',fa:'دلخواه'}
 };
+
+// Built-in categories (req 2). Custom categories are stored in DB.meta.payCategories.
+const PAY_BUILTIN_CATEGORIES=['Electricity','Water','Gas','Internet','Phone','Rent','Insurance','Subscription','Loan','Instalment','Membership','Rates / Council','Medical','Education','Transport','Other'];
+function payCategoriesAll(){
+  const custom=(DB.meta.payCategories||[]);
+  const seen={}, out=[];
+  PAY_BUILTIN_CATEGORIES.concat(custom).forEach(c=>{ const k=c.trim(); if(k&&!seen[k.toLowerCase()]){seen[k.toLowerCase()]=1;out.push(k);} });
+  return out;
+}
+function payRememberCategory(c){
+  c=(c||'').trim(); if(!c)return;
+  if(PAY_BUILTIN_CATEGORIES.some(b=>b.toLowerCase()===c.toLowerCase()))return;
+  if(!DB.meta.payCategories)DB.meta.payCategories=[];
+  if(!DB.meta.payCategories.some(x=>x.toLowerCase()===c.toLowerCase())){ DB.meta.payCategories.push(c); saveDB(); }
+}
+
+// Currency list (req 3): ISO code + display name + symbol. Not hardcoded to AUD.
+const PAY_CURRENCIES=[
+  {code:'AUD',name:'Australian Dollar',sym:'A$'},
+  {code:'USD',name:'US Dollar',sym:'$'},
+  {code:'EUR',name:'Euro',sym:'€'},
+  {code:'GBP',name:'British Pound',sym:'£'},
+  {code:'NZD',name:'New Zealand Dollar',sym:'NZ$'},
+  {code:'CAD',name:'Canadian Dollar',sym:'C$'},
+  {code:'JPY',name:'Japanese Yen',sym:'¥'},
+  {code:'CNY',name:'Chinese Yuan',sym:'¥'},
+  {code:'INR',name:'Indian Rupee',sym:'₹'},
+  {code:'AED',name:'UAE Dirham',sym:'د.إ'},
+  {code:'TRY',name:'Turkish Lira',sym:'₺'},
+  {code:'IRR',name:'Iranian Rial',sym:'﷼'},
+  {code:'CHF',name:'Swiss Franc',sym:'CHF'},
+  {code:'SGD',name:'Singapore Dollar',sym:'S$'},
+  {code:'HKD',name:'Hong Kong Dollar',sym:'HK$'},
+  {code:'SEK',name:'Swedish Krona',sym:'kr'},
+  {code:'NOK',name:'Norwegian Krone',sym:'kr'},
+  {code:'ZAR',name:'South African Rand',sym:'R'},
+  {code:'SAR',name:'Saudi Riyal',sym:'﷼'},
+  {code:'MYR',name:'Malaysian Ringgit',sym:'RM'}
+];
+function payCurrencyMeta(code){ return PAY_CURRENCIES.find(c=>c.code===code)||{code:code,name:code,sym:code}; }
 
 function paymentsMap(){ if(!DB.entities.payments)DB.entities.payments={}; return DB.entities.payments; }
 function payFoldersMap(){ if(!DB.entities.payFolders)DB.entities.payFolders={}; return DB.entities.payFolders; }
@@ -3841,10 +3937,10 @@ function payRenderHome(){
     ['archived',L==='fa'?'بایگانی':'Archived'],
     ['trash',L==='fa'?'سطل':'Trash']
   ];
-  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
-    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
-    <div style="flex:1;font-size:28px;font-weight:800;letter-spacing:-.5px">§ ${L==='fa'?'مرکز پرداخت':'Payment Center'}</div>
-    <button class="hbtn" id="pay-new" style="width:40px;height:40px;border-radius:12px;background:var(--s2);border:1px solid var(--b1);color:var(--ink);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">＋</button>
+  let html=`<div class="pg-head pay-head" style="display:flex;align-items:center;gap:8px;padding:16px 16px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none" aria-label="${L==='fa'?'بازگشت':'Back'}">&#8249;</button>
+    <div style="flex:1;min-width:0;font-size:22px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:8px;overflow:hidden"><span style="color:#f59e0b;display:inline-flex;flex:none">${paySvg(24)}</span> <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${L==='fa'?'مرکز پرداخت':'Payment Center'}</span></div>
+    <button class="btn btn-primary pay-head-add" id="pay-new-head" style="flex:none;padding:9px 16px">＋ ${L==='fa'?'پرداخت':'Payment'}</button>
   </div>`;
 
   // Dashboard cards (all numbers from PaymentService — UI never computes).
@@ -3871,13 +3967,13 @@ function payRenderHome(){
 
   // Search + filter chips
   html+=`<div style="padding:4px 16px 8px">
-    <input id="pay-search" class="finput" placeholder="${L==='fa'?'جستجوی پرداخت‌ها...':'Search payments...'}" value="${esc(paySearch)}" style="width:100%;box-sizing:border-box">
+    <input id="pay-search" class="finput" placeholder="${L==='fa'?'جستجوی پرداخت‌ها...':'Search payments...'}" value="${esc(paySearch)}" style="width:100%;box-sizing:border-box" aria-label="${L==='fa'?'جستجوی پرداخت‌ها':'Search payments'}">
   </div>
-  <div class="pay-chips">${chips.map(c=>`<button class="pay-chip${payFilter===c[0]?' on':''}" data-pay-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
+  <div class="pay-chips" role="tablist">${chips.map(c=>`<button class="pay-chip${payFilter===c[0]?' on':''}" role="tab" aria-selected="${payFilter===c[0]}" data-pay-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
 
   // List (lazy window)
   if(!filtered.length){
-    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#f59e0b18;color:#f59e0b">§</div>
+    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#f59e0b18;color:#f59e0b;display:flex;align-items:center;justify-content:center">${paySvg(30)}</div>
       <div class="hub-ph-t">${L==='fa'?'پرداختی نیست':'No payments'}</div>
       <div class="hub-ph-d">${L==='fa'?'برای افزودن قبض، اشتراک، اجاره و... دکمه + را بزنید.':'Tap + to add a bill, subscription, rent and more.'}</div></div>`;
   }else{
@@ -3886,6 +3982,8 @@ function payRenderHome(){
       html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="pay-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
     }
   }
+  // Floating action button — phone/small-tablet only (hidden on wide via CSS).
+  html+=`<button class="pay-fab" id="pay-new-fab" aria-label="${L==='fa'?'افزودن پرداخت':'Add payment'}">＋</button>`;
   return html;
 }
 
@@ -3896,7 +3994,7 @@ function payRowHTML(p){
   const stLabel=st==='paid'?(L==='fa'?'پرداخت‌شده':'Paid'):st==='overdue'?(L==='fa'?'گذشته':'Overdue'):(L==='fa'?'در انتظار':'Pending');
   const inTrash=!!p.deletedAt, inArchive=!!p.archivedAt;
   return `<div class="pay-row" data-pay-open="${p.id}">
-    <div class="pay-row-ic" style="background:${p.color||'#f59e0b'}22;color:${p.color||'#f59e0b'}">${meta.icon}</div>
+    <div class="pay-row-ic" style="background:${p.color||'#f59e0b'}22;color:${p.color||'#f59e0b'}" aria-hidden="true">${paySvg(18)}</div>
     <div class="pay-row-main">
       <div class="pay-row-title" dir="auto">${esc(p.title||(L==='fa'?'بدون عنوان':'Untitled'))}${p.starred?' <span style="color:#e0a800">★</span>':''}</div>
       <div class="pay-row-meta">
@@ -3908,7 +4006,7 @@ function payRowHTML(p){
     </div>
     <div class="pay-row-right">
       <div class="pay-row-amt">${payFmt(p.amount,p.currency)}</div>
-      ${(!inTrash&&!inArchive)?`<button class="pay-paid-btn${st==='paid'?' on':''}" data-pay-toggle="${p.id}" title="${st==='paid'?stLabel:(L==='fa'?'علامت پرداخت':'Mark paid')}">${st==='paid'?'✓':'○'}</button>`:''}
+      ${(!inTrash&&!inArchive)?`<button class="pay-paid-btn${st==='paid'?' on':''}" data-pay-toggle="${p.id}" role="switch" aria-checked="${st==='paid'?'true':'false'}" aria-label="${st==='paid'?(L==='fa'?'پرداخت‌شده — لغو':'Paid — tap to undo'):(L==='fa'?'علامت پرداخت':'Mark as paid')}"><span class="pay-paid-ic">${st==='paid'?'✓':''}</span><span class="pay-paid-lbl">${st==='paid'?(L==='fa'?'پرداخت شد':'Paid'):(L==='fa'?'پرداخت':'Pay')}</span></button>`:''}
     </div>
   </div>`;
 }
@@ -3927,7 +4025,7 @@ function payRenderDetail(){
   </div>`;
   html+=`<div style="padding:0 16px 20px">
     <div class="pay-detail-hero" style="border-color:${p.color||'#f59e0b'}55">
-      <div class="pay-row-ic" style="background:${p.color||'#f59e0b'}22;color:${p.color||'#f59e0b'};width:52px;height:52px;font-size:24px">${meta.icon}</div>
+      <div class="pay-row-ic" style="background:${p.color||'#f59e0b'}22;color:${p.color||'#f59e0b'};width:52px;height:52px" aria-hidden="true">${paySvg(26)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:26px;font-weight:800">${payFmt(p.amount,p.currency)}</div>
         <div style="font-size:13px;color:var(--ink3)">${payTypeLabel(p.type)}${p.category?' · '+esc(p.category):''}</div>
@@ -3999,20 +4097,26 @@ function payOpenEditor(id){
         ${voiceMicHTML('pay-title')}
       </div>
     </div>
-    <div class="fld" style="display:flex;gap:8px">
-      <div style="flex:1"><label>${L==='fa'?'مبلغ':'Amount'}</label>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'مبلغ':'Amount'}</label>
         <input class="finput" id="pay-f-amount" type="number" inputmode="decimal" value="${esc(String(p.amount||''))}" placeholder="0.00"></div>
-      <div style="width:110px"><label>${L==='fa'?'ارز':'Currency'}</label>
-        <input class="finput" id="pay-f-currency" value="${esc(p.currency||'AUD')}" placeholder="AUD"></div>
+      <div class="pay-fg-cur"><label>${L==='fa'?'ارز':'Currency'}</label>
+        <select class="finput" id="pay-f-currency">
+          ${PAY_CURRENCIES.map(c=>`<option value="${c.code}" ${((p.currency||'AUD')===c.code)?'selected':''}>${c.code} — ${esc(c.name)}</option>`).join('')}
+          ${(p.currency && !PAY_CURRENCIES.some(c=>c.code===p.currency))?`<option value="${esc(p.currency)}" selected>${esc(p.currency)}</option>`:''}
+          <option value="__custom__">${L==='fa'?'ارز سفارشی…':'Custom currency…'}</option>
+        </select></div>
     </div>
     <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
       <select class="finput" id="pay-f-type">${PAY_TYPES.map(t=>`<option value="${t}" ${p.type===t?'selected':''}>${payTypeLabel(t)}</option>`).join('')}</select>
     </div>
     <div class="fld"><label>${L==='fa'?'دسته':'Category'}</label>
-      <div class="qa-input-row">
-        <input class="finput" id="pay-f-category" value="${esc(p.category||'')}" placeholder="${L==='fa'?'اختیاری':'optional'}">
-        ${voiceMicHTML('pay-category')}
-      </div>
+      <select class="finput" id="pay-f-category">
+        <option value="">${L==='fa'?'— انتخاب —':'— Select —'}</option>
+        ${payCategoriesAll().map(c=>`<option value="${esc(c)}" ${p.category===c?'selected':''}>${esc(c)}</option>`).join('')}
+        ${(p.category && !payCategoriesAll().some(c=>c.toLowerCase()===p.category.toLowerCase()))?`<option value="${esc(p.category)}" selected>${esc(p.category)}</option>`:''}
+        <option value="__custom__">${L==='fa'?'＋ دسته سفارشی…':'＋ Custom category…'}</option>
+      </select>
     </div>
     <div class="fld" style="display:flex;gap:8px">
       <div style="flex:1"><label>${L==='fa'?'تاریخ سررسید':'Due date'}</label>
@@ -4058,16 +4162,45 @@ function payOpenEditor(id){
   const recSel=document.getElementById('pay-f-rec');
   recSel.onchange=()=>{ document.getElementById('pay-f-rule-wrap').style.display=recSel.value==='custom'?'':'none'; };
   attachVoiceInput('mic-pay-title','pay-f-title');
-  attachVoiceInput('mic-pay-category','pay-f-category');
   attachVoiceInput('mic-pay-notes','pay-f-notes');
+  // Currency select with custom option
+  const curSel=document.getElementById('pay-f-currency');
+  let _prevCur=curSel.value;
+  curSel.onchange=()=>{
+    if(curSel.value==='__custom__'){
+      const c=prompt(L==='fa'?'کد ارز (مثل BTC):':'Currency code (e.g. BTC):','');
+      if(c&&c.trim()){
+        const code=c.trim().toUpperCase();
+        const opt=document.createElement('option'); opt.value=code; opt.textContent=code;
+        curSel.insertBefore(opt, curSel.querySelector('option[value="__custom__"]'));
+        curSel.value=code;
+      }else{ curSel.value=_prevCur; }
+    }
+    _prevCur=curSel.value;
+  };
+  // Custom category flow
+  const catSel=document.getElementById('pay-f-category');
+  let _prevCat=catSel.value;
+  catSel.onchange=()=>{
+    if(catSel.value==='__custom__'){
+      const name=prompt(L==='fa'?'نام دسته سفارشی:':'Custom category name:','');
+      if(name&&name.trim()){
+        payRememberCategory(name.trim()); saveDB();
+        const opt=document.createElement('option'); opt.value=name.trim(); opt.textContent=name.trim();
+        catSel.insertBefore(opt, catSel.querySelector('option[value="__custom__"]'));
+        catSel.value=name.trim();
+      }else{ catSel.value=_prevCat; }
+    }
+    _prevCat=catSel.value;
+  };
   document.getElementById('pay-f-cancel').onclick=()=>closeSheet();
   document.getElementById('pay-f-save').onclick=()=>{
     const data={
       title:document.getElementById('pay-f-title').value.trim(),
       amount:document.getElementById('pay-f-amount').value,
-      currency:(document.getElementById('pay-f-currency').value.trim()||'AUD').toUpperCase(),
+      currency:((document.getElementById('pay-f-currency').value==='__custom__'?'AUD':document.getElementById('pay-f-currency').value).trim()||'AUD').toUpperCase(),
       type:document.getElementById('pay-f-type').value,
-      category:document.getElementById('pay-f-category').value.trim(),
+      category:(document.getElementById('pay-f-category').value==='__custom__'?'':document.getElementById('pay-f-category').value).trim(),
       dueDate:document.getElementById('pay-f-date').value,
       dueTime:document.getElementById('pay-f-time').value,
       recurrence:document.getElementById('pay-f-rec').value,
@@ -6200,7 +6333,7 @@ function renderLifeHub(){
   <div class="hub-grid">`;
   HUB_MODULES.forEach(m=>{
     html+=`<div class="hub-card" data-hub-mod="${m.id}">
-      <div class="hub-card-ic" style="background:${m.color}18;color:${m.color}">${m.icon}</div>
+      <div class="hub-card-ic" style="background:${m.color}18;color:${m.color}">${m.id==='payments'?paySvg(24):m.icon}</div>
       <div class="hub-card-t">${esc(m.title)}</div>
       <div class="hub-card-d">${esc(m.desc)}</div>
       ${m.ready?'':`<div class="hub-soon">${tr('hubComingSoon')}</div>`}
@@ -6517,10 +6650,10 @@ function _renderSearch(q){
         </div>`;}).join('')}
     </div>`;}
   if(payments.length){
-    html+=`<div class="hub-sec-label">§ ${L==='fa'?'پرداخت‌ها':'Payments'}</div>
+    html+=`<div class="hub-sec-label"><span style="display:inline-flex;vertical-align:middle;color:#f59e0b">${paySvg(15)}</span> ${L==='fa'?'پرداخت‌ها':'Payments'}</div>
     <div style="background:var(--s1);border-radius:var(--r);margin:0 0 8px;overflow:hidden;border:1px solid var(--b1)">
       ${payments.map(p=>{const st=payDerivedStatus(p);const over=st==='overdue';return `<div class="ul-row" data-srch-payid="${p.id}" style="cursor:pointer">
-        <div class="ul-icon"><div class="ul-icon-inner" style="background:${p.color||'#f59e0b'}">${(PAY_TYPE_META[p.type]||{}).icon||'§'}</div></div>
+        <div class="ul-icon"><div class="ul-icon-inner" style="background:${p.color||'#f59e0b'}">${paySvg(16)}</div></div>
         <div style="flex:1;padding:14px 0 14px 4px;min-width:0">
           <div style="font-size:15px;font-weight:500${st==='paid'?';text-decoration:line-through;color:var(--ink3)':''}" dir="auto">${esc(p.title)}${p.starred?' ★':''}</div>
           <div style="font-size:12px;color:var(--ink3);margin-top:2px">${[payFmt(p.amount,p.currency),p.dueDate?shortDate(p.dueDate):null,over?(L==='fa'?'سررسید گذشته':'overdue'):null].filter(Boolean).join(' · ')}</div>
@@ -7338,6 +7471,10 @@ function bindScreen(){
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
+    const nbHead=document.getElementById('pay-new-head');
+    if(nbHead)nbHead.onclick=()=>payOpenEditor(null);
+    const nbFab=document.getElementById('pay-new-fab');
+    if(nbFab)nbFab.onclick=()=>payOpenEditor(null);
     const nb=document.getElementById('pay-new');
     if(nb)nb.onclick=()=>payOpenEditor(null);
     if(payView==='home'){
