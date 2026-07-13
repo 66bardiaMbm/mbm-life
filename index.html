@@ -1353,7 +1353,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v227';
+const APP_VERSION='v229';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1381,9 +1381,9 @@ const KEY='mbmlife_platform_v1';
   var onResume=function(){ if(document.visibilityState==='visible'){ _exitingApp=false; _guards=0; window.addEventListener('popstate', onPop); } };
   document.addEventListener('visibilitychange', onResume);
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof voiceHardStop==='function') voiceHardStop(); });
-  document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof VaultSession!=='undefined'){ VaultSession.lock(); _vaultReveal={}; } });
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof VaultSession!=='undefined'){ VaultSession.lock(); if(typeof _vaultReveal!=='undefined')_vaultReveal={}; if(typeof vaultWipeInputs==='function')vaultWipeInputs(); } });
   window.addEventListener('pagehide', ()=>{ if(typeof voiceHardStop==='function') voiceHardStop(); });
-  window.addEventListener('pagehide', ()=>{ if(typeof VaultSession!=='undefined')VaultSession.lock(); });
+  window.addEventListener('pagehide', ()=>{ if(typeof VaultSession!=='undefined'){VaultSession.lock(); if(typeof vaultWipeInputs==='function')vaultWipeInputs();} });
   window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
 })();
 
@@ -1870,6 +1870,10 @@ let vaultSearch='';
 let vaultListLimit=50;
 let _vaultUnlockBusy=false;
 let _vaultReveal={};
+function vaultWipeInputs(){
+  ['vault-unlock-pin','vault-setup-pin','vault-setup-pin2'].forEach(id=>{ const el=document.getElementById(id); if(el)el.value=''; });
+  document.querySelectorAll('.vault-ef').forEach(el=>{ el.value=''; });
+}
 let noteSearch='';
 let noteSortMode='modified'; // 'modified'|'created'|'alpha'|'color'
 let noteFilterFolder=null;   // folderId or null
@@ -4729,22 +4733,29 @@ function vaultOpenMenu(){
 async function vaultRevealField(key){
   if(!VaultSession.isUnlocked())return;
   const el=document.querySelector(`.vault-fv[data-vf="${key}"]`); if(!el)return;
+  // toggle: if already revealed, hide immediately
+  if(el.dataset.shown==='1'){ el.textContent='••••••••'; el.dataset.shown=''; return; }
+  const boundId=vaultActiveId;
   try{
-    const payload=await VaultService.read(vaultActiveId);
-    if(!VaultSession.isUnlocked())return;   // locked during async
+    let payload=await VaultService.read(boundId);
+    if(!VaultSession.isUnlocked()||vaultActiveId!==boundId){ payload=null; return; }
+    const el2=document.querySelector(`.vault-fv[data-vf="${key}"]`); if(!el2){ payload=null; return; }
     const val=payload[key]||'';
-    el.textContent=val||'—';
-    // clear payload reference
-    setTimeout(()=>{ const e2=document.querySelector(`.vault-fv[data-vf="${key}"]`); if(e2)e2.innerHTML='••••••••'; }, 12000);
+    el2.textContent=val||'—'; el2.dataset.shown='1';
+    payload=null;
+    setTimeout(()=>{ const e3=document.querySelector(`.vault-fv[data-vf="${key}"]`); if(e3){ e3.textContent='••••••••'; e3.dataset.shown=''; } }, 12000);
   }catch(_){}
 }
 async function vaultCopyField(key){
   if(!VaultSession.isUnlocked())return;
+  const boundId=vaultActiveId;
   try{
-    const payload=await VaultService.read(vaultActiveId);
-    if(!VaultSession.isUnlocked())return;
-    const val=payload[key]||'';
-    if(val){ await vaultCopy(val); VaultActivity.log('copied', vaultActiveId, (vaultItemsMap()[vaultActiveId]||{}).title||''); }
+    let payload=await VaultService.read(boundId);
+    if(!VaultSession.isUnlocked()||vaultActiveId!==boundId){ payload=null; return; }
+    let val=payload[key]||'';
+    payload=null;
+    if(val){ await vaultCopy(val); VaultActivity.log('copied', boundId, (vaultItemsMap()[boundId]||{}).title||''); }
+    val=null;
   }catch(_){}
 }
 
@@ -7969,7 +7980,7 @@ function bindScreen(){
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};vaultView='home';vaultActiveId=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -8040,13 +8051,14 @@ function bindScreen(){
       if(_vaultUnlockBusy)return; _vaultUnlockBusy=true;
       const pinEl=document.getElementById('vault-unlock-pin'); const errEl=document.getElementById('vault-unlock-err');
       if(unlockGo){ unlockGo.disabled=true; unlockGo.classList.add('vault-unlock-loading'); unlockGo.textContent=(L==='fa'?'در حال باز کردن…':'Unlocking…'); }
-      const pin=pinEl?pinEl.value:'';
+      let pin=pinEl?pinEl.value:'';
       const res=await VaultSession.tryUnlock(pin);
+      pin=''; if(pinEl)pinEl.value='';   // never retain the master value
       _vaultUnlockBusy=false;
       if(res.ok){ VaultActivity.system('unlocked'); render(); return; }
       if(unlockGo){ unlockGo.disabled=false; unlockGo.classList.remove('vault-unlock-loading'); unlockGo.textContent=(L==='fa'?'باز کردن':'Unlock'); }
-      if(res.reason==='wrong'){ if(errEl)errEl.textContent=L==='fa'?'رمز نادرست است':'Incorrect PIN / password'; if(pinEl)pinEl.value=''; }
-      else if(res.reason!=='stale'&&res.reason!=='busy'){ if(errEl)errEl.textContent=L==='fa'?'خطا':'Error'; }
+      if(res.reason==='wrong'){ if(errEl)errEl.textContent=L==='fa'?'رمز نادرست است — دوباره وارد کنید':'Incorrect — please re-enter'; if(pinEl){ pinEl.value=''; pinEl.focus(); } }
+      else if(res.reason!=='stale'&&res.reason!=='busy'){ if(errEl)errEl.textContent=L==='fa'?'خطا':'Error'; if(pinEl)pinEl.value=''; }
     };
     if(unlockGo)unlockGo.onclick=doUnlock;
     const unlockPin=document.getElementById('vault-unlock-pin');
@@ -8057,7 +8069,7 @@ function bindScreen(){
       if(nb1)nb1.onclick=()=>vaultOpenEditor(null);
       if(nb2)nb2.onclick=()=>vaultOpenEditor(null);
       const lock=document.getElementById('vault-lock');
-      if(lock)lock.onclick=()=>{ VaultSession.lock(); VaultActivity.system('locked'); vaultView='home'; vaultActiveId=null; _vaultReveal={}; render(); };
+      if(lock)lock.onclick=()=>{ VaultSession.lock(); VaultActivity.system('locked'); vaultView='home'; vaultActiveId=null; _vaultReveal={}; vaultWipeInputs(); render(); };
       const se=document.getElementById('vault-search');
       if(se)se.oninput=()=>{ vaultSearch=se.value; vaultListLimit=50; clearTimeout(window._vaultSearchT); window._vaultSearchT=setTimeout(()=>{ render(); const s=document.getElementById('vault-search'); if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);} },250); };
       document.querySelectorAll('[data-vault-filter]').forEach(el=>el.onclick=()=>{ vaultFilter=el.dataset.vaultFilter; vaultListLimit=50; render(); });
