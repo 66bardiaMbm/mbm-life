@@ -1337,7 +1337,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v222';
+const APP_VERSION='v223';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2040,6 +2040,7 @@ function updateFab(){
   else if(screen==='module'){
     if(currentModule==='shopping') show=(shopView==='home');
     else if(currentModule==='notes') show=false; // Notes has its own Add button in the board action bar
+    else if(currentModule==='payments') show=false; // Payment Center has its own Add button
     else show=moduleHasCreate(hubModule(currentModule));
   }
   else show=false; // lifehub, profile, more, search, ...
