@@ -402,6 +402,10 @@ body.light .trow-title{color:var(--ink)}
 .pay-fab:focus-visible{outline:3px solid #6d5efc;outline-offset:2px}
 .pay-head-add{display:none}
 .pay-editor-wrap{display:flex;flex-direction:column;height:100%;min-height:0;flex:1 1 auto}
+.vault-mini{width:34px;height:34px;flex:none;border-radius:9px;border:1px solid var(--b2);background:var(--s2);color:var(--ink2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.vault-mini:active{background:var(--s3)}
+.vault-mini:focus-visible{outline:2px solid #6d5efc;outline-offset:2px}
+.vault-fv{font-variant-numeric:tabular-nums}
 .pay-editor-scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:0 4px}
 .pay-form-actions{flex:0 0 auto;display:flex;gap:12px;padding:14px 20px calc(14px + env(safe-area-inset-bottom));background:var(--sheet);border-top:1px solid var(--b1);box-sizing:border-box;width:100%}
 .pay-btn-save{flex:1 1 auto;min-width:0;width:auto}
@@ -1346,7 +1350,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v225';
+const APP_VERSION='v226';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1374,7 +1378,9 @@ const KEY='mbmlife_platform_v1';
   var onResume=function(){ if(document.visibilityState==='visible'){ _exitingApp=false; _guards=0; window.addEventListener('popstate', onPop); } };
   document.addEventListener('visibilitychange', onResume);
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof voiceHardStop==='function') voiceHardStop(); });
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof VaultSession!=='undefined'){ VaultSession.lock(); _vaultReveal={}; } });
   window.addEventListener('pagehide', ()=>{ if(typeof voiceHardStop==='function') voiceHardStop(); });
+  window.addEventListener('pagehide', ()=>{ if(typeof VaultSession!=='undefined')VaultSession.lock(); });
   window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
 })();
 
@@ -1413,6 +1419,8 @@ function blankDB(){
       noteFolders:{}, // {id,name,color,createdAt,updatedAt,archivedAt}
       payments:{},    // Payment Center — see PAYMENT DATA MODEL comment below
       payFolders:{},  // {id,name,color,createdAt,updatedAt,archivedAt}
+      vaultItems:{},  // Vault — encrypted; see VAULT DATA MODEL. Sensitive data ONLY inside encryptedPayload.
+      vaultFolders:{},// {id,name,color,createdAt,updatedAt,archivedAt}
     }
   };
 }
@@ -1436,7 +1444,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
@@ -1852,6 +1860,13 @@ let payActiveId=null;
 let payFilter='all';      // all | pending | overdue | paid | archived | trash
 let paySearch='';
 let payListLimit=50;      // lazy rendering window (req 11)
+let vaultView='home';
+let vaultActiveId=null;
+let vaultFilter='all';
+let vaultSearch='';
+let vaultListLimit=50;
+let _vaultUnlockBusy=false;
+let _vaultReveal={};
 let noteSearch='';
 let noteSortMode='modified'; // 'modified'|'created'|'alpha'|'color'
 let noteFilterFolder=null;   // folderId or null
@@ -2050,6 +2065,7 @@ function updateFab(){
     if(currentModule==='shopping') show=(shopView==='home');
     else if(currentModule==='notes') show=false; // Notes has its own Add button in the board action bar
     else if(currentModule==='payments') show=false; // Payment Center has its own Add button
+    else if(currentModule==='vault') show=false; // Vault has its own Add button (and only when unlocked)
     else show=moduleHasCreate(hubModule(currentModule));
   }
   else show=false; // lifehub, profile, more, search, ...
@@ -4260,6 +4276,475 @@ function payOpenMenu(){
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════
+//  VAULT — end-to-end encrypted secure store
+//  Layers: VaultCrypto (Web Crypto) · VaultSession (state) · VaultService
+//  (lifecycle over DB/IndexedDB) · VaultActivity. Sensitive data lives ONLY
+//  inside encryptedPayload (AES-GCM); key derived via PBKDF2-SHA256, held in
+//  memory only, never persisted, never on window/console/activity.
+// ═══════════════════════════════════════════════════════════════════════
+const VAULT_PBKDF2_ITER=310000;
+const VAULT_ENC_VER=1;
+
+const VaultCrypto=(()=>{
+  const enc=new TextEncoder(), dec=new TextDecoder();
+  const b64=(buf)=>btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const unb64=(s)=>{const bin=atob(s);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;};
+  function randBytes(n){ const u=new Uint8Array(n); crypto.getRandomValues(u); return u; }
+  async function deriveKey(passphrase, saltU8){
+    const base=await crypto.subtle.importKey('raw', enc.encode(passphrase), {name:'PBKDF2'}, false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      {name:'PBKDF2', salt:saltU8, iterations:VAULT_PBKDF2_ITER, hash:'SHA-256'},
+      base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+  }
+  async function makeVerifier(key){
+    const iv=randBytes(12);
+    const ct=await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode('MBM_VAULT_OK'));
+    return {iv:b64(iv), ct:b64(ct)};
+  }
+  async function checkVerifier(key, verifier){
+    try{ const pt=await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(verifier.iv)}, key, unb64(verifier.ct)); return dec.decode(pt)==='MBM_VAULT_OK'; }
+    catch(_){ return false; }
+  }
+  async function encryptObj(key, obj){
+    const iv=randBytes(12);
+    const ct=await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(JSON.stringify(obj)));
+    return {payload:b64(ct), iv:b64(iv)};
+  }
+  async function decryptObj(key, payloadB64, ivB64){
+    const pt=await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(ivB64)}, key, unb64(payloadB64));
+    return JSON.parse(dec.decode(pt));
+  }
+  return {randBytes, deriveKey, makeVerifier, checkVerifier, encryptObj, decryptObj, b64, unb64};
+})();
+
+const VaultSession=(()=>{
+  let _key=null, _state='LOCKED', _gen=0, _idleTimer=null;
+  const IDLE_MS=120000;
+  function state(){ return _state; }
+  function isUnlocked(){ return _state==='UNLOCKED' && !!_key; }
+  function key(){ return _key; }
+  function _clearIdle(){ if(_idleTimer){ clearTimeout(_idleTimer); _idleTimer=null; } }
+  function touch(){ if(!isUnlocked())return; _clearIdle(); _idleTimer=setTimeout(()=>{ lock(); if(screen==='module'&&currentModule==='vault')render(); }, IDLE_MS); }
+  async function tryUnlock(pin){
+    const cfg=DB.meta.vault; if(!cfg||!cfg.salt||!cfg.verifier) return {ok:false, reason:'no-setup'};
+    if(_state==='UNLOCKING') return {ok:false, reason:'busy'};
+    _state='UNLOCKING'; const myGen=++_gen;
+    let key;
+    try{ key=await VaultCrypto.deriveKey(pin, VaultCrypto.unb64(cfg.salt)); }
+    catch(e){ if(myGen===_gen)_state='LOCKED'; return {ok:false, reason:'error'}; }
+    if(myGen!==_gen) return {ok:false, reason:'stale'};
+    const ok=await VaultCrypto.checkVerifier(key, cfg.verifier);
+    if(myGen!==_gen) return {ok:false, reason:'stale'};
+    if(!ok){ _state='LOCKED'; return {ok:false, reason:'wrong'}; }
+    _key=key; _state='UNLOCKED'; touch();
+    return {ok:true};
+  }
+  function lock(){ if(_state==='LOCKED') return; _state='LOCKING'; _gen++; _key=null; _clearIdle(); _state='LOCKED'; }
+  async function setup(pin){
+    const salt=VaultCrypto.randBytes(16);
+    const key=await VaultCrypto.deriveKey(pin, salt);
+    const verifier=await VaultCrypto.makeVerifier(key);
+    DB.meta.vault={ salt:VaultCrypto.b64(salt), verifier, iter:VAULT_PBKDF2_ITER, createdAt:now() };
+    _key=key; _state='UNLOCKED'; _gen++; touch(); saveDB();
+  }
+  function isConfigured(){ return !!(DB.meta.vault && DB.meta.vault.salt && DB.meta.vault.verifier); }
+  return {state, isUnlocked, isConfigured, key, tryUnlock, lock, setup, touch};
+})();
+
+function vaultItemsMap(){ if(!DB.entities.vaultItems)DB.entities.vaultItems={}; return DB.entities.vaultItems; }
+function vaultFoldersMap(){ if(!DB.entities.vaultFolders)DB.entities.vaultFolders={}; return DB.entities.vaultFolders; }
+function vaultFoldersAll(){ return Object.values(vaultFoldersMap()).filter(f=>!f.archivedAt&&!f.deletedAt); }
+function vaultAll(){ return Object.values(vaultItemsMap()).filter(v=>!v.archivedAt&&!v.deletedAt); }
+function vaultArchived(){ return Object.values(vaultItemsMap()).filter(v=>v.archivedAt&&!v.deletedAt); }
+function vaultTrashed(){ return Object.values(vaultItemsMap()).filter(v=>v.deletedAt); }
+
+const VAULT_TYPES=['login','password','bank','credit-card','debit-card','passport','driver-licence','medicare','insurance','wifi','software-licence','crypto-wallet','identity','secure-note','other'];
+const VAULT_TYPE_META={
+  login:{en:'Login',fa:'ورود',ic:'🔑'}, password:{en:'Password',fa:'رمز',ic:'∗'},
+  bank:{en:'Bank Account',fa:'حساب بانکی',ic:'🏦'}, 'credit-card':{en:'Credit Card',fa:'کارت اعتباری',ic:'💳'},
+  'debit-card':{en:'Debit Card',fa:'کارت نقدی',ic:'💳'}, passport:{en:'Passport',fa:'پاسپورت',ic:'🛂'},
+  'driver-licence':{en:'Driver Licence',fa:'گواهینامه',ic:'🚗'}, medicare:{en:'Medicare',fa:'مدیکر',ic:'⚕'},
+  insurance:{en:'Insurance',fa:'بیمه',ic:'☂'}, wifi:{en:'Wi-Fi',fa:'وای‌فای',ic:'📶'},
+  'software-licence':{en:'Software Licence',fa:'لایسنس',ic:'🔧'}, 'crypto-wallet':{en:'Crypto Wallet',fa:'کیف‌پول',ic:'₿'},
+  identity:{en:'Identity',fa:'هویت',ic:'🆔'}, 'secure-note':{en:'Secure Note',fa:'یادداشت امن',ic:'📝'}, other:{en:'Other',fa:'دیگر',ic:'◆'}
+};
+const VAULT_FIELDS={
+  login:[['username','Username'],['email','Email'],['password','Password',true],['website','Website'],['notes','Notes']],
+  password:[['password','Password',true],['website','Website'],['notes','Notes']],
+  bank:[['accountHolder','Account holder'],['bankName','Bank name'],['bsb','BSB/Routing'],['accountNumber','Account number',true],['swift','SWIFT/BIC'],['notes','Notes']],
+  'credit-card':[['cardholder','Cardholder name'],['cardNumber','Card number',true],['expiryDate','Expiry date'],['cvv','CVV',true],['issuer','Issuer'],['notes','Notes']],
+  'debit-card':[['cardholder','Cardholder name'],['cardNumber','Card number',true],['expiryDate','Expiry date'],['cvv','CVV',true],['issuer','Issuer'],['notes','Notes']],
+  passport:[['fullName','Full name'],['passportNumber','Passport number',true],['nationality','Nationality'],['issueDate','Issue date'],['expiryDate','Expiry date'],['authority','Issuing authority'],['notes','Notes']],
+  'driver-licence':[['fullName','Full name'],['licenceNumber','Licence number',true],['region','State/Country'],['issueDate','Issue date'],['expiryDate','Expiry date'],['notes','Notes']],
+  medicare:[['fullName','Full name'],['medicareNumber','Medicare number',true],['reference','Reference'],['expiryDate','Expiry date'],['notes','Notes']],
+  insurance:[['provider','Provider'],['policyNumber','Policy number',true],['coverType','Cover type'],['expiryDate','Expiry date'],['notes','Notes']],
+  wifi:[['network','Network name'],['password','Password',true],['security','Security type'],['notes','Notes']],
+  'software-licence':[['product','Product'],['licenceKey','Licence key',true],['email','Email'],['notes','Notes']],
+  'crypto-wallet':[['walletName','Wallet name'],['address','Address'],['seedPhrase','Seed phrase',true],['privateKey','Private key',true],['notes','Notes']],
+  identity:[['fullName','Full name'],['idNumber','ID number',true],['dob','Date of birth'],['notes','Notes']],
+  'secure-note':[['notes','Secure note',true]],
+  other:[['field1','Detail 1'],['field2','Detail 2',true],['notes','Notes']]
+};
+function vaultTypeLabel(t){ const m=VAULT_TYPE_META[t]||VAULT_TYPE_META.other; return L==='fa'?m.fa:m.en; }
+
+const VaultActivity={
+  log(type, itemId, name){ logActivity(type,'vault',itemId,{name:name||''}); },
+  system(type){ logActivity(type,'vaultSystem','vault',{name:''}); }
+};
+
+const VaultService={
+  async create(meta, payload){
+    if(!VaultSession.isUnlocked()) throw new Error('locked');
+    const {payload:ct, iv}=await VaultCrypto.encryptObj(VaultSession.key(), payload||{});
+    const ts=now(), id=uid();
+    vaultItemsMap()[id]={
+      id, title:meta.title||'', type:VAULT_TYPES.includes(meta.type)?meta.type:'login',
+      folderId:meta.folderId||null, tags:meta.tags||[], favourite:!!meta.favourite,
+      color:meta.color||'#ef4444', websiteDomain:meta.websiteDomain||'',
+      createdAt:ts, updatedAt:ts, archivedAt:null, deletedAt:null,
+      encryptionVersion:VAULT_ENC_VER, encryptedPayload:ct, iv, saltReference:'meta.vault.salt',
+      integrityMetadata:{alg:'AES-GCM'}, syncVersion:1, conflictMetadata:null, versions:[],
+      attachments:[], metadata:null, aiMeta:null, biometricMeta:null, syncMeta:null
+    };
+    VaultActivity.log('created', id, meta.title||'');
+    saveDB();
+    return id;
+  },
+  async read(id){
+    if(!VaultSession.isUnlocked()) throw new Error('locked');
+    const it=vaultItemsMap()[id]; if(!it) return null;
+    return VaultCrypto.decryptObj(VaultSession.key(), it.encryptedPayload, it.iv);
+  },
+  async update(id, meta, payload){
+    if(!VaultSession.isUnlocked()) throw new Error('locked');
+    const it=vaultItemsMap()[id]; if(!it) return;
+    if(!it.versions)it.versions=[];
+    it.versions.push({at:now(), encryptedPayload:it.encryptedPayload, iv:it.iv});
+    if(it.versions.length>50)it.versions=it.versions.slice(-50);
+    const {payload:ct, iv}=await VaultCrypto.encryptObj(VaultSession.key(), payload||{});
+    it.encryptedPayload=ct; it.iv=iv;
+    if(meta){ ['title','type','folderId','tags','favourite','color','websiteDomain'].forEach(k=>{ if(k in meta)it[k]=meta[k]; }); }
+    it.updatedAt=now(); it.syncVersion=(it.syncVersion||1)+1;
+    VaultActivity.log('edited', id, it.title);
+    saveDB();
+  },
+  async restoreVersion(id, index){
+    if(!VaultSession.isUnlocked()) throw new Error('locked');
+    const it=vaultItemsMap()[id]; if(!it||!it.versions||!it.versions[index]) return;
+    const v=it.versions[index];
+    const obj=await VaultCrypto.decryptObj(VaultSession.key(), v.encryptedPayload, v.iv);
+    it.versions.push({at:now(), encryptedPayload:it.encryptedPayload, iv:it.iv});
+    const {payload:ct, iv}=await VaultCrypto.encryptObj(VaultSession.key(), obj);
+    it.encryptedPayload=ct; it.iv=iv; it.updatedAt=now();
+    VaultActivity.log('edited', id, it.title);
+    saveDB();
+  },
+  toggleFav(id){ const it=vaultItemsMap()[id]; if(!it)return; it.favourite=!it.favourite; it.updatedAt=now(); VaultActivity.log(it.favourite?'starred':'unstarred', id, it.title); saveDB(); },
+  archive(id){ const it=vaultItemsMap()[id]; if(!it)return; it.archivedAt=now(); it.updatedAt=it.archivedAt; VaultActivity.log('archived', id, it.title); saveDB(); },
+  unarchive(id){ const it=vaultItemsMap()[id]; if(!it)return; it.archivedAt=null; it.updatedAt=now(); VaultActivity.log('restored', id, it.title); saveDB(); },
+  trash(id){ const it=vaultItemsMap()[id]; if(!it)return; it.deletedAt=now(); it.updatedAt=it.deletedAt; VaultActivity.log('deleted', id, it.title); saveDB(); },
+  restore(id){ const it=vaultItemsMap()[id]; if(!it)return; it.deletedAt=null; it.updatedAt=now(); VaultActivity.log('restored', id, it.title); saveDB(); },
+  permDelete(id){ const it=vaultItemsMap()[id]; if(!it)return; VaultActivity.log('permanently_deleted', id, it.title); delete vaultItemsMap()[id]; saveDB(); },
+  folderCreate(name){ const id=uid(), ts=now(); vaultFoldersMap()[id]={id,name:name||'Folder',color:'#ef4444',createdAt:ts,updatedAt:ts,archivedAt:null,deletedAt:null}; saveDB(); return id; },
+  dashboard(){
+    const all=vaultAll();
+    const counts={}; all.forEach(v=>{counts[v.type]=(counts[v.type]||0)+1;});
+    const fcounts={}; all.forEach(v=>{ if(v.folderId)fcounts[v.folderId]=(fcounts[v.folderId]||0)+1; });
+    const recent=all.slice().sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||'')).slice(0,5);
+    return { total:all.length, favourites:all.filter(v=>v.favourite).length, recent, counts, fcounts };
+  }
+};
+
+async function vaultCopy(value){
+  try{
+    await navigator.clipboard.writeText(value);
+    toast(L==='fa'?'کپی شد':'Copied');
+    setTimeout(async()=>{ try{ const cur=await navigator.clipboard.readText(); if(cur===value) await navigator.clipboard.writeText(''); }catch(_){} }, 30000);
+  }catch(_){ toast(L==='fa'?'کپی نشد':'Copy failed'); }
+}
+
+/* ═══════════ VAULT — UI ═══════════ */
+function vaultBackHeader(title){
+  return `<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:22px;font-weight:800;display:flex;align-items:center;gap:8px"><span style="color:#ef4444">🔒</span> ${esc(title)}</div>
+  </div>`;
+}
+
+function renderVault(){
+  // Locked / setup gates first — no decrypted content can render while locked.
+  if(!VaultSession.isConfigured()) return vaultRenderSetup();
+  if(!VaultSession.isUnlocked()) return vaultRenderLocked();
+  if(vaultView==='detail') return vaultRenderDetail();
+  if(vaultView==='history') return vaultRenderHistory();
+  return vaultRenderHome();
+}
+
+function vaultRenderSetup(){
+  return vaultBackHeader(L==='fa'?'راه‌اندازی ولت':'Set up Vault')+`
+  <div style="padding:20px 20px;max-width:460px;margin:0 auto">
+    <p style="color:var(--ink3);font-size:14px;margin-bottom:16px">${L==='fa'?'یک رمز اصلی بسازید. همه‌چیز با آن رمزنگاری می‌شود. این رمز ذخیره نمی‌شود؛ اگر آن را فراموش کنید، اطلاعات قابل بازیابی نیست.':'Create a master PIN or password. Everything is encrypted with it. It is never stored — if you forget it, your data cannot be recovered.'}</p>
+    <div class="fld"><label>${L==='fa'?'رمز اصلی':'Master PIN / password'}</label>
+      <input class="finput" id="vault-setup-pin" type="password" inputmode="text" autocomplete="new-password" placeholder="••••••••"></div>
+    <div class="fld"><label>${L==='fa'?'تکرار رمز':'Confirm'}</label>
+      <input class="finput" id="vault-setup-pin2" type="password" autocomplete="new-password" placeholder="••••••••"></div>
+    <button class="btn btn-primary" id="vault-setup-go" style="width:100%">${L==='fa'?'ساخت ولت امن':'Create secure Vault'}</button>
+  </div>`;
+}
+
+function vaultRenderLocked(){
+  return vaultBackHeader(L==='fa'?'ولت قفل است':'Vault locked')+`
+  <div style="padding:40px 20px;max-width:460px;margin:0 auto;text-align:center">
+    <div style="font-size:52px;margin-bottom:8px">🔒</div>
+    <p style="color:var(--ink3);font-size:14px;margin-bottom:16px">${L==='fa'?'برای دسترسی، رمز اصلی را وارد کنید.':'Enter your master PIN / password to unlock.'}</p>
+    <div class="fld" style="text-align:start"><label>${L==='fa'?'رمز اصلی':'Master PIN / password'}</label>
+      <input class="finput" id="vault-unlock-pin" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <div id="vault-unlock-err" style="color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px"></div>
+    <button class="btn btn-primary" id="vault-unlock-go" style="width:100%">${L==='fa'?'باز کردن':'Unlock'}</button>
+  </div>`;
+}
+
+function vaultFilteredList(){
+  let list;
+  if(vaultFilter==='archived')list=vaultArchived();
+  else if(vaultFilter==='trash')list=vaultTrashed();
+  else{
+    list=vaultAll();
+    if(vaultFilter==='favourite')list=list.filter(v=>v.favourite);
+    else if(vaultFilter==='recent')list=list.slice().sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||'')).slice(0,25);
+    else if(vaultFilter.startsWith('type:'))list=list.filter(v=>v.type===vaultFilter.slice(5));
+  }
+  const q=(vaultSearch||'').trim().toLowerCase();
+  if(q){
+    // SAFE metadata only — never decrypt for search
+    list=list.filter(v=>{
+      const folder=v.folderId?(vaultFoldersMap()[v.folderId]||{}).name:'';
+      return (v.title||'').toLowerCase().includes(q)
+        || vaultTypeLabel(v.type).toLowerCase().includes(q)
+        || (v.websiteDomain||'').toLowerCase().includes(q)
+        || (v.tags||[]).some(t=>String(t).toLowerCase().includes(q))
+        || String(folder||'').toLowerCase().includes(q);
+    });
+  }
+  list.sort((a,b)=>{
+    if(!!b.favourite!==!!a.favourite)return b.favourite?1:-1;
+    return (a.title||'').localeCompare(b.title||'');
+  });
+  return list;
+}
+
+function vaultRenderHome(){
+  const d=VaultService.dashboard();
+  const filtered=vaultFilteredList();
+  const shown=filtered.slice(0,vaultListLimit);
+  const chips=[
+    ['all',L==='fa'?'همه':'All'],['favourite',L==='fa'?'دلخواه':'Favourites'],['recent',L==='fa'?'اخیر':'Recent'],
+    ['archived',L==='fa'?'بایگانی':'Archived'],['trash',L==='fa'?'سطل':'Trash']
+  ];
+  let html=`<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:22px;font-weight:800;display:flex;align-items:center;gap:8px;overflow:hidden"><span style="color:#ef4444;flex:none">🔒</span> <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${L==='fa'?'ولت':'Vault'}</span></div>
+    <button class="btn btn-primary pay-head-add" id="vault-new-head" style="flex:none;padding:9px 16px">＋ ${L==='fa'?'مورد':'Item'}</button>
+    <button class="note-icon-btn" id="vault-lock" aria-label="lock vault" title="${L==='fa'?'قفل':'Lock'}" style="color:var(--ink)">🔒</button>
+  </div>`;
+  html+=`<div class="pay-dash">
+    <div class="pay-dash-card" style="--pc:#ef4444"><div class="pay-dash-k">${L==='fa'?'کل موارد':'Total items'}</div><div class="pay-dash-v">${d.total}</div></div>
+    <div class="pay-dash-card" style="--pc:#f59e0b"><div class="pay-dash-k">${L==='fa'?'دلخواه':'Favourites'}</div><div class="pay-dash-v">${d.favourites}</div></div>
+    <div class="pay-dash-card" style="--pc:#22c55e"><div class="pay-dash-k">${L==='fa'?'اخیر':'Recent'}</div><div class="pay-dash-v">${d.recent.length}</div></div>
+  </div>`;
+  html+=`<div style="padding:4px 16px 8px"><input id="vault-search" class="finput" placeholder="${L==='fa'?'جستجو (فقط عنوان/نوع/برچسب)':'Search (title/type/tag only)'}" value="${esc(vaultSearch)}" style="width:100%;box-sizing:border-box"></div>
+    <div class="pay-chips">${chips.map(c=>`<button class="pay-chip${vaultFilter===c[0]?' on':''}" data-vault-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
+  if(!filtered.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ef444418;color:#ef4444">🔒</div>
+      <div class="hub-ph-t">${L==='fa'?'موردی نیست':'No items'}</div>
+      <div class="hub-ph-d">${L==='fa'?'برای افزودن رمز، کارت یا مدرک، + را بزنید.':'Tap + to add a password, card or ID.'}</div></div>`;
+  }else{
+    html+=`<div class="pay-list" id="vault-list">${shown.map(vaultRowHTML).join('')}</div>`;
+    if(filtered.length>shown.length)html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="vault-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
+  }
+  html+=`<button class="pay-fab" id="vault-new-fab" aria-label="${L==='fa'?'افزودن':'Add item'}">＋</button>`;
+  return html;
+}
+
+function vaultRowHTML(v){
+  const meta=VAULT_TYPE_META[v.type]||VAULT_TYPE_META.other;
+  const inTrash=!!v.deletedAt, inArch=!!v.archivedAt;
+  return `<div class="pay-row" data-vault-open="${v.id}">
+    <div class="pay-row-ic" style="background:${v.color||'#ef4444'}22;color:${v.color||'#ef4444'};font-size:18px">${meta.ic}</div>
+    <div class="pay-row-main">
+      <div class="pay-row-title" dir="auto">${esc(v.title||(L==='fa'?'بدون عنوان':'Untitled'))}${v.favourite?' <span style="color:#e0a800">★</span>':''}</div>
+      <div class="pay-row-meta">
+        <span class="pay-mchip">${vaultTypeLabel(v.type)}</span>
+        ${v.websiteDomain?`<span class="pay-mchip">${esc(v.websiteDomain)}</span>`:''}
+        <span class="pay-mchip">•••• ${L==='fa'?'رمزنگاری‌شده':'encrypted'}</span>
+      </div>
+    </div>
+    <span style="color:var(--ink3);opacity:.4;padding-inline-end:4px">›</span>
+  </div>`;
+}
+
+function vaultRenderDetail(){
+  const v=vaultItemsMap()[vaultActiveId];
+  if(!v){ vaultView='home'; return vaultRenderHome(); }
+  const meta=VAULT_TYPE_META[v.type]||VAULT_TYPE_META.other;
+  const fields=VAULT_FIELDS[v.type]||VAULT_FIELDS.other;
+  let html=`<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="vault-detail-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:20px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.title||'')}</div>
+    <button class="note-icon-btn" id="vault-fav" style="color:${v.favourite?'#e0a800':'var(--ink)'}" aria-label="favourite">★</button>
+    <button class="note-icon-btn" id="vault-menu" aria-label="options"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+  </div>
+  <div style="padding:0 16px 20px">
+    <div class="pay-detail-hero" style="border-color:${v.color||'#ef4444'}55">
+      <div class="pay-row-ic" style="background:${v.color||'#ef4444'}22;color:${v.color||'#ef4444'};width:52px;height:52px;font-size:24px">${meta.ic}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:18px;font-weight:800">${esc(v.title||'')}</div>
+      <div style="font-size:13px;color:var(--ink3)">${vaultTypeLabel(v.type)}</div></div>
+    </div>
+    <div class="pay-detail-rows" id="vault-fields">
+      ${fields.map(f=>{const key=f[0],lbl=f[1],sens=!!f[2];
+        return `<div class="pay-drow" style="flex-direction:column;align-items:stretch;gap:4px">
+          <span class="pay-drow-k">${esc(lbl)}</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="vault-fv" data-vf="${key}" data-sens="${sens?1:0}" style="flex:1;min-width:0;word-break:break-word;font-weight:600">${sens?'••••••••':`<span style="color:var(--ink3)">…</span>`}</span>
+            ${sens?`<button class="vault-mini" data-vault-reveal="${key}" aria-label="show/hide">👁</button>`:''}
+            <button class="vault-mini" data-vault-copy="${key}" aria-label="copy">⧉</button>
+          </div>
+        </div>`;}).join('')}
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--ink3)">${L==='fa'?'مقادیر فقط پس از باز کردن ولت رمزگشایی می‌شوند و پس از چند ثانیه دوباره مخفی می‌گردند.':'Values are decrypted only after unlock and re-hidden after a few seconds.'}</div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-primary" id="vault-edit" style="flex:1">${L==='fa'?'ویرایش':'Edit'}</button>
+    </div>
+  </div>`;
+  return html;
+}
+
+function vaultRenderHistory(){
+  const v=vaultItemsMap()[vaultActiveId];
+  if(!v){ vaultView='home'; return vaultRenderHome(); }
+  const versions=(v.versions||[]).slice().reverse();
+  let html=vaultBackHeaderHist(L==='fa'?'تاریخچه (رمزنگاری‌شده)':'History (encrypted)');
+  if(!versions.length){ html+=`<div class="hub-ph"><div class="hub-ph-ic">◷</div><div class="hub-ph-t">${L==='fa'?'نسخه‌ای نیست':'No versions'}</div></div>`; return html; }
+  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+  versions.forEach((ver,i)=>{
+    const realIndex=(v.versions.length-1)-i;
+    const dd=new Date(ver.at);
+    const when=isNaN(dd)?'':dd.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    html+=`<div class="ul-row"><div style="flex:1;padding:12px 0 12px 14px;min-width:0">
+      <div style="font-size:14px">🔒 ${L==='fa'?'نسخه رمزنگاری‌شده':'Encrypted version'}</div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(when)}</div></div>
+      <button class="shop-mini" data-vault-restore-ver="${realIndex}" style="margin-inline-end:12px">${L==='fa'?'بازگردانی':'Restore'}</button></div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+function vaultBackHeaderHist(title){
+  return `<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="vault-hist-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:22px;font-weight:800">${esc(title)}</div></div>`;
+}
+
+async function vaultOpenEditor(id){
+  if(!VaultSession.isUnlocked()){ render(); return; }
+  const editing=!!id;
+  const v=editing?vaultItemsMap()[id]:{title:'',type:'login',folderId:null,tags:[],favourite:false,color:'#ef4444',websiteDomain:''};
+  if(editing&&!v)return;
+  let payload={};
+  if(editing){ try{ payload=await VaultService.read(id)||{}; }catch(_){ toast(L==='fa'?'ولت قفل است':'Vault locked'); render(); return; } }
+  const folders=vaultFoldersAll();
+  const buildFields=(type)=>{
+    const fields=VAULT_FIELDS[type]||VAULT_FIELDS.other;
+    return fields.map(f=>{const key=f[0],lbl=f[1],sens=!!f[2];
+      const val=payload[key]||'';
+      return `<div class="fld"><label>${esc(lbl)}</label>
+        <input class="finput vault-ef" data-vk="${key}" type="${sens?'password':'text'}" autocomplete="off" value="${esc(val)}"></div>`;
+    }).join('');
+  };
+  openSheet(`<div class="pay-editor-wrap"><div class="pay-editor-scroll"><h3>${editing?(L==='fa'?'ویرایش مورد':'Edit item'):(L==='fa'?'مورد جدید':'New item')}</h3>
+    <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
+      <input class="finput" id="vault-f-title" autocomplete="off" value="${esc(v.title||'')}" placeholder="${L==='fa'?'مثلاً جیمیل':'e.g. Gmail'}"></div>
+    <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
+      <select class="finput" id="vault-f-type">${VAULT_TYPES.map(t=>`<option value="${t}" ${v.type===t?'selected':''}>${vaultTypeLabel(t)}</option>`).join('')}</select></div>
+    <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
+      <select class="finput" id="vault-f-folder"><option value="">${L==='fa'?'بدون پوشه':'No folder'}</option>
+      ${folders.map(f=>`<option value="${f.id}" ${v.folderId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}</select></div>
+    <div id="vault-f-fields">${buildFields(v.type)}</div>
+    </div>
+    <div class="pay-form-actions">
+      <button class="btn pay-btn-cancel" id="vault-f-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary pay-btn-save" id="vault-f-save">${editing?(L==='fa'?'ذخیره':'Save'):(L==='fa'?'افزودن':'Add')}</button>
+    </div></div>`, {noPad:true});
+  const typeSel=document.getElementById('vault-f-type');
+  typeSel.onchange=()=>{ document.getElementById('vault-f-fields').innerHTML=buildFields(typeSel.value); };
+  document.getElementById('vault-f-cancel').onclick=()=>closeSheet();
+  document.getElementById('vault-f-save').onclick=async()=>{
+    const title=document.getElementById('vault-f-title').value.trim();
+    if(!title){ toast(L==='fa'?'عنوان لازم است':'Title required'); return; }
+    const type=document.getElementById('vault-f-type').value;
+    const folderId=document.getElementById('vault-f-folder').value||null;
+    const newPayload={};
+    document.querySelectorAll('.vault-ef').forEach(el=>{ const k=el.dataset.vk; const val=el.value; if(val)newPayload[k]=val; });
+    let domain='';
+    if(newPayload.website){ try{ domain=new URL(newPayload.website.includes('://')?newPayload.website:'https://'+newPayload.website).hostname; }catch(_){ domain=''; } }
+    const meta={title, type, folderId, websiteDomain:domain, favourite:v.favourite, color:v.color};
+    try{
+      if(!VaultSession.isUnlocked()){ toast(L==='fa'?'ولت قفل شد':'Vault locked'); closeSheet(); render(); return; }
+      if(editing)await VaultService.update(id, meta, newPayload);
+      else{ const nid=await VaultService.create(meta, newPayload); vaultActiveId=nid; }
+      // wipe plaintext from the form fields immediately
+      document.querySelectorAll('.vault-ef').forEach(el=>{ el.value=''; });
+      closeSheet(); render();
+    }catch(e){ toast(L==='fa'?'خطا در ذخیره':'Save failed'); }
+  };
+}
+
+function vaultOpenMenu(){
+  const v=vaultItemsMap()[vaultActiveId]; if(!v)return;
+  openSheet(`<h3>${L==='fa'?'گزینه‌ها':'Options'}</h3>
+    <div class="btn-col">
+      <button class="btn btn-ghost" id="vm-history">${L==='fa'?'تاریخچه':'Version history'}</button>
+      ${v.archivedAt?`<button class="btn btn-ghost" id="vm-unarchive">${L==='fa'?'خروج از بایگانی':'Unarchive'}</button>`:`<button class="btn btn-ghost" id="vm-archive">${L==='fa'?'بایگانی':'Archive'}</button>`}
+      ${v.deletedAt?`<button class="btn btn-ghost" id="vm-restore">${L==='fa'?'بازگردانی':'Restore'}</button><button class="btn btn-danger" id="vm-perm">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>`:`<button class="btn btn-danger" id="vm-trash">${L==='fa'?'انتقال به سطل':'Move to Trash'}</button>`}
+      <button class="btn btn-ghost" id="vm-cancel">${tr('cancel')}</button>
+    </div>`);
+  const bind=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
+  bind('vm-history',()=>{ closeSheet(); vaultView='history'; render(); });
+  bind('vm-archive',()=>{ VaultService.archive(vaultActiveId); closeSheet(); vaultView='home'; render(); });
+  bind('vm-unarchive',()=>{ VaultService.unarchive(vaultActiveId); closeSheet(); render(); });
+  bind('vm-trash',()=>{ VaultService.trash(vaultActiveId); closeSheet(); vaultView='home'; render(); });
+  bind('vm-restore',()=>{ VaultService.restore(vaultActiveId); closeSheet(); render(); });
+  bind('vm-perm',()=>{ closeSheet(); openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3><p style="padding:0 4px 8px;color:var(--ink3)">${L==='fa'?'این عمل قابل بازگشت نیست.':'This cannot be undone.'}</p><div class="btn-col"><button class="btn btn-danger" id="vm-perm2">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button><button class="btn btn-ghost" id="vm-perm-cancel">${tr('cancel')}</button></div>`);
+    document.getElementById('vm-perm2').onclick=()=>{ VaultService.permDelete(vaultActiveId); closeSheet(); vaultView='home'; vaultActiveId=null; render(); };
+    document.getElementById('vm-perm-cancel').onclick=()=>closeSheet();
+  });
+  bind('vm-cancel',()=>closeSheet());
+}
+
+// Reveal a single sensitive field briefly, then auto-remask.
+async function vaultRevealField(key){
+  if(!VaultSession.isUnlocked())return;
+  const el=document.querySelector(`.vault-fv[data-vf="${key}"]`); if(!el)return;
+  try{
+    const payload=await VaultService.read(vaultActiveId);
+    if(!VaultSession.isUnlocked())return;   // locked during async
+    const val=payload[key]||'';
+    el.textContent=val||'—';
+    // clear payload reference
+    setTimeout(()=>{ const e2=document.querySelector(`.vault-fv[data-vf="${key}"]`); if(e2)e2.innerHTML='••••••••'; }, 12000);
+  }catch(_){}
+}
+async function vaultCopyField(key){
+  if(!VaultSession.isUnlocked())return;
+  try{
+    const payload=await VaultService.read(vaultActiveId);
+    if(!VaultSession.isUnlocked())return;
+    const val=payload[key]||'';
+    if(val){ await vaultCopy(val); VaultActivity.log('copied', vaultActiveId, (vaultItemsMap()[vaultActiveId]||{}).title||''); }
+  }catch(_){}
+}
+
+
 const HUB_MODULES=[
   // ready:false → placeholder page, "Coming soon" badge, NO create (+) button.
   // A future milestone flips ready:true and supplies createLabel + onCreate()
@@ -4267,7 +4752,7 @@ const HUB_MODULES=[
   {id:'notes',    icon:'✎', color:'#6e56f8', title:'Notes',     desc:'Quick notes, checklists & ideas',   ready:true,  createLabel:'New Note',         onCreate:()=>openNewNoteSheet()},
   {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:true,  createLabel:'New Shopping List', onCreate:null},
   {id:'payments', icon:'§',  color:'#f59e0b', title:'Payment Center', desc:'Bills, subscriptions, rent, loans & more', ready:true, createLabel:'New Payment', onCreate:()=>payOpenEditor(null)},
-  {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Secure info (future, encrypted)',   ready:false, createLabel:'New Secure Item',  onCreate:null},
+  {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Encrypted passwords, cards & IDs',   ready:true,  createLabel:'New Secure Item',  onCreate:()=>vaultOpenEditor(null)},
   {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records',    ready:false, createLabel:'New Document',     onCreate:null},
   {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings',         ready:false, createLabel:'New Trip',         onCreate:null},
   {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules',           ready:false, createLabel:'New Home Item',    onCreate:null},
@@ -5199,11 +5684,11 @@ function logActivity(type,refType,refId,meta){
 function activityLabel(e){
   const n=(e.meta&&e.meta.name)?e.meta.name:'';
   const verbs=L==='fa'
-    ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد',paid:'پرداخت شد',reopened:'باز شد',restored:'بازگردانی شد',permanently_deleted:'برای همیشه حذف شد'}
-    :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred',paid:'marked paid',reopened:'reopened',restored:'restored',permanently_deleted:'permanently deleted'};
+    ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد',paid:'پرداخت شد',reopened:'باز شد',restored:'بازگردانی شد',permanently_deleted:'برای همیشه حذف شد',unlocked:'باز شد',locked:'قفل شد',setup:'راه‌اندازی شد',copied:'کپی شد'}
+    :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred',paid:'marked paid',reopened:'reopened',restored:'restored',permanently_deleted:'permanently deleted',unlocked:'unlocked',locked:'locked',setup:'set up',copied:'field copied'};
   const kinds=L==='fa'
-    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت',payment:'پرداخت'}
-    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note',payment:'Payment'};
+    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت',payment:'پرداخت',vault:'محرمانه',vaultSystem:'ولت'}
+    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note',payment:'Payment',vault:'Secure item',vaultSystem:'Vault'};
   return `${kinds[e.refType]||e.refType} ${n?'“'+n+'” ':''}${verbs[e.type]||e.type}`;
 }
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
@@ -6390,6 +6875,7 @@ function renderModule(){
   if(currentModule==='activity') return renderActivity();
   if(currentModule==='notes') return renderNotes();
   if(currentModule==='payments') return renderPayments();
+  if(currentModule==='vault') return renderVault();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -7479,7 +7965,7 @@ function bindScreen(){
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};vaultView='home';vaultActiveId=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -7530,6 +8016,64 @@ function bindScreen(){
       if(b)b.onclick=()=>{ payView='detail'; render(); };
       document.querySelectorAll('[data-pay-restore-ver]').forEach(el=>el.onclick=()=>payRestoreVersion(payActiveId,parseInt(el.dataset.payRestoreVer,10)));
     }
+  })();
+  // ── Vault wiring ──
+  (()=>{
+    if(!(screen==='module'&&currentModule==='vault'))return;
+    // setup
+    const setupGo=document.getElementById('vault-setup-go');
+    if(setupGo)setupGo.onclick=async()=>{
+      const a=document.getElementById('vault-setup-pin').value, b=document.getElementById('vault-setup-pin2').value;
+      if(!a||a.length<4){ toast(L==='fa'?'حداقل ۴ کاراکتر':'At least 4 characters'); return; }
+      if(a!==b){ toast(L==='fa'?'رمزها یکی نیستند':'PINs do not match'); return; }
+      await VaultSession.setup(a);
+      VaultActivity.system('setup'); VaultActivity.system('unlocked');
+      render();
+    };
+    // unlock
+    const unlockGo=document.getElementById('vault-unlock-go');
+    const doUnlock=async()=>{
+      if(_vaultUnlockBusy)return; _vaultUnlockBusy=true;
+      const pinEl=document.getElementById('vault-unlock-pin'); const errEl=document.getElementById('vault-unlock-err');
+      const pin=pinEl?pinEl.value:'';
+      const res=await VaultSession.tryUnlock(pin);
+      _vaultUnlockBusy=false;
+      if(res.ok){ VaultActivity.system('unlocked'); render(); }
+      else if(res.reason==='wrong'){ if(errEl)errEl.textContent=L==='fa'?'رمز نادرست است':'Incorrect PIN / password'; if(pinEl)pinEl.value=''; }
+      else if(res.reason!=='stale'&&res.reason!=='busy'){ if(errEl)errEl.textContent=L==='fa'?'خطا':'Error'; }
+    };
+    if(unlockGo)unlockGo.onclick=doUnlock;
+    const unlockPin=document.getElementById('vault-unlock-pin');
+    if(unlockPin)unlockPin.onkeydown=(e)=>{ if(e.key==='Enter')doUnlock(); };
+    // home
+    if(vaultView==='home'&&VaultSession.isUnlocked()){
+      const nb1=document.getElementById('vault-new-head'), nb2=document.getElementById('vault-new-fab');
+      if(nb1)nb1.onclick=()=>vaultOpenEditor(null);
+      if(nb2)nb2.onclick=()=>vaultOpenEditor(null);
+      const lock=document.getElementById('vault-lock');
+      if(lock)lock.onclick=()=>{ VaultSession.lock(); VaultActivity.system('locked'); vaultView='home'; vaultActiveId=null; _vaultReveal={}; render(); };
+      const se=document.getElementById('vault-search');
+      if(se)se.oninput=()=>{ vaultSearch=se.value; vaultListLimit=50; clearTimeout(window._vaultSearchT); window._vaultSearchT=setTimeout(()=>{ render(); const s=document.getElementById('vault-search'); if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);} },250); };
+      document.querySelectorAll('[data-vault-filter]').forEach(el=>el.onclick=()=>{ vaultFilter=el.dataset.vaultFilter; vaultListLimit=50; render(); });
+      document.querySelectorAll('[data-vault-open]').forEach(el=>el.onclick=()=>{ vaultActiveId=el.dataset.vaultOpen; vaultView='detail'; render(); window.scrollTo(0,0); });
+      const more=document.getElementById('vault-more'); if(more)more.onclick=()=>{ vaultListLimit+=50; render(); };
+    }
+    // detail
+    if(vaultView==='detail'&&VaultSession.isUnlocked()){
+      const b=document.getElementById('vault-detail-back'); if(b)b.onclick=()=>{ vaultView='home'; _vaultReveal={}; render(); window.scrollTo(0,0); };
+      const fav=document.getElementById('vault-fav'); if(fav)fav.onclick=()=>{ VaultService.toggleFav(vaultActiveId); render(); };
+      const menu=document.getElementById('vault-menu'); if(menu)menu.onclick=()=>vaultOpenMenu();
+      const edit=document.getElementById('vault-edit'); if(edit)edit.onclick=()=>vaultOpenEditor(vaultActiveId);
+      document.querySelectorAll('[data-vault-reveal]').forEach(el=>el.onclick=()=>vaultRevealField(el.dataset.vaultReveal));
+      document.querySelectorAll('[data-vault-copy]').forEach(el=>el.onclick=()=>vaultCopyField(el.dataset.vaultCopy));
+    }
+    // history
+    if(vaultView==='history'&&VaultSession.isUnlocked()){
+      const b=document.getElementById('vault-hist-back'); if(b)b.onclick=()=>{ vaultView='detail'; render(); };
+      document.querySelectorAll('[data-vault-restore-ver]').forEach(el=>el.onclick=async()=>{ await VaultService.restoreVersion(vaultActiveId,parseInt(el.dataset.vaultRestoreVer,10)); vaultView='detail'; render(); });
+    }
+    // any interaction resets the idle auto-lock timer
+    VaultSession.touch();
   })();
   // ── Notes wiring ──
   (()=>{
@@ -8350,6 +8894,7 @@ function showAuthScreen(){
 /* ── Sign out without relying on reload ── */
 function doSignOut(){
   if(typeof voiceHardStop==='function')voiceHardStop();
+  if(typeof VaultSession!=='undefined'){ VaultSession.lock(); _vaultReveal={}; vaultView='home'; vaultActiveId=null; }
   stopListeners();
   try{removeDeviceToken();}catch(e){}
   DB.meta.userId=null;
