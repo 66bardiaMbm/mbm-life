@@ -406,6 +406,9 @@ body.light .trow-title{color:var(--ink)}
 .vault-mini:active{background:var(--s3)}
 .vault-mini:focus-visible{outline:2px solid #6d5efc;outline-offset:2px}
 .vault-fv{font-variant-numeric:tabular-nums}
+.vault-secure-input{background:var(--s2)!important;color:var(--ink)!important;-webkit-text-fill-color:var(--ink)!important;caret-color:var(--ink)}
+.vault-secure-input:-webkit-autofill,.vault-secure-input:-webkit-autofill:hover,.vault-secure-input:-webkit-autofill:focus,.vault-secure-input:-webkit-autofill:active{-webkit-text-fill-color:var(--ink)!important;-webkit-box-shadow:0 0 0 1000px var(--s2) inset!important;box-shadow:0 0 0 1000px var(--s2) inset!important;transition:background-color 9999s ease-in-out 0s;caret-color:var(--ink)}
+.vault-unlock-loading{opacity:.6;pointer-events:none}
 .pay-editor-scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:0 4px}
 .pay-form-actions{flex:0 0 auto;display:flex;gap:12px;padding:14px 20px calc(14px + env(safe-area-inset-bottom));background:var(--sheet);border-top:1px solid var(--b1);box-sizing:border-box;width:100%}
 .pay-btn-save{flex:1 1 auto;min-width:0;width:auto}
@@ -1350,7 +1353,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v226';
+const APP_VERSION='v227';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4486,9 +4489,9 @@ function vaultRenderSetup(){
   <div style="padding:20px 20px;max-width:460px;margin:0 auto">
     <p style="color:var(--ink3);font-size:14px;margin-bottom:16px">${L==='fa'?'یک رمز اصلی بسازید. همه‌چیز با آن رمزنگاری می‌شود. این رمز ذخیره نمی‌شود؛ اگر آن را فراموش کنید، اطلاعات قابل بازیابی نیست.':'Create a master PIN or password. Everything is encrypted with it. It is never stored — if you forget it, your data cannot be recovered.'}</p>
     <div class="fld"><label>${L==='fa'?'رمز اصلی':'Master PIN / password'}</label>
-      <input class="finput" id="vault-setup-pin" type="password" inputmode="text" autocomplete="new-password" placeholder="••••••••"></div>
+      <input class="finput vault-secure-input" id="vault-setup-pin" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" name="vault-nofill-a" placeholder="••••••••"></div>
     <div class="fld"><label>${L==='fa'?'تکرار رمز':'Confirm'}</label>
-      <input class="finput" id="vault-setup-pin2" type="password" autocomplete="new-password" placeholder="••••••••"></div>
+      <input class="finput vault-secure-input" id="vault-setup-pin2" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" name="vault-nofill-b" placeholder="••••••••"></div>
     <button class="btn btn-primary" id="vault-setup-go" style="width:100%">${L==='fa'?'ساخت ولت امن':'Create secure Vault'}</button>
   </div>`;
 }
@@ -4499,7 +4502,7 @@ function vaultRenderLocked(){
     <div style="font-size:52px;margin-bottom:8px">🔒</div>
     <p style="color:var(--ink3);font-size:14px;margin-bottom:16px">${L==='fa'?'برای دسترسی، رمز اصلی را وارد کنید.':'Enter your master PIN / password to unlock.'}</p>
     <div class="fld" style="text-align:start"><label>${L==='fa'?'رمز اصلی':'Master PIN / password'}</label>
-      <input class="finput" id="vault-unlock-pin" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <input class="finput vault-secure-input" id="vault-unlock-pin" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" name="vault-nofill-u" placeholder="••••••••"></div>
     <div id="vault-unlock-err" style="color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px"></div>
     <button class="btn btn-primary" id="vault-unlock-go" style="width:100%">${L==='fa'?'باز کردن':'Unlock'}</button>
   </div>`;
@@ -4546,7 +4549,7 @@ function vaultRenderHome(){
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
     <div style="flex:1;font-size:22px;font-weight:800;display:flex;align-items:center;gap:8px;overflow:hidden"><span style="color:#ef4444;flex:none">🔒</span> <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${L==='fa'?'ولت':'Vault'}</span></div>
     <button class="btn btn-primary pay-head-add" id="vault-new-head" style="flex:none;padding:9px 16px">＋ ${L==='fa'?'مورد':'Item'}</button>
-    <button class="note-icon-btn" id="vault-lock" aria-label="lock vault" title="${L==='fa'?'قفل':'Lock'}" style="color:var(--ink)">🔒</button>
+    <button class="note-icon-btn" id="vault-lock" aria-label="lock vault" title="${L==='fa'?'قفل کردن ولت':'Lock Vault'}" style="color:var(--ink);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.3"/></svg></button>
   </div>`;
   html+=`<div class="pay-dash">
     <div class="pay-dash-card" style="--pc:#ef4444"><div class="pay-dash-k">${L==='fa'?'کل موارد':'Total items'}</div><div class="pay-dash-v">${d.total}</div></div>
@@ -4556,9 +4559,10 @@ function vaultRenderHome(){
   html+=`<div style="padding:4px 16px 8px"><input id="vault-search" class="finput" placeholder="${L==='fa'?'جستجو (فقط عنوان/نوع/برچسب)':'Search (title/type/tag only)'}" value="${esc(vaultSearch)}" style="width:100%;box-sizing:border-box"></div>
     <div class="pay-chips">${chips.map(c=>`<button class="pay-chip${vaultFilter===c[0]?' on':''}" data-vault-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
   if(!filtered.length){
-    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ef444418;color:#ef4444">🔒</div>
-      <div class="hub-ph-t">${L==='fa'?'موردی نیست':'No items'}</div>
-      <div class="hub-ph-d">${L==='fa'?'برای افزودن رمز، کارت یا مدرک، + را بزنید.':'Tap + to add a password, card or ID.'}</div></div>`;
+    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ef444418;color:#ef4444;font-size:30px">🔒</div>
+      <div class="hub-ph-t">${L==='fa'?'اولین مورد امن خود را بسازید':'Create your first secure item'}</div>
+      <div class="hub-ph-d">${L==='fa'?'رمزها، کارت‌های بانکی، مدارک و یادداشت‌های محرمانه‌تان را رمزنگاری‌شده و امن نگه دارید.':'Keep passwords, cards, IDs and secret notes encrypted and safe — only you can unlock them.'}</div>
+      <button class="btn btn-primary" id="vault-empty-add" style="margin-top:14px;padding:11px 22px">＋ ${L==='fa'?'افزودن اولین مورد':'Add first item'}</button></div>`;
   }else{
     html+=`<div class="pay-list" id="vault-list">${shown.map(vaultRowHTML).join('')}</div>`;
     if(filtered.length>shown.length)html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="vault-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
@@ -4658,12 +4662,12 @@ async function vaultOpenEditor(id){
     return fields.map(f=>{const key=f[0],lbl=f[1],sens=!!f[2];
       const val=payload[key]||'';
       return `<div class="fld"><label>${esc(lbl)}</label>
-        <input class="finput vault-ef" data-vk="${key}" type="${sens?'password':'text'}" autocomplete="off" value="${esc(val)}"></div>`;
+        <input class="finput vault-ef vault-secure-input" data-vk="${key}" type="${sens?'password':'text'}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" name="vf-${key}-${Math.random().toString(36).slice(2,7)}" value="${esc(val)}"></div>`;
     }).join('');
   };
   openSheet(`<div class="pay-editor-wrap"><div class="pay-editor-scroll"><h3>${editing?(L==='fa'?'ویرایش مورد':'Edit item'):(L==='fa'?'مورد جدید':'New item')}</h3>
     <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
-      <input class="finput" id="vault-f-title" autocomplete="off" value="${esc(v.title||'')}" placeholder="${L==='fa'?'مثلاً جیمیل':'e.g. Gmail'}"></div>
+      <input class="finput vault-secure-input" id="vault-f-title" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" name="vault-title-nofill" value="${esc(v.title||'')}" placeholder="${L==='fa'?'مثلاً جیمیل':'e.g. Gmail'}"></div>
     <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
       <select class="finput" id="vault-f-type">${VAULT_TYPES.map(t=>`<option value="${t}" ${v.type===t?'selected':''}>${vaultTypeLabel(t)}</option>`).join('')}</select></div>
     <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
@@ -8035,11 +8039,13 @@ function bindScreen(){
     const doUnlock=async()=>{
       if(_vaultUnlockBusy)return; _vaultUnlockBusy=true;
       const pinEl=document.getElementById('vault-unlock-pin'); const errEl=document.getElementById('vault-unlock-err');
+      if(unlockGo){ unlockGo.disabled=true; unlockGo.classList.add('vault-unlock-loading'); unlockGo.textContent=(L==='fa'?'در حال باز کردن…':'Unlocking…'); }
       const pin=pinEl?pinEl.value:'';
       const res=await VaultSession.tryUnlock(pin);
       _vaultUnlockBusy=false;
-      if(res.ok){ VaultActivity.system('unlocked'); render(); }
-      else if(res.reason==='wrong'){ if(errEl)errEl.textContent=L==='fa'?'رمز نادرست است':'Incorrect PIN / password'; if(pinEl)pinEl.value=''; }
+      if(res.ok){ VaultActivity.system('unlocked'); render(); return; }
+      if(unlockGo){ unlockGo.disabled=false; unlockGo.classList.remove('vault-unlock-loading'); unlockGo.textContent=(L==='fa'?'باز کردن':'Unlock'); }
+      if(res.reason==='wrong'){ if(errEl)errEl.textContent=L==='fa'?'رمز نادرست است':'Incorrect PIN / password'; if(pinEl)pinEl.value=''; }
       else if(res.reason!=='stale'&&res.reason!=='busy'){ if(errEl)errEl.textContent=L==='fa'?'خطا':'Error'; }
     };
     if(unlockGo)unlockGo.onclick=doUnlock;
@@ -8057,6 +8063,7 @@ function bindScreen(){
       document.querySelectorAll('[data-vault-filter]').forEach(el=>el.onclick=()=>{ vaultFilter=el.dataset.vaultFilter; vaultListLimit=50; render(); });
       document.querySelectorAll('[data-vault-open]').forEach(el=>el.onclick=()=>{ vaultActiveId=el.dataset.vaultOpen; vaultView='detail'; render(); window.scrollTo(0,0); });
       const more=document.getElementById('vault-more'); if(more)more.onclick=()=>{ vaultListLimit+=50; render(); };
+      const emptyAdd=document.getElementById('vault-empty-add'); if(emptyAdd)emptyAdd.onclick=()=>vaultOpenEditor(null);
     }
     // detail
     if(vaultView==='detail'&&VaultSession.isUnlocked()){
