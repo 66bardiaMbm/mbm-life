@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v238';
+const APP_VERSION='v240';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -5474,10 +5474,8 @@ function tripQuickCreate(){
     const country=document.getElementById('tq-country').value.trim();
     const start=document.getElementById('tq-start').value;
     const end=document.getElementById('tq-end').value;
-    if(!dest){ toast(L==='fa'?'مقصد لازم است':'Destination required'); return; }
-    if(!start||!end){ toast(L==='fa'?'تاریخ شروع و پایان لازم است':'Start and end dates required'); return; }
     const ci=tripCountryInfo(country);
-    const meta={ title:dest, destination:dest, country:country,
+    const meta={ title:dest||(L==='fa'?'سفر جدید':'New trip'), destination:dest, country:country,
       startDate:start, endDate:end,
       currency: ci?ci.currency:(DB.meta.payDefaultCurrency||'AUD'),
       timezone: ci?ci.timezone:'' };
@@ -5485,13 +5483,17 @@ function tripQuickCreate(){
     // seed suggested packing from country/season
     tripSuggestPacking(tripsMap()[nid]).forEach(x=>TripService.listAdd(nid,'packing',x));
     tripActiveId=nid; travelView='detail'; tripDetailTab='overview';
-    render();
-    tripOpenEditor(nid);
+    // Open the Full Trip Editor directly (standalone fn, no routing branch) in the same sheet.
+    if(!nid||!tripsMap()[nid]){ toast(L==='fa'?'خطا در ساخت سفر':'Failed to create trip'); return; }
+    tripOpenFullEditor(nid);
   };
 }
 
 function tripOpenEditor(id){
   if(!id){ tripQuickCreate(); return; }
+  tripOpenFullEditor(id);
+}
+function tripOpenFullEditor(id){
   const editing=true;
   const t=tripsMap()[id]; if(!t)return;
   const curOpts=(typeof PAY_CURRENCIES!=='undefined'?PAY_CURRENCIES:[{code:'AUD',name:'Australian Dollar'}]);
