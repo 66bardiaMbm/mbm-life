@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v235';
+const APP_VERSION='v237';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2456,6 +2456,7 @@ function renderListDetail(){
     if(activeSmartView!=='assigned'){
       tasks=tasks.concat(shopListsAsTasks());
       tasks=tasks.concat(paymentsAsTasks());
+      tasks=tasks.concat(tripsAsTasks());
     }
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
@@ -2587,6 +2588,21 @@ function taskRowFlat(t,isOverdue){
       <div class="trow-star-wrap">
         <button class="star ${t.pinned?'on':''}" data-pay-pin="${t.payId}">★</button>
       </div>
+    </div>`;
+  }
+  // ── Travel row: read-only projection, opens the trip ──
+  if(t.kind==='trip'){
+    let tmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'سفر':'Travel'}</span>`;
+    if(t.dueDate&&!over)tmeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
+    if(over)tmeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+    const tOverStyle=over?'border-left:2px solid var(--danger);':'';
+    return `<div class="trow-flat" data-trip-open-task="${t.tripId}" style="${tOverStyle}">
+      <div class="trow-chk-wrap"><div class="chk" data-trip-open-task="${t.tripId}" style="border-radius:7px"></div></div>
+      <div class="trow-content">
+        <div class="trow-title" dir="auto">${esc(t.text)}</div>
+        <div class="trow-meta-row">${tmeta}</div>
+      </div>
+      <div class="trow-star-wrap"></div>
     </div>`;
   }
   const pr=t.priority==='p1'?`<span class="pill p1">${tr('high')}</span>`:'';
@@ -5002,6 +5018,15 @@ function documentsAsTasks(){ return documentsLive().map(docAsTask).filter(Boolea
 //   payLinks[]  = paymentId[]       (Payment Center)
 // ═══════════════════════════════════════════════════════════════════════
 const TRIP_BOOKING_KINDS=['flight','hotel','car','train','bus','ferry','activity','restaurant'];
+const TRIP_SEGMENT_KINDS=['flight','train','bus','ferry','cruise','car','taxi','walking','bicycle','motorcycle','other'];
+const TRIP_SEGMENT_META={
+  flight:{en:'Flight',fa:'پرواز',ic:'✈'}, train:{en:'Train',fa:'قطار',ic:'🚆'}, bus:{en:'Bus',fa:'اتوبوس',ic:'🚌'},
+  ferry:{en:'Ferry',fa:'کشتی',ic:'⛴'}, cruise:{en:'Cruise',fa:'کروز',ic:'🛳'}, car:{en:'Rental Car',fa:'اجاره خودرو',ic:'🚗'},
+  taxi:{en:'Taxi',fa:'تاکسی',ic:'🚕'}, walking:{en:'Walking',fa:'پیاده',ic:'🚶'}, bicycle:{en:'Bicycle',fa:'دوچرخه',ic:'🚲'},
+  motorcycle:{en:'Motorcycle',fa:'موتور',ic:'🏍'}, other:{en:'Other',fa:'دیگر',ic:'◆'}
+};
+function tripSegLabel(k){ const m=TRIP_SEGMENT_META[k]||TRIP_SEGMENT_META.other; return L==='fa'?m.fa:m.en; }
+function tripSegIcon(k){ return (TRIP_SEGMENT_META[k]||TRIP_SEGMENT_META.other).ic; }
 const TRIP_BOOKING_META={
   flight:{en:'Flight',fa:'پرواز',ic:'✈'}, hotel:{en:'Hotel',fa:'هتل',ic:'🏨'},
   car:{en:'Car Rental',fa:'اجاره خودرو',ic:'🚗'}, train:{en:'Train',fa:'قطار',ic:'🚆'},
@@ -5098,6 +5123,39 @@ function tripDaysUntil(t){
   if(isNaN(s))return null;
   return Math.round((s-today)/86400000);
 }
+// Live countdown label — updates as the date changes (computed from today each render)
+function tripCountdown(t){
+  if(!t.startDate)return '';
+  const today=new Date(todayStr()+'T00:00:00');
+  const s=new Date(t.startDate+'T00:00:00');
+  const e=new Date((t.endDate||t.startDate)+'T00:00:00');
+  if(isNaN(s))return '';
+  const dayMs=86400000;
+  const toStart=Math.round((s-today)/dayMs);
+  const total=Math.round((e-s)/dayMs)+1;
+  // During the trip (today within [start,end]) → Day N of X
+  if(today>=s && today<=e){
+    const dayNo=Math.round((today-s)/dayMs)+1;
+    if(dayNo>=total)return (L==='fa'?'روز آخر':'Final day');
+    return (L==='fa'?`روز ${dayNo} از ${total}`:`Day ${dayNo} of ${total}`);
+  }
+  if(toStart>1)return (L==='fa'?toStart+' روز مانده':toStart+' days remaining');
+  if(toStart===1)return (L==='fa'?'فردا':'Tomorrow');
+  // after
+  const ended=Math.round((today-e)/dayMs);
+  if(ended===0)return (L==='fa'?'پایان امروز':'Ended today');
+  return (L==='fa'?`سفر تمام شد — ${ended} روز پیش`:`Trip completed — ${ended}d ago`);
+}
+// Project dated Travel items (segments, bookings, dated checklist/packing reminders) into smart views.
+function tripsAsTasks(){
+  const out=[];
+  tripsLive().forEach(t=>{
+    (t.segments||[]).forEach(sg=>{ if(sg.depDate){ out.push({ id:'trip:'+t.id+':seg:'+sg.id, tripId:t.id, kind:'trip', text:(tripSegLabel(sg.kind))+': '+([sg.fromCity,sg.toCity].filter(Boolean).join(' → ')||t.title||''), dueDate:sg.depDate, dueTime:sg.depTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' }); } });
+    (t.bookings||[]).forEach(b=>{ if(b.date){ out.push({ id:'trip:'+t.id+':bk:'+b.id, tripId:t.id, kind:'trip', text:(tripBookingLabel(b.kind))+': '+(b.title||t.title||''), dueDate:b.date, dueTime:b.time||'', pinned:false, done:false, notes:'', icon:tripBookingIcon(b.kind), color:t.color||'#06b6d4' }); } });
+    if(t.startDate){ out.push({ id:'trip:'+t.id+':start', tripId:t.id, kind:'trip', text:(L==='fa'?'شروع سفر: ':'Trip starts: ')+(t.title||t.destination||''), dueDate:t.startDate, dueTime:'', pinned:!!t.favourite, done:false, notes:'', icon:'✈', color:t.color||'#06b6d4' }); }
+  });
+  return out;
+}
 
 const TravelActivity={ log(type,id,name){ logActivity(type,'trip',id,{name:name||''}); } };
 
@@ -5110,7 +5168,9 @@ const TripService={
       notes:meta.notes||'', budget:meta.budget||0, currency:meta.currency||(DB.meta.payDefaultCurrency||'AUD'),
       travellers:meta.travellers||1, color:meta.color||'#06b6d4', tags:meta.tags||[],
       favourite:!!meta.favourite, archivedAt:null, deletedAt:null, createdAt:ts, updatedAt:ts,
-      bookings:[], checklist:[], packing:[], docLinks:[], payLinks:[]
+      bookings:[], checklist:[], packing:[], docLinks:[], payLinks:[],
+      countries:(meta.country?[{id:uid(),name:meta.country,cities:(meta.city?[{id:uid(),name:meta.city}]:[])}]:[]),
+      segments:[]
     };
     TravelActivity.log('created', id, meta.title||'');
     saveDB();
@@ -5142,7 +5202,16 @@ const TripService={
   unlinkDoc(id, docId){ const t=tripsMap()[id]; if(!t)return; t.docLinks=(t.docLinks||[]).filter(x=>x!==docId); t.updatedAt=now(); saveDB(); },
   linkPay(id, payId){ const t=tripsMap()[id]; if(!t)return; if(!t.payLinks)t.payLinks=[]; if(!t.payLinks.includes(payId))t.payLinks.push(payId); t.updatedAt=now(); saveDB(); },
   unlinkPay(id, payId){ const t=tripsMap()[id]; if(!t)return; t.payLinks=(t.payLinks||[]).filter(x=>x!==payId); t.updatedAt=now(); saveDB(); },
-  spentTotal(id){ const t=tripsMap()[id]; if(!t)return 0; let sum=0; (t.bookings||[]).forEach(b=>{ sum+=(+b.cost||0); }); (t.payLinks||[]).forEach(pid=>{ const p=(typeof paymentsMap==='function')?paymentsMap()[pid]:null; if(p)sum+=(+p.amount||0); }); return sum; },
+  spentTotal(id){ const t=tripsMap()[id]; if(!t)return 0; let sum=0; (t.bookings||[]).forEach(b=>{ sum+=(+b.cost||0); }); (t.segments||[]).forEach(sg=>{ sum+=(+sg.cost||0); }); (t.payLinks||[]).forEach(pid=>{ const p=(typeof paymentsMap==='function')?paymentsMap()[pid]:null; if(p)sum+=(+p.amount||0); }); return sum; },
+  _ensure(t){ if(!t.countries)t.countries=[]; if(!t.segments)t.segments=[]; if(!t.bookings)t.bookings=[]; if(!t.checklist)t.checklist=[]; if(!t.packing)t.packing=[]; if(!t.docLinks)t.docLinks=[]; if(!t.payLinks)t.payLinks=[]; },
+  countryAdd(id,name){ const t=tripsMap()[id]; if(!t||!name.trim())return; this._ensure(t); t.countries.push({id:uid(),name:name.trim(),cities:[]}); t.updatedAt=now(); saveDB(); },
+  countryRename(id,cid,name){ const t=tripsMap()[id]; if(!t)return; const c=(t.countries||[]).find(x=>x.id===cid); if(c){ c.name=name.trim(); t.updatedAt=now(); saveDB(); } },
+  countryDelete(id,cid){ const t=tripsMap()[id]; if(!t)return; t.countries=(t.countries||[]).filter(x=>x.id!==cid); t.updatedAt=now(); saveDB(); },
+  cityAdd(id,cid,name){ const t=tripsMap()[id]; if(!t||!name.trim())return; const c=(t.countries||[]).find(x=>x.id===cid); if(c){ if(!c.cities)c.cities=[]; c.cities.push({id:uid(),name:name.trim()}); t.updatedAt=now(); saveDB(); } },
+  cityDelete(id,cid,cityId){ const t=tripsMap()[id]; if(!t)return; const c=(t.countries||[]).find(x=>x.id===cid); if(c){ c.cities=(c.cities||[]).filter(x=>x.id!==cityId); t.updatedAt=now(); saveDB(); } },
+  segmentAdd(id,seg){ const t=tripsMap()[id]; if(!t)return; this._ensure(t); t.segments.push(Object.assign({id:uid(),kind:'flight',fromCountry:'',fromCity:'',toCountry:'',toCity:'',depDate:'',depTime:'',arrDate:'',arrTime:'',operator:'',bookingRef:'',seat:'',gate:'',terminal:'',platform:'',cost:0,notes:'',attachment:null},seg)); t.updatedAt=now(); saveDB(); },
+  segmentUpdate(id,sid,seg){ const t=tripsMap()[id]; if(!t)return; const s=(t.segments||[]).find(x=>x.id===sid); if(s){ Object.assign(s,seg); t.updatedAt=now(); saveDB(); } },
+  segmentDelete(id,sid){ const t=tripsMap()[id]; if(!t)return; t.segments=(t.segments||[]).filter(x=>x.id!==sid); t.updatedAt=now(); saveDB(); },
   dashboard(){
     const live=tripsLive();
     let up=0,act=0,past=0;
@@ -5250,6 +5319,7 @@ function tripRowHTML(t){
         ${where?`<span class="pay-mchip">${esc(where)}</span>`:''}
         ${tripDates(t)?`<span class="pay-mchip">${tripDates(t)}</span>`:''}
         ${tripStatusChip(t)}
+        ${tripCountdown(t)?`<span class="pay-mchip">${tripCountdown(t)}</span>`:''}
       </div>
     </div>
     <span style="color:var(--ink3);opacity:.4;padding-inline-end:4px">›</span>
@@ -5261,7 +5331,7 @@ function tripCardHTML(t){
     <div class="doc-card-ic" style="background:${t.color||'#06b6d4'}18;color:${t.color||'#06b6d4'}">✈</div>
     <div class="doc-card-title" dir="auto">${esc(t.title||where||(L==='fa'?'سفر':'Trip'))}</div>
     <div class="doc-card-sub">${esc(where)}</div>
-    <div style="margin-top:4px">${tripStatusChip(t)}</div>
+    <div style="margin-top:4px">${tripStatusChip(t)}${tripCountdown(t)?` <span class="pay-mchip" style="font-size:11px">${tripCountdown(t)}</span>`:''}</div>
     ${t.favourite?'<div class="doc-card-fav">★</div>':''}
   </div>`;
 }
@@ -5269,9 +5339,10 @@ function tripCardHTML(t){
 function tripRenderDetail(){
   const t=tripsMap()[tripActiveId];
   if(!t){ travelView='home'; return tripRenderHome(); }
+  TripService._ensure(t);
   const where=[t.city,t.country].filter(Boolean).join(', ')||t.destination||'';
   const spent=TripService.spentTotal(t.id);
-  const tabs=[['overview',L==='fa'?'کلی':'Overview'],['bookings',L==='fa'?'رزروها':'Bookings'],['lists',L==='fa'?'لیست‌ها':'Lists'],['links',L==='fa'?'پیوندها':'Links']];
+  const tabs=[['overview',L==='fa'?'کلی':'Overview'],['countries',L==='fa'?'کشورها':'Countries'],['route',L==='fa'?'مسیر':'Route'],['bookings',L==='fa'?'رزروها':'Bookings'],['lists',L==='fa'?'لیست‌ها':'Lists'],['links',L==='fa'?'پیوندها':'Links']];
   let html=`<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
     <button class="ld-back" id="trip-detail-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
     <div style="flex:1;font-size:20px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title||where||'')}</div>
@@ -5282,7 +5353,8 @@ function tripRenderDetail(){
     <div class="pay-detail-hero" style="border-color:${t.color||'#06b6d4'}55">
       <div class="pay-row-ic" style="background:${t.color||'#06b6d4'}22;color:${t.color||'#06b6d4'};width:52px;height:52px;font-size:26px">✈</div>
       <div style="flex:1;min-width:0"><div style="font-size:18px;font-weight:800" dir="auto">${esc(t.title||where||'')}</div>
-      <div style="font-size:13px;color:var(--ink3)">${esc(where)}${tripDates(t)?' · '+tripDates(t):''}</div></div>
+      <div style="font-size:13px;color:var(--ink3)">${esc(where)}${tripDates(t)?' · '+tripDates(t):''}</div>
+      ${tripCountdown(t)?`<div style="font-size:13px;font-weight:700;color:${t.color||'#06b6d4'};margin-top:2px">${tripCountdown(t)}</div>`:''}</div>
     </div>
     <div class="trip-tabs">${tabs.map(tb=>`<button class="trip-tab${tripDetailTab===tb[0]?' on':''}" data-trip-tab="${tb[0]}">${tb[1]}</button>`).join('')}</div>`;
   if(tripDetailTab==='overview'){
@@ -5293,7 +5365,7 @@ function tripRenderDetail(){
       <div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'مسافران':'Travellers'}</span><span class="pay-drow-v">${t.travellers||1}</span></div>
       ${t.budget?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'بودجه':'Budget'}</span><span class="pay-drow-v">${payFmt?payFmt(t.budget,t.currency):(t.budget+' '+t.currency)}</span></div>`:''}
       <div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'هزینه رزروها':'Booked cost'}</span><span class="pay-drow-v">${payFmt?payFmt(spent,t.currency):(spent+' '+t.currency)}</span></div>
-      ${t.budget?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'باقی‌مانده بودجه':'Budget left'}</span><span class="pay-drow-v" style="color:${(t.budget-spent)<0?'#ef4444':'#22c55e'}">${payFmt?payFmt(t.budget-spent,t.currency):((t.budget-spent)+' '+t.currency)}</span></div>`:''}
+      ${t.budget?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'باقی‌مانده بودجه':'Budget left'}</span><span class="pay-drow-v" style="color:${(t.budget-spent)<0?'#ef4444':'#22c55e'}">${payFmt?payFmt(t.budget-spent,t.currency):((t.budget-spent)+' '+t.currency)} · ${Math.max(0,Math.round((1-spent/t.budget)*100))}%</span></div>`:''}
       ${(t.tags&&t.tags.length)?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'برچسب‌ها':'Tags'}</span><span class="pay-drow-v">${t.tags.map(x=>'#'+esc(x)).join(' ')}</span></div>`:''}
     </div>
     ${(()=>{ const ci=tripCountryInfo(t.country); if(!ci)return ''; const season=tripSeason(t.startDate,ci.hemi);
@@ -5344,6 +5416,31 @@ function tripRenderDetail(){
     if(pays.length){ html+=`<div class="pay-detail-rows">`; pays.forEach(pp=>{ html+=`<div class="pay-drow"><span class="pay-drow-k">${esc(pp.title||'')}</span><span class="pay-drow-v">${payFmt?payFmt(pp.amount,pp.currency):pp.amount}<button class="doc-eatt-x" data-trip-unlinkpay="${pp.id}" style="margin-inline-start:8px" aria-label="unlink">✕</button></span></div>`; }); html+=`</div>`; }
     else html+=`<div style="color:var(--ink3);font-size:13px;padding:6px 2px">${L==='fa'?'پرداختی پیوند نشده':'No payments linked'}</div>`;
     html+=`<button class="btn btn-ghost" id="trip-link-pay" style="width:100%;margin-top:8px">＋ ${L==='fa'?'پیوند پرداخت':'Link payment'}</button></div>`;
+  } else if(tripDetailTab==='countries'){
+    const countries=t.countries||[];
+    html+=`<div style="margin-top:8px">`;
+    if(!countries.length)html+=`<div style="color:var(--ink3);font-size:14px;padding:16px 4px;text-align:center">${L==='fa'?'کشوری اضافه نشده':'No countries added'}</div>`;
+    countries.forEach(c=>{
+      html+=`<div class="pay-detail-rows" style="margin-bottom:10px">
+        <div class="pay-drow"><span class="pay-drow-k" style="display:flex;align-items:center;gap:6px">🌍 ${esc(c.name)}</span>
+          <span class="pay-drow-v"><button class="doc-eatt-x" data-trip-delcountry="${c.id}" aria-label="delete">✕</button></span></div>`;
+      (c.cities||[]).forEach(ci=>{ html+=`<div class="pay-drow"><span class="pay-drow-k" style="padding-inline-start:14px">📍 ${esc(ci.name)}</span><span class="pay-drow-v"><button class="doc-eatt-x" data-trip-delcity="${c.id}:${ci.id}" aria-label="delete">✕</button></span></div>`; });
+      html+=`<div class="pay-drow"><input class="finput" id="trip-addcity-${c.id}" placeholder="${L==='fa'?'افزودن شهر...':'Add city...'}" style="width:100%"></div></div>`;
+    });
+    html+=`<div class="qa-input-row" style="margin-top:6px"><input class="finput" id="trip-addcountry" placeholder="${L==='fa'?'افزودن کشور...':'Add country...'}" style="flex:1"></div></div>`;
+  } else if(tripDetailTab==='route'){
+    const segs=t.segments||[];
+    html+=`<div style="margin-top:8px">`;
+    if(!segs.length)html+=`<div style="color:var(--ink3);font-size:14px;padding:16px 4px;text-align:center">${L==='fa'?'مسیری تعریف نشده':'No route segments yet'}</div>`;
+    else{
+      html+=`<div class="pay-detail-rows">`;
+      segs.forEach(sg=>{ const route=[sg.fromCity||sg.fromCountry,sg.toCity||sg.toCountry].filter(Boolean).join(' → ');
+        html+=`<div class="pay-drow" data-trip-seg="${sg.id}" style="cursor:pointer">
+          <span class="pay-drow-k" style="display:flex;align-items:center;gap:6px">${tripSegIcon(sg.kind)} ${tripSegLabel(sg.kind)}</span>
+          <span class="pay-drow-v" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(route||sg.operator||'')}${sg.depDate?' · '+shortDate(sg.depDate):''}</span></div>`; });
+      html+=`</div>`;
+    }
+    html+=`<button class="btn btn-primary" id="trip-add-segment" style="width:100%;margin-top:12px">＋ ${L==='fa'?'افزودن مسیر':'Add route segment'}</button></div>`;
   }
   html+=`</div>`;
   return html;
@@ -5388,8 +5485,8 @@ function tripQuickCreate(){
     // seed suggested packing from country/season
     tripSuggestPacking(tripsMap()[nid]).forEach(x=>TripService.listAdd(nid,'packing',x));
     tripActiveId=nid; travelView='detail'; tripDetailTab='overview';
-    closeSheet(); render();
-    setTimeout(()=>{ if(tripsMap()[nid]) tripOpenEditor(nid); }, 60);
+    render();
+    tripOpenEditor(nid);
   };
 }
 
@@ -5489,6 +5586,68 @@ function tripImportBooking(tripId, file){
     tripOpenBookingEditor(tripId,null,prefill);
   };
   reader.readAsDataURL(file);
+}
+function tripOpenSegmentEditor(tripId, sid){
+  const t=tripsMap()[tripId]; if(!t)return;
+  const editing=!!sid;
+  const sg=editing?(t.segments||[]).find(x=>x.id===sid):{kind:'flight',fromCountry:'',fromCity:'',toCountry:'',toCity:'',depDate:'',depTime:'',arrDate:'',arrTime:'',operator:'',bookingRef:'',seat:'',gate:'',terminal:'',platform:'',cost:'',notes:'',attachment:null};
+  if(editing&&!sg)return;
+  let att=sg.attachment||null;
+  openSheet(`<div class="pay-editor-wrap"><div class="pay-editor-scroll"><h3>${editing?(L==='fa'?'ویرایش مسیر':'Edit segment'):(L==='fa'?'مسیر جدید':'New segment')}</h3>
+    <div class="fld"><label>${L==='fa'?'نوع حمل‌ونقل':'Transport type'}</label>
+      <select class="finput" id="sg-kind">${TRIP_SEGMENT_KINDS.map(k=>`<option value="${k}" ${sg.kind===k?'selected':''}>${tripSegIcon(k)} ${tripSegLabel(k)}</option>`).join('')}</select></div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'کشور مبدأ':'From country'}</label><input class="finput" id="sg-fc" autocomplete="off" value="${esc(sg.fromCountry||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'شهر مبدأ':'From city'}</label><input class="finput" id="sg-fci" autocomplete="off" value="${esc(sg.fromCity||'')}"></div>
+    </div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'کشور مقصد':'To country'}</label><input class="finput" id="sg-tc" autocomplete="off" value="${esc(sg.toCountry||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'شهر مقصد':'To city'}</label><input class="finput" id="sg-tci" autocomplete="off" value="${esc(sg.toCity||'')}"></div>
+    </div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ حرکت':'Dep date'}</label><input class="finput" id="sg-dd" type="date" value="${esc(sg.depDate||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'ساعت حرکت':'Dep time'}</label><input class="finput" id="sg-dt" type="time" value="${esc(sg.depTime||'')}"></div>
+    </div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ رسیدن':'Arr date'}</label><input class="finput" id="sg-ad" type="date" value="${esc(sg.arrDate||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'ساعت رسیدن':'Arr time'}</label><input class="finput" id="sg-at" type="time" value="${esc(sg.arrTime||'')}"></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'اپراتور':'Operator'}</label><input class="finput" id="sg-op" autocomplete="off" value="${esc(sg.operator||'')}" placeholder="${L==='fa'?'شرکت هواپیمایی / قطار':'Airline / operator'}"></div>
+    <div class="fld"><label>${L==='fa'?'کد رزرو':'Booking reference'}</label><input class="finput" id="sg-ref" autocomplete="off" value="${esc(sg.bookingRef||'')}"></div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'صندلی':'Seat'}</label><input class="finput" id="sg-seat" autocomplete="off" value="${esc(sg.seat||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'گیت':'Gate'}</label><input class="finput" id="sg-gate" autocomplete="off" value="${esc(sg.gate||'')}"></div>
+    </div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'ترمینال':'Terminal'}</label><input class="finput" id="sg-term" autocomplete="off" value="${esc(sg.terminal||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'سکو':'Platform'}</label><input class="finput" id="sg-plat" autocomplete="off" value="${esc(sg.platform||'')}"></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'هزینه':'Cost'}</label><input class="finput" id="sg-cost" type="number" inputmode="decimal" value="${esc(String(sg.cost||''))}" placeholder="0.00"></div>
+    <div class="fld"><label>${L==='fa'?'یادداشت':'Notes'}</label><textarea class="finput" id="sg-notes" rows="2" style="min-height:56px">${esc(sg.notes||'')}</textarea></div>
+    <div class="fld"><label>${L==='fa'?'پیوست (بلیط/کارت پرواز)':'Attachment (ticket/boarding pass)'}</label>
+      <div id="sg-att-info" style="font-size:13px;color:var(--ink3);margin-bottom:6px">${att?esc(att.name):(L==='fa'?'بدون پیوست':'None')}</div>
+      <button class="btn btn-ghost" id="sg-att-btn" type="button" style="width:100%">📎 ${L==='fa'?'افزودن / جایگزینی':'Add / replace'}</button>
+      <input type="file" id="sg-att-file" accept="image/*,application/pdf" style="display:none"></div>
+    </div>
+    <div class="pay-form-actions">
+      ${editing?`<button class="btn btn-danger" id="sg-delete" style="flex:0 0 auto;width:auto">${L==='fa'?'حذف':'Delete'}</button>`:`<button class="btn pay-btn-cancel" id="sg-cancel">${tr('cancel')}</button>`}
+      <button class="btn btn-primary pay-btn-save" id="sg-save">${editing?(L==='fa'?'ذخیره':'Save'):(L==='fa'?'افزودن':'Add')}</button>
+    </div></div>`, {noPad:true});
+  const fileInp=document.getElementById('sg-att-file');
+  document.getElementById('sg-att-btn').onclick=()=>fileInp.click();
+  fileInp.onchange=async()=>{ const f=(fileInp.files||[])[0]; if(!f)return; if(f.size>8*1024*1024){ toast(L==='fa'?'فایل بزرگ‌تر از ۸ مگابایت':'File over 8MB'); return; } try{ att=await docReadFileAsAttachment(f); document.getElementById('sg-att-info').textContent=att.name; }catch(_){} fileInp.value=''; };
+  const cc=document.getElementById('sg-cancel'); if(cc)cc.onclick=()=>closeSheet();
+  const dd=document.getElementById('sg-delete'); if(dd)dd.onclick=()=>{ TripService.segmentDelete(tripId,sid); closeSheet(); render(); };
+  document.getElementById('sg-save').onclick=()=>{
+    const gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
+    const data={ kind:gv('sg-kind'), fromCountry:gv('sg-fc').trim(), fromCity:gv('sg-fci').trim(), toCountry:gv('sg-tc').trim(), toCity:gv('sg-tci').trim(),
+      depDate:gv('sg-dd'), depTime:gv('sg-dt'), arrDate:gv('sg-ad'), arrTime:gv('sg-at'), operator:gv('sg-op').trim(), bookingRef:gv('sg-ref').trim(),
+      seat:gv('sg-seat').trim(), gate:gv('sg-gate').trim(), terminal:gv('sg-term').trim(), platform:gv('sg-plat').trim(),
+      cost:parseFloat(gv('sg-cost'))||0, notes:gv('sg-notes'), attachment:att };
+    if(editing)TripService.segmentUpdate(tripId,sid,data);
+    else TripService.segmentAdd(tripId,data);
+    closeSheet(); render();
+  };
 }
 function tripOpenBookingEditor(tripId, bid, prefill){
   const t=tripsMap()[tripId]; if(!t)return;
@@ -9230,6 +9389,9 @@ function bindScreen(){
   document.querySelectorAll('[data-pay-open-task]').forEach(el=>el.onclick=e=>{
     if(e.target.closest('[data-pay-pin]')||e.target.closest('[data-pay-complete]'))return;
     screen='module'; currentModule='payments'; payActiveId=el.dataset.payOpenTask; payView='detail'; render(); window.scrollTo(0,0);});
+  document.querySelectorAll('[data-trip-open-task]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();
+    screen='module'; currentModule='travel'; tripActiveId=el.dataset.tripOpenTask; travelView='detail'; tripDetailTab='overview'; render(); window.scrollTo(0,0);});
   // Task row → detail panel
   document.querySelectorAll('.trow-flat').forEach(el=>el.onclick=()=>{
     if(el.dataset.tid)openTaskDetail(el.dataset.tid);});
@@ -9447,6 +9609,14 @@ function bindScreen(){
       document.querySelectorAll('[data-trip-unlinkdoc]').forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); TripService.unlinkDoc(tripActiveId, el.dataset.tripUnlinkdoc); render(); });
       document.querySelectorAll('[data-trip-unlinkpay]').forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); TripService.unlinkPay(tripActiveId, el.dataset.tripUnlinkpay); render(); });
       document.querySelectorAll('[data-trip-opendoc]').forEach(el=>el.onclick=()=>{ const did=el.dataset.tripOpendoc; currentModule='documents'; docView='detail'; docActiveId=did; render(); window.scrollTo(0,0); });
+      // countries + cities
+      const addC=document.getElementById('trip-addcountry'); if(addC)addC.onkeydown=(e)=>{ if(e.key==='Enter'&&addC.value.trim()){ TripService.countryAdd(tripActiveId,addC.value); render(); } };
+      (tripsMap()[tripActiveId]&&tripsMap()[tripActiveId].countries||[]).forEach(c=>{ const ci=document.getElementById('trip-addcity-'+c.id); if(ci)ci.onkeydown=(e)=>{ if(e.key==='Enter'&&ci.value.trim()){ TripService.cityAdd(tripActiveId,c.id,ci.value); render(); } }; });
+      document.querySelectorAll('[data-trip-delcountry]').forEach(el=>el.onclick=()=>{ TripService.countryDelete(tripActiveId, el.dataset.tripDelcountry); render(); });
+      document.querySelectorAll('[data-trip-delcity]').forEach(el=>el.onclick=()=>{ const [cid,cityId]=el.dataset.tripDelcity.split(':'); TripService.cityDelete(tripActiveId,cid,cityId); render(); });
+      // segments
+      const addSeg=document.getElementById('trip-add-segment'); if(addSeg)addSeg.onclick=()=>tripOpenSegmentEditor(tripActiveId,null);
+      document.querySelectorAll('[data-trip-seg]').forEach(el=>el.onclick=()=>tripOpenSegmentEditor(tripActiveId, el.dataset.tripSeg));
     }
   })();
   (()=>{
