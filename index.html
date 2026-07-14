@@ -406,6 +406,31 @@ body.light .trow-title{color:var(--ink)}
 .vault-mini:active{background:var(--s3)}
 .vault-mini:focus-visible{outline:2px solid #6d5efc;outline-offset:2px}
 .vault-fv{font-variant-numeric:tabular-nums}
+.doc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:8px 16px;padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+.doc-card{position:relative;background:var(--s1);border:1px solid var(--b1);border-radius:14px;padding:14px;cursor:pointer;min-width:0}
+.doc-card-ic{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:8px}
+.doc-card-title{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-card-sub{font-size:12px;color:var(--ink3);margin-top:2px}
+.doc-card-fav{position:absolute;top:10px;inset-inline-end:12px;color:#e0a800}
+.doc-att-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.doc-att{position:relative;border:1px solid var(--b1);border-radius:10px;overflow:hidden;cursor:pointer;background:var(--s2)}
+.doc-att img{width:100%;height:80px;object-fit:cover;display:block}
+.doc-att-name{font-size:10px;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink3)}
+.doc-att-file{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80px;padding:8px}
+.doc-att-fileic{font-size:28px}
+.doc-eatt-list{display:flex;flex-direction:column;gap:6px}
+.doc-eatt{display:flex;align-items:center;gap:8px;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:8px 10px}
+.doc-eatt-ic{font-size:18px;flex:none}
+.doc-eatt-name{flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-eatt-x{width:26px;height:26px;flex:none;border:none;background:var(--s3);color:var(--ink2);border-radius:7px;cursor:pointer}
+.doc-switch{width:44px;height:26px;flex:none;border-radius:14px;background:var(--b2);position:relative;transition:background .18s;display:inline-block}
+.doc-switch::after{content:'';position:absolute;top:3px;inset-inline-start:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .18s}
+.doc-switch.on{background:#3b82f6}
+.doc-switch.on::after{transform:translateX(18px)}
+html[dir="rtl"] .doc-switch.on::after{transform:translateX(-18px)}
+.doc-locked-box{text-align:center;padding:24px 16px;margin-top:12px;background:var(--s1);border:1px dashed var(--b2);border-radius:14px}
+@media (min-width:768px){ .doc-grid{grid-template-columns:repeat(3,1fr)} }
+@media (min-width:1024px){ .doc-grid{grid-template-columns:repeat(4,1fr);max-width:1000px;margin-inline:auto} }
 .vault-secure-input{background:var(--s2)!important;color:var(--ink)!important;-webkit-text-fill-color:var(--ink)!important;caret-color:var(--ink)}
 .vault-secure-input:-webkit-autofill,.vault-secure-input:-webkit-autofill:hover,.vault-secure-input:-webkit-autofill:focus,.vault-secure-input:-webkit-autofill:active{-webkit-text-fill-color:var(--ink)!important;-webkit-box-shadow:0 0 0 1000px var(--s2) inset!important;box-shadow:0 0 0 1000px var(--s2) inset!important;transition:background-color 9999s ease-in-out 0s;caret-color:var(--ink)}
 .vault-unlock-loading{opacity:.6;pointer-events:none}
@@ -1353,7 +1378,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v229';
+const APP_VERSION='v230';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1424,6 +1449,8 @@ function blankDB(){
       payFolders:{},  // {id,name,color,createdAt,updatedAt,archivedAt}
       vaultItems:{},  // Vault — encrypted; see VAULT DATA MODEL. Sensitive data ONLY inside encryptedPayload.
       vaultFolders:{},// {id,name,color,createdAt,updatedAt,archivedAt}
+      documents:{},   // Documents module — see DOC DATA MODEL. Secure docs store attachments encrypted.
+      docFolders:{},  // {id,name,color,parentId,createdAt,updatedAt,archivedAt}
     }
   };
 }
@@ -1447,7 +1474,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
@@ -1868,6 +1895,14 @@ let vaultActiveId=null;
 let vaultFilter='all';
 let vaultSearch='';
 let vaultListLimit=50;
+let docView='home';        // home | detail | history
+let docActiveId=null;
+let docFilter='all';       // all | recent | expiring | expired | archived | trash | secure | favourites
+let docSort='updated';     // name | added | updated | expiry | issue | type
+let docLayout='list';      // list | grid
+let docSearch='';
+let docListLimit=60;
+let docActiveFolder=null;
 let _vaultUnlockBusy=false;
 let _vaultReveal={};
 function vaultWipeInputs(){
@@ -2073,6 +2108,7 @@ function updateFab(){
     else if(currentModule==='notes') show=false; // Notes has its own Add button in the board action bar
     else if(currentModule==='payments') show=false; // Payment Center has its own Add button
     else if(currentModule==='vault') show=false; // Vault has its own Add button (and only when unlocked)
+    else if(currentModule==='documents') show=false; // Documents has its own Add button
     else show=moduleHasCreate(hubModule(currentModule));
   }
   else show=false; // lifehub, profile, more, search, ...
@@ -4760,6 +4796,541 @@ async function vaultCopyField(key){
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════
+//  DOCUMENTS — records with attachments, expiry, folders, optional Vault security
+//  DOC DATA MODEL (DB.entities.documents[id]):
+//   id,title,type,folderId,tags[],issueDate,expiryDate,reminderDays,notes,
+//   favourite,color,secure(bool),archivedAt,deletedAt,createdAt,updatedAt,
+//   customMeta{}, versions[], attachments[] | encAttachments(when secure)
+//     attachment={id,name,mime,kind:'image'|'pdf'|'file',dataUrl,size,addedAt}
+//   Secure docs: attachments+notes stored inside encryptedPayload (Vault key),
+//   only safe metadata (title,type,dates,tags) remains in the clear for search.
+// ═══════════════════════════════════════════════════════════════════════
+const DOC_TYPES=['passport','driver-licence','national-id','medicare','insurance','vehicle-registration','warranty','receipt','invoice','tax','medical','education','employment','property','bank','visa','certificate','contract','other'];
+const DOC_TYPE_META={
+  passport:{en:'Passport',fa:'پاسپورت',ic:'🛂'}, 'driver-licence':{en:'Driver Licence',fa:'گواهینامه',ic:'🚗'},
+  'national-id':{en:'National ID',fa:'کارت ملی',ic:'🆔'}, medicare:{en:'Medicare',fa:'مدیکر',ic:'⚕'},
+  insurance:{en:'Insurance',fa:'بیمه',ic:'☂'}, 'vehicle-registration':{en:'Vehicle Registration',fa:'سند خودرو',ic:'🚙'},
+  warranty:{en:'Warranty',fa:'گارانتی',ic:'🛡'}, receipt:{en:'Receipt',fa:'رسید',ic:'🧾'},
+  invoice:{en:'Invoice',fa:'فاکتور',ic:'📄'}, tax:{en:'Tax',fa:'مالیات',ic:'💰'},
+  medical:{en:'Medical',fa:'پزشکی',ic:'🩺'}, education:{en:'Education',fa:'تحصیلی',ic:'🎓'},
+  employment:{en:'Employment',fa:'شغلی',ic:'💼'}, property:{en:'Property',fa:'ملک',ic:'🏠'},
+  bank:{en:'Bank',fa:'بانکی',ic:'🏦'}, visa:{en:'Visa',fa:'ویزا',ic:'✈'},
+  certificate:{en:'Certificate',fa:'گواهی',ic:'📜'}, contract:{en:'Contract',fa:'قرارداد',ic:'✍'},
+  other:{en:'Other',fa:'دیگر',ic:'▤'}
+};
+const DOC_COLORS=['#3b82f6','#22c55e','#f59e0b','#ef4444','#6e56f8','#ec4899','#06b6d4','#a855f7'];
+function docTypeLabel(t){ const m=DOC_TYPE_META[t]||DOC_TYPE_META.other; return L==='fa'?m.fa:m.en; }
+function docTypeIcon(t){ return (DOC_TYPE_META[t]||DOC_TYPE_META.other).ic; }
+
+function documentsMap(){ if(!DB.entities.documents)DB.entities.documents={}; return DB.entities.documents; }
+function docFoldersMap(){ if(!DB.entities.docFolders)DB.entities.docFolders={}; return DB.entities.docFolders; }
+function docFoldersAll(){ return Object.values(docFoldersMap()).filter(f=>!f.archivedAt&&!f.deletedAt); }
+function documentsAllRaw(){ return Object.values(documentsMap()); }
+function documentsLive(){ return documentsAllRaw().filter(d=>!d.archivedAt&&!d.deletedAt); }
+function documentsArchived(){ return documentsAllRaw().filter(d=>d.archivedAt&&!d.deletedAt); }
+function documentsTrashed(){ return documentsAllRaw().filter(d=>d.deletedAt); }
+
+function docDaysToExpiry(d){
+  if(!d.expiryDate)return null;
+  const today=new Date(todayStr()+'T00:00:00'), exp=new Date(d.expiryDate+'T00:00:00');
+  if(isNaN(exp))return null;
+  return Math.round((exp-today)/86400000);
+}
+function docExpiryBucket(d){
+  const n=docDaysToExpiry(d);
+  if(n===null)return 'none';
+  if(n<0)return 'expired';
+  if(n===0)return 'today';
+  if(n<=7)return 'week';
+  if(n<=30)return 'month';
+  if(n<=90)return 'quarter';
+  return 'later';
+}
+
+const DocActivity={ log(type,id,name){ logActivity(type,'document',id,{name:name||''}); } };
+
+const DocService={
+  // Attachments held in payload for secure docs; inline otherwise.
+  async _encPayload(payload){
+    if(!VaultSession.isUnlocked()) throw new Error('vault-locked');
+    return VaultCrypto.encryptObj(VaultSession.key(), payload||{});
+  },
+  async create(meta, attachments, securePayload){
+    const ts=now(), id=uid();
+    const doc={
+      id, title:meta.title||'', type:DOC_TYPES.includes(meta.type)?meta.type:'other',
+      folderId:meta.folderId||null, tags:meta.tags||[],
+      issueDate:meta.issueDate||'', expiryDate:meta.expiryDate||'', reminderDays:meta.reminderDays||0,
+      notes:meta.secure?'':(meta.notes||''), favourite:!!meta.favourite, color:meta.color||'#3b82f6',
+      secure:!!meta.secure, archivedAt:null, deletedAt:null, createdAt:ts, updatedAt:ts,
+      customMeta:meta.customMeta||{}, versions:[],
+      attachments: meta.secure?[]:(attachments||[]),
+      encryptedPayload:null, iv:null, encryptionVersion:meta.secure?VAULT_ENC_VER:null,
+      syncVersion:1, conflictMetadata:null
+    };
+    if(meta.secure){
+      const sp=securePayload||{};
+      const {payload:ct, iv}=await this._encPayload({notes:(sp.notes!==undefined?sp.notes:(meta.notes||'')), attachments:(sp.attachments||attachments||[])});
+      doc.encryptedPayload=ct; doc.iv=iv;
+    }
+    documentsMap()[id]=doc;
+    DocActivity.log('created', id, doc.title);
+    saveDB();
+    return id;
+  },
+  // returns {notes, attachments} decrypting when secure
+  async read(id){
+    const d=documentsMap()[id]; if(!d)return null;
+    if(d.secure){
+      if(!VaultSession.isUnlocked()) throw new Error('vault-locked');
+      const obj=await VaultCrypto.decryptObj(VaultSession.key(), d.encryptedPayload, d.iv);
+      return {notes:obj.notes||'', attachments:obj.attachments||[]};
+    }
+    return {notes:d.notes||'', attachments:d.attachments||[]};
+  },
+  async update(id, meta, attachments, notes){
+    const d=documentsMap()[id]; if(!d)return;
+    if(!d.versions)d.versions=[];
+    // snapshot (encrypted stays encrypted)
+    d.versions.push({at:now(), title:d.title, type:d.type, issueDate:d.issueDate, expiryDate:d.expiryDate,
+      secure:d.secure, encryptedPayload:d.encryptedPayload, iv:d.iv,
+      attachments:d.secure?null:(d.attachments||[]).map(a=>({...a})), notes:d.secure?null:d.notes});
+    if(d.versions.length>50)d.versions=d.versions.slice(-50);
+    ['title','type','folderId','tags','issueDate','expiryDate','reminderDays','favourite','color','customMeta'].forEach(k=>{ if(meta&&k in meta)d[k]=meta[k]; });
+    const wantSecure=meta&&('secure' in meta)?!!meta.secure:d.secure;
+    if(wantSecure){
+      const {payload:ct, iv}=await this._encPayload({notes:notes||'', attachments:attachments||[]});
+      d.encryptedPayload=ct; d.iv=iv; d.secure=true; d.notes=''; d.attachments=[]; d.encryptionVersion=VAULT_ENC_VER;
+    }else{
+      d.secure=false; d.encryptedPayload=null; d.iv=null; d.notes=notes||''; d.attachments=attachments||[];
+    }
+    d.updatedAt=now(); d.syncVersion=(d.syncVersion||1)+1;
+    DocActivity.log('edited', id, d.title);
+    saveDB();
+  },
+  toggleFav(id){ const d=documentsMap()[id]; if(!d)return; d.favourite=!d.favourite; d.updatedAt=now(); DocActivity.log(d.favourite?'starred':'unstarred', id, d.title); saveDB(); },
+  archive(id){ const d=documentsMap()[id]; if(!d)return; d.archivedAt=now(); d.updatedAt=d.archivedAt; DocActivity.log('archived', id, d.title); saveDB(); },
+  unarchive(id){ const d=documentsMap()[id]; if(!d)return; d.archivedAt=null; d.updatedAt=now(); DocActivity.log('restored', id, d.title); saveDB(); },
+  trash(id){ const d=documentsMap()[id]; if(!d)return; d.deletedAt=now(); d.updatedAt=d.deletedAt; DocActivity.log('deleted', id, d.title); saveDB(); },
+  restore(id){ const d=documentsMap()[id]; if(!d)return; d.deletedAt=null; d.updatedAt=now(); DocActivity.log('restored', id, d.title); saveDB(); },
+  permDelete(id){ const d=documentsMap()[id]; if(!d)return; DocActivity.log('permanently_deleted', id, d.title); delete documentsMap()[id]; saveDB(); },
+  folderCreate(name,parentId){ const id=uid(), ts=now(); docFoldersMap()[id]={id,name:name||'Folder',color:DOC_COLORS[docFoldersAll().length%DOC_COLORS.length],parentId:parentId||null,createdAt:ts,updatedAt:ts,archivedAt:null,deletedAt:null}; saveDB(); return id; },
+  folderRename(id,name){ const f=docFoldersMap()[id]; if(!f)return; f.name=name; f.updatedAt=now(); saveDB(); },
+  folderDelete(id){ const f=docFoldersMap()[id]; if(!f)return; documentsLive().forEach(d=>{ if(d.folderId===id)d.folderId=null; }); delete docFoldersMap()[id]; saveDB(); },
+  moveToFolder(id,folderId){ const d=documentsMap()[id]; if(!d)return; d.folderId=folderId||null; d.updatedAt=now(); saveDB(); },
+  storageBytes(){
+    let bytes=0;
+    documentsAllRaw().forEach(d=>{
+      if(d.encryptedPayload)bytes+=d.encryptedPayload.length*0.75;
+      (d.attachments||[]).forEach(a=>{ bytes+=(a.size||(a.dataUrl?a.dataUrl.length*0.75:0)); });
+    });
+    return bytes;
+  },
+  dashboard(){
+    const live=documentsLive();
+    let expiring=0, expired=0;
+    live.forEach(d=>{ const bk=docExpiryBucket(d); if(bk==='expired')expired++; else if(bk==='today'||bk==='week'||bk==='month')expiring++; });
+    return {
+      total:live.length, expiring, expired,
+      archived:documentsArchived().length, trash:documentsTrashed().length,
+      storage:this.storageBytes(), favourites:live.filter(d=>d.favourite).length
+    };
+  }
+};
+
+function docFmtBytes(b){
+  if(b<1024)return Math.round(b)+' B';
+  if(b<1048576)return (b/1024).toFixed(1)+' KB';
+  return (b/1048576).toFixed(1)+' MB';
+}
+
+// ── Expiry reminder projection into smart views (tasks) ──
+function docAsTask(d){
+  if(!d.expiryDate)return null;
+  return { id:'doc:'+d.id, docId:d.id, kind:'doc', text:(d.title||'Document')+(L==='fa'?' — انقضا':' — expires'),
+    dueDate:d.expiryDate, dueTime:'', pinned:!!d.favourite, done:false, notes:'', icon:docTypeIcon(d.type), color:d.color||'#3b82f6' };
+}
+function documentsAsTasks(){ return documentsLive().map(docAsTask).filter(Boolean); }
+
+/* ═══════════ DOCUMENTS — UI ═══════════ */
+function docFilteredList(){
+  let list;
+  if(docFilter==='archived')list=documentsArchived();
+  else if(docFilter==='trash')list=documentsTrashed();
+  else{
+    list=documentsLive();
+    if(docActiveFolder)list=list.filter(d=>d.folderId===docActiveFolder);
+    if(docFilter==='recent')list=list.slice().sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||'')).slice(0,30);
+    else if(docFilter==='favourites')list=list.filter(d=>d.favourite);
+    else if(docFilter==='secure')list=list.filter(d=>d.secure);
+    else if(docFilter==='expiring')list=list.filter(d=>['today','week','month'].includes(docExpiryBucket(d)));
+    else if(docFilter==='expired')list=list.filter(d=>docExpiryBucket(d)==='expired');
+    else if(docFilter.startsWith('type:'))list=list.filter(d=>d.type===docFilter.slice(5));
+  }
+  const q=(docSearch||'').trim().toLowerCase();
+  if(q){
+    list=list.filter(d=>{
+      const folder=d.folderId?(docFoldersMap()[d.folderId]||{}).name:'';
+      return (d.title||'').toLowerCase().includes(q)
+        || docTypeLabel(d.type).toLowerCase().includes(q)
+        || (d.tags||[]).some(t=>String(t).toLowerCase().includes(q))
+        || (!d.secure && (d.notes||'').toLowerCase().includes(q))
+        || String(folder||'').toLowerCase().includes(q);
+    });
+  }
+  const dir=1;
+  list.sort((a,b)=>{
+    if(!!b.favourite!==!!a.favourite)return b.favourite?1:-1;
+    if(docSort==='name')return (a.title||'').localeCompare(b.title||'');
+    if(docSort==='added')return (b.createdAt||'').localeCompare(a.createdAt||'');
+    if(docSort==='expiry'){ const ax=a.expiryDate||'9999',bx=b.expiryDate||'9999'; return ax<bx?-1:ax>bx?1:0; }
+    if(docSort==='issue'){ const ai=a.issueDate||'',bi=b.issueDate||''; return bi.localeCompare(ai); }
+    if(docSort==='type')return docTypeLabel(a.type).localeCompare(docTypeLabel(b.type));
+    return (b.updatedAt||'').localeCompare(a.updatedAt||''); // updated
+  });
+  return list;
+}
+
+function renderDocuments(){
+  if(docView==='detail') return docRenderDetail();
+  if(docView==='history') return docRenderHistory();
+  return docRenderHome();
+}
+
+function docRenderHome(){
+  const d=DocService.dashboard();
+  const filtered=docFilteredList();
+  const shown=filtered.slice(0,docListLimit);
+  const chips=[
+    ['all',L==='fa'?'همه':'All'],['expiring',L==='fa'?'رو به انقضا':'Expiring'],['expired',L==='fa'?'منقضی':'Expired'],
+    ['favourites',L==='fa'?'دلخواه':'Favourites'],['secure',L==='fa'?'امن':'Secure'],['recent',L==='fa'?'اخیر':'Recent'],
+    ['archived',L==='fa'?'بایگانی':'Archived'],['trash',L==='fa'?'سطل':'Trash']
+  ];
+  const folders=docFoldersAll();
+  let html=`<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:22px;font-weight:800;display:flex;align-items:center;gap:8px;overflow:hidden"><span style="color:#3b82f6;flex:none">▤</span> <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${L==='fa'?'اسناد':'Documents'}</span></div>
+    <button class="note-icon-btn" id="doc-layout-toggle" aria-label="layout" title="${docLayout==='grid'?(L==='fa'?'فهرست':'List'):(L==='fa'?'شبکه':'Grid')}" style="color:var(--ink)">${docLayout==='grid'?'☰':'▦'}</button>
+    <button class="btn btn-primary pay-head-add" id="doc-new-head" style="flex:none;padding:9px 16px">＋ ${L==='fa'?'سند':'Document'}</button>
+  </div>`;
+  html+=`<div class="pay-dash">
+    <div class="pay-dash-card" style="--pc:#3b82f6"><div class="pay-dash-k">${L==='fa'?'کل اسناد':'Total'}</div><div class="pay-dash-v">${d.total}</div></div>
+    <div class="pay-dash-card" style="--pc:#f59e0b"><div class="pay-dash-k">${L==='fa'?'رو به انقضا':'Expiring'}</div><div class="pay-dash-v">${d.expiring}</div></div>
+    <div class="pay-dash-card" style="--pc:#ef4444"><div class="pay-dash-k">${L==='fa'?'منقضی':'Expired'}</div><div class="pay-dash-v">${d.expired}</div></div>
+  </div>
+  <div class="pay-mini-row">
+    <div class="pay-mini"><span class="pay-mini-n">${d.favourites}</span>${L==='fa'?'دلخواه':'Favourites'}</div>
+    <div class="pay-mini"><span class="pay-mini-n">${documentsLive().filter(x=>x.secure).length}</span>${L==='fa'?'امن':'Secure'}</div>
+    <div class="pay-mini"><span class="pay-mini-n">${docFmtBytes(d.storage)}</span>${L==='fa'?'حجم':'Storage'}</div>
+  </div>`;
+  html+=`<div style="padding:4px 16px 8px"><input id="doc-search" class="finput" placeholder="${L==='fa'?'جستجوی اسناد...':'Search documents...'}" value="${esc(docSearch)}" style="width:100%;box-sizing:border-box"></div>`;
+  if(folders.length){
+    html+=`<div class="pay-chips" style="padding-bottom:4px">
+      <button class="pay-chip${!docActiveFolder?' on':''}" data-doc-folder="">${L==='fa'?'همه پوشه‌ها':'All folders'}</button>
+      ${folders.map(f=>`<button class="pay-chip${docActiveFolder===f.id?' on':''}" data-doc-folder="${f.id}">${esc(f.name)}</button>`).join('')}
+    </div>`;
+  }
+  html+=`<div class="pay-chips">${chips.map(c=>`<button class="pay-chip${docFilter===c[0]?' on':''}" data-doc-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
+  if(!filtered.length){
+    html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#3b82f618;color:#3b82f6;font-size:30px">▤</div>
+      <div class="hub-ph-t">${L==='fa'?'اولین سند خود را اضافه کنید':'Add your first document'}</div>
+      <div class="hub-ph-d">${L==='fa'?'پاسپورت، گواهینامه، بیمه، گارانتی و رسیدها را با تاریخ انقضا و یادآوری نگه دارید.':'Keep passports, licences, insurance, warranties and receipts with expiry dates and reminders.'}</div>
+      <button class="btn btn-primary" id="doc-empty-add" style="margin-top:14px;padding:11px 22px">＋ ${L==='fa'?'افزودن سند':'Add document'}</button></div>`;
+  }else if(docLayout==='grid'){
+    html+=`<div class="doc-grid" id="doc-list">${shown.map(docCardHTML).join('')}</div>`;
+    if(filtered.length>shown.length)html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="doc-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
+  }else{
+    html+=`<div class="pay-list" id="doc-list">${shown.map(docRowHTML).join('')}</div>`;
+    if(filtered.length>shown.length)html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="doc-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
+  }
+  html+=`<button class="pay-fab" id="doc-new-fab" aria-label="${L==='fa'?'افزودن سند':'Add document'}" style="background:#3b82f6;box-shadow:0 6px 20px rgba(59,130,246,.45)">＋</button>`;
+  return html;
+}
+
+function docExpiryChip(doc){
+  const bk=docExpiryBucket(doc); if(bk==='none')return '';
+  const n=docDaysToExpiry(doc);
+  let color='#22c55e', label='';
+  if(bk==='expired'){ color='#ef4444'; label=L==='fa'?'منقضی':'Expired'; }
+  else if(bk==='today'){ color='#ef4444'; label=L==='fa'?'امروز':'Today'; }
+  else if(bk==='week'){ color='#f59e0b'; label=(L==='fa'?n+' روز':n+'d'); }
+  else if(bk==='month'){ color='#f59e0b'; label=(L==='fa'?n+' روز':n+'d'); }
+  else { color='#22c55e'; label=shortDate(doc.expiryDate); }
+  return `<span class="pay-badge" style="color:${color};border-color:${color}55">${bk==='expired'||bk==='today'?'⚠ ':''}${label}</span>`;
+}
+
+function docRowHTML(doc){
+  const att=doc.secure?'🔒':((doc.attachments||[]).length?'📎'+((doc.attachments||[]).length):'');
+  return `<div class="pay-row" data-doc-open="${doc.id}">
+    <div class="pay-row-ic" style="background:${doc.color||'#3b82f6'}22;color:${doc.color||'#3b82f6'};font-size:18px">${docTypeIcon(doc.type)}</div>
+    <div class="pay-row-main">
+      <div class="pay-row-title" dir="auto">${esc(doc.title||(L==='fa'?'بدون عنوان':'Untitled'))}${doc.favourite?' <span style="color:#e0a800">★</span>':''}</div>
+      <div class="pay-row-meta">
+        <span class="pay-mchip">${docTypeLabel(doc.type)}</span>
+        ${docExpiryChip(doc)}
+        ${att?`<span class="pay-mchip">${att}</span>`:''}
+      </div>
+    </div>
+    <span style="color:var(--ink3);opacity:.4;padding-inline-end:4px">›</span>
+  </div>`;
+}
+function docCardHTML(doc){
+  return `<div class="doc-card" data-doc-open="${doc.id}">
+    <div class="doc-card-ic" style="background:${doc.color||'#3b82f6'}18;color:${doc.color||'#3b82f6'}">${doc.secure?'🔒':docTypeIcon(doc.type)}</div>
+    <div class="doc-card-title" dir="auto">${esc(doc.title||(L==='fa'?'بدون عنوان':'Untitled'))}</div>
+    <div class="doc-card-sub">${docTypeLabel(doc.type)}</div>
+    <div style="margin-top:4px">${docExpiryChip(doc)}</div>
+    ${doc.favourite?'<div class="doc-card-fav">★</div>':''}
+  </div>`;
+}
+
+function docRenderDetail(){
+  const doc=documentsMap()[docActiveId];
+  if(!doc){ docView='home'; return docRenderHome(); }
+  const folder=doc.folderId?(docFoldersMap()[doc.folderId]||{}).name:'';
+  const needUnlock=doc.secure&&!VaultSession.isUnlocked();
+  let html=`<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="doc-detail-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:20px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(doc.title||'')}</div>
+    <button class="note-icon-btn" id="doc-fav" style="color:${doc.favourite?'#e0a800':'var(--ink)'}" aria-label="favourite">★</button>
+    <button class="note-icon-btn" id="doc-menu" aria-label="options"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+  </div>
+  <div style="padding:0 16px 24px">
+    <div class="pay-detail-hero" style="border-color:${doc.color||'#3b82f6'}55">
+      <div class="pay-row-ic" style="background:${doc.color||'#3b82f6'}22;color:${doc.color||'#3b82f6'};width:52px;height:52px;font-size:26px">${doc.secure?'🔒':docTypeIcon(doc.type)}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:18px;font-weight:800" dir="auto">${esc(doc.title||'')}</div>
+      <div style="font-size:13px;color:var(--ink3)">${docTypeLabel(doc.type)}${doc.secure?' · '+(L==='fa'?'امن':'Secure'):''}</div></div>
+    </div>
+    <div class="pay-detail-rows">
+      ${doc.issueDate?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'تاریخ صدور':'Issued'}</span><span class="pay-drow-v">${shortDate(doc.issueDate)}</span></div>`:''}
+      ${doc.expiryDate?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'تاریخ انقضا':'Expires'}</span><span class="pay-drow-v">${shortDate(doc.expiryDate)} ${docExpiryChip(doc)}</span></div>`:''}
+      ${folder?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'پوشه':'Folder'}</span><span class="pay-drow-v">${esc(folder)}</span></div>`:''}
+      ${(doc.tags&&doc.tags.length)?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'برچسب‌ها':'Tags'}</span><span class="pay-drow-v">${doc.tags.map(t=>'#'+esc(t)).join(' ')}</span></div>`:''}
+    </div>`;
+  if(needUnlock){
+    html+=`<div class="doc-locked-box"><div style="font-size:34px">🔒</div>
+      <div style="margin:6px 0 10px;color:var(--ink3);font-size:14px">${L==='fa'?'این سند امن است. برای مشاهده، ولت را باز کنید.':'This document is secured. Unlock the Vault to view it.'}</div>
+      <button class="btn btn-primary" id="doc-unlock-go" style="padding:10px 20px">${L==='fa'?'باز کردن ولت':'Unlock Vault'}</button></div>`;
+  }else{
+    html+=`<div id="doc-secure-content"><div class="pay-drow" style="border:none;padding:14px 0 6px"><span class="pay-drow-k">${L==='fa'?'در حال بارگذاری…':'Loading…'}</span></div></div>`;
+  }
+  html+=`<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-primary" id="doc-edit" style="flex:1">${L==='fa'?'ویرایش':'Edit'}</button></div></div>`;
+  return html;
+}
+
+async function docRenderSecureContent(){
+  const doc=documentsMap()[docActiveId]; if(!doc)return;
+  const host=document.getElementById('doc-secure-content'); if(!host)return;
+  let data;
+  try{ data=await DocService.read(docActiveId); }
+  catch(_){ host.innerHTML=`<div style="color:var(--ink3);padding:10px 0">${L==='fa'?'ولت قفل است':'Vault locked'}</div>`; return; }
+  if(docView!=='detail'||documentsMap()[docActiveId]!==doc)return;
+  let h='';
+  if(data.notes){ h+=`<div class="pay-detail-rows" style="margin-top:12px"><div class="pay-drow" style="flex-direction:column;align-items:stretch;gap:4px"><span class="pay-drow-k">${L==='fa'?'یادداشت':'Notes'}</span><span class="pay-drow-v" style="text-align:start;white-space:pre-wrap" dir="auto">${esc(data.notes)}</span></div></div>`; }
+  const atts=data.attachments||[];
+  if(atts.length){
+    h+=`<div style="margin-top:14px;font-size:13px;font-weight:700;color:var(--ink2)">${L==='fa'?'پیوست‌ها':'Attachments'} (${atts.length})</div><div class="doc-att-grid">`;
+    atts.forEach((a,i)=>{
+      if(a.kind==='image'){ h+=`<div class="doc-att" data-doc-att="${i}"><img src="${a.dataUrl}" alt="${esc(a.name)}" loading="lazy"><div class="doc-att-name">${esc(a.name)}</div></div>`; }
+      else{ h+=`<div class="doc-att doc-att-file" data-doc-att="${i}"><div class="doc-att-fileic">${a.kind==='pdf'?'📕':'📄'}</div><div class="doc-att-name">${esc(a.name)}</div></div>`; }
+    });
+    h+=`</div>`;
+  }
+  if(!data.notes&&!atts.length){ h=`<div style="color:var(--ink3);padding:10px 0;font-size:14px">${L==='fa'?'محتوایی نیست':'No content'}</div>`; }
+  host.innerHTML=h;
+  host.querySelectorAll('[data-doc-att]').forEach(el=>el.onclick=()=>docOpenAttachment(atts[parseInt(el.dataset.docAtt,10)]));
+}
+
+function docOpenAttachment(a){
+  if(!a)return;
+  openSheet(`<div style="text-align:center">
+    <h3>${esc(a.name)}</h3>
+    ${a.kind==='image'?`<img src="${a.dataUrl}" style="max-width:100%;max-height:70vh;border-radius:12px">`:
+      a.kind==='pdf'?`<iframe src="${a.dataUrl}" style="width:100%;height:70vh;border:none;border-radius:12px;background:#fff"></iframe>`:
+      `<div style="padding:30px;color:var(--ink3)">${L==='fa'?'پیش‌نمایش موجود نیست':'No preview available'}</div>`}
+    <div class="btn-col" style="margin-top:12px">
+      <a class="btn btn-primary" href="${a.dataUrl}" download="${esc(a.name)}">${L==='fa'?'دانلود':'Download'}</a>
+      <button class="btn btn-ghost" id="doc-att-close">${tr('cancel')}</button>
+    </div>`);
+  const c=document.getElementById('doc-att-close'); if(c)c.onclick=()=>closeSheet();
+}
+
+function docRenderHistory(){
+  const doc=documentsMap()[docActiveId];
+  if(!doc){ docView='home'; return docRenderHome(); }
+  const versions=(doc.versions||[]).slice().reverse();
+  let html=`<div class="pay-head" style="display:flex;align-items:center;gap:6px;padding:20px 16px 8px">
+    <button class="ld-back" id="doc-hist-back" style="width:40px;height:40px;flex:none" aria-label="back">&#8249;</button>
+    <div style="flex:1;font-size:22px;font-weight:800">${L==='fa'?'تاریخچه':'History'}</div></div>`;
+  if(!versions.length){ html+=`<div class="hub-ph"><div class="hub-ph-ic">◷</div><div class="hub-ph-t">${L==='fa'?'نسخه‌ای نیست':'No versions'}</div></div>`; return html; }
+  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+  versions.forEach((v,i)=>{
+    const realIndex=(doc.versions.length-1)-i;
+    const dd=new Date(v.at); const when=isNaN(dd)?'':dd.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    html+=`<div class="ul-row"><div style="flex:1;padding:12px 0 12px 14px;min-width:0">
+      <div style="font-size:14px" dir="auto">${esc(v.title||'')} — ${docTypeLabel(v.type)}</div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(when)}${v.secure?' · 🔒':''}</div></div>
+      <button class="shop-mini" data-doc-restore-ver="${realIndex}" style="margin-inline-end:12px">${L==='fa'?'بازگردانی':'Restore'}</button></div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
+// File → attachment (base64). Images/PDF get preview; others stored as file.
+function docReadFileAsAttachment(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      const mime=file.type||'application/octet-stream';
+      const kind=mime.startsWith('image/')?'image':(mime==='application/pdf'?'pdf':'file');
+      resolve({id:uid(), name:file.name||'file', mime, kind, dataUrl:r.result, size:file.size||0, addedAt:now()});
+    };
+    r.onerror=()=>reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+async function docOpenEditor(id){
+  const editing=!!id;
+  const doc=editing?documentsMap()[id]:{title:'',type:'other',folderId:null,tags:[],issueDate:'',expiryDate:'',reminderDays:0,notes:'',favourite:false,color:'#3b82f6',secure:false};
+  if(editing&&!doc)return;
+  let notes=doc.notes||'', attachments=(doc.attachments||[]).slice();
+  if(editing&&doc.secure){
+    if(!VaultSession.isUnlocked()){ docPromptUnlock(()=>docOpenEditor(id)); return; }
+    try{ const data=await DocService.read(id); notes=data.notes; attachments=data.attachments.slice(); }catch(_){ toast(L==='fa'?'ولت قفل است':'Vault locked'); return; }
+  }
+  let workingAtts=attachments.slice();
+  let secureFlag=!!doc.secure;
+  const folders=docFoldersAll();
+  const attListHTML=()=>workingAtts.map((a,i)=>`<div class="doc-eatt"><span class="doc-eatt-ic">${a.kind==='image'?'🖼':a.kind==='pdf'?'📕':'📄'}</span><span class="doc-eatt-name">${esc(a.name)}</span><button class="doc-eatt-x" data-doc-rmatt="${i}" type="button">✕</button></div>`).join('');
+  openSheet(`<div class="pay-editor-wrap"><div class="pay-editor-scroll"><h3>${editing?(L==='fa'?'ویرایش سند':'Edit document'):(L==='fa'?'سند جدید':'New document')}</h3>
+    <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
+      <input class="finput" id="doc-f-title" autocomplete="off" value="${esc(doc.title||'')}" placeholder="${L==='fa'?'مثلاً پاسپورت من':'e.g. My passport'}"></div>
+    <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
+      <select class="finput" id="doc-f-type">${DOC_TYPES.map(t=>`<option value="${t}" ${doc.type===t?'selected':''}>${docTypeLabel(t)}</option>`).join('')}</select></div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ صدور':'Issue date'}</label><input class="finput" id="doc-f-issue" type="date" value="${esc(doc.issueDate||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ انقضا':'Expiry date'}</label><input class="finput" id="doc-f-expiry" type="date" value="${esc(doc.expiryDate||'')}"></div>
+    </div>
+    <div class="fld"><label>${L==='fa'?'یادآوری پیش از انقضا (روز)':'Remind before expiry (days)'}</label>
+      <input class="finput" id="doc-f-remind" type="number" inputmode="numeric" value="${esc(String(doc.reminderDays||''))}" placeholder="30"></div>
+    <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
+      <select class="finput" id="doc-f-folder"><option value="">${L==='fa'?'بدون پوشه':'No folder'}</option>
+      ${folders.map(f=>`<option value="${f.id}" ${doc.folderId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}</select></div>
+    <div class="fld"><label>${L==='fa'?'برچسب‌ها (با کاما)':'Tags (comma separated)'}</label>
+      <input class="finput" id="doc-f-tags" autocomplete="off" value="${esc((doc.tags||[]).join(', '))}" placeholder="${L==='fa'?'خانه، مهم':'home, important'}"></div>
+    <div class="fld"><label>${L==='fa'?'یادداشت':'Notes'}</label>
+      <textarea class="finput" id="doc-f-notes" rows="3" style="min-height:70px" placeholder="${L==='fa'?'اختیاری':'optional'}">${esc(notes)}</textarea></div>
+    <div class="fld"><label>${L==='fa'?'پیوست‌ها':'Attachments'}</label>
+      <div id="doc-f-attlist" class="doc-eatt-list">${attListHTML()}</div>
+      <button class="btn btn-ghost" id="doc-f-addatt" type="button" style="width:100%;margin-top:6px">＋ ${L==='fa'?'افزودن فایل / عکس':'Add file / photo'}</button>
+      <input type="file" id="doc-f-file" accept="image/*,application/pdf" multiple style="display:none">
+    </div>
+    <div class="fld"><label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <span>${L==='fa'?'ذخیره امن (رمزنگاری با ولت)':'Store securely (encrypt with Vault)'}</span>
+      <span class="doc-switch${secureFlag?' on':''}" id="doc-f-secure" role="switch" aria-checked="${secureFlag}"></span></label>
+      <div style="font-size:12px;color:var(--ink3);margin-top:4px">${L==='fa'?'اسناد امن فقط پس از باز کردن ولت قابل مشاهده‌اند.':'Secure documents are viewable only after unlocking the Vault.'}</div></div>
+    </div>
+    <div class="pay-form-actions">
+      <button class="btn pay-btn-cancel" id="doc-f-cancel">${tr('cancel')}</button>
+      <button class="btn btn-primary pay-btn-save" id="doc-f-save">${editing?(L==='fa'?'ذخیره':'Save'):(L==='fa'?'افزودن':'Add')}</button>
+    </div></div>`, {noPad:true});
+  const refreshAtts=()=>{ const host=document.getElementById('doc-f-attlist'); if(host){ host.innerHTML=attListHTML(); host.querySelectorAll('[data-doc-rmatt]').forEach(el=>el.onclick=()=>{ workingAtts.splice(parseInt(el.dataset.docRmatt,10),1); refreshAtts(); }); } };
+  refreshAtts();
+  const secureEl=document.getElementById('doc-f-secure');
+  secureEl.onclick=()=>{ secureFlag=!secureFlag; secureEl.classList.toggle('on',secureFlag); secureEl.setAttribute('aria-checked',secureFlag); };
+  const fileInput=document.getElementById('doc-f-file');
+  document.getElementById('doc-f-addatt').onclick=()=>fileInput.click();
+  fileInput.onchange=async()=>{
+    const files=Array.from(fileInput.files||[]);
+    for(const f of files){
+      if(f.size>8*1024*1024){ toast(L==='fa'?'فایل بزرگ‌تر از ۸ مگابایت':'File over 8MB skipped'); continue; }
+      try{ workingAtts.push(await docReadFileAsAttachment(f)); }catch(_){}
+    }
+    fileInput.value=''; refreshAtts();
+  };
+  document.getElementById('doc-f-cancel').onclick=()=>closeSheet();
+  document.getElementById('doc-f-save').onclick=async()=>{
+    const title=document.getElementById('doc-f-title').value.trim();
+    if(!title){ toast(L==='fa'?'عنوان لازم است':'Title required'); return; }
+    const meta={
+      title, type:document.getElementById('doc-f-type').value,
+      issueDate:document.getElementById('doc-f-issue').value, expiryDate:document.getElementById('doc-f-expiry').value,
+      reminderDays:parseInt(document.getElementById('doc-f-remind').value,10)||0,
+      folderId:document.getElementById('doc-f-folder').value||null,
+      tags:document.getElementById('doc-f-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
+      favourite:doc.favourite, color:doc.color, secure:secureFlag
+    };
+    const notesVal=document.getElementById('doc-f-notes').value;
+    if(secureFlag && !VaultSession.isUnlocked()){ closeSheet(); docPromptUnlock(()=>{}); return; }
+    try{
+      if(editing){ await DocService.update(id, meta, workingAtts, notesVal); }
+      else{ const nid=await DocService.create(meta, workingAtts, secureFlag?{notes:notesVal,attachments:workingAtts}:null); docActiveId=nid; }
+      // wipe plaintext refs
+      workingAtts=null; notes=null;
+      closeSheet(); render();
+    }catch(e){ toast(L==='fa'?'خطا در ذخیره':'Save failed'); }
+  };
+}
+
+function docPromptUnlock(after){
+  openSheet(`<h3>${L==='fa'?'باز کردن ولت':'Unlock Vault'}</h3>
+    <p style="padding:0 4px 8px;color:var(--ink3);font-size:14px">${VaultSession.isConfigured()?(L==='fa'?'برای اسناد امن، رمز اصلی ولت را وارد کنید.':'Enter your Vault master PIN/password for secure documents.'):(L==='fa'?'ابتدا در ماژول ولت یک رمز اصلی بسازید.':'First create a master PIN in the Vault module.')}</p>
+    ${VaultSession.isConfigured()?`<div class="fld"><input class="finput vault-secure-input" id="doc-unlock-pin" type="password" autocomplete="off" data-lpignore="true" placeholder="••••••••"></div>
+    <div id="doc-unlock-err" style="color:var(--danger);font-size:13px;min-height:16px"></div>
+    <button class="btn btn-primary" id="doc-unlock-go2" style="width:100%">${L==='fa'?'باز کردن':'Unlock'}</button>`:
+    `<button class="btn btn-primary" id="doc-goto-vault" style="width:100%">${L==='fa'?'رفتن به ولت':'Go to Vault'}</button>`}
+    <button class="btn btn-ghost" id="doc-unlock-cancel" style="width:100%;margin-top:8px">${tr('cancel')}</button>`);
+  const cancel=document.getElementById('doc-unlock-cancel'); if(cancel)cancel.onclick=()=>closeSheet();
+  const goto=document.getElementById('doc-goto-vault'); if(goto)goto.onclick=()=>{ closeSheet(); currentModule='vault'; vaultView='home'; render(); };
+  const go=document.getElementById('doc-unlock-go2');
+  if(go)go.onclick=async()=>{
+    const pinEl=document.getElementById('doc-unlock-pin'); const errEl=document.getElementById('doc-unlock-err');
+    go.disabled=true; go.textContent=L==='fa'?'…':'…';
+    let pin=pinEl?pinEl.value:'';
+    const res=await VaultSession.tryUnlock(pin);
+    pin=''; if(pinEl)pinEl.value='';
+    if(res.ok){ closeSheet(); if(typeof after==='function')after(); render(); }
+    else{ go.disabled=false; go.textContent=L==='fa'?'باز کردن':'Unlock'; if(errEl)errEl.textContent=L==='fa'?'رمز نادرست':'Incorrect'; if(pinEl)pinEl.focus(); }
+  };
+}
+
+function docOpenMenu(){
+  const doc=documentsMap()[docActiveId]; if(!doc)return;
+  const folders=docFoldersAll();
+  openSheet(`<h3>${L==='fa'?'گزینه‌ها':'Options'}</h3>
+    <div class="btn-col">
+      <button class="btn btn-ghost" id="dm-history">${L==='fa'?'تاریخچه':'Version history'}</button>
+      <button class="btn btn-ghost" id="dm-move">${L==='fa'?'انتقال به پوشه':'Move to folder'}</button>
+      ${doc.archivedAt?`<button class="btn btn-ghost" id="dm-unarchive">${L==='fa'?'خروج از بایگانی':'Unarchive'}</button>`:`<button class="btn btn-ghost" id="dm-archive">${L==='fa'?'بایگانی':'Archive'}</button>`}
+      ${doc.deletedAt?`<button class="btn btn-ghost" id="dm-restore">${L==='fa'?'بازگردانی':'Restore'}</button><button class="btn btn-danger" id="dm-perm">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>`:`<button class="btn btn-danger" id="dm-trash">${L==='fa'?'انتقال به سطل':'Move to Trash'}</button>`}
+      <button class="btn btn-ghost" id="dm-cancel">${tr('cancel')}</button>
+    </div>`);
+  const bind=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
+  bind('dm-history',()=>{ closeSheet(); docView='history'; render(); });
+  bind('dm-move',()=>{ closeSheet(); openSheet(`<h3>${L==='fa'?'انتقال به پوشه':'Move to folder'}</h3><div class="btn-col">
+    <button class="btn ${!doc.folderId?'btn-primary':'btn-ghost'}" data-dmf="">${L==='fa'?'بدون پوشه':'No folder'}</button>
+    ${folders.map(f=>`<button class="btn ${doc.folderId===f.id?'btn-primary':'btn-ghost'}" data-dmf="${f.id}">${esc(f.name)}</button>`).join('')}
+    <button class="btn btn-ghost" id="dmf-new">＋ ${L==='fa'?'پوشه جدید':'New folder'}</button>
+    <button class="btn btn-ghost" id="dmf-cancel">${tr('cancel')}</button></div>`);
+    document.querySelectorAll('[data-dmf]').forEach(el=>el.onclick=()=>{ DocService.moveToFolder(docActiveId, el.dataset.dmf||null); closeSheet(); render(); });
+    document.getElementById('dmf-new').onclick=()=>{ const n=prompt(L==='fa'?'نام پوشه:':'Folder name:',''); if(n&&n.trim()){ const fid=DocService.folderCreate(n.trim()); DocService.moveToFolder(docActiveId,fid); } closeSheet(); render(); };
+    document.getElementById('dmf-cancel').onclick=()=>closeSheet();
+  });
+  bind('dm-archive',()=>{ DocService.archive(docActiveId); closeSheet(); docView='home'; render(); });
+  bind('dm-unarchive',()=>{ DocService.unarchive(docActiveId); closeSheet(); render(); });
+  bind('dm-trash',()=>{ DocService.trash(docActiveId); closeSheet(); docView='home'; render(); });
+  bind('dm-restore',()=>{ DocService.restore(docActiveId); closeSheet(); render(); });
+  bind('dm-perm',()=>{ closeSheet(); openSheet(`<h3>${L==='fa'?'حذف همیشگی؟':'Delete permanently?'}</h3><p style="padding:0 4px 8px;color:var(--ink3)">${L==='fa'?'این عمل قابل بازگشت نیست.':'This cannot be undone.'}</p><div class="btn-col"><button class="btn btn-danger" id="dm-perm2">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button><button class="btn btn-ghost" id="dm-perm-cancel">${tr('cancel')}</button></div>`);
+    document.getElementById('dm-perm2').onclick=()=>{ DocService.permDelete(docActiveId); closeSheet(); docView='home'; docActiveId=null; render(); };
+    document.getElementById('dm-perm-cancel').onclick=()=>closeSheet();
+  });
+  bind('dm-cancel',()=>closeSheet());
+}
+
+
+
 const HUB_MODULES=[
   // ready:false → placeholder page, "Coming soon" badge, NO create (+) button.
   // A future milestone flips ready:true and supplies createLabel + onCreate()
@@ -4768,7 +5339,7 @@ const HUB_MODULES=[
   {id:'shopping', icon:'🛒', color:'#22c55e', title:'Shopping',  desc:'Lists, stores & pantry',            ready:true,  createLabel:'New Shopping List', onCreate:null},
   {id:'payments', icon:'§',  color:'#f59e0b', title:'Payment Center', desc:'Bills, subscriptions, rent, loans & more', ready:true, createLabel:'New Payment', onCreate:()=>payOpenEditor(null)},
   {id:'vault',    icon:'🔒', color:'#ef4444', title:'Vault',     desc:'Encrypted passwords, cards & IDs',   ready:true,  createLabel:'New Secure Item',  onCreate:()=>vaultOpenEditor(null)},
-  {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Warranties, receipts & records',    ready:false, createLabel:'New Document',     onCreate:null},
+  {id:'documents',icon:'▤',  color:'#3b82f6', title:'Documents', desc:'Passports, licences, receipts & records', ready:true, createLabel:'New Document', onCreate:()=>docOpenEditor(null)},
   {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, packing & bookings',         ready:false, createLabel:'New Trip',         onCreate:null},
   {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules',           ready:false, createLabel:'New Home Item',    onCreate:null},
   {id:'activity', icon:'⟳', color:'#0ea5e9', title:'Activity',  desc:'Recent activity across the app',    ready:true,  createLabel:null,               onCreate:null},
@@ -5702,8 +6273,8 @@ function activityLabel(e){
     ?{created:'ساخته شد',edited:'ویرایش شد',completed:'تکمیل شد',reused:'دوباره استفاده شد',archived:'بایگانی شد',deleted:'حذف شد',starred:'ستاره‌دار شد',unstarred:'ستاره برداشته شد',paid:'پرداخت شد',reopened:'باز شد',restored:'بازگردانی شد',permanently_deleted:'برای همیشه حذف شد',unlocked:'باز شد',locked:'قفل شد',setup:'راه‌اندازی شد',copied:'کپی شد'}
     :{created:'created',edited:'edited',completed:'completed',reused:'reused',archived:'archived',deleted:'deleted',starred:'starred',unstarred:'unstarred',paid:'marked paid',reopened:'reopened',restored:'restored',permanently_deleted:'permanently deleted',unlocked:'unlocked',locked:'locked',setup:'set up',copied:'field copied'};
   const kinds=L==='fa'
-    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت',payment:'پرداخت',vault:'محرمانه',vaultSystem:'ولت'}
-    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note',payment:'Payment',vault:'Secure item',vaultSystem:'Vault'};
+    ?{shopList:'لیست خرید',shopItem:'آیتم خرید',task:'کار',appt:'قرار',note:'یادداشت',payment:'پرداخت',vault:'محرمانه',vaultSystem:'ولت',document:'سند'}
+    :{shopList:'Shopping list',shopItem:'Shopping item',task:'Task',appt:'Appointment',note:'Note',payment:'Payment',vault:'Secure item',vaultSystem:'Vault',document:'Document'};
   return `${kinds[e.refType]||e.refType} ${n?'“'+n+'” ':''}${verbs[e.type]||e.type}`;
 }
 function shopListsMap(){ if(!DB.entities.shopLists)DB.entities.shopLists={}; return DB.entities.shopLists; }
@@ -6891,6 +7462,7 @@ function renderModule(){
   if(currentModule==='notes') return renderNotes();
   if(currentModule==='payments') return renderPayments();
   if(currentModule==='vault') return renderVault();
+  if(currentModule==='documents') return renderDocuments();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -7980,7 +8552,7 @@ function bindScreen(){
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -8093,6 +8665,46 @@ function bindScreen(){
     }
     // any interaction resets the idle auto-lock timer
     VaultSession.touch();
+  })();
+  // ── Documents wiring ──
+  (()=>{
+    if(!(screen==='module'&&currentModule==='documents'))return;
+    if(docView==='home'){
+      const nbH=document.getElementById('doc-new-head'), nbF=document.getElementById('doc-new-fab'), nbE=document.getElementById('doc-empty-add');
+      if(nbH)nbH.onclick=()=>docOpenEditor(null);
+      if(nbF)nbF.onclick=()=>docOpenEditor(null);
+      if(nbE)nbE.onclick=()=>docOpenEditor(null);
+      const lt=document.getElementById('doc-layout-toggle'); if(lt)lt.onclick=()=>{ docLayout=docLayout==='grid'?'list':'grid'; render(); };
+      const se=document.getElementById('doc-search');
+      if(se)se.oninput=()=>{ docSearch=se.value; docListLimit=60; clearTimeout(window._docSearchT); window._docSearchT=setTimeout(()=>{ render(); const s=document.getElementById('doc-search'); if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);} },250); };
+      document.querySelectorAll('[data-doc-folder]').forEach(el=>el.onclick=()=>{ docActiveFolder=el.dataset.docFolder||null; docListLimit=60; render(); });
+      document.querySelectorAll('[data-doc-filter]').forEach(el=>el.onclick=()=>{ docFilter=el.dataset.docFilter; docListLimit=60; render(); });
+      document.querySelectorAll('[data-doc-open]').forEach(el=>el.onclick=()=>{ docActiveId=el.dataset.docOpen; docView='detail'; render(); window.scrollTo(0,0); });
+      const more=document.getElementById('doc-more'); if(more)more.onclick=()=>{ docListLimit+=60; render(); };
+    }
+    if(docView==='detail'){
+      const b=document.getElementById('doc-detail-back'); if(b)b.onclick=()=>{ docView='home'; render(); window.scrollTo(0,0); };
+      const fav=document.getElementById('doc-fav'); if(fav)fav.onclick=()=>{ DocService.toggleFav(docActiveId); render(); };
+      const menu=document.getElementById('doc-menu'); if(menu)menu.onclick=()=>docOpenMenu();
+      const edit=document.getElementById('doc-edit'); if(edit)edit.onclick=()=>docOpenEditor(docActiveId);
+      const unlock=document.getElementById('doc-unlock-go'); if(unlock)unlock.onclick=()=>docPromptUnlock(()=>{ render(); });
+      const doc=documentsMap()[docActiveId];
+      if(doc && !(doc.secure && !VaultSession.isUnlocked())) docRenderSecureContent();
+    }
+    if(docView==='history'){
+      const b=document.getElementById('doc-hist-back'); if(b)b.onclick=()=>{ docView='detail'; render(); };
+      document.querySelectorAll('[data-doc-restore-ver]').forEach(el=>el.onclick=()=>{
+        const doc=documentsMap()[docActiveId]; const idx=parseInt(el.dataset.docRestoreVer,10);
+        if(!doc||!doc.versions||!doc.versions[idx])return;
+        const v=doc.versions[idx];
+        doc.versions.push({at:now(),title:doc.title,type:doc.type,issueDate:doc.issueDate,expiryDate:doc.expiryDate,secure:doc.secure,encryptedPayload:doc.encryptedPayload,iv:doc.iv,attachments:doc.secure?null:(doc.attachments||[]).map(a=>({...a})),notes:doc.secure?null:doc.notes});
+        ['title','type','issueDate','expiryDate'].forEach(k=>{ if(k in v)doc[k]=v[k]; });
+        doc.secure=v.secure; doc.encryptedPayload=v.encryptedPayload; doc.iv=v.iv;
+        if(!v.secure){ doc.attachments=v.attachments||[]; doc.notes=v.notes||''; }
+        doc.updatedAt=now(); DocActivity.log('edited',docActiveId,doc.title); saveDB();
+        docView='detail'; render();
+      });
+    }
   })();
   // ── Notes wiring ──
   (()=>{
