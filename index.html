@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v237';
+const APP_VERSION='v238';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -8629,6 +8629,7 @@ function openSheet(html,opts={}){
   const body=document.getElementById('sheet-body');
   const sheet=document.getElementById('sheet');
   const bg=document.getElementById('sheet-bg');
+  window._sheetGen=(window._sheetGen||0)+1;   // invalidate any pending close-clear
   // Push current content if stacking
   if(opts.stack&&body.innerHTML){_sheetStack.push(body.innerHTML);}
   body.innerHTML=html;
@@ -8653,9 +8654,10 @@ function closeSheet(opts={}){
   const bg=document.getElementById('sheet-bg');
   sheet.classList.remove('on');
   bg.classList.remove('on');
-  // Clear after animation
+  const myGen=(window._sheetGen||0);
+  // Clear after animation — but only if no newer sheet was opened meanwhile
   setTimeout(()=>{
-    if(!sheet.classList.contains('on'))
+    if(!sheet.classList.contains('on') && (window._sheetGen||0)===myGen)
       document.getElementById('sheet-body').innerHTML='';
   },350);
 }
