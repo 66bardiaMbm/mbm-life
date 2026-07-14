@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v234';
+const APP_VERSION='v235';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -5389,6 +5389,7 @@ function tripQuickCreate(){
     tripSuggestPacking(tripsMap()[nid]).forEach(x=>TripService.listAdd(nid,'packing',x));
     tripActiveId=nid; travelView='detail'; tripDetailTab='overview';
     closeSheet(); render();
+    setTimeout(()=>{ if(tripsMap()[nid]) tripOpenEditor(nid); }, 60);
   };
 }
 
