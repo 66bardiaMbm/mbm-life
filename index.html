@@ -1378,7 +1378,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v230';
+const APP_VERSION='v231';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -5151,8 +5151,10 @@ function docOpenAttachment(a){
       `<div style="padding:30px;color:var(--ink3)">${L==='fa'?'پیش‌نمایش موجود نیست':'No preview available'}</div>`}
     <div class="btn-col" style="margin-top:12px">
       <a class="btn btn-primary" href="${a.dataUrl}" download="${esc(a.name)}">${L==='fa'?'دانلود':'Download'}</a>
+      <button class="btn btn-ghost" id="doc-att-share">${L==='fa'?'اشتراک‌گذاری':'Share'}</button>
       <button class="btn btn-ghost" id="doc-att-close">${tr('cancel')}</button>
     </div>`);
+  const sh=document.getElementById('doc-att-share'); if(sh)sh.onclick=()=>docShareAttachment(a);
   const c=document.getElementById('doc-att-close'); if(c)c.onclick=()=>closeSheet();
 }
 
@@ -5178,6 +5180,49 @@ function docRenderHistory(){
 }
 
 // File → attachment (base64). Images/PDF get preview; others stored as file.
+// dataURL → Blob → File for native share
+function _dataUrlToFile(dataUrl, name){
+  try{
+    const [head,b64]=dataUrl.split(','); const mime=(head.match(/data:([^;]+)/)||[])[1]||'application/octet-stream';
+    const bin=atob(b64); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+    return new File([u], name||'file', {type:mime});
+  }catch(_){ return null; }
+}
+async function docShareAttachment(a){
+  if(!a)return;
+  const file=_dataUrlToFile(a.dataUrl, a.name);
+  if(file && navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:a.name}); return; }catch(_){ return; }
+  }
+  // fallback: trigger download
+  const link=document.createElement('a'); link.href=a.dataUrl; link.download=a.name||'file'; document.body.appendChild(link); link.click(); link.remove();
+  toast(L==='fa'?'دانلود شد':'Downloaded');
+}
+async function docShareDocument(id){
+  const doc=documentsMap()[id]; if(!doc)return;
+  let atts=[];
+  try{ const data=await DocService.read(id); atts=data.attachments||[]; }catch(_){ atts=(doc.attachments||[]); }
+  const files=atts.map(a=>_dataUrlToFile(a.dataUrl,a.name)).filter(Boolean);
+  const summary=`${doc.title} — ${docTypeLabel(doc.type)}${doc.expiryDate?(L==='fa'?'، انقضا: ':', expires: ')+shortDate(doc.expiryDate):''}`;
+  if(files.length && navigator.canShare && navigator.canShare({files})){
+    try{ await navigator.share({files, title:doc.title, text:summary}); return; }catch(_){ return; }
+  }
+  if(navigator.share){ try{ await navigator.share({title:doc.title, text:summary}); return; }catch(_){ return; } }
+  // fallback: download attachments
+  if(files.length){ atts.forEach(a=>{ const link=document.createElement('a'); link.href=a.dataUrl; link.download=a.name||'file'; document.body.appendChild(link); link.click(); link.remove(); }); toast(L==='fa'?'دانلود شد':'Downloaded'); }
+  else toast(L==='fa'?'چیزی برای اشتراک نیست':'Nothing to share');
+}
+// Expiry reminders: documents entering their reminder window (or expired) surface as due reminders.
+function docExpiryReminders(){
+  const out=[];
+  documentsLive().forEach(d=>{
+    if(!d.expiryDate)return;
+    const days=docDaysToExpiry(d); if(days===null)return;
+    const win=d.reminderDays||30;
+    if(days<=win){ out.push({id:d.id, title:d.title, type:d.type, expiryDate:d.expiryDate, days, expired:days<0}); }
+  });
+  return out.sort((a,b)=>a.days-b.days);
+}
 function docReadFileAsAttachment(file){
   return new Promise((resolve,reject)=>{
     const r=new FileReader();
@@ -5203,7 +5248,7 @@ async function docOpenEditor(id){
   let workingAtts=attachments.slice();
   let secureFlag=!!doc.secure;
   const folders=docFoldersAll();
-  const attListHTML=()=>workingAtts.map((a,i)=>`<div class="doc-eatt"><span class="doc-eatt-ic">${a.kind==='image'?'🖼':a.kind==='pdf'?'📕':'📄'}</span><span class="doc-eatt-name">${esc(a.name)}</span><button class="doc-eatt-x" data-doc-rmatt="${i}" type="button">✕</button></div>`).join('');
+  const attListHTML=()=>workingAtts.map((a,i)=>`<div class="doc-eatt"><span class="doc-eatt-ic">${a.kind==='image'?'🖼':a.kind==='pdf'?'📕':'📄'}</span><span class="doc-eatt-name">${esc(a.name)}</span><button class="doc-eatt-x" data-doc-renatt="${i}" type="button" aria-label="rename" style="background:var(--s3)">✎</button><button class="doc-eatt-x" data-doc-rmatt="${i}" type="button" aria-label="delete">✕</button></div>`).join('');
   openSheet(`<div class="pay-editor-wrap"><div class="pay-editor-scroll"><h3>${editing?(L==='fa'?'ویرایش سند':'Edit document'):(L==='fa'?'سند جدید':'New document')}</h3>
     <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
       <input class="finput" id="doc-f-title" autocomplete="off" value="${esc(doc.title||'')}" placeholder="${L==='fa'?'مثلاً پاسپورت من':'e.g. My passport'}"></div>
@@ -5224,8 +5269,14 @@ async function docOpenEditor(id){
       <textarea class="finput" id="doc-f-notes" rows="3" style="min-height:70px" placeholder="${L==='fa'?'اختیاری':'optional'}">${esc(notes)}</textarea></div>
     <div class="fld"><label>${L==='fa'?'پیوست‌ها':'Attachments'}</label>
       <div id="doc-f-attlist" class="doc-eatt-list">${attListHTML()}</div>
-      <button class="btn btn-ghost" id="doc-f-addatt" type="button" style="width:100%;margin-top:6px">＋ ${L==='fa'?'افزودن فایل / عکس':'Add file / photo'}</button>
-      <input type="file" id="doc-f-file" accept="image/*,application/pdf" multiple style="display:none">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-ghost" id="doc-f-cam" type="button" style="flex:1">📷 ${L==='fa'?'دوربین':'Camera'}</button>
+        <button class="btn btn-ghost" id="doc-f-gal" type="button" style="flex:1">🖼 ${L==='fa'?'گالری':'Gallery'}</button>
+        <button class="btn btn-ghost" id="doc-f-doc" type="button" style="flex:1">📄 ${L==='fa'?'فایل':'Files'}</button>
+      </div>
+      <input type="file" id="doc-f-cam-in" accept="image/*" capture="environment" style="display:none">
+      <input type="file" id="doc-f-gal-in" accept="image/*" multiple style="display:none">
+      <input type="file" id="doc-f-doc-in" accept="image/*,application/pdf" multiple style="display:none">
     </div>
     <div class="fld"><label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
       <span>${L==='fa'?'ذخیره امن (رمزنگاری با ولت)':'Store securely (encrypt with Vault)'}</span>
@@ -5236,20 +5287,28 @@ async function docOpenEditor(id){
       <button class="btn pay-btn-cancel" id="doc-f-cancel">${tr('cancel')}</button>
       <button class="btn btn-primary pay-btn-save" id="doc-f-save">${editing?(L==='fa'?'ذخیره':'Save'):(L==='fa'?'افزودن':'Add')}</button>
     </div></div>`, {noPad:true});
-  const refreshAtts=()=>{ const host=document.getElementById('doc-f-attlist'); if(host){ host.innerHTML=attListHTML(); host.querySelectorAll('[data-doc-rmatt]').forEach(el=>el.onclick=()=>{ workingAtts.splice(parseInt(el.dataset.docRmatt,10),1); refreshAtts(); }); } };
+  const refreshAtts=()=>{ const host=document.getElementById('doc-f-attlist'); if(host){ host.innerHTML=attListHTML();
+    host.querySelectorAll('[data-doc-rmatt]').forEach(el=>el.onclick=()=>{ workingAtts.splice(parseInt(el.dataset.docRmatt,10),1); refreshAtts(); });
+    host.querySelectorAll('[data-doc-renatt]').forEach(el=>el.onclick=()=>{ const i=parseInt(el.dataset.docRenatt,10); const cur=workingAtts[i]; const nn=prompt(L==='fa'?'نام جدید:':'New name:',cur.name); if(nn&&nn.trim()){ cur.name=nn.trim(); refreshAtts(); } });
+  } };
   refreshAtts();
   const secureEl=document.getElementById('doc-f-secure');
   secureEl.onclick=()=>{ secureFlag=!secureFlag; secureEl.classList.toggle('on',secureFlag); secureEl.setAttribute('aria-checked',secureFlag); };
-  const fileInput=document.getElementById('doc-f-file');
-  document.getElementById('doc-f-addatt').onclick=()=>fileInput.click();
-  fileInput.onchange=async()=>{
-    const files=Array.from(fileInput.files||[]);
+  const importFrom=async(inp)=>{
+    const files=Array.from(inp.files||[]);
     for(const f of files){
       if(f.size>8*1024*1024){ toast(L==='fa'?'فایل بزرگ‌تر از ۸ مگابایت':'File over 8MB skipped'); continue; }
       try{ workingAtts.push(await docReadFileAsAttachment(f)); }catch(_){}
     }
-    fileInput.value=''; refreshAtts();
+    inp.value=''; refreshAtts();
   };
+  const camIn=document.getElementById('doc-f-cam-in'), galIn=document.getElementById('doc-f-gal-in'), docIn=document.getElementById('doc-f-doc-in');
+  document.getElementById('doc-f-cam').onclick=()=>camIn.click();
+  document.getElementById('doc-f-gal').onclick=()=>galIn.click();
+  document.getElementById('doc-f-doc').onclick=()=>docIn.click();
+  camIn.onchange=()=>importFrom(camIn);
+  galIn.onchange=()=>importFrom(galIn);
+  docIn.onchange=()=>importFrom(docIn);
   document.getElementById('doc-f-cancel').onclick=()=>closeSheet();
   document.getElementById('doc-f-save').onclick=async()=>{
     const title=document.getElementById('doc-f-title').value.trim();
@@ -5302,6 +5361,7 @@ function docOpenMenu(){
   openSheet(`<h3>${L==='fa'?'گزینه‌ها':'Options'}</h3>
     <div class="btn-col">
       <button class="btn btn-ghost" id="dm-history">${L==='fa'?'تاریخچه':'Version history'}</button>
+      <button class="btn btn-ghost" id="dm-share">${L==='fa'?'اشتراک‌گذاری / خروجی':'Share / Export'}</button>
       <button class="btn btn-ghost" id="dm-move">${L==='fa'?'انتقال به پوشه':'Move to folder'}</button>
       ${doc.archivedAt?`<button class="btn btn-ghost" id="dm-unarchive">${L==='fa'?'خروج از بایگانی':'Unarchive'}</button>`:`<button class="btn btn-ghost" id="dm-archive">${L==='fa'?'بایگانی':'Archive'}</button>`}
       ${doc.deletedAt?`<button class="btn btn-ghost" id="dm-restore">${L==='fa'?'بازگردانی':'Restore'}</button><button class="btn btn-danger" id="dm-perm">${L==='fa'?'حذف همیشگی':'Delete permanently'}</button>`:`<button class="btn btn-danger" id="dm-trash">${L==='fa'?'انتقال به سطل':'Move to Trash'}</button>`}
@@ -5309,6 +5369,7 @@ function docOpenMenu(){
     </div>`);
   const bind=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
   bind('dm-history',()=>{ closeSheet(); docView='history'; render(); });
+  bind('dm-share',()=>{ closeSheet(); docShareDocument(docActiveId); });
   bind('dm-move',()=>{ closeSheet(); openSheet(`<h3>${L==='fa'?'انتقال به پوشه':'Move to folder'}</h3><div class="btn-col">
     <button class="btn ${!doc.folderId?'btn-primary':'btn-ghost'}" data-dmf="">${L==='fa'?'بدون پوشه':'No folder'}</button>
     ${folders.map(f=>`<button class="btn ${doc.folderId===f.id?'btn-primary':'btn-ghost'}" data-dmf="${f.id}">${esc(f.name)}</button>`).join('')}
