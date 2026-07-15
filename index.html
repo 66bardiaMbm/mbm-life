@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v248';
+const APP_VERSION='v252';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1503,6 +1503,23 @@ function loadDB(){
     // ensure all entity collections exist
     ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
+    // ── Travel data repair (safe, no data loss) ──
+    try{
+      Object.values(d.entities.trips||{}).forEach(t=>{
+        if(!t||typeof t!=='object')return;
+        // Repair swapped/invalid dates: if end < start, swap them (preserves both values).
+        if(t.startDate&&t.endDate&&t.endDate<t.startDate){ const tmp=t.startDate; t.startDate=t.endDate; t.endDate=tmp; }
+        // Backfill a meaningful title for legacy "New trip"/empty placeholders using known fields.
+        if(!t.title||/^new trip$/i.test(t.title.trim())){
+          const place=t.city||t.destination||t.country||'';
+          if(place){ let nights=0; if(t.startDate&&t.endDate){ const s=new Date(t.startDate+'T00:00:00'),e=new Date(t.endDate+'T00:00:00'); if(!isNaN(s)&&!isNaN(e))nights=Math.max(0,Math.round((e-s)/86400000)); }
+            t.title = nights>=10?`${place} Holiday`:nights>=6?`A Week in ${place}`:nights>=3?`${place} Getaway`:nights>=1?`${place} Weekend`:`Trip to ${place}`;
+          }
+        }
+        // Ensure new segment fields exist on old segments (non-destructive).
+        (t.segments||[]).forEach(sg=>{ ['vehicleNo','depPoint','arrPoint'].forEach(k=>{ if(sg[k]===undefined)sg[k]=''; }); if(sg.distanceKm===undefined)sg.distanceKm=0; if(sg.durationH===undefined)sg.durationH=0; });
+      });
+    }catch(_){}
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
     if(!d.meta.viewOrder)d.meta.viewOrder={};
@@ -5138,6 +5155,286 @@ const TRIP_CITY_DB={
   'usa':['New York','Los Angeles','San Francisco','Chicago','Miami','Las Vegas','Boston','Seattle']
 };
 function tripCitiesFor(country){ return TRIP_CITY_DB[tripCountryKey(country)]||[]; }
+// ── Intelligent transport datasets (searchable) ──
+const TRIP_AIRLINES=['Qantas','Emirates','Qatar Airways','Singapore Airlines','Lufthansa','British Airways','Air France','KLM','Turkish Airlines','Iran Air','Mahan Air','Etihad','Cathay Pacific','ANA','Japan Airlines','Thai Airways','Air Canada','United Airlines','American Airlines','Delta','Virgin Australia','Jetstar','Air New Zealand','Ryanair','easyJet','China Southern','Air India','IndiGo'];
+const TRIP_TRAIN_OPERATORS=['SNCF','Deutsche Bahn','Trenitalia','Italo','Renfe','SBB','ÖBB','Eurostar','Thalys','Amtrak','VIA Rail','JR (Japan Rail)','RAJA (Iran)','Indian Railways','China Railway','National Rail (UK)','NS (Netherlands)'];
+const TRIP_BUS_COMPANIES=['FlixBus','Greyhound','National Express','Megabus','Eurolines','Ouibus','RedCoach','Seyro Safar (Iran)','Hamsafar (Iran)'];
+const TRIP_FERRY_OPERATORS=['DFDS','Stena Line','P&O Ferries','Brittany Ferries','Grimaldi Lines','Blue Star Ferries','Interislander','SpiritofTasmania'];
+const TRIP_CRUISE_OPERATORS=['Royal Caribbean','Carnival','MSC Cruises','Norwegian Cruise Line','Princess Cruises','Celebrity Cruises','Cunard','Costa Cruises'];
+// Airports/stations/ports keyed by country (canonical lowercase). Extend safely.
+const TRIP_AIRPORTS={
+  'australia':['SYD Sydney','MEL Melbourne','BNE Brisbane','PER Perth','ADL Adelaide','HBA Hobart','CBR Canberra','OOL Gold Coast'],
+  'iran':['IKA Tehran Imam Khomeini','THR Tehran Mehrabad','MHD Mashhad','IFN Isfahan','SYZ Shiraz','TBZ Tabriz','KIH Kish'],
+  'france':['CDG Paris Charles de Gaulle','ORY Paris Orly','NCE Nice','LYS Lyon','MRS Marseille','BOD Bordeaux'],
+  'japan':['HND Tokyo Haneda','NRT Tokyo Narita','KIX Osaka Kansai','ITM Osaka Itami','CTS Sapporo','FUK Fukuoka'],
+  'united kingdom':['LHR London Heathrow','LGW London Gatwick','STN London Stansted','MAN Manchester','EDI Edinburgh','BHX Birmingham'],
+  'uk':['LHR London Heathrow','LGW London Gatwick','STN London Stansted','MAN Manchester','EDI Edinburgh'],
+  'united states':['JFK New York','LGA New York LaGuardia','EWR Newark','LAX Los Angeles','SFO San Francisco','ORD Chicago','MIA Miami','LAS Las Vegas'],
+  'usa':['JFK New York','LAX Los Angeles','SFO San Francisco','ORD Chicago','MIA Miami','LAS Las Vegas'],
+  'germany':['FRA Frankfurt','MUC Munich','BER Berlin','HAM Hamburg','DUS Dusseldorf'],
+  'italy':['FCO Rome Fiumicino','MXP Milan Malpensa','LIN Milan Linate','VCE Venice','NAP Naples'],
+  'spain':['MAD Madrid','BCN Barcelona','AGP Malaga','VLC Valencia','SVQ Seville'],
+  'united arab emirates':['DXB Dubai','AUH Abu Dhabi','SHJ Sharjah'],'uae':['DXB Dubai','AUH Abu Dhabi'],
+  'turkey':['IST Istanbul','SAW Istanbul Sabiha','AYT Antalya','ESB Ankara','ADB Izmir'],
+  'canada':['YYZ Toronto','YVR Vancouver','YUL Montreal','YYC Calgary'],
+  'thailand':['BKK Bangkok','DMK Bangkok Don Mueang','HKT Phuket','CNX Chiang Mai'],
+  'india':['DEL Delhi','BOM Mumbai','BLR Bangalore','MAA Chennai','HYD Hyderabad'],
+  'china':['PEK Beijing','PVG Shanghai','CAN Guangzhou','SZX Shenzhen','HKG Hong Kong'],
+  'singapore':['SIN Singapore Changi'],'greece':['ATH Athens','JTR Santorini','JMK Mykonos','HER Heraklion'],
+  'netherlands':['AMS Amsterdam Schiphol','RTM Rotterdam','EIN Eindhoven'],
+  'new zealand':['AKL Auckland','WLG Wellington','CHC Christchurch','ZQN Queenstown']
+};
+const TRIP_STATIONS={
+  'france':['Paris Gare du Nord','Paris Gare de Lyon','Lyon Part-Dieu','Marseille St-Charles','Nice-Ville'],
+  'iran':['Tehran Railway Station','Mashhad Railway Station','Isfahan Station','Shiraz Station'],
+  'italy':['Roma Termini','Milano Centrale','Firenze S.M.N.','Venezia S. Lucia','Napoli Centrale'],
+  'united kingdom':["London King's Cross","London St Pancras","London Paddington","Manchester Piccadilly","Edinburgh Waverley"],
+  'uk':["London King's Cross","London St Pancras","Manchester Piccadilly"],
+  'germany':['Berlin Hauptbahnhof','München Hauptbahnhof','Frankfurt Hauptbahnhof','Hamburg Hauptbahnhof'],
+  'japan':['Tokyo Station','Shin-Osaka','Kyoto Station','Nagoya Station'],
+  'netherlands':['Amsterdam Centraal','Rotterdam Centraal','Utrecht Centraal'],
+  'spain':['Madrid Atocha','Barcelona Sants','Valencia Joaquín Sorolla']
+};
+const TRIP_PORTS={
+  'italy':['Port of Civitavecchia','Port of Naples','Port of Venice','Port of Genoa'],
+  'greece':['Port of Piraeus','Port of Santorini','Port of Mykonos','Port of Rhodes'],
+  'australia':['Port of Sydney','Port of Melbourne','Devonport (Tasmania)'],
+  'united kingdom':['Port of Dover','Port of Southampton','Port of Portsmouth'],'uk':['Port of Dover','Port of Southampton'],
+  'spain':['Port of Barcelona','Port of Palma','Port of Valencia'],
+  'france':['Port of Calais','Port of Marseille','Port of Nice']
+};
+function tripAirportsFor(country){ return TRIP_AIRPORTS[tripCountryKey(country)]||[]; }
+// Structured airport records for intelligent ranked search (IATA, ICAO, name, city, country).
+const TRIP_AIRPORT_DB=[
+  {iata:'SYD',icao:'YSSY',name:'Sydney Kingsford Smith',city:'Sydney',country:'Australia'},
+  {iata:'MEL',icao:'YMML',name:'Melbourne',city:'Melbourne',country:'Australia'},
+  {iata:'BNE',icao:'YBBN',name:'Brisbane',city:'Brisbane',country:'Australia'},
+  {iata:'PER',icao:'YPPH',name:'Perth',city:'Perth',country:'Australia'},
+  {iata:'ADL',icao:'YPAD',name:'Adelaide',city:'Adelaide',country:'Australia'},
+  {iata:'HBA',icao:'YMHB',name:'Hobart',city:'Hobart',country:'Australia'},
+  {iata:'CBR',icao:'YSCB',name:'Canberra',city:'Canberra',country:'Australia'},
+  {iata:'OOL',icao:'YBCG',name:'Gold Coast',city:'Gold Coast',country:'Australia'},
+  {iata:'IKA',icao:'OIIE',name:'Tehran Imam Khomeini',city:'Tehran',country:'Iran'},
+  {iata:'THR',icao:'OIII',name:'Tehran Mehrabad',city:'Tehran',country:'Iran'},
+  {iata:'MHD',icao:'OIMM',name:'Mashhad Hasheminejad',city:'Mashhad',country:'Iran'},
+  {iata:'IFN',icao:'OIFM',name:'Isfahan',city:'Isfahan',country:'Iran'},
+  {iata:'SYZ',icao:'OISS',name:'Shiraz',city:'Shiraz',country:'Iran'},
+  {iata:'TBZ',icao:'OITT',name:'Tabriz',city:'Tabriz',country:'Iran'},
+  {iata:'KIH',icao:'OIBK',name:'Kish Island',city:'Kish',country:'Iran'},
+  {iata:'DOH',icao:'OTHH',name:'Hamad International',city:'Doha',country:'Qatar'},
+  {iata:'DXB',icao:'OMDB',name:'Dubai International',city:'Dubai',country:'United Arab Emirates'},
+  {iata:'AUH',icao:'OMAA',name:'Abu Dhabi',city:'Abu Dhabi',country:'United Arab Emirates'},
+  {iata:'CDG',icao:'LFPG',name:'Paris Charles de Gaulle',city:'Paris',country:'France'},
+  {iata:'ORY',icao:'LFPO',name:'Paris Orly',city:'Paris',country:'France'},
+  {iata:'NCE',icao:'LFMN',name:'Nice Côte d’Azur',city:'Nice',country:'France'},
+  {iata:'LYS',icao:'LFLL',name:'Lyon Saint-Exupéry',city:'Lyon',country:'France'},
+  {iata:'MRS',icao:'LFML',name:'Marseille Provence',city:'Marseille',country:'France'},
+  {iata:'HND',icao:'RJTT',name:'Tokyo Haneda',city:'Tokyo',country:'Japan'},
+  {iata:'NRT',icao:'RJAA',name:'Tokyo Narita',city:'Tokyo',country:'Japan'},
+  {iata:'KIX',icao:'RJBB',name:'Osaka Kansai',city:'Osaka',country:'Japan'},
+  {iata:'ITM',icao:'RJOO',name:'Osaka Itami',city:'Osaka',country:'Japan'},
+  {iata:'CTS',icao:'RJCC',name:'Sapporo New Chitose',city:'Sapporo',country:'Japan'},
+  {iata:'FUK',icao:'RJFF',name:'Fukuoka',city:'Fukuoka',country:'Japan'},
+  {iata:'LHR',icao:'EGLL',name:'London Heathrow',city:'London',country:'United Kingdom'},
+  {iata:'LGW',icao:'EGKK',name:'London Gatwick',city:'London',country:'United Kingdom'},
+  {iata:'STN',icao:'EGSS',name:'London Stansted',city:'London',country:'United Kingdom'},
+  {iata:'MAN',icao:'EGCC',name:'Manchester',city:'Manchester',country:'United Kingdom'},
+  {iata:'EDI',icao:'EGPH',name:'Edinburgh',city:'Edinburgh',country:'United Kingdom'},
+  {iata:'BHX',icao:'EGBB',name:'Birmingham',city:'Birmingham',country:'United Kingdom'},
+  {iata:'JFK',icao:'KJFK',name:'New York John F Kennedy',city:'New York',country:'United States'},
+  {iata:'LGA',icao:'KLGA',name:'New York LaGuardia',city:'New York',country:'United States'},
+  {iata:'EWR',icao:'KEWR',name:'Newark Liberty',city:'Newark',country:'United States'},
+  {iata:'LAX',icao:'KLAX',name:'Los Angeles',city:'Los Angeles',country:'United States'},
+  {iata:'SFO',icao:'KSFO',name:'San Francisco',city:'San Francisco',country:'United States'},
+  {iata:'ORD',icao:'KORD',name:'Chicago O’Hare',city:'Chicago',country:'United States'},
+  {iata:'MIA',icao:'KMIA',name:'Miami',city:'Miami',country:'United States'},
+  {iata:'LAS',icao:'KLAS',name:'Las Vegas Harry Reid',city:'Las Vegas',country:'United States'},
+  {iata:'FRA',icao:'EDDF',name:'Frankfurt',city:'Frankfurt',country:'Germany'},
+  {iata:'MUC',icao:'EDDM',name:'Munich',city:'Munich',country:'Germany'},
+  {iata:'BER',icao:'EDDB',name:'Berlin Brandenburg',city:'Berlin',country:'Germany'},
+  {iata:'FCO',icao:'LIRF',name:'Rome Fiumicino',city:'Rome',country:'Italy'},
+  {iata:'MXP',icao:'LIMC',name:'Milan Malpensa',city:'Milan',country:'Italy'},
+  {iata:'VCE',icao:'LIPZ',name:'Venice Marco Polo',city:'Venice',country:'Italy'},
+  {iata:'MAD',icao:'LEMD',name:'Madrid Barajas',city:'Madrid',country:'Spain'},
+  {iata:'BCN',icao:'LEBL',name:'Barcelona El Prat',city:'Barcelona',country:'Spain'},
+  {iata:'IST',icao:'LTFM',name:'Istanbul',city:'Istanbul',country:'Turkey'},
+  {iata:'SAW',icao:'LTFJ',name:'Istanbul Sabiha Gökçen',city:'Istanbul',country:'Turkey'},
+  {iata:'AYT',icao:'LTAI',name:'Antalya',city:'Antalya',country:'Turkey'},
+  {iata:'YYZ',icao:'CYYZ',name:'Toronto Pearson',city:'Toronto',country:'Canada'},
+  {iata:'YVR',icao:'CYVR',name:'Vancouver',city:'Vancouver',country:'Canada'},
+  {iata:'BKK',icao:'VTBS',name:'Bangkok Suvarnabhumi',city:'Bangkok',country:'Thailand'},
+  {iata:'HKT',icao:'VTSP',name:'Phuket',city:'Phuket',country:'Thailand'},
+  {iata:'DEL',icao:'VIDP',name:'Delhi Indira Gandhi',city:'Delhi',country:'India'},
+  {iata:'BOM',icao:'VABB',name:'Mumbai',city:'Mumbai',country:'India'},
+  {iata:'PEK',icao:'ZBAA',name:'Beijing Capital',city:'Beijing',country:'China'},
+  {iata:'PVG',icao:'ZSPD',name:'Shanghai Pudong',city:'Shanghai',country:'China'},
+  {iata:'HKG',icao:'VHHH',name:'Hong Kong',city:'Hong Kong',country:'China'},
+  {iata:'SIN',icao:'WSSS',name:'Singapore Changi',city:'Singapore',country:'Singapore'},
+  {iata:'ATH',icao:'LGAV',name:'Athens',city:'Athens',country:'Greece'},
+  {iata:'AMS',icao:'EHAM',name:'Amsterdam Schiphol',city:'Amsterdam',country:'Netherlands'},
+  {iata:'AKL',icao:'NZAA',name:'Auckland',city:'Auckland',country:'New Zealand'},
+  {iata:'WLG',icao:'NZWN',name:'Wellington',city:'Wellington',country:'New Zealand'},
+  {iata:'CHC',icao:'NZCH',name:'Christchurch',city:'Christchurch',country:'New Zealand'}
+];
+// Ranked search: name, IATA, ICAO, city, country. Prioritises selected country/city, allows worldwide search.
+function tripSearchAirports(query, priorityCountry, priorityCity){
+  const q=(query||'').trim().toLowerCase();
+  const pc=(priorityCountry||'').trim().toLowerCase();
+  const pcity=(priorityCity||'').trim().toLowerCase();
+  const scored=TRIP_AIRPORT_DB.map(a=>{
+    let s=-1;
+    const iata=a.iata.toLowerCase(), icao=a.icao.toLowerCase(), name=a.name.toLowerCase(), city=a.city.toLowerCase(), ctry=a.country.toLowerCase();
+    if(!q){ s=0; }
+    else if(iata===q) s=100;
+    else if(icao===q) s=95;
+    else if(city===q) s=90;
+    else if(iata.startsWith(q)) s=80;
+    else if(city.startsWith(q)) s=75;
+    else if(name.startsWith(q)) s=70;
+    else if(name.includes(q)) s=55;
+    else if(city.includes(q)) s=50;
+    else if(ctry.includes(q)) s=40;
+    else if(icao.includes(q)) s=35;
+    if(s<0)return null;
+    if(pcity&&city===pcity)s+=30;
+    if(pc&&ctry===pc)s+=15;
+    return {a,s};
+  }).filter(Boolean).sort((x,y)=>y.s-x.s);
+  return scored.map(x=>x.a);
+}
+function tripAirportLabel(a){ return `${a.iata} · ${a.name} (${a.city}, ${a.country})`; }
+function tripAirportValue(a){ return `${a.iata} ${a.name}`; }
+function tripStationsFor(country){ return TRIP_STATIONS[tripCountryKey(country)]||[]; }
+function tripPortsFor(country){ return TRIP_PORTS[tripCountryKey(country)]||[]; }
+// Structured station/port records for ranked search (code where applicable, name, city, country).
+const TRIP_STATION_DB=[
+  {code:'',name:'Paris Gare du Nord',city:'Paris',country:'France'},
+  {code:'',name:'Paris Gare de Lyon',city:'Paris',country:'France'},
+  {code:'',name:'Lyon Part-Dieu',city:'Lyon',country:'France'},
+  {code:'',name:'Marseille St-Charles',city:'Marseille',country:'France'},
+  {code:'',name:'Nice-Ville',city:'Nice',country:'France'},
+  {code:'',name:'Tehran Railway Station',city:'Tehran',country:'Iran'},
+  {code:'',name:'Mashhad Railway Station',city:'Mashhad',country:'Iran'},
+  {code:'',name:'Isfahan Station',city:'Isfahan',country:'Iran'},
+  {code:'',name:'Shiraz Station',city:'Shiraz',country:'Iran'},
+  {code:'',name:'Roma Termini',city:'Rome',country:'Italy'},
+  {code:'',name:'Milano Centrale',city:'Milan',country:'Italy'},
+  {code:'',name:'Firenze S.M.N.',city:'Florence',country:'Italy'},
+  {code:'',name:'Venezia S. Lucia',city:'Venice',country:'Italy'},
+  {code:'',name:'Napoli Centrale',city:'Naples',country:'Italy'},
+  {code:"",name:"London King's Cross",city:'London',country:'United Kingdom'},
+  {code:'',name:'London St Pancras',city:'London',country:'United Kingdom'},
+  {code:'',name:'London Paddington',city:'London',country:'United Kingdom'},
+  {code:'',name:'Manchester Piccadilly',city:'Manchester',country:'United Kingdom'},
+  {code:'',name:'Edinburgh Waverley',city:'Edinburgh',country:'United Kingdom'},
+  {code:'',name:'Berlin Hauptbahnhof',city:'Berlin',country:'Germany'},
+  {code:'',name:'München Hauptbahnhof',city:'Munich',country:'Germany'},
+  {code:'',name:'Frankfurt Hauptbahnhof',city:'Frankfurt',country:'Germany'},
+  {code:'',name:'Hamburg Hauptbahnhof',city:'Hamburg',country:'Germany'},
+  {code:'',name:'Tokyo Station',city:'Tokyo',country:'Japan'},
+  {code:'',name:'Shin-Osaka',city:'Osaka',country:'Japan'},
+  {code:'',name:'Kyoto Station',city:'Kyoto',country:'Japan'},
+  {code:'',name:'Nagoya Station',city:'Nagoya',country:'Japan'},
+  {code:'',name:'Amsterdam Centraal',city:'Amsterdam',country:'Netherlands'},
+  {code:'',name:'Rotterdam Centraal',city:'Rotterdam',country:'Netherlands'},
+  {code:'',name:'Madrid Atocha',city:'Madrid',country:'Spain'},
+  {code:'',name:'Barcelona Sants',city:'Barcelona',country:'Spain'},
+  {code:'',name:'Valencia Joaquín Sorolla',city:'Valencia',country:'Spain'}
+];
+const TRIP_PORT_DB=[
+  {code:'',name:'Port of Civitavecchia',city:'Rome',country:'Italy'},
+  {code:'',name:'Port of Naples',city:'Naples',country:'Italy'},
+  {code:'',name:'Port of Venice',city:'Venice',country:'Italy'},
+  {code:'',name:'Port of Genoa',city:'Genoa',country:'Italy'},
+  {code:'',name:'Port of Piraeus',city:'Athens',country:'Greece'},
+  {code:'',name:'Port of Santorini',city:'Santorini',country:'Greece'},
+  {code:'',name:'Port of Mykonos',city:'Mykonos',country:'Greece'},
+  {code:'',name:'Port of Rhodes',city:'Rhodes',country:'Greece'},
+  {code:'',name:'Port of Sydney',city:'Sydney',country:'Australia'},
+  {code:'',name:'Port of Melbourne',city:'Melbourne',country:'Australia'},
+  {code:'',name:'Devonport',city:'Devonport',country:'Australia'},
+  {code:'',name:'Port of Dover',city:'Dover',country:'United Kingdom'},
+  {code:'',name:'Port of Southampton',city:'Southampton',country:'United Kingdom'},
+  {code:'',name:'Port of Portsmouth',city:'Portsmouth',country:'United Kingdom'},
+  {code:'',name:'Port of Barcelona',city:'Barcelona',country:'Spain'},
+  {code:'',name:'Port of Palma',city:'Palma',country:'Spain'},
+  {code:'',name:'Port of Valencia',city:'Valencia',country:'Spain'},
+  {code:'',name:'Port of Calais',city:'Calais',country:'France'},
+  {code:'',name:'Port of Marseille',city:'Marseille',country:'France'},
+  {code:'',name:'Port of Nice',city:'Nice',country:'France'}
+];
+// Generic ranked search over station/port records (name, city, country, code). Prioritises country/city; worldwide fallback.
+function tripSearchPlaces(db, query, priorityCountry, priorityCity){
+  const q=(query||'').trim().toLowerCase();
+  const pc=(priorityCountry||'').trim().toLowerCase();
+  const pcity=(priorityCity||'').trim().toLowerCase();
+  const scored=db.map(a=>{
+    let s=-1;
+    const code=(a.code||'').toLowerCase(), name=a.name.toLowerCase(), city=a.city.toLowerCase(), ctry=a.country.toLowerCase();
+    if(!q)s=0;
+    else if(code&&code===q)s=100;
+    else if(city===q)s=90;
+    else if(name.startsWith(q))s=75;
+    else if(city.startsWith(q))s=72;
+    else if(name.includes(q))s=55;
+    else if(city.includes(q))s=50;
+    else if(ctry.includes(q))s=40;
+    if(s<0)return null;
+    if(pcity&&city===pcity)s+=30;
+    if(pc&&ctry===pc)s+=15;
+    return {a,s};
+  }).filter(Boolean).sort((x,y)=>y.s-x.s);
+  return scored.map(x=>x.a);
+}
+function tripPlaceLabel(a){ return `${a.name} (${a.city}, ${a.country})`; }
+// Context-aware point suggestions per transport + country (structured + ranked, worldwide fallback).
+function tripPointsFor(kind,country,city){
+  if(kind==='flight'){
+    const ranked=tripSearchAirports('',country,city);
+    return ranked.map(a=>`${a.iata} ${a.name} (${a.city}, ${a.country})`);
+  }
+  if(kind==='train'||kind==='bus'){
+    const ranked=tripSearchPlaces(TRIP_STATION_DB,'',country,city);
+    return ranked.map(a=>`${a.name} (${a.city}, ${a.country})`);
+  }
+  if(kind==='ferry'||kind==='cruise'){
+    const ranked=tripSearchPlaces(TRIP_PORT_DB,'',country,city);
+    return ranked.map(a=>`${a.name} (${a.city}, ${a.country})`);
+  }
+  return [];
+}
+function tripOperatorsFor(kind){
+  if(kind==='flight')return TRIP_AIRLINES;
+  if(kind==='train')return TRIP_TRAIN_OPERATORS;
+  if(kind==='bus')return TRIP_BUS_COMPANIES;
+  if(kind==='ferry')return TRIP_FERRY_OPERATORS;
+  if(kind==='cruise')return TRIP_CRUISE_OPERATORS;
+  return [];
+}
+// Smart trip title from destination/city/country + dates.
+function tripAutoTitle(meta){
+  const place=meta.city||meta.destination||meta.country||'';
+  if(!place)return (L==='fa'?'سفر جدید':'Trip');
+  // Duration in nights
+  let nights=0;
+  if(meta.startDate&&meta.endDate){ const s=new Date(meta.startDate+'T00:00:00'),e=new Date(meta.endDate+'T00:00:00'); if(!isNaN(s)&&!isNaN(e))nights=Math.max(0,Math.round((e-s)/86400000)); }
+  const info=tripCountryInfo(meta.country);
+  const season=tripSeason(meta.startDate, info?info.hemi:'N');
+  const seasonLabel=season?tripSeasonLabel(season):'';
+  // Natural phrasing: weekend / short break / week / getaway / holiday by length
+  if(L==='fa'){
+    if(nights>0&&nights<=2)return `گشت کوتاه ${place}`;
+    if(nights>=3&&nights<=5)return `سفر ${place}`;
+    if(nights>=6&&nights<=9)return `یک هفته در ${place}`;
+    if(nights>=10)return `تعطیلات ${place}`;
+    return `سفر ${place}`;
+  }
+  if(nights>0&&nights<=2)return `${place} Weekend`;
+  if(nights>=3&&nights<=5)return `${place} Getaway`;
+  if(nights>=6&&nights<=9)return `A Week in ${place}`;
+  if(nights>=10)return `${place} Holiday`;
+  return (seasonLabel?`${seasonLabel} in ${place}`:`Trip to ${place}`);
+}
 function tripCountryFlag(name){ const c=tripCountryInfo(name); return c&&c.flag?c.flag:'\ud83c\udf0d'; }
 function tripCountryInfo(name){ return TRIP_COUNTRY_INFO[tripCountryKey(name)]||null; }
 
@@ -5431,7 +5728,7 @@ function tripRenderHome(){
     <div class="pay-mini"><span class="pay-mini-n">${d.favourites}</span>${L==='fa'?'دلخواه':'Favourites'}</div>
     <div class="pay-mini"><span class="pay-mini-n">${d.archived}</span>${L==='fa'?'بایگانی':'Archived'}</div>
   </div>`;
-  html+=`<div style="padding:4px 16px 8px"><input id="trip-search" class="finput" placeholder="${L==='fa'?'جستجوی سفرها...':'Search trips...'}" value="${esc(tripSearch)}" style="width:100%;box-sizing:border-box"></div>`;
+  html+=`<div style="padding:4px 16px 8px;display:flex;gap:8px"><input id="trip-search" class="finput" placeholder="${L==='fa'?'جستجوی سفرها...':'Search trips...'}" value="${esc(tripSearch)}" style="flex:1;box-sizing:border-box"><button id="trip-scan-btn" class="btn btn-ghost" title="${L==='fa'?'اسکن بلیط':'Scan ticket'}" style="flex:0 0 auto;padding:0 14px" aria-label="${L==='fa'?'اسکن بلیط برای ساخت سفر':'Scan ticket to create trip'}">📷</button></div>`;
   html+=`<div class="pay-chips">${chips.map(c=>`<button class="pay-chip${tripFilter===c[0]?' on':''}" data-trip-filter="${c[0]}">${c[1]}</button>`).join('')}</div>`;
   if(!filtered.length){
     html+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#06b6d418;color:#06b6d4;font-size:30px">✈</div>
@@ -5446,6 +5743,7 @@ function tripRenderHome(){
     if(filtered.length>shown.length)html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="trip-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
   }
   html+=`<button class="pay-fab" id="trip-new-fab" aria-label="${L==='fa'?'افزودن سفر':'Add trip'}" style="background:#06b6d4;box-shadow:0 6px 20px rgba(6,182,212,.45)">＋</button>`;
+  html+=`<input type="file" id="trip-scan-file" accept="image/*" style="display:none">`;
   return html;
 }
 
@@ -5638,17 +5936,31 @@ function tripQuickCreate(){
   // Transport-specific fields shown inline in Create, only the relevant ones per transport.
   const transportEl=document.getElementById('tq-transport');
   const tf=document.getElementById('tq-transport-fields');
-  const fld=(id,label,ph,type)=>`<div class="fld"><label>${label}</label><input class="finput" id="${id}" ${type?`type="${type}" inputmode="${type==='number'?'decimal':'text'}"`:'autocomplete="off"'} placeholder="${ph||''}"></div>`;
+  const fldDL=(id,label,ph,options,type)=>{
+    const dlId=id+'-dl';
+    const list=(options&&options.length)?` list="${dlId}"`:'';
+    const dl=(options&&options.length)?`<datalist id="${dlId}">${options.map(o=>`<option value="${esc(o)}"></option>`).join('')}</datalist>`:'';
+    return `<div class="fld"><label>${label}</label><input class="finput" id="${id}"${list} ${type?`type="${type}" inputmode="${type==='number'?'decimal':'text'}"`:'autocomplete="off"'} placeholder="${ph||''}">${dl}</div>`;
+  };
+  const fld=(id,label,ph,type)=>fldDL(id,label,ph,null,type);
   const renderTransportFields=()=>{
-    const k=transportEl.value; let h='';
-    if(k==='flight')h=fld('tqf-airline',L==='fa'?'شرکت هواپیمایی':'Airline','')+fld('tqf-flightno',L==='fa'?'شماره پرواز':'Flight number','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'فرودگاه مبدأ':'Departure airport','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'فرودگاه مقصد':'Arrival airport','')}</div></div>`;
-    else if(k==='train')h=fld('tqf-airline',L==='fa'?'اپراتور قطار':'Train operator','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'ایستگاه مبدأ':'Departure station','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'ایستگاه مقصد':'Arrival station','')}</div></div>`+fld('tqf-platform',L==='fa'?'سکو':'Platform','');
-    else if(k==='bus')h=fld('tqf-airline',L==='fa'?'شرکت اتوبوس':'Bus company','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'ترمینال مبدأ':'Departure station','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'ترمینال مقصد':'Arrival station','')}</div></div>`;
+    const k=transportEl.value; const cty=countryEl.value; let h='';
+    const ops=tripOperatorsFor(k); const pts=tripPointsFor(k,cty);
+    if(k==='flight')h=fldDL('tqf-airline',L==='fa'?'شرکت هواپیمایی':'Airline','',ops)+fld('tqf-flightno',L==='fa'?'شماره پرواز':'Flight number','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fldDL('tqf-from',L==='fa'?'فرودگاه مبدأ':'Departure airport','',pts)}</div><div class="pay-fg-amt">${fldDL('tqf-to',L==='fa'?'فرودگاه مقصد':'Arrival airport','',pts)}</div></div>`;
+    else if(k==='train')h=fldDL('tqf-airline',L==='fa'?'اپراتور قطار':'Train operator','',ops)+fld('tqf-flightno',L==='fa'?'شماره قطار':'Train number','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fldDL('tqf-from',L==='fa'?'ایستگاه مبدأ':'Departure station','',pts)}</div><div class="pay-fg-amt">${fldDL('tqf-to',L==='fa'?'ایستگاه مقصد':'Arrival station','',pts)}</div></div>`+fld('tqf-platform',L==='fa'?'سکو':'Platform','');
+    else if(k==='bus')h=fldDL('tqf-airline',L==='fa'?'شرکت اتوبوس':'Bus company','',ops)+fld('tqf-flightno',L==='fa'?'شماره اتوبوس':'Bus number','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fldDL('tqf-from',L==='fa'?'ترمینال مبدأ':'Departure terminal','',pts)}</div><div class="pay-fg-amt">${fldDL('tqf-to',L==='fa'?'ترمینال مقصد':'Arrival terminal','',pts)}</div></div>`;
     else if(k==='car'||k==='motorcycle')h=`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-dist',L==='fa'?'مسافت تخمینی (km)':'Est. distance (km)','auto','number')}</div><div class="pay-fg-amt">${fld('tqf-dur',L==='fa'?'زمان تخمینی (ساعت)':'Est. driving time (h)','auto','number')}</div></div>`;
-    else if(k==='ferry'||k==='cruise')h=fld('tqf-airline',k==='ferry'?(L==='fa'?'اپراتور کشتی':'Ferry operator'):(L==='fa'?'شرکت کروز':'Cruise company'),'')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'بندر مبدأ':'Departure port','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'بندر مقصد':'Arrival port','')}</div></div>`;
+    else if(k==='ferry'||k==='cruise')h=fldDL('tqf-airline',k==='ferry'?(L==='fa'?'اپراتور کشتی':'Ferry operator'):(L==='fa'?'شرکت کروز':'Cruise company'),'',ops)+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fldDL('tqf-from',L==='fa'?'بندر مبدأ':'Departure port','',pts)}</div><div class="pay-fg-amt">${fldDL('tqf-to',L==='fa'?'بندر مقصد':'Arrival port','',pts)}</div></div>`;
+    // taxi/walking/bicycle/other → no extra fields (item 10: hide irrelevant fields)
+    // Preserve already-entered values across re-render (country/city change must not clear valid points).
+    const keep={};
+    ['tqf-airline','tqf-flightno','tqf-from','tqf-to','tqf-platform','tqf-dist','tqf-dur'].forEach(id=>{ const e=document.getElementById(id); if(e)keep[id]=e.value; });
     tf.innerHTML=h;
+    Object.keys(keep).forEach(id=>{ const e=document.getElementById(id); if(e&&keep[id])e.value=keep[id]; });
   };
   transportEl.addEventListener('change',renderTransportFields);
+  // Re-render point datalists when country changes (context-aware) but keep typed values.
+  countryEl.addEventListener('change',renderTransportFields);
   renderTransportFields();
   document.getElementById('tq-cancel').onclick=()=>closeSheet();
   document.getElementById('tq-save').onclick=()=>{
@@ -5664,7 +5976,7 @@ function tripQuickCreate(){
     if(!end){ showErr(L==='fa'?'تاریخ پایان لازم است':'End date is required'); return; }
     if(end<start){ showErr(L==='fa'?'تاریخ پایان نمی‌تواند قبل از شروع باشد':'End date cannot be before start date'); return; }
     const ci=tripCountryInfo(country);
-    const meta={ title:dest, destination:dest, country:country, city:city,
+    const meta={ title:tripAutoTitle({destination:dest,city:city,country:country,startDate:start,endDate:end}), destination:dest, country:country, city:city,
       startDate:start, endDate:end,
       currency: ci?ci.currency:(DB.meta.payDefaultCurrency||'AUD'),
       timezone: ci?ci.timezone:'' };
@@ -5833,6 +6145,45 @@ const TripExtract={
   }
 };
 
+function tripCreateFromFile(file){
+  // Create a trip pre-filled from a real boarding pass / ticket image (QR/BCBP → OCR → filename).
+  // Requires the extraction engines to load (online). Opens the editor for user confirmation before nothing is saved silently.
+  if(!file){ return; }
+  const isImage=(file.type||'').startsWith('image/');
+  if(!isImage){ toast(L==='fa'?'فقط عکس/اسکرین‌شات پشتیبانی می‌شود':'Only image/screenshot supported'); return; }
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    const dataUrl=reader.result;
+    toast(L==='fa'?'در حال خواندن بلیط…':'Reading ticket…');
+    let ex={}, source='';
+    try{
+      const bar=await TripExtract.decodeBarcode(dataUrl);
+      if(bar){ const bcbp=TripExtract.parseBCBP(bar); if(bcbp&&(bcbp.passenger||bcbp.flightNo||bcbp.origin)){ ex=bcbp; source='barcode'; } }
+      if(!source){ const txt=await TripExtract.ocrText(dataUrl); const parsed=TripExtract.parseText(txt); if(Object.keys(parsed).length){ ex=parsed; source='ocr'; } }
+    }catch(_){}
+    if(!source){ toast(L==='fa'?'اطلاعاتی استخراج نشد — دستی وارد کنید':'Nothing extracted — enter manually'); tripOpenEditor(null); return; }
+    // Map destination from arrival airport city if known
+    let destCity='', destCountry='';
+    if(ex.destination){ const ap=TRIP_AIRPORT_DB.find(a=>a.iata===ex.destination); if(ap){ destCity=ap.city; destCountry=ap.country; } }
+    const start=ex.date||'';
+    const ci=destCountry?tripCountryInfo(destCountry):null;
+    const meta={ title:tripAutoTitle({city:destCity,destination:destCity||ex.destination||'',country:destCountry,startDate:start,endDate:start}),
+      destination:destCity||ex.destination||'', country:destCountry||'', city:destCity||'',
+      startDate:start, endDate:start, currency:ci?ci.currency:(DB.meta.payDefaultCurrency||'AUD'), timezone:ci?ci.timezone:'' };
+    if(!meta.destination){ toast(L==='fa'?'مقصد تشخیص داده نشد':'Destination not detected'); tripOpenEditor(null); return; }
+    const nid=TripService.create(meta);
+    if(!nid){ return; }
+    // Seed a flight segment from extracted fields (semantic schema)
+    TripService.segmentAdd(nid,{ kind:'flight', operator:ex.operator||'', vehicleNo:ex.flightNo||'',
+      depPoint:ex.origin||'', arrPoint:ex.destination||'', seat:ex.seat||'', depDate:start,
+      bookingRef:ex.confirmation||'' });
+    tripActiveId=nid; travelView='detail'; tripDetailTab='overview';
+    closeSheet(); render();
+    toast((L==='fa'?'سفر از بلیط ساخته شد ':'Trip created from ticket ')+'('+(source==='barcode'?'barcode':'OCR')+')');
+  };
+  reader.readAsDataURL(file);
+}
+
 function tripImportBooking(tripId, file){
   // Real extraction: QR/BCBP + OCR when online, filename heuristics as fallback.
   const t=tripsMap()[tripId]; if(!t)return;
@@ -5914,11 +6265,14 @@ function tripOpenSegmentEditor(tripId, sid){
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ رسیدن':'Arr date'}</label><input class="finput" id="sg-ad" type="date" value="${esc(sg.arrDate||'')}"></div>
       <div class="pay-fg-amt"><label>${L==='fa'?'ساعت رسیدن':'Arr time'}</label><input class="finput" id="sg-at" type="time" value="${esc(sg.arrTime||'')}"></div>
     </div>
-    <div class="fld"><label>${L==='fa'?'اپراتور':'Operator'}</label><input class="finput" id="sg-op" autocomplete="off" value="${esc(sg.operator||'')}" placeholder="${L==='fa'?'شرکت هواپیمایی / قطار':'Airline / operator'}"></div>
+    <div class="fld"><label>${L==='fa'?'اپراتور':'Operator'}</label><input class="finput" id="sg-op" list="sg-op-dl" autocomplete="off" value="${esc(sg.operator||'')}" placeholder="${L==='fa'?'شرکت هواپیمایی / قطار':'Airline / operator'}"><datalist id="sg-op-dl">${tripOperatorsFor(sg.kind).map(o=>`<option value="${esc(o)}"></option>`).join('')}</datalist></div>
     <div class="fld"><label>${L==='fa'?'شماره پرواز/قطار/اتوبوس':'Flight / train / bus number'}</label><input class="finput" id="sg-vehno" autocomplete="off" value="${esc(sg.vehicleNo||'')}"></div>
     <div class="fld pay-form-grid">
-      <div class="pay-fg-amt"><label>${L==='fa'?'ایستگاه/فرودگاه/بندر مبدأ':'Departure airport/station/port'}</label><input class="finput" id="sg-deppoint" autocomplete="off" value="${esc(sg.depPoint||'')}"></div>
-      <div class="pay-fg-amt"><label>${L==='fa'?'ایستگاه/فرودگاه/بندر مقصد':'Arrival airport/station/port'}</label><input class="finput" id="sg-arrpoint" autocomplete="off" value="${esc(sg.arrPoint||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'ایستگاه/فرودگاه/بندر مبدأ':'Departure airport/station/port'}</label><input class="finput" id="sg-deppoint" list="sg-pt-dl" autocomplete="off" value="${esc(sg.depPoint||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'ایستگاه/فرودگاه/بندر مقصد':'Arrival airport/station/port'}</label><input class="finput" id="sg-arrpoint" list="sg-pt-dl" autocomplete="off" value="${esc(sg.arrPoint||'')}"></div>
+    </div>
+    <datalist id="sg-pt-dl">${[...tripPointsFor(sg.kind,sg.fromCountry),...tripPointsFor(sg.kind,sg.toCountry),...tripPointsFor(sg.kind,t.country,t.city)].filter((v,i,arr)=>arr.indexOf(v)===i).slice(0,60).map(o=>`<option value="${esc(o)}"></option>`).join('')}</datalist>
+    <div style="display:none">
     </div>
     <div class="fld"><label>${L==='fa'?'کد رزرو':'Booking reference'}</label><input class="finput" id="sg-ref" autocomplete="off" value="${esc(sg.bookingRef||'')}"></div>
     <div class="fld pay-form-grid">
@@ -9960,6 +10314,8 @@ function bindScreen(){
       if(nbH)nbH.onclick=()=>tripOpenEditor(null);
       if(nbF)nbF.onclick=()=>tripOpenEditor(null);
       if(nbE)nbE.onclick=()=>tripOpenEditor(null);
+      const scanBtn=document.getElementById('trip-scan-btn'), scanFile=document.getElementById('trip-scan-file');
+      if(scanBtn&&scanFile){ scanBtn.onclick=()=>scanFile.click(); scanFile.onchange=()=>{ const f=(scanFile.files||[])[0]; if(f)tripCreateFromFile(f); scanFile.value=''; }; }
       const lt=document.getElementById('trip-layout-toggle'); if(lt)lt.onclick=()=>{ tripLayout=tripLayout==='grid'?'list':'grid'; render(); };
       const se=document.getElementById('trip-search');
       if(se)se.oninput=()=>{ tripSearch=se.value; tripListLimit=40; clearTimeout(window._tripSearchT); window._tripSearchT=setTimeout(()=>{ render(); const s=document.getElementById('trip-search'); if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);} },250); };
