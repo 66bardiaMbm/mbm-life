@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v240';
+const APP_VERSION='v244';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1477,6 +1477,7 @@ function blankDB(){
       documents:{},   // Documents module — see DOC DATA MODEL. Secure docs store attachments encrypted.
       docFolders:{},  // {id,name,color,parentId,createdAt,updatedAt,archivedAt}
       trips:{},       // Travel module — see TRIP DATA MODEL below.
+      tripReminderDone:{}, // {reminderId: doneISO} — completion state for projected Travel reminders (no data duplication)
     }
   };
 }
@@ -1500,7 +1501,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     if(!d.meta)d.meta={};
     if(!d.meta.viewSort)d.meta.viewSort={};
@@ -2204,13 +2205,17 @@ function renderToday(){
   // Dated shopping lists participate in Today exactly like dated tasks.
   // Undated lists are deliberately excluded so Today never fills with noise.
   const shopT=shopListsAsTasks().filter(t=>t.dueDate);
+  // Payments and Travel items project into Today exactly like dated tasks.
+  const payT=(typeof paymentsAsTasks==='function'?paymentsAsTasks():[]).filter(t=>t.dueDate);
+  const tripT=(typeof tripsAsTasks==='function'?tripsAsTasks():[]).filter(t=>t.dueDate);
   const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts)
-    .concat(shopT.filter(t=>t.dueDate<ts));
+    .concat(shopT.filter(t=>t.dueDate<ts)).concat(payT.filter(t=>t.dueDate<ts)).concat(tripT.filter(t=>!t.done&&t.dueDate<ts));
   const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate))
-    .concat(shopT.filter(t=>t.dueDate===ts));
-  const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts);
+    .concat(shopT.filter(t=>t.dueDate===ts)).concat(payT.filter(t=>t.dueDate===ts)).concat(tripT.filter(t=>!t.done&&t.dueDate===ts));
+  const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts)
+    .concat(tripT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts));
   const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts)
-    .concat(shopT.filter(t=>t.dueDate>ts));
+    .concat(shopT.filter(t=>t.dueDate>ts)).concat(payT.filter(t=>t.dueDate>ts)).concat(tripT.filter(t=>!t.done&&t.dueDate>ts));
   // Today's appointments
   const todayAppts=Object.values(DB.entities.appts||{})
     .filter(a=>!a.archivedAt&&a.date===ts)
@@ -2304,12 +2309,14 @@ function renderListsNav(){
   const user=DB.meta;
 
   const shopT=shopListsAsTasks();   // active shopping lists, task-shaped
+  const payT=(typeof paymentsAsTasks==='function'?paymentsAsTasks():[]);
+  const tripT=(typeof tripsAsTasks==='function'?tripsAsTasks():[]);
   const svCounts={
-    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length,
-    important:allT.filter(t=>!t.done&&t.pinned).length + shopT.filter(t=>t.pinned).length,
-    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length,
+    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length + payT.filter(t=>t.dueDate===ts).length + tripT.filter(t=>!t.done&&t.dueDate===ts).length,
+    important:allT.filter(t=>!t.done&&t.pinned).length + shopT.filter(t=>t.pinned).length + payT.filter(t=>t.pinned).length + tripT.filter(t=>!t.done&&t.pinned).length,
+    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length + payT.filter(t=>t.dueDate&&t.dueDate>ts).length + tripT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length,
     assigned:allT.filter(t=>!t.done&&t.assigneeId&&t.assigneeId===DB.meta.userId).length,
-    all:allT.filter(t=>!t.done).length + shopT.length,
+    all:allT.filter(t=>!t.done).length + shopT.length + payT.length + tripT.filter(t=>!t.done).length,
   };
   const _sShow=DB.meta.smartShow||{};
   const _autoHide=DB.meta.autoHideSmart===true;
@@ -2592,17 +2599,21 @@ function taskRowFlat(t,isOverdue){
   }
   // ── Travel row: read-only projection, opens the trip ──
   if(t.kind==='trip'){
+    const parentTrip=tripsMap()[t.tripId];
+    const cd=parentTrip?tripCountdown(parentTrip):'';
     let tmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'سفر':'Travel'}</span>`;
     if(t.dueDate&&!over)tmeta+=`<span class="chip">${shortDate(t.dueDate)}${t.dueTime?' · '+t.dueTime:''}</span>`;
     if(over)tmeta+=`<span class="chip over">⚠ ${shortDate(t.dueDate)}</span>`;
+    if(cd)tmeta+=`<span class="chip" style="background:${t.color}18;color:${t.color}">${cd}</span>`;
     const tOverStyle=over?'border-left:2px solid var(--danger);':'';
+    const starred=parentTrip&&parentTrip.favourite;
     return `<div class="trow-flat" data-trip-open-task="${t.tripId}" style="${tOverStyle}">
-      <div class="trow-chk-wrap"><div class="chk" data-trip-open-task="${t.tripId}" style="border-radius:7px"></div></div>
+      <div class="trow-chk-wrap"><div class="chk${t.done?' done':''}" data-trip-done="${t.id}" style="border-radius:7px">${t.done?'✓':''}</div></div>
       <div class="trow-content">
-        <div class="trow-title" dir="auto">${esc(t.text)}</div>
+        <div class="trow-title${t.done?' done':''}" dir="auto">${esc(t.text)}</div>
         <div class="trow-meta-row">${tmeta}</div>
       </div>
-      <div class="trow-star-wrap"></div>
+      <div class="trow-star-wrap"><button class="trow-star${starred?' on':''}" data-trip-star="${t.tripId}" aria-label="important">${starred?'★':'☆'}</button></div>
     </div>`;
   }
   const pr=t.priority==='p1'?`<span class="pill p1">${tr('high')}</span>`:'';
@@ -5017,7 +5028,7 @@ function documentsAsTasks(){ return documentsLive().map(docAsTask).filter(Boolea
 //   docLinks[]  = documentId[]      (Documents module)
 //   payLinks[]  = paymentId[]       (Payment Center)
 // ═══════════════════════════════════════════════════════════════════════
-const TRIP_BOOKING_KINDS=['flight','hotel','car','train','bus','ferry','activity','restaurant'];
+const TRIP_BOOKING_KINDS=['flight','hotel','airbnb','car','train','bus','ferry','cruise','activity','tour','restaurant','event','insurance','visa','other'];
 const TRIP_SEGMENT_KINDS=['flight','train','bus','ferry','cruise','car','taxi','walking','bicycle','motorcycle','other'];
 const TRIP_SEGMENT_META={
   flight:{en:'Flight',fa:'پرواز',ic:'✈'}, train:{en:'Train',fa:'قطار',ic:'🚆'}, bus:{en:'Bus',fa:'اتوبوس',ic:'🚌'},
@@ -5029,37 +5040,69 @@ function tripSegLabel(k){ const m=TRIP_SEGMENT_META[k]||TRIP_SEGMENT_META.other;
 function tripSegIcon(k){ return (TRIP_SEGMENT_META[k]||TRIP_SEGMENT_META.other).ic; }
 const TRIP_BOOKING_META={
   flight:{en:'Flight',fa:'پرواز',ic:'✈'}, hotel:{en:'Hotel',fa:'هتل',ic:'🏨'},
+  airbnb:{en:'Airbnb',fa:'اقامتگاه',ic:'🏠'},
   car:{en:'Car Rental',fa:'اجاره خودرو',ic:'🚗'}, train:{en:'Train',fa:'قطار',ic:'🚆'},
   bus:{en:'Bus',fa:'اتوبوس',ic:'🚌'}, ferry:{en:'Ferry',fa:'کشتی',ic:'⛴'},
-  activity:{en:'Activity',fa:'فعالیت',ic:'🎟'}, restaurant:{en:'Restaurant',fa:'رستوران',ic:'🍽'}
+  cruise:{en:'Cruise',fa:'کروز',ic:'🛳'},
+  activity:{en:'Activity',fa:'فعالیت',ic:'🎟'}, tour:{en:'Tour',fa:'تور',ic:'🗺'},
+  restaurant:{en:'Restaurant',fa:'رستوران',ic:'🍽'}, event:{en:'Event',fa:'رویداد',ic:'🎫'},
+  insurance:{en:'Insurance',fa:'بیمه',ic:'🛡'}, visa:{en:'Visa',fa:'ویزا',ic:'📕'},
+  other:{en:'Other',fa:'دیگر',ic:'◆'}
 };
 const TRIP_COLORS=['#06b6d4','#3b82f6','#22c55e','#f59e0b','#ef4444','#6e56f8','#ec4899','#a855f7'];
 // Country info for auto-population (currency, timezone, language, plug, emergency, tips, coords, hemisphere)
 const TRIP_COUNTRY_INFO={
-  'france':{currency:'EUR',timezone:'Europe/Paris',language:'French',plug:'C / E',emergency:'112',tip:'Tipping optional; service included.',lat:48.85,lon:2.35,hemi:'N'},
-  'australia':{currency:'AUD',timezone:'Australia/Sydney',language:'English',plug:'I',emergency:'000',tip:'Tipping not expected.',lat:-33.87,lon:151.21,hemi:'S'},
-  'united kingdom':{currency:'GBP',timezone:'Europe/London',language:'English',plug:'G',emergency:'999',tip:'10% in restaurants.',lat:51.51,lon:-0.13,hemi:'N'},
-  'uk':{currency:'GBP',timezone:'Europe/London',language:'English',plug:'G',emergency:'999',tip:'10% in restaurants.',lat:51.51,lon:-0.13,hemi:'N'},
-  'united states':{currency:'USD',timezone:'America/New_York',language:'English',plug:'A / B',emergency:'911',tip:'15–20% expected.',lat:40.71,lon:-74.0,hemi:'N'},
-  'usa':{currency:'USD',timezone:'America/New_York',language:'English',plug:'A / B',emergency:'911',tip:'15–20% expected.',lat:40.71,lon:-74.0,hemi:'N'},
-  'germany':{currency:'EUR',timezone:'Europe/Berlin',language:'German',plug:'C / F',emergency:'112',tip:'Round up the bill.',lat:52.52,lon:13.40,hemi:'N'},
-  'italy':{currency:'EUR',timezone:'Europe/Rome',language:'Italian',plug:'C / F / L',emergency:'112',tip:'Service often included.',lat:41.90,lon:12.50,hemi:'N'},
-  'spain':{currency:'EUR',timezone:'Europe/Madrid',language:'Spanish',plug:'C / F',emergency:'112',tip:'Small tips appreciated.',lat:40.42,lon:-3.70,hemi:'N'},
-  'japan':{currency:'JPY',timezone:'Asia/Tokyo',language:'Japanese',plug:'A / B',emergency:'110 / 119',tip:'No tipping culture.',lat:35.68,lon:139.69,hemi:'N'},
-  'iran':{currency:'IRR',timezone:'Asia/Tehran',language:'Persian',plug:'C / F',emergency:'110 / 115',tip:'Tipping (tarof) customary.',lat:35.69,lon:51.39,hemi:'N'},
-  'united arab emirates':{currency:'AED',timezone:'Asia/Dubai',language:'Arabic',plug:'G',emergency:'999',tip:'10–15% common.',lat:25.20,lon:55.27,hemi:'N'},
-  'uae':{currency:'AED',timezone:'Asia/Dubai',language:'Arabic',plug:'G',emergency:'999',tip:'10–15% common.',lat:25.20,lon:55.27,hemi:'N'},
-  'turkey':{currency:'TRY',timezone:'Europe/Istanbul',language:'Turkish',plug:'C / F',emergency:'112',tip:'5–10% in restaurants.',lat:41.01,lon:28.98,hemi:'N'},
-  'new zealand':{currency:'NZD',timezone:'Pacific/Auckland',language:'English',plug:'I',emergency:'111',tip:'Tipping not expected.',lat:-36.85,lon:174.76,hemi:'S'},
-  'canada':{currency:'CAD',timezone:'America/Toronto',language:'English / French',plug:'A / B',emergency:'911',tip:'15–20% expected.',lat:43.65,lon:-79.38,hemi:'N'},
-  'thailand':{currency:'THB',timezone:'Asia/Bangkok',language:'Thai',plug:'A / B / C',emergency:'191',tip:'Small tips appreciated.',lat:13.76,lon:100.50,hemi:'N'},
-  'india':{currency:'INR',timezone:'Asia/Kolkata',language:'Hindi / English',plug:'C / D / M',emergency:'112',tip:'5–10% common.',lat:28.61,lon:77.21,hemi:'N'},
-  'china':{currency:'CNY',timezone:'Asia/Shanghai',language:'Mandarin',plug:'A / C / I',emergency:'110 / 120',tip:'No tipping culture.',lat:39.90,lon:116.40,hemi:'N'},
-  'singapore':{currency:'SGD',timezone:'Asia/Singapore',language:'English',plug:'G',emergency:'999',tip:'Service charge included.',lat:1.35,lon:103.82,hemi:'N'},
-  'greece':{currency:'EUR',timezone:'Europe/Athens',language:'Greek',plug:'C / F',emergency:'112',tip:'5–10% appreciated.',lat:37.98,lon:23.73,hemi:'N'},
-  'netherlands':{currency:'EUR',timezone:'Europe/Amsterdam',language:'Dutch',plug:'C / F',emergency:'112',tip:'Round up the bill.',lat:52.37,lon:4.90,hemi:'N'}
+  'france':{currency:'EUR',timezone:'Europe/Paris',language:'French',plug:'C / E',emergency:'112',tip:'Tipping optional; service included.',lat:48.85,lon:2.35,hemi:'N',flag:'🇫🇷',code:'+33'},
+  'australia':{currency:'AUD',timezone:'Australia/Sydney',language:'English',plug:'I',emergency:'000',tip:'Tipping not expected.',lat:-33.87,lon:151.21,hemi:'S',flag:'🇦🇺',code:'+61'},
+  'united kingdom':{currency:'GBP',timezone:'Europe/London',language:'English',plug:'G',emergency:'999',tip:'10% in restaurants.',lat:51.51,lon:-0.13,hemi:'N',flag:'🇬🇧',code:'+44'},
+  'uk':{currency:'GBP',timezone:'Europe/London',language:'English',plug:'G',emergency:'999',tip:'10% in restaurants.',lat:51.51,lon:-0.13,hemi:'N',flag:'🇬🇧',code:'+44'},
+  'united states':{currency:'USD',timezone:'America/New_York',language:'English',plug:'A / B',emergency:'911',tip:'15–20% expected.',lat:40.71,lon:-74.0,hemi:'N',flag:'🇺🇸',code:'+1'},
+  'usa':{currency:'USD',timezone:'America/New_York',language:'English',plug:'A / B',emergency:'911',tip:'15–20% expected.',lat:40.71,lon:-74.0,hemi:'N',flag:'🇺🇸',code:'+1'},
+  'germany':{currency:'EUR',timezone:'Europe/Berlin',language:'German',plug:'C / F',emergency:'112',tip:'Round up the bill.',lat:52.52,lon:13.40,hemi:'N',flag:'🇩🇪',code:'+49'},
+  'italy':{currency:'EUR',timezone:'Europe/Rome',language:'Italian',plug:'C / F / L',emergency:'112',tip:'Service often included.',lat:41.90,lon:12.50,hemi:'N',flag:'🇮🇹',code:'+39'},
+  'spain':{currency:'EUR',timezone:'Europe/Madrid',language:'Spanish',plug:'C / F',emergency:'112',tip:'Small tips appreciated.',lat:40.42,lon:-3.70,hemi:'N',flag:'🇪🇸',code:'+34'},
+  'japan':{currency:'JPY',timezone:'Asia/Tokyo',language:'Japanese',plug:'A / B',emergency:'110 / 119',tip:'No tipping culture.',lat:35.68,lon:139.69,hemi:'N',flag:'🇯🇵',code:'+81'},
+  'iran':{currency:'IRR',timezone:'Asia/Tehran',language:'Persian',plug:'C / F',emergency:'110 / 115',tip:'Tipping (tarof) customary.',lat:35.69,lon:51.39,hemi:'N',flag:'🇮🇷',code:'+98'},
+  'united arab emirates':{currency:'AED',timezone:'Asia/Dubai',language:'Arabic',plug:'G',emergency:'999',tip:'10–15% common.',lat:25.20,lon:55.27,hemi:'N',flag:'🇦🇪',code:'+971'},
+  'uae':{currency:'AED',timezone:'Asia/Dubai',language:'Arabic',plug:'G',emergency:'999',tip:'10–15% common.',lat:25.20,lon:55.27,hemi:'N',flag:'🇦🇪',code:'+971'},
+  'turkey':{currency:'TRY',timezone:'Europe/Istanbul',language:'Turkish',plug:'C / F',emergency:'112',tip:'5–10% in restaurants.',lat:41.01,lon:28.98,hemi:'N',flag:'🇹🇷',code:'+90'},
+  'new zealand':{currency:'NZD',timezone:'Pacific/Auckland',language:'English',plug:'I',emergency:'111',tip:'Tipping not expected.',lat:-36.85,lon:174.76,hemi:'S',flag:'🇳🇿',code:'+64'},
+  'canada':{currency:'CAD',timezone:'America/Toronto',language:'English / French',plug:'A / B',emergency:'911',tip:'15–20% expected.',lat:43.65,lon:-79.38,hemi:'N',flag:'🇨🇦',code:'+1'},
+  'thailand':{currency:'THB',timezone:'Asia/Bangkok',language:'Thai',plug:'A / B / C',emergency:'191',tip:'Small tips appreciated.',lat:13.76,lon:100.50,hemi:'N',flag:'🇹🇭',code:'+66'},
+  'india':{currency:'INR',timezone:'Asia/Kolkata',language:'Hindi / English',plug:'C / D / M',emergency:'112',tip:'5–10% common.',lat:28.61,lon:77.21,hemi:'N',flag:'🇮🇳',code:'+91'},
+  'china':{currency:'CNY',timezone:'Asia/Shanghai',language:'Mandarin',plug:'A / C / I',emergency:'110 / 120',tip:'No tipping culture.',lat:39.90,lon:116.40,hemi:'N',flag:'🇨🇳',code:'+86'},
+  'singapore':{currency:'SGD',timezone:'Asia/Singapore',language:'English',plug:'G',emergency:'999',tip:'Service charge included.',lat:1.35,lon:103.82,hemi:'N',flag:'🇸🇬',code:'+65'},
+  'greece':{currency:'EUR',timezone:'Europe/Athens',language:'Greek',plug:'C / F',emergency:'112',tip:'5–10% appreciated.',lat:37.98,lon:23.73,hemi:'N',flag:'🇬🇷',code:'+30'},
+  'netherlands':{currency:'EUR',timezone:'Europe/Amsterdam',language:'Dutch',plug:'C / F',emergency:'112',tip:'Round up the bill.',lat:52.37,lon:4.90,hemi:'N',flag:'🇳🇱',code:'+31'}
 };
 function tripCountryKey(name){ return (name||'').trim().toLowerCase(); }
+const TRIP_COUNTRY_LIST=['Australia','Canada','China','France','Germany','Greece','India','Iran','Italy','Japan','Netherlands','New Zealand','Singapore','Spain','Thailand','Turkey','United Arab Emirates','United Kingdom','United States'];
+const TRIP_CITY_DB={
+  'australia':['Sydney','Melbourne','Brisbane','Perth','Adelaide','Hobart','Canberra','Gold Coast','Darwin','Cairns'],
+  'canada':['Toronto','Vancouver','Montreal','Calgary','Ottawa','Edmonton','Quebec City','Winnipeg'],
+  'china':['Beijing','Shanghai','Guangzhou','Shenzhen','Chengdu','Xian','Hangzhou','Hong Kong'],
+  'france':['Paris','Nice','Lyon','Marseille','Bordeaux','Toulouse','Strasbourg','Cannes'],
+  'germany':['Berlin','Munich','Frankfurt','Hamburg','Cologne','Stuttgart','Dusseldorf'],
+  'greece':['Athens','Thessaloniki','Santorini','Mykonos','Heraklion','Rhodes','Corfu'],
+  'india':['Delhi','Mumbai','Bangalore','Chennai','Kolkata','Hyderabad','Jaipur','Goa'],
+  'iran':['Tehran','Mashhad','Isfahan','Shiraz','Tabriz','Karaj','Qom','Kish'],
+  'italy':['Rome','Milan','Venice','Florence','Naples','Turin','Bologna','Pisa'],
+  'japan':['Tokyo','Osaka','Kyoto','Yokohama','Nagoya','Sapporo','Fukuoka','Hiroshima'],
+  'netherlands':['Amsterdam','Rotterdam','The Hague','Utrecht','Eindhoven','Groningen'],
+  'new zealand':['Auckland','Wellington','Christchurch','Queenstown','Hamilton','Dunedin'],
+  'singapore':['Singapore'],
+  'spain':['Madrid','Barcelona','Seville','Valencia','Malaga','Granada','Bilbao'],
+  'thailand':['Bangkok','Phuket','Chiang Mai','Pattaya','Krabi','Koh Samui'],
+  'turkey':['Istanbul','Ankara','Antalya','Izmir','Bodrum','Cappadocia'],
+  'united arab emirates':['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah'],
+  'uae':['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah'],
+  'united kingdom':['London','Manchester','Edinburgh','Birmingham','Glasgow','Liverpool','Bristol'],
+  'uk':['London','Manchester','Edinburgh','Birmingham','Glasgow','Liverpool','Bristol'],
+  'united states':['New York','Los Angeles','San Francisco','Chicago','Miami','Las Vegas','Boston','Seattle'],
+  'usa':['New York','Los Angeles','San Francisco','Chicago','Miami','Las Vegas','Boston','Seattle']
+};
+function tripCitiesFor(country){ return TRIP_CITY_DB[tripCountryKey(country)]||[]; }
+function tripCountryFlag(name){ const c=tripCountryInfo(name); return c&&c.flag?c.flag:'\ud83c\udf0d'; }
 function tripCountryInfo(name){ return TRIP_COUNTRY_INFO[tripCountryKey(name)]||null; }
 
 // Season from month + hemisphere
@@ -5141,23 +5184,92 @@ function tripCountdown(t){
   }
   if(toStart>1)return (L==='fa'?toStart+' روز مانده':toStart+' days remaining');
   if(toStart===1)return (L==='fa'?'فردا':'Tomorrow');
+  if(toStart===0){
+    // Under 24h: show hours remaining until the actual start moment (start of day, or dep time if known)
+    const nowMs=Date.now();
+    const startMoment=new Date(t.startDate+'T00:00:00').getTime();
+    const hrs=Math.ceil((startMoment-nowMs)/3600000);
+    if(hrs>0)return (L==='fa'?hrs+' ساعت مانده':hrs+' hours remaining');
+    return (L==='fa'?'امروز':'Today');
+  }
   // after
   const ended=Math.round((today-e)/dayMs);
   if(ended===0)return (L==='fa'?'پایان امروز':'Ended today');
   return (L==='fa'?`سفر تمام شد — ${ended} روز پیش`:`Trip completed — ${ended}d ago`);
 }
 // Project dated Travel items (segments, bookings, dated checklist/packing reminders) into smart views.
+function tripReminderDoneMap(){ if(!DB.entities.tripReminderDone)DB.entities.tripReminderDone={}; return DB.entities.tripReminderDone; }
+function tripReminderToggle(rid){
+  const m=tripReminderDoneMap();
+  if(m[rid])delete m[rid]; else m[rid]=now();
+  saveDB();
+}
+function tripReminderGC(validIds){
+  const m=tripReminderDoneMap(); let changed=false;
+  Object.keys(m).forEach(rid=>{ if(!validIds.has(rid)){ delete m[rid]; changed=true; } });
+  if(changed)saveDB();
+}
 function tripsAsTasks(){
   const out=[];
+  const doneMap=tripReminderDoneMap();
+  const mark=(o)=>{ o.done=!!doneMap[o.id]; if(o.done)o.doneAt=doneMap[o.id]; return o; };
   tripsLive().forEach(t=>{
-    (t.segments||[]).forEach(sg=>{ if(sg.depDate){ out.push({ id:'trip:'+t.id+':seg:'+sg.id, tripId:t.id, kind:'trip', text:(tripSegLabel(sg.kind))+': '+([sg.fromCity,sg.toCity].filter(Boolean).join(' → ')||t.title||''), dueDate:sg.depDate, dueTime:sg.depTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' }); } });
-    (t.bookings||[]).forEach(b=>{ if(b.date){ out.push({ id:'trip:'+t.id+':bk:'+b.id, tripId:t.id, kind:'trip', text:(tripBookingLabel(b.kind))+': '+(b.title||t.title||''), dueDate:b.date, dueTime:b.time||'', pinned:false, done:false, notes:'', icon:tripBookingIcon(b.kind), color:t.color||'#06b6d4' }); } });
-    if(t.startDate){ out.push({ id:'trip:'+t.id+':start', tripId:t.id, kind:'trip', text:(L==='fa'?'شروع سفر: ':'Trip starts: ')+(t.title||t.destination||''), dueDate:t.startDate, dueTime:'', pinned:!!t.favourite, done:false, notes:'', icon:'✈', color:t.color||'#06b6d4' }); }
+    (t.segments||[]).forEach(sg=>{
+      if(sg.depDate){ out.push(mark({ id:'trip:'+t.id+':seg:'+sg.id, tripId:t.id, kind:'trip', text:(tripSegLabel(sg.kind))+': '+([sg.fromCity,sg.toCity].filter(Boolean).join(' → ')||t.title||''), dueDate:sg.depDate, dueTime:sg.depTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' })); }
+      if(sg.arrDate&&sg.arrDate!==sg.depDate){ out.push(mark({ id:'trip:'+t.id+':segarr:'+sg.id, tripId:t.id, kind:'trip', text:(L==='fa'?'رسیدن: ':'Arrive: ')+([sg.toCity,sg.toCountry].filter(Boolean).join(', ')||t.title||''), dueDate:sg.arrDate, dueTime:sg.arrTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' })); }
+    });
+    (t.bookings||[]).forEach(b=>{
+      if(b.date){ out.push(mark({ id:'trip:'+t.id+':bk:'+b.id, tripId:t.id, kind:'trip', text:(tripBookingLabel(b.kind))+': '+(b.title||t.title||''), dueDate:b.date, dueTime:b.time||'', pinned:false, done:false, notes:'', icon:tripBookingIcon(b.kind), color:t.color||'#06b6d4' })); }
+      // Hotel/Airbnb check-out reminder from checkout field if present
+      if((b.kind==='hotel'||b.kind==='airbnb')&&b.checkout){ out.push(mark({ id:'trip:'+t.id+':bkout:'+b.id, tripId:t.id, kind:'trip', text:(L==='fa'?'تحویل اتاق: ':'Check-out: ')+(b.title||''), dueDate:b.checkout, dueTime:'', pinned:false, done:false, notes:'', icon:'🏨', color:t.color||'#06b6d4' })); }
+    });
+    if(t.startDate){ out.push(mark({ id:'trip:'+t.id+':start', tripId:t.id, kind:'trip', text:(L==='fa'?'شروع سفر: ':'Trip starts: ')+(t.title||t.destination||''), dueDate:t.startDate, dueTime:'', pinned:!!t.favourite, done:false, notes:'', icon:'✈', color:t.color||'#06b6d4' })); }
   });
+  tripReminderGC(new Set(out.map(o=>o.id)));
   return out;
 }
 
 const TravelActivity={ log(type,id,name){ logActivity(type,'trip',id,{name:name||''}); } };
+
+// ── Calendar two-way sync ──
+// Each trip keeps a linked calendar event (events entity uses {date,time}).
+// eventId is stored on the trip as calEventId. Calendar remains source of truth for dates:
+// tripCalendarPull() reconciles trip.startDate from the linked event if the event moved.
+const TripCalendar={
+  _ev(){ if(!DB.entities.events)DB.entities.events={}; return DB.entities.events; },
+  sync(id){
+    const t=tripsMap()[id]; if(!t)return;
+    if(!t.startDate){ this.remove(id); return; }
+    const evs=this._ev();
+    const where=[t.city,t.country].filter(Boolean).join(', ')||t.destination||'';
+    const title=(t.title||where||'Trip');
+    let ev=t.calEventId?evs[t.calEventId]:null;
+    if(!ev){ const eid=uid(); ev={id:eid,createdAt:now()}; evs[eid]=ev; t.calEventId=eid; }
+    ev.title=title; ev.date=t.startDate; ev.endDate=t.endDate||t.startDate; ev.time=''; ev.location=where; ev.notes=t.notes||''; ev.tripId=id; ev.updatedAt=now(); ev.archivedAt=null;
+    saveDB();
+  },
+  remove(id){
+    const t=tripsMap()[id]; if(!t||!t.calEventId)return;
+    const evs=this._ev(); if(evs[t.calEventId])delete evs[t.calEventId];
+    t.calEventId=null; saveDB();
+  },
+  // Calendar → Travel: if a linked event's date changed, pull it back onto the trip.
+  pull(){
+    const evs=this._ev(); let changed=false;
+    tripsLive().forEach(t=>{
+      if(t.calEventId&&evs[t.calEventId]&&!evs[t.calEventId].archivedAt){
+        const ev=evs[t.calEventId];
+        if(ev.date&&ev.date!==t.startDate){ t.startDate=ev.date; changed=true; }
+        if(ev.endDate&&ev.endDate!==t.endDate){ t.endDate=ev.endDate; changed=true; }
+      } else if(t.calEventId&&(!evs[t.calEventId]||evs[t.calEventId].archivedAt)){
+        // event deleted on calendar side → unlink (trip keeps its dates)
+        t.calEventId=null; changed=true;
+      }
+    });
+    if(changed)saveDB();
+    return changed;
+  }
+};
 
 const TripService={
   create(meta){
@@ -5174,6 +5286,7 @@ const TripService={
     };
     TravelActivity.log('created', id, meta.title||'');
     saveDB();
+    TripCalendar.sync(id);
     return id;
   },
   update(id, meta){
@@ -5182,15 +5295,16 @@ const TripService={
     t.updatedAt=now();
     TravelActivity.log('edited', id, t.title);
     saveDB();
+    TripCalendar.sync(id);
   },
   toggleFav(id){ const t=tripsMap()[id]; if(!t)return; t.favourite=!t.favourite; t.updatedAt=now(); TravelActivity.log(t.favourite?'starred':'unstarred', id, t.title); saveDB(); },
   archive(id){ const t=tripsMap()[id]; if(!t)return; t.archivedAt=now(); t.updatedAt=t.archivedAt; TravelActivity.log('archived', id, t.title); saveDB(); },
   unarchive(id){ const t=tripsMap()[id]; if(!t)return; t.archivedAt=null; t.updatedAt=now(); TravelActivity.log('restored', id, t.title); saveDB(); },
-  trash(id){ const t=tripsMap()[id]; if(!t)return; t.deletedAt=now(); t.updatedAt=t.deletedAt; TravelActivity.log('deleted', id, t.title); saveDB(); },
-  restore(id){ const t=tripsMap()[id]; if(!t)return; t.deletedAt=null; t.updatedAt=now(); TravelActivity.log('restored', id, t.title); saveDB(); },
-  permDelete(id){ const t=tripsMap()[id]; if(!t)return; TravelActivity.log('permanently_deleted', id, t.title); delete tripsMap()[id]; saveDB(); },
+  trash(id){ const t=tripsMap()[id]; if(!t)return; t.deletedAt=now(); t.updatedAt=t.deletedAt; TravelActivity.log('deleted', id, t.title); TripCalendar.remove(id); saveDB(); },
+  restore(id){ const t=tripsMap()[id]; if(!t)return; t.deletedAt=null; t.updatedAt=now(); TravelActivity.log('restored', id, t.title); saveDB(); TripCalendar.sync(id); },
+  permDelete(id){ const t=tripsMap()[id]; if(!t)return; TripCalendar.remove(id); TravelActivity.log('permanently_deleted', id, t.title); delete tripsMap()[id]; saveDB(); },
   // bookings
-  bookingAdd(id, b){ const t=tripsMap()[id]; if(!t)return; if(!t.bookings)t.bookings=[]; t.bookings.push({id:uid(),kind:b.kind||'flight',title:b.title||'',detail:b.detail||'',date:b.date||'',time:b.time||'',confirmation:b.confirmation||'',cost:b.cost||0,currency:b.currency||t.currency,attachment:b.attachment||null}); t.updatedAt=now(); saveDB(); },
+  bookingAdd(id, b){ const t=tripsMap()[id]; if(!t)return; if(!t.bookings)t.bookings=[]; t.bookings.push({id:uid(),kind:b.kind||'flight',title:b.title||'',detail:b.detail||'',date:b.date||'',time:b.time||'',confirmation:b.confirmation||'',cost:b.cost||0,currency:b.currency||t.currency,attachment:b.attachment||null,passenger:b.passenger||'',operator:b.operator||'',origin:b.origin||'',destination:b.destination||'',seat:b.seat||'',gate:b.gate||'',terminal:b.terminal||'',platform:b.platform||''}); t.updatedAt=now(); saveDB(); },
   bookingUpdate(id, bid, b){ const t=tripsMap()[id]; if(!t)return; const bk=(t.bookings||[]).find(x=>x.id===bid); if(!bk)return; Object.assign(bk,b); t.updatedAt=now(); saveDB(); },
   bookingDelete(id, bid){ const t=tripsMap()[id]; if(!t)return; t.bookings=(t.bookings||[]).filter(x=>x.id!==bid); t.updatedAt=now(); saveDB(); },
   // checklist / packing
@@ -5251,6 +5365,7 @@ function tripFilteredList(){
 }
 
 function renderTravel(){
+  try{ TripCalendar.pull(); }catch(_){}
   if(travelView==='detail') return tripRenderDetail();
   return tripRenderHome();
 }
@@ -5370,6 +5485,7 @@ function tripRenderDetail(){
     </div>
     ${(()=>{ const ci=tripCountryInfo(t.country); if(!ci)return ''; const season=tripSeason(t.startDate,ci.hemi);
       return `<div class="pay-detail-rows" style="margin-top:10px">
+        <div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'کشور':'Country'}</span><span class="pay-drow-v">${ci.flag?ci.flag+' ':''}${esc(t.country)}${ci.code?' · '+ci.code:''}</span></div>
         <div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'ارز کشور':'Currency'}</span><span class="pay-drow-v">${ci.currency}</span></div>
         <div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'زبان':'Language'}</span><span class="pay-drow-v">${esc(ci.language)}</span></div>
         <div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'نوع پریز':'Plug type'}</span><span class="pay-drow-v">${esc(ci.plug)}</span></div>
@@ -5453,7 +5569,7 @@ function tripQuickCreate(){
       <input class="finput" id="tq-dest" autocomplete="off" placeholder="${L==='fa'?'مثلاً پاریس، فرانسه':'e.g. Paris, France'}"></div>
     <div class="fld"><label>${L==='fa'?'کشور (برای اطلاعات خودکار)':'Country (for auto info)'}</label>
       <input class="finput" id="tq-country" list="tq-country-list" autocomplete="off" placeholder="${L==='fa'?'مثلاً France':'e.g. France'}">
-      <datalist id="tq-country-list">${Object.keys(TRIP_COUNTRY_INFO).map(k=>`<option value="${k.replace(/\b\w/g,c=>c.toUpperCase())}"></option>`).join('')}</datalist></div>
+      <datalist id="tq-country-list">${TRIP_COUNTRY_LIST.map(c=>`<option value="${c}"></option>`).join('')}</datalist></div>
     <div class="fld pay-form-grid">
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ شروع':'Start date'}</label><input class="finput" id="tq-start" type="date"></div>
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ پایان':'End date'}</label><input class="finput" id="tq-end" type="date"></div>
@@ -5503,8 +5619,8 @@ function tripOpenFullEditor(id){
     <div class="fld"><label>${L==='fa'?'مقصد':'Destination'}</label>
       <input class="finput" id="trip-f-dest" autocomplete="off" value="${esc(t.destination||'')}" placeholder="${L==='fa'?'مثلاً پاریس':'e.g. Paris'}"></div>
     <div class="fld pay-form-grid">
-      <div class="pay-fg-amt"><label>${L==='fa'?'کشور':'Country'}</label><input class="finput" id="trip-f-country" list="trip-country-list" autocomplete="off" value="${esc(t.country||'')}"><datalist id="trip-country-list">${Object.keys(TRIP_COUNTRY_INFO).map(k=>`<option value="${k.replace(/\b\w/g,c=>c.toUpperCase())}"></option>`).join('')}</datalist></div>
-      <div class="pay-fg-amt"><label>${L==='fa'?'شهر':'City'}</label><input class="finput" id="trip-f-city" autocomplete="off" value="${esc(t.city||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'کشور':'Country'}</label><input class="finput" id="trip-f-country" list="trip-country-list" autocomplete="off" value="${esc(t.country||'')}"><datalist id="trip-country-list">${TRIP_COUNTRY_LIST.map(c=>`<option value="${c}"></option>`).join('')}</datalist></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'شهر':'City'}</label><input class="finput" id="trip-f-city" list="trip-city-list" autocomplete="off" value="${esc(t.city||'')}"><datalist id="trip-city-list">${tripCitiesFor(t.country).map(c=>`<option value="${c}"></option>`).join('')}</datalist></div>
     </div>
     <div class="fld pay-form-grid">
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ شروع':'Start date'}</label><input class="finput" id="trip-f-start" type="date" value="${esc(t.startDate||'')}"></div>
@@ -5540,11 +5656,14 @@ function tripOpenFullEditor(id){
   // country auto-fill (only fills empty advanced fields)
   const countryEl=document.getElementById('trip-f-country');
   countryEl.addEventListener('change',()=>{
+    // refresh dependent city list
+    const cityDL=document.getElementById('trip-city-list');
+    if(cityDL)cityDL.innerHTML=tripCitiesFor(countryEl.value).map(c=>`<option value="${c}"></option>`).join('');
     const ci=tripCountryInfo(countryEl.value); if(!ci)return;
     const tz=document.getElementById('trip-f-tz'), cur=document.getElementById('trip-f-currency');
     if(tz&&!tz.value)tz.value=ci.timezone;
     if(cur&&(!t.currency||cur.value==='AUD'))cur.value=ci.currency;
-    toast((L==='fa'?'اطلاعات ':'Auto: ')+ci.currency+' · '+ci.timezone);
+    toast((ci.flag?ci.flag+' ':'')+ci.currency+' · '+ci.timezone);
   });
   document.getElementById('trip-f-cancel').onclick=()=>closeSheet();
   document.getElementById('trip-f-save').onclick=()=>{
@@ -5566,9 +5685,75 @@ function tripOpenFullEditor(id){
   };
 }
 
+// ── Real local booking extraction: QR/barcode (jsQR) + OCR (Tesseract.js), loaded lazily from CDN.
+// Boarding-pass barcodes follow IATA BCBP (Bar Coded Boarding Pass) — genuinely structured data,
+// not OCR guessing. OCR is used only for printed text patterns (booking ref, times, gate…).
+const TripExtract={
+  _loaded:{},
+  _loadScript(src){
+    return new Promise((res,rej)=>{
+      if(this._loaded[src])return res();
+      const s=document.createElement('script'); s.src=src;
+      s.onload=()=>{ this._loaded[src]=true; res(); };
+      s.onerror=()=>rej(new Error('load failed: '+src));
+      document.head.appendChild(s);
+    });
+  },
+  async ensureJsQR(){ if(window.jsQR)return true; try{ await this._loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js'); return !!window.jsQR; }catch(_){ return false; } },
+  async ensureTesseract(){ if(window.Tesseract)return true; try{ await this._loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js'); return !!window.Tesseract; }catch(_){ return false; } },
+  // Decode a QR/2D barcode from an image dataURL. Returns decoded string or null.
+  async decodeBarcode(dataUrl){
+    const ok=await this.ensureJsQR(); if(!ok)return null;
+    try{
+      const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=dataUrl; });
+      const cv=document.createElement('canvas'); cv.width=img.naturalWidth; cv.height=img.naturalHeight;
+      const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0);
+      const data=ctx.getImageData(0,0,cv.width,cv.height);
+      const r=window.jsQR(data.data,cv.width,cv.height);
+      return r&&r.data?r.data:null;
+    }catch(_){ return null; }
+  },
+  // Parse IATA BCBP (M1 format) string. Returns {passenger,operator,flightNo,origin,destination,seat,depDate} — blank where absent.
+  parseBCBP(s){
+    if(!s||s[0]!=='M')return null;
+    try{
+      // Format: M1SURNAME/FIRST     EABC123 SYDMELQF 0025 ...
+      const out={};
+      const nameM=s.slice(2).match(/^([A-Z\/ ]{1,20})/);
+      if(nameM){ const nm=nameM[1].trim().replace(/\s+/g,' '); if(nm.includes('/')){ const [ln,fn]=nm.split('/'); out.passenger=((fn||'').trim()+' '+(ln||'').trim()).trim(); } else out.passenger=nm; }
+      // segment block: after name, optional E-ticket indicator, then PNR(6-7) FROM(3) TO(3) CARRIER(2-3) FLIGHT
+      const seg=s.match(/\bE?([A-Z0-9]{6,7})\s?([A-Z]{3})([A-Z]{3})([A-Z0-9]{2,3})\s?(\d{3,5})/);
+      if(seg){ out.confirmation=seg[1].trim(); out.origin=seg[2]; out.destination=seg[3]; out.operator=seg[4].trim(); out.flightNo=(seg[4].trim()+seg[5].replace(/^0+/,'')); }
+      // Julian date of flight (3 digits) + seat (4 chars) appear after flight; seat like 012A
+      const seatM=s.match(/\d{3}[A-Z]?(\d{3}[A-Z])/); if(seatM)out.seat=seatM[1].replace(/^0+/,'');
+      return out;
+    }catch(_){ return null; }
+  },
+  // OCR an image dataURL, return recognized text (or '' on failure).
+  async ocrText(dataUrl){
+    const ok=await this.ensureTesseract(); if(!ok)return '';
+    try{ const r=await window.Tesseract.recognize(dataUrl,'eng'); return (r&&r.data&&r.data.text)||''; }catch(_){ return ''; }
+  },
+  // Pull structured fields from OCR text using conservative patterns. Blank where not confident.
+  parseText(txt){
+    const o={};
+    if(!txt)return o;
+    const T=txt.replace(/\r/g,'');
+    let m;
+    if((m=T.match(/\b(PNR|Booking\s*Ref(?:erence)?|Confirmation|Reservation)\s*[:#]?\s*([A-Z0-9]{5,8})\b/i)))o.confirmation=m[2].toUpperCase();
+    if((m=T.match(/\b([A-Z]{2}\s?\d{2,4})\b/)))o.flightNo=m[1].replace(/\s/,'');
+    if((m=T.match(/\bSeat\s*[:#]?\s*(\d{1,3}[A-Z])\b/i)))o.seat=m[1].toUpperCase();
+    if((m=T.match(/\bGate\s*[:#]?\s*([A-Z]?\d{1,3}[A-Z]?)\b/i)))o.gate=m[1].toUpperCase();
+    if((m=T.match(/\bTerminal\s*[:#]?\s*([A-Z0-9]{1,3})\b/i)))o.terminal=m[1].toUpperCase();
+    if((m=T.match(/\bPlatform\s*[:#]?\s*([A-Z0-9]{1,3})\b/i)))o.platform=m[1].toUpperCase();
+    if((m=T.match(/\b([0-2]?\d[:h][0-5]\d)\b/)))o.time=m[1].replace('h',':');
+    if((m=T.match(/\b(20\d{2})[-\/.](\d{2})[-\/.](\d{2})\b/)))o.date=`${m[1]}-${m[2]}-${m[3]}`;
+    return o;
+  }
+};
+
 function tripImportBooking(tripId, file){
-  // Heuristic extraction from filename + (image/pdf stored as attachment on booking detail).
-  // Full OCR isn't available offline; we pre-fill what we can and open the editor for confirmation.
+  // Real extraction: QR/BCBP + OCR when online, filename heuristics as fallback.
   const t=tripsMap()[tripId]; if(!t)return;
   const name=(file.name||'').toLowerCase();
   let kind='flight';
@@ -5577,14 +5762,48 @@ function tripImportBooking(tripId, file){
   else if(/bus|coach/.test(name))kind='bus';
   else if(/ferry|boat/.test(name))kind='ferry';
   else if(/flight|air|boarding|eticket|e-ticket|ticket/.test(name))kind='flight';
-  // try to pull a booking ref (6+ alphanumerics) and a date from filename
-  const refM=(file.name||'').match(/\b([A-Z0-9]{6,8})\b/);
-  const dateM=(file.name||'').match(/(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})/);
+  // filename fallbacks
+  const raw=file.name||'';
+  const refM=raw.match(/\b([A-Z0-9]{6,8})\b/);
+  const dateM=raw.match(/(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})/);
+  const flightNoM=raw.match(/\b([A-Z]{2}\d{2,4})\b/);
+  const timeM=raw.match(/\b([0-2]\d[:h][0-5]\d)\b/);
   const reader=new FileReader();
-  reader.onload=()=>{
-    const prefill={ kind, title:file.name.replace(/\.(pdf|png|jpe?g|webp)$/i,''),
+  reader.onload=async()=>{
+    const dataUrl=reader.result;
+    const isImage=(file.type||'').startsWith('image/');
+    const attachment={id:uid(),name:file.name,mime:file.type||'',kind:isImage?'image':'pdf',dataUrl:dataUrl,size:file.size||0};
+    // Start with filename-derived values (fallback, lowest priority)
+    const prefill={ kind, title:raw.replace(/\.(pdf|png|jpe?g|webp)$/i,''),
       confirmation: refM?refM[1]:'', date: dateM?`${dateM[1]}-${dateM[2]}-${dateM[3]}`:'',
-      _attachment:{id:uid(),name:file.name,mime:file.type||'',kind:(file.type||'').startsWith('image/')?'image':'pdf',dataUrl:reader.result,size:file.size||0} };
+      time: timeM?timeM[1].replace('h',':'):'', operator: flightNoM?flightNoM[1]:'',
+      _attachment:attachment };
+    // Only images can be decoded/OCR'd here (PDF rasterisation isn't available offline).
+    if(isImage){
+      let extracted={}, source='';
+      const toast1=toast(L==='fa'?'در حال خواندن فایل…':'Reading file…');
+      // 1) Try QR/2D barcode (boarding passes) — most reliable, structured BCBP
+      const bar=await TripExtract.decodeBarcode(dataUrl);
+      if(bar){ const bcbp=TripExtract.parseBCBP(bar); if(bcbp&&(bcbp.passenger||bcbp.flightNo||bcbp.origin)){ extracted=bcbp; source='barcode'; } }
+      // 2) Fall back to OCR text patterns
+      if(!source){ const txt=await TripExtract.ocrText(dataUrl); const parsed=TripExtract.parseText(txt); if(Object.keys(parsed).length){ extracted=parsed; source='ocr'; } }
+      // Merge: extracted (real) takes priority over filename; blank stays blank
+      if(extracted.passenger)prefill.passenger=extracted.passenger;
+      if(extracted.operator)prefill.operator=extracted.operator;
+      if(extracted.flightNo)prefill.operator=extracted.flightNo; // operator field shows flight/operator
+      if(extracted.confirmation)prefill.confirmation=extracted.confirmation;
+      if(extracted.origin)prefill.origin=extracted.origin;
+      if(extracted.destination)prefill.destination=extracted.destination;
+      if(extracted.seat)prefill.seat=extracted.seat;
+      if(extracted.gate)prefill.gate=extracted.gate;
+      if(extracted.terminal)prefill.terminal=extracted.terminal;
+      if(extracted.platform)prefill.platform=extracted.platform;
+      if(extracted.date)prefill.date=extracted.date;
+      if(extracted.time)prefill.time=extracted.time;
+      prefill._extractSource=source||'filename';
+    } else {
+      prefill._extractSource='filename';
+    }
     tripOpenBookingEditor(tripId,null,prefill);
   };
   reader.readAsDataURL(file);
@@ -5651,10 +5870,25 @@ function tripOpenSegmentEditor(tripId, sid){
     closeSheet(); render();
   };
 }
+// Preview a booking attachment (image inline, PDF/other via download link). Does not touch Documents.
+function docPreviewAttachment(a){
+  if(!a)return;
+  const body = a.kind==='image'
+    ? `<img src="${a.dataUrl}" style="width:100%;border-radius:12px;display:block">`
+    : `<div style="padding:24px;text-align:center;color:var(--ink3)"><div style="font-size:44px">${a.kind==='pdf'?'\ud83d\udcd5':'\ud83d\udcc4'}</div><div style="margin-top:8px;font-size:14px">${esc(a.name)}</div></div>`;
+  openSheet(`<h3 style="word-break:break-word">${esc(a.name)}</h3>${body}
+    <div class="btn-col" style="margin-top:12px">
+      <a class="btn btn-primary" href="${a.dataUrl}" download="${esc(a.name)}">${L==='fa'?'\u062f\u0627\u0646\u0644\u0648\u062f':'Download'}</a>
+      <button class="btn btn-ghost" id="bkpv-share">${L==='fa'?'\u0627\u0634\u062a\u0631\u0627\u06a9\u200c\u06af\u0630\u0627\u0631\u06cc':'Share'}</button>
+      <button class="btn btn-ghost" id="bkpv-close">${tr('cancel')}</button>
+    </div>`, {stack:true});
+  const sh=document.getElementById('bkpv-share'); if(sh)sh.onclick=()=>{ if(typeof docShareAttachment==='function')docShareAttachment(a); };
+  const c=document.getElementById('bkpv-close'); if(c)c.onclick=()=>closeSheet({back:true});
+}
 function tripOpenBookingEditor(tripId, bid, prefill){
   const t=tripsMap()[tripId]; if(!t)return;
   const editing=!!bid;
-  const bk=editing?(t.bookings||[]).find(x=>x.id===bid):(prefill?{kind:prefill.kind||'flight',title:prefill.title||'',detail:'',date:prefill.date||'',time:'',confirmation:prefill.confirmation||'',cost:'',currency:t.currency}:{kind:'flight',title:'',detail:'',date:'',time:'',confirmation:'',cost:'',currency:t.currency});
+  const bk=editing?(t.bookings||[]).find(x=>x.id===bid):(prefill?{kind:prefill.kind||'flight',title:prefill.title||'',detail:prefill.operator||'',date:prefill.date||'',time:prefill.time||'',confirmation:prefill.confirmation||'',cost:'',currency:t.currency,passenger:prefill.passenger||'',operator:prefill.operator||'',origin:prefill.origin||'',destination:prefill.destination||'',seat:prefill.seat||'',gate:prefill.gate||'',terminal:prefill.terminal||'',platform:prefill.platform||''}:{kind:'flight',title:'',detail:'',date:'',time:'',confirmation:'',cost:'',currency:t.currency});
   if(editing&&!bk)return;
   const _imp=prefill&&prefill._attachment?prefill._attachment:null;
   openSheet(`<div class="pay-editor-wrap"><div class="pay-editor-scroll"><h3>${editing?(L==='fa'?'ویرایش رزرو':'Edit booking'):(L==='fa'?'رزرو جدید':'New booking')}</h3>
@@ -5667,20 +5901,67 @@ function tripOpenBookingEditor(tripId, bid, prefill){
       <div class="pay-fg-amt"><label>${L==='fa'?'ساعت':'Time'}</label><input class="finput" id="bk-time" type="time" value="${esc(bk.time||'')}"></div>
     </div>
     <div class="fld"><label>${L==='fa'?'کد تأیید':'Confirmation'}</label><input class="finput" id="bk-conf" autocomplete="off" value="${esc(bk.confirmation||'')}"></div>
+    ${(prefill&&prefill._extractSource&&prefill._extractSource!=='filename')?`<div style="font-size:12.5px;color:#22c55e;padding:2px 4px 8px">✓ ${L==='fa'?'اطلاعات از فایل استخراج شد — لطفاً بررسی و تأیید کنید':'Extracted from file — please review & confirm'} (${prefill._extractSource==='barcode'?'barcode':'OCR'})</div>`:''}
+    <details ${(bk.passenger||bk.origin||bk.destination||bk.seat||bk.gate||bk.terminal||bk.platform)?'open':''} style="margin-bottom:10px"><summary style="cursor:pointer;font-size:14px;font-weight:600;padding:4px 0">${L==='fa'?'جزئیات استخراج‌شده':'Extracted details'}</summary>
+      <div class="fld" style="margin-top:8px"><label>${L==='fa'?'مسافر':'Passenger'}</label><input class="finput" id="bk-passenger" autocomplete="off" value="${esc(bk.passenger||'')}"></div>
+      <div class="fld"><label>${L==='fa'?'شرکت / شماره پرواز':'Operator / Flight no.'}</label><input class="finput" id="bk-operator" autocomplete="off" value="${esc(bk.operator||'')}"></div>
+      <div class="fld pay-form-grid">
+        <div class="pay-fg-amt"><label>${L==='fa'?'مبدأ':'Origin'}</label><input class="finput" id="bk-origin" autocomplete="off" value="${esc(bk.origin||'')}"></div>
+        <div class="pay-fg-amt"><label>${L==='fa'?'مقصد':'Destination'}</label><input class="finput" id="bk-destination" autocomplete="off" value="${esc(bk.destination||'')}"></div>
+      </div>
+      <div class="fld pay-form-grid">
+        <div class="pay-fg-amt"><label>${L==='fa'?'صندلی':'Seat'}</label><input class="finput" id="bk-seat" autocomplete="off" value="${esc(bk.seat||'')}"></div>
+        <div class="pay-fg-amt"><label>${L==='fa'?'گیت':'Gate'}</label><input class="finput" id="bk-gate" autocomplete="off" value="${esc(bk.gate||'')}"></div>
+      </div>
+      <div class="fld pay-form-grid">
+        <div class="pay-fg-amt"><label>${L==='fa'?'ترمینال':'Terminal'}</label><input class="finput" id="bk-terminal" autocomplete="off" value="${esc(bk.terminal||'')}"></div>
+        <div class="pay-fg-amt"><label>${L==='fa'?'سکو':'Platform'}</label><input class="finput" id="bk-platform" autocomplete="off" value="${esc(bk.platform||'')}"></div>
+      </div>
+    </details>
     <div class="fld"><label>${L==='fa'?'هزینه':'Cost'}</label><input class="finput" id="bk-cost" type="number" inputmode="decimal" value="${esc(String(bk.cost||''))}" placeholder="0.00"></div>
+    <div class="fld"><label>${L==='fa'?'پیوست (بلیط/کارت پرواز/رسید)':'Attachment (ticket/boarding pass/receipt)'}</label>
+      <div id="bk-att-list" class="doc-eatt-list"></div>
+      <button class="btn btn-ghost" id="bk-att-add" type="button" style="width:100%;margin-top:6px">📎 ${L==='fa'?'افزودن / جایگزینی':'Add / replace'}</button>
+      <input type="file" id="bk-att-file" accept="image/*,application/pdf" style="display:none"></div>
     </div>
     <div class="pay-form-actions">
       ${editing?`<button class="btn btn-danger" id="bk-delete" style="flex:0 0 auto;width:auto">${L==='fa'?'حذف':'Delete'}</button>`:`<button class="btn pay-btn-cancel" id="bk-cancel">${tr('cancel')}</button>`}
       <button class="btn btn-primary pay-btn-save" id="bk-save">${editing?(L==='fa'?'ذخیره':'Save'):(L==='fa'?'افزودن':'Add')}</button>
     </div></div>`, {noPad:true});
+  // Attachment state — start from existing booking attachment or imported one
+  let bkAtt = (editing && bk.attachment) ? bk.attachment : (_imp||null);
+  const bkAttHTML=()=>{
+    if(!bkAtt)return `<div style="font-size:13px;color:var(--ink3)">${L==='fa'?'بدون پیوست':'None'}</div>`;
+    return `<div class="doc-eatt"><span class="doc-eatt-ic">${bkAtt.kind==='image'?'🖼':bkAtt.kind==='pdf'?'📕':'📄'}</span><span class="doc-eatt-name">${esc(bkAtt.name)}</span>`+
+      `<button class="doc-eatt-x" id="bk-att-preview" type="button" aria-label="preview" style="background:var(--s3)">👁</button>`+
+      `<button class="doc-eatt-x" id="bk-att-rename" type="button" aria-label="rename" style="background:var(--s3)">✎</button>`+
+      `<button class="doc-eatt-x" id="bk-att-share" type="button" aria-label="share" style="background:var(--s3)">↗</button>`+
+      `<button class="doc-eatt-x" id="bk-att-del" type="button" aria-label="delete">✕</button></div>`;
+  };
+  const refreshBkAtt=()=>{
+    const host=document.getElementById('bk-att-list'); if(!host)return;
+    host.innerHTML=bkAttHTML();
+    const pv=document.getElementById('bk-att-preview'); if(pv)pv.onclick=()=>{ if(bkAtt)docPreviewAttachment(bkAtt); };
+    const rn=document.getElementById('bk-att-rename'); if(rn)rn.onclick=()=>{ const nn=prompt(L==='fa'?'نام جدید:':'New name:',bkAtt.name); if(nn&&nn.trim()){ bkAtt.name=nn.trim(); refreshBkAtt(); } };
+    const sh=document.getElementById('bk-att-share'); if(sh)sh.onclick=()=>{ if(typeof docShareAttachment==='function')docShareAttachment(bkAtt); };
+    const dl=document.getElementById('bk-att-del'); if(dl)dl.onclick=()=>{ bkAtt=null; refreshBkAtt(); };
+  };
+  refreshBkAtt();
+  const attFile=document.getElementById('bk-att-file');
+  const attAdd=document.getElementById('bk-att-add');
+  if(attAdd)attAdd.onclick=()=>attFile.click();
+  if(attFile)attFile.onchange=async()=>{ const f=(attFile.files||[])[0]; if(!f){return;} if(f.size>8*1024*1024){ toast(L==='fa'?'فایل بزرگ‌تر از ۸ مگابایت':'File over 8MB'); return; } try{ bkAtt=await docReadFileAsAttachment(f); refreshBkAtt(); }catch(_){} attFile.value=''; };
   const cc=document.getElementById('bk-cancel'); if(cc)cc.onclick=()=>closeSheet();
   const dd=document.getElementById('bk-delete'); if(dd)dd.onclick=()=>{ TripService.bookingDelete(tripId,bid); closeSheet(); render(); };
   document.getElementById('bk-save').onclick=()=>{
     const data={ kind:document.getElementById('bk-kind').value, title:document.getElementById('bk-title').value.trim(),
       detail:document.getElementById('bk-detail').value.trim(), date:document.getElementById('bk-date').value,
       time:document.getElementById('bk-time').value, confirmation:document.getElementById('bk-conf').value.trim(),
-      cost:parseFloat(document.getElementById('bk-cost').value)||0, currency:t.currency };
-    if(_imp)data.attachment=_imp;
+      cost:parseFloat(document.getElementById('bk-cost').value)||0, currency:t.currency, attachment:bkAtt,
+      passenger:(document.getElementById('bk-passenger')||{}).value||'', operator:(document.getElementById('bk-operator')||{}).value||'',
+      origin:(document.getElementById('bk-origin')||{}).value||'', destination:(document.getElementById('bk-destination')||{}).value||'',
+      seat:(document.getElementById('bk-seat')||{}).value||'', gate:(document.getElementById('bk-gate')||{}).value||'',
+      terminal:(document.getElementById('bk-terminal')||{}).value||'', platform:(document.getElementById('bk-platform')||{}).value||'' };
     if(editing)TripService.bookingUpdate(tripId,bid,data);
     else TripService.bookingAdd(tripId,data);
     closeSheet(); render();
@@ -9393,7 +9674,16 @@ function bindScreen(){
   document.querySelectorAll('[data-pay-open-task]').forEach(el=>el.onclick=e=>{
     if(e.target.closest('[data-pay-pin]')||e.target.closest('[data-pay-complete]'))return;
     screen='module'; currentModule='payments'; payActiveId=el.dataset.payOpenTask; payView='detail'; render(); window.scrollTo(0,0);});
+  document.querySelectorAll('[data-trip-done]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();
+    tripReminderToggle(el.dataset.tripDone);
+    render();});
+  document.querySelectorAll('[data-trip-star]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();
+    TripService.toggleFav(el.dataset.tripStar);
+    render();});
   document.querySelectorAll('[data-trip-open-task]').forEach(el=>el.onclick=e=>{
+    if(e.target.closest('[data-trip-star]')||e.target.closest('[data-trip-done]'))return;
     e.stopPropagation();
     screen='module'; currentModule='travel'; tripActiveId=el.dataset.tripOpenTask; travelView='detail'; tripDetailTab='overview'; render(); window.scrollTo(0,0);});
   // Task row → detail panel
