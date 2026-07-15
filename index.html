@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v245';
+const APP_VERSION='v248';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -5038,6 +5038,42 @@ const TRIP_SEGMENT_META={
 };
 function tripSegLabel(k){ const m=TRIP_SEGMENT_META[k]||TRIP_SEGMENT_META.other; return L==='fa'?m.fa:m.en; }
 function tripSegIcon(k){ return (TRIP_SEGMENT_META[k]||TRIP_SEGMENT_META.other).ic; }
+// Rough great-circle distance (km) between two city/country names using country coords as fallback.
+function _tripCoords(country,city){
+  const ci=tripCountryInfo(country);
+  if(ci&&typeof ci.lat==='number')return {lat:ci.lat,lon:ci.lon};
+  return null;
+}
+function tripHaversineKm(a,b){
+  if(!a||!b)return null;
+  const R=6371, toR=x=>x*Math.PI/180;
+  const dLat=toR(b.lat-a.lat), dLon=toR(b.lon-a.lon);
+  const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLon/2)**2;
+  return Math.round(2*R*Math.asin(Math.sqrt(s)));
+}
+// Typical cruising speed (km/h) per transport for duration estimate.
+const TRIP_SPEED={flight:750,train:120,bus:80,car:90,ferry:40,cruise:35,taxi:60,motorcycle:80,bicycle:18,walking:5,other:60};
+function tripFmtDuration(hours){
+  if(hours==null||!isFinite(hours))return '';
+  const h=Math.floor(hours), m=Math.round((hours-h)*60);
+  if(h>0&&m>0)return `${h}h ${m}m`;
+  if(h>0)return `${h}h`;
+  return `${m}m`;
+}
+// Estimate {km,duration} for a segment. Uses explicit distanceKm if set, else country-coord haversine.
+function tripSegEstimate(sg){
+  let km=null;
+  if(sg.distanceKm&&+sg.distanceKm>0)km=+sg.distanceKm;
+  else{
+    const a=_tripCoords(sg.fromCountry,sg.fromCity), b=_tripCoords(sg.toCountry,sg.toCity);
+    if(a&&b){ km=tripHaversineKm(a,b); if(sg.kind==='car'||sg.kind==='bus')km=Math.round(km*1.25); } // road factor
+  }
+  const speed=TRIP_SPEED[sg.kind]||60;
+  let durH=null;
+  if(sg.durationH&&+sg.durationH>0)durH=+sg.durationH;
+  else if(km!=null&&km>0)durH=km/speed + (sg.kind==='flight'?1.0:0); // +taxi/boarding overhead for flights
+  return { km, duration:durH!=null?tripFmtDuration(durH):'' };
+}
 const TRIP_BOOKING_META={
   flight:{en:'Flight',fa:'پرواز',ic:'✈'}, hotel:{en:'Hotel',fa:'هتل',ic:'🏨'},
   airbnb:{en:'Airbnb',fa:'اقامتگاه',ic:'🏠'},
@@ -5215,7 +5251,7 @@ function tripsAsTasks(){
   const mark=(o)=>{ o.done=!!doneMap[o.id]; if(o.done)o.doneAt=doneMap[o.id]; return o; };
   tripsLive().forEach(t=>{
     (t.segments||[]).forEach(sg=>{
-      if(sg.depDate){ out.push(mark({ id:'trip:'+t.id+':seg:'+sg.id, tripId:t.id, kind:'trip', text:(tripSegLabel(sg.kind))+': '+([sg.fromCity,sg.toCity].filter(Boolean).join(' → ')||t.title||''), dueDate:sg.depDate, dueTime:sg.depTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' })); }
+      if(sg.depDate){ out.push(mark({ id:'trip:'+t.id+':seg:'+sg.id, tripId:t.id, kind:'trip', text:(tripSegLabel(sg.kind))+': '+([sg.depPoint||sg.fromCity,sg.arrPoint||sg.toCity].filter(Boolean).join(' → ')||t.title||''), dueDate:sg.depDate, dueTime:sg.depTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' })); }
       if(sg.arrDate&&sg.arrDate!==sg.depDate){ out.push(mark({ id:'trip:'+t.id+':segarr:'+sg.id, tripId:t.id, kind:'trip', text:(L==='fa'?'رسیدن: ':'Arrive: ')+([sg.toCity,sg.toCountry].filter(Boolean).join(', ')||t.title||''), dueDate:sg.arrDate, dueTime:sg.arrTime||'', pinned:false, done:false, notes:sg.operator||'', icon:tripSegIcon(sg.kind), color:t.color||'#06b6d4' })); }
     });
     (t.bookings||[]).forEach(b=>{
@@ -5317,13 +5353,13 @@ const TripService={
   linkPay(id, payId){ const t=tripsMap()[id]; if(!t)return; if(!t.payLinks)t.payLinks=[]; if(!t.payLinks.includes(payId))t.payLinks.push(payId); t.updatedAt=now(); saveDB(); },
   unlinkPay(id, payId){ const t=tripsMap()[id]; if(!t)return; t.payLinks=(t.payLinks||[]).filter(x=>x!==payId); t.updatedAt=now(); saveDB(); },
   spentTotal(id){ const t=tripsMap()[id]; if(!t)return 0; let sum=0; (t.bookings||[]).forEach(b=>{ sum+=(+b.cost||0); }); (t.segments||[]).forEach(sg=>{ sum+=(+sg.cost||0); }); (t.payLinks||[]).forEach(pid=>{ const p=(typeof paymentsMap==='function')?paymentsMap()[pid]:null; if(p)sum+=(+p.amount||0); }); return sum; },
-  _ensure(t){ if(!t.countries)t.countries=[]; if(!t.segments)t.segments=[]; if(!t.bookings)t.bookings=[]; if(!t.checklist)t.checklist=[]; if(!t.packing)t.packing=[]; if(!t.docLinks)t.docLinks=[]; if(!t.payLinks)t.payLinks=[]; },
+  _ensure(t){ if(!t.countries)t.countries=[]; if(!t.segments)t.segments=[]; if(!t.bookings)t.bookings=[]; if(!t.checklist)t.checklist=[]; if(!t.packing)t.packing=[]; if(!t.docLinks)t.docLinks=[]; if(!t.payLinks)t.payLinks=[]; (t.segments||[]).forEach(sg=>{ if(sg.vehicleNo===undefined)sg.vehicleNo=''; if(sg.depPoint===undefined)sg.depPoint=''; if(sg.arrPoint===undefined)sg.arrPoint=''; if(sg.distanceKm===undefined)sg.distanceKm=0; if(sg.durationH===undefined)sg.durationH=0; }); },
   countryAdd(id,name){ const t=tripsMap()[id]; if(!t||!name.trim())return; this._ensure(t); t.countries.push({id:uid(),name:name.trim(),cities:[]}); t.updatedAt=now(); saveDB(); },
   countryRename(id,cid,name){ const t=tripsMap()[id]; if(!t)return; const c=(t.countries||[]).find(x=>x.id===cid); if(c){ c.name=name.trim(); t.updatedAt=now(); saveDB(); } },
   countryDelete(id,cid){ const t=tripsMap()[id]; if(!t)return; t.countries=(t.countries||[]).filter(x=>x.id!==cid); t.updatedAt=now(); saveDB(); },
   cityAdd(id,cid,name){ const t=tripsMap()[id]; if(!t||!name.trim())return; const c=(t.countries||[]).find(x=>x.id===cid); if(c){ if(!c.cities)c.cities=[]; c.cities.push({id:uid(),name:name.trim()}); t.updatedAt=now(); saveDB(); } },
   cityDelete(id,cid,cityId){ const t=tripsMap()[id]; if(!t)return; const c=(t.countries||[]).find(x=>x.id===cid); if(c){ c.cities=(c.cities||[]).filter(x=>x.id!==cityId); t.updatedAt=now(); saveDB(); } },
-  segmentAdd(id,seg){ const t=tripsMap()[id]; if(!t)return; this._ensure(t); t.segments.push(Object.assign({id:uid(),kind:'flight',fromCountry:'',fromCity:'',toCountry:'',toCity:'',depDate:'',depTime:'',arrDate:'',arrTime:'',operator:'',bookingRef:'',seat:'',gate:'',terminal:'',platform:'',cost:0,notes:'',attachment:null},seg)); t.updatedAt=now(); saveDB(); },
+  segmentAdd(id,seg){ const t=tripsMap()[id]; if(!t)return; this._ensure(t); t.segments.push(Object.assign({id:uid(),kind:'flight',fromCountry:'',fromCity:'',toCountry:'',toCity:'',depDate:'',depTime:'',arrDate:'',arrTime:'',operator:'',bookingRef:'',vehicleNo:'',depPoint:'',arrPoint:'',seat:'',gate:'',terminal:'',platform:'',cost:0,notes:'',attachment:null,distanceKm:0,durationH:0},seg)); t.updatedAt=now(); saveDB(); },
   segmentUpdate(id,sid,seg){ const t=tripsMap()[id]; if(!t)return; const s=(t.segments||[]).find(x=>x.id===sid); if(s){ Object.assign(s,seg); t.updatedAt=now(); saveDB(); } },
   segmentDelete(id,sid){ const t=tripsMap()[id]; if(!t)return; t.segments=(t.segments||[]).filter(x=>x.id!==sid); t.updatedAt=now(); saveDB(); },
   dashboard(){
@@ -5550,10 +5586,12 @@ function tripRenderDetail(){
     if(!segs.length)html+=`<div style="color:var(--ink3);font-size:14px;padding:16px 4px;text-align:center">${L==='fa'?'مسیری تعریف نشده':'No route segments yet'}</div>`;
     else{
       html+=`<div class="pay-detail-rows">`;
-      segs.forEach(sg=>{ const route=[sg.fromCity||sg.fromCountry,sg.toCity||sg.toCountry].filter(Boolean).join(' → ');
+      segs.forEach(sg=>{ const route=[sg.depPoint||sg.fromCity||sg.fromCountry,sg.arrPoint||sg.toCity||sg.toCountry].filter(Boolean).join(' → ');
+        const est=tripSegEstimate(sg); const estStr=[est.km!=null?est.km.toLocaleString()+' km':'',est.duration].filter(Boolean).join(' · ');
+        const line2=[sg.operator,sg.vehicleNo].filter(Boolean).join(' ');
         html+=`<div class="pay-drow" data-trip-seg="${sg.id}" style="cursor:pointer">
           <span class="pay-drow-k" style="display:flex;align-items:center;gap:6px">${tripSegIcon(sg.kind)} ${tripSegLabel(sg.kind)}</span>
-          <span class="pay-drow-v" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(route||sg.operator||'')}${sg.depDate?' · '+shortDate(sg.depDate):''}</span></div>`; });
+          <span class="pay-drow-v" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(route||line2||'')}${sg.depDate?' · '+shortDate(sg.depDate):''}${(line2&&route)?'<br><span style="color:var(--ink3);font-size:12px">'+esc(line2)+'</span>':''}${estStr?'<br><span style="color:var(--ink3);font-size:12px">'+estStr+'</span>':''}</span></div>`; });
       html+=`</div>`;
     }
     html+=`<button class="btn btn-primary" id="trip-add-segment" style="width:100%;margin-top:12px">＋ ${L==='fa'?'افزودن مسیر':'Add route segment'}</button></div>`;
@@ -5577,6 +5615,9 @@ function tripQuickCreate(){
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ شروع':'Start date'}</label><input class="finput" id="tq-start" type="date"></div>
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ پایان':'End date'}</label><input class="finput" id="tq-end" type="date"></div>
     </div>
+    <div class="fld"><label>${L==='fa'?'حمل‌ونقل اصلی':'Primary transport'}</label>
+      <select class="finput" id="tq-transport">${TRIP_SEGMENT_KINDS.map(k=>`<option value="${k}">${tripSegIcon(k)} ${tripSegLabel(k)}</option>`).join('')}</select></div>
+    <div id="tq-transport-fields"></div>
     <div id="tq-autoinfo" style="font-size:12.5px;color:var(--ink3);padding:0 2px;min-height:16px"></div>
     </div>
     <div class="pay-form-actions">
@@ -5594,6 +5635,21 @@ function tripQuickCreate(){
     info.innerHTML=ci?`${ci.flag?ci.flag+' ':''}${ci.currency} · ${esc(ci.language)} · ${L==='fa'?'پریز':'Plug'} ${ci.plug} · ${L==='fa'?'اورژانس':'Emergency'} ${ci.emergency}${ci.code?' · '+ci.code:''} · ${ci.timezone}`:'';
   };
   countryEl.addEventListener('input',showInfo); countryEl.addEventListener('change',showInfo);
+  // Transport-specific fields shown inline in Create, only the relevant ones per transport.
+  const transportEl=document.getElementById('tq-transport');
+  const tf=document.getElementById('tq-transport-fields');
+  const fld=(id,label,ph,type)=>`<div class="fld"><label>${label}</label><input class="finput" id="${id}" ${type?`type="${type}" inputmode="${type==='number'?'decimal':'text'}"`:'autocomplete="off"'} placeholder="${ph||''}"></div>`;
+  const renderTransportFields=()=>{
+    const k=transportEl.value; let h='';
+    if(k==='flight')h=fld('tqf-airline',L==='fa'?'شرکت هواپیمایی':'Airline','')+fld('tqf-flightno',L==='fa'?'شماره پرواز':'Flight number','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'فرودگاه مبدأ':'Departure airport','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'فرودگاه مقصد':'Arrival airport','')}</div></div>`;
+    else if(k==='train')h=fld('tqf-airline',L==='fa'?'اپراتور قطار':'Train operator','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'ایستگاه مبدأ':'Departure station','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'ایستگاه مقصد':'Arrival station','')}</div></div>`+fld('tqf-platform',L==='fa'?'سکو':'Platform','');
+    else if(k==='bus')h=fld('tqf-airline',L==='fa'?'شرکت اتوبوس':'Bus company','')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'ترمینال مبدأ':'Departure station','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'ترمینال مقصد':'Arrival station','')}</div></div>`;
+    else if(k==='car'||k==='motorcycle')h=`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-dist',L==='fa'?'مسافت تخمینی (km)':'Est. distance (km)','auto','number')}</div><div class="pay-fg-amt">${fld('tqf-dur',L==='fa'?'زمان تخمینی (ساعت)':'Est. driving time (h)','auto','number')}</div></div>`;
+    else if(k==='ferry'||k==='cruise')h=fld('tqf-airline',k==='ferry'?(L==='fa'?'اپراتور کشتی':'Ferry operator'):(L==='fa'?'شرکت کروز':'Cruise company'),'')+`<div class="fld pay-form-grid"><div class="pay-fg-amt">${fld('tqf-from',L==='fa'?'بندر مبدأ':'Departure port','')}</div><div class="pay-fg-amt">${fld('tqf-to',L==='fa'?'بندر مقصد':'Arrival port','')}</div></div>`;
+    tf.innerHTML=h;
+  };
+  transportEl.addEventListener('change',renderTransportFields);
+  renderTransportFields();
   document.getElementById('tq-cancel').onclick=()=>closeSheet();
   document.getElementById('tq-save').onclick=()=>{
     const dest=document.getElementById('tq-dest').value.trim();
@@ -5614,9 +5670,17 @@ function tripQuickCreate(){
       timezone: ci?ci.timezone:'' };
     const nid=TripService.create(meta);
     if(!nid||!tripsMap()[nid]){ toast(L==='fa'?'خطا در ساخت سفر':'Failed to create trip'); return; }
+    // Primary transport → seed the first route segment with its transport-specific fields (semantic schema)
+    const transport=(document.getElementById('tq-transport')||{}).value||'flight';
+    const tfv=id=>{const e=document.getElementById(id);return e?e.value.trim():'';};
+    TripService.segmentAdd(nid,{ kind:transport, toCountry:country, toCity:city, depDate:start,
+      operator:tfv('tqf-airline'), vehicleNo:tfv('tqf-flightno'),
+      depPoint:tfv('tqf-from'), arrPoint:tfv('tqf-to'), platform:tfv('tqf-platform'),
+      distanceKm:parseFloat(tfv('tqf-dist'))||0, durationH:parseFloat(tfv('tqf-dur'))||0 });
     tripSuggestPacking(tripsMap()[nid]).forEach(x=>TripService.listAdd(nid,'packing',x));
     tripActiveId=nid; travelView='detail'; tripDetailTab='overview';
-    tripOpenFullEditor(nid);
+    // Basic info is captured — go straight to the trip detail, not back into an editor asking again.
+    closeSheet(); render();
   };
 }
 
@@ -5851,6 +5915,11 @@ function tripOpenSegmentEditor(tripId, sid){
       <div class="pay-fg-amt"><label>${L==='fa'?'ساعت رسیدن':'Arr time'}</label><input class="finput" id="sg-at" type="time" value="${esc(sg.arrTime||'')}"></div>
     </div>
     <div class="fld"><label>${L==='fa'?'اپراتور':'Operator'}</label><input class="finput" id="sg-op" autocomplete="off" value="${esc(sg.operator||'')}" placeholder="${L==='fa'?'شرکت هواپیمایی / قطار':'Airline / operator'}"></div>
+    <div class="fld"><label>${L==='fa'?'شماره پرواز/قطار/اتوبوس':'Flight / train / bus number'}</label><input class="finput" id="sg-vehno" autocomplete="off" value="${esc(sg.vehicleNo||'')}"></div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'ایستگاه/فرودگاه/بندر مبدأ':'Departure airport/station/port'}</label><input class="finput" id="sg-deppoint" autocomplete="off" value="${esc(sg.depPoint||'')}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'ایستگاه/فرودگاه/بندر مقصد':'Arrival airport/station/port'}</label><input class="finput" id="sg-arrpoint" autocomplete="off" value="${esc(sg.arrPoint||'')}"></div>
+    </div>
     <div class="fld"><label>${L==='fa'?'کد رزرو':'Booking reference'}</label><input class="finput" id="sg-ref" autocomplete="off" value="${esc(sg.bookingRef||'')}"></div>
     <div class="fld pay-form-grid">
       <div class="pay-fg-amt"><label>${L==='fa'?'صندلی':'Seat'}</label><input class="finput" id="sg-seat" autocomplete="off" value="${esc(sg.seat||'')}"></div>
@@ -5859,6 +5928,10 @@ function tripOpenSegmentEditor(tripId, sid){
     <div class="fld pay-form-grid">
       <div class="pay-fg-amt"><label>${L==='fa'?'ترمینال':'Terminal'}</label><input class="finput" id="sg-term" autocomplete="off" value="${esc(sg.terminal||'')}"></div>
       <div class="pay-fg-amt"><label>${L==='fa'?'سکو':'Platform'}</label><input class="finput" id="sg-plat" autocomplete="off" value="${esc(sg.platform||'')}"></div>
+    </div>
+    <div class="fld pay-form-grid">
+      <div class="pay-fg-amt"><label>${L==='fa'?'مسافت (km)':'Distance (km)'}</label><input class="finput" id="sg-dist" type="number" inputmode="decimal" value="${esc(String(sg.distanceKm||''))}" placeholder="${L==='fa'?'خودکار':'auto'}"></div>
+      <div class="pay-fg-amt"><label>${L==='fa'?'مدت (ساعت)':'Duration (h)'}</label><input class="finput" id="sg-dur" type="number" inputmode="decimal" value="${esc(String(sg.durationH||''))}" placeholder="${L==='fa'?'خودکار':'auto'}"></div>
     </div>
     <div class="fld"><label>${L==='fa'?'هزینه':'Cost'}</label><input class="finput" id="sg-cost" type="number" inputmode="decimal" value="${esc(String(sg.cost||''))}" placeholder="0.00"></div>
     <div class="fld"><label>${L==='fa'?'یادداشت':'Notes'}</label><textarea class="finput" id="sg-notes" rows="2" style="min-height:56px">${esc(sg.notes||'')}</textarea></div>
@@ -5880,8 +5953,9 @@ function tripOpenSegmentEditor(tripId, sid){
     const gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
     const data={ kind:gv('sg-kind'), fromCountry:gv('sg-fc').trim(), fromCity:gv('sg-fci').trim(), toCountry:gv('sg-tc').trim(), toCity:gv('sg-tci').trim(),
       depDate:gv('sg-dd'), depTime:gv('sg-dt'), arrDate:gv('sg-ad'), arrTime:gv('sg-at'), operator:gv('sg-op').trim(), bookingRef:gv('sg-ref').trim(),
+      vehicleNo:gv('sg-vehno').trim(), depPoint:gv('sg-deppoint').trim(), arrPoint:gv('sg-arrpoint').trim(),
       seat:gv('sg-seat').trim(), gate:gv('sg-gate').trim(), terminal:gv('sg-term').trim(), platform:gv('sg-plat').trim(),
-      cost:parseFloat(gv('sg-cost'))||0, notes:gv('sg-notes'), attachment:att };
+      cost:parseFloat(gv('sg-cost'))||0, notes:gv('sg-notes'), attachment:att, distanceKm:parseFloat(gv('sg-dist'))||0, durationH:parseFloat(gv('sg-dur'))||0 };
     if(editing)TripService.segmentUpdate(tripId,sid,data);
     else TripService.segmentAdd(tripId,data);
     closeSheet(); render();
