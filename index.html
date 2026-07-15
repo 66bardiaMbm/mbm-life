@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v255';
+const APP_VERSION='v256';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -4500,6 +4500,12 @@ function vaultArchived(){ return Object.values(vaultItemsMap()).filter(v=>v.arch
 function vaultTrashed(){ return Object.values(vaultItemsMap()).filter(v=>v.deletedAt); }
 
 const VAULT_TYPES=['login','password','bank','credit-card','debit-card','passport','driver-licence','medicare','insurance','wifi','software-licence','crypto-wallet','identity','secure-note','other'];
+// Document-based identity types that now live in the Documents module (single source of truth).
+// Retained in VAULT_TYPES so existing items still render/migrate, but removed from NEW creation.
+const VAULT_RETIRED_DOC_TYPES=['passport','driver-licence','medicare','insurance','identity'];
+const VAULT_CREATE_TYPES=VAULT_TYPES.filter(t=>!VAULT_RETIRED_DOC_TYPES.includes(t));
+// Map a retired Vault identity type → Documents type.
+const VAULT_TO_DOC_TYPE={passport:'passport','driver-licence':'driver-licence',medicare:'medicare',insurance:'insurance',identity:'national-id'};
 const VAULT_TYPE_META={
   login:{en:'Login',fa:'ورود',ic:'🔑'}, password:{en:'Password',fa:'رمز',ic:'∗'},
   bank:{en:'Bank Account',fa:'حساب بانکی',ic:'🏦'}, 'credit-card':{en:'Credit Card',fa:'کارت اعتباری',ic:'💳'},
@@ -4595,6 +4601,51 @@ const VaultService={
     return { total:all.length, favourites:all.filter(v=>v.favourite).length, recent, counts, fcounts };
   }
 };
+
+// ── Vault → Documents migration ──
+// Converts retired identity/document-type Vault items into secure Documents (single source of truth).
+// Runs only when Vault is unlocked (needs the key to decrypt payloads). Rollback-safe: marks each
+// migrated Vault item with migratedToDocId and sets DB.meta.vaultDocMigration; prevents duplicates.
+async function vaultMigrateIdentityDocs(){
+  if(!VaultSession.isUnlocked())return {ran:false, reason:'locked'};
+  let migrated=0, skipped=0;
+  try{
+    for(const v of Object.values(vaultItemsMap())){
+      if(v.deletedAt)continue;
+      if(!VAULT_RETIRED_DOC_TYPES.includes(v.type))continue;
+      if(v.migratedToDocId && documentsMap()[v.migratedToDocId]){ skipped++; continue; } // already migrated
+      // Decrypt the Vault payload to recover fields + attachments.
+      let payload={};
+      try{ payload=await VaultCrypto.decryptObj(VaultSession.key(), v.encryptedPayload, v.iv)||{}; }catch(_){ continue; }
+      const docType=VAULT_TO_DOC_TYPE[v.type]||'other';
+      // Duplicate guard: matching secure doc with same type + number/title already present.
+      const num=payload.passportNumber||payload.licenceNumber||payload.medicareNumber||payload.policyNumber||payload.idNumber||'';
+      const existing=documentsLive().find(d=>d.secure&&d.type===docType&&(
+        (num&&d.customMeta&&d.customMeta.number===num) || (d.title&&v.title&&d.title===v.title)
+      ));
+      if(existing){ v.migratedToDocId=existing.id; v.updatedAt=now(); skipped++; continue; }
+      // Build notes from all non-attachment fields (preserve everything).
+      const lines=[];
+      Object.keys(payload).forEach(k=>{ if(k==='attachments'||k==='notes')return; const val=payload[k]; if(val!==undefined&&val!==null&&String(val).trim()!=='')lines.push(`${k}: ${val}`); });
+      if(payload.notes)lines.push(String(payload.notes));
+      const notes=lines.join('\n');
+      const attachments=Array.isArray(payload.attachments)?payload.attachments:(Array.isArray(v.attachments)?v.attachments:[]);
+      const meta={
+        title:v.title||vaultTypeLabel(v.type), type:docType,
+        folderId:null, tags:(v.tags||[]).slice(),
+        issueDate:payload.issueDate||'', expiryDate:payload.expiryDate||'',
+        reminderDays: payload.expiryDate?30:0,
+        favourite:!!v.favourite, color:v.color||'#3b82f6', secure:true,
+        customMeta:{ number:num, migratedFromVault:v.id }
+      };
+      const nid=await DocService.create(meta, attachments, {notes, attachments});
+      v.migratedToDocId=nid; v.updatedAt=now();
+      migrated++;
+    }
+    if(migrated||skipped){ DB.meta.vaultDocMigration={ at:now(), migrated, skipped, version:1 }; saveDB(); }
+  }catch(e){ return {ran:false, reason:'error'}; }
+  return {ran:true, migrated, skipped};
+}
 
 async function vaultCopy(value){
   try{
@@ -4704,6 +4755,18 @@ function vaultRenderHome(){
     html+=`<div class="pay-list" id="vault-list">${shown.map(vaultRowHTML).join('')}</div>`;
     if(filtered.length>shown.length)html+=`<div style="padding:10px 16px 20px"><button class="btn btn-ghost" id="vault-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${filtered.length-shown.length})</button></div>`;
   }
+  // Secure documents live here by reference only (canonical record stays in Documents — single source of truth).
+  const secureDocs=(typeof documentsLive==='function'?documentsLive():[]).filter(dd=>dd.secure);
+  if(secureDocs.length){
+    html+=`<div style="padding:16px 16px 4px;font-size:13px;font-weight:700;color:var(--ink2);display:flex;align-items:center;gap:6px">🔒 ${L==='fa'?'اسناد امن (در بخش اسناد)':'Secure documents (in Documents)'}</div>`;
+    html+=`<div class="pay-list">${secureDocs.slice(0,20).map(dd=>`<div class="pay-row" data-vault-doc-open="${dd.id}">
+      <div class="pay-row-ic" style="background:${dd.color||'#3b82f6'}22;color:${dd.color||'#3b82f6'};font-size:18px">${docTypeIcon(dd.type)}</div>
+      <div class="pay-row-main"><div class="pay-row-title" dir="auto">${esc(dd.title||docTypeLabel(dd.type))}</div>
+        <div class="pay-row-meta"><span class="pay-mchip">${docTypeLabel(dd.type)}</span>${dd.expiryDate?`<span class="pay-mchip">${L==='fa'?'انقضا':'exp'} ${shortDate(dd.expiryDate)}</span>`:''}<span class="pay-mchip">${L==='fa'?'مرجع':'reference'}</span></div>
+      </div>
+      <span style="color:var(--ink3);opacity:.4;padding-inline-end:4px">›</span>
+    </div>`).join('')}</div>`;
+  }
   html+=`<button class="pay-fab" id="vault-new-fab" aria-label="${L==='fa'?'افزودن':'Add item'}">＋</button>`;
   return html;
 }
@@ -4806,7 +4869,8 @@ async function vaultOpenEditor(id){
     <div class="fld"><label>${L==='fa'?'عنوان':'Title'}</label>
       <input class="finput vault-secure-input" id="vault-f-title" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" name="vault-title-nofill" value="${esc(v.title||'')}" placeholder="${L==='fa'?'مثلاً جیمیل':'e.g. Gmail'}"></div>
     <div class="fld"><label>${L==='fa'?'نوع':'Type'}</label>
-      <select class="finput" id="vault-f-type">${VAULT_TYPES.map(t=>`<option value="${t}" ${v.type===t?'selected':''}>${vaultTypeLabel(t)}</option>`).join('')}</select></div>
+      <select class="finput" id="vault-f-type">${(editing?VAULT_TYPES:VAULT_CREATE_TYPES).map(t=>`<option value="${t}" ${v.type===t?'selected':''}>${vaultTypeLabel(t)}</option>`).join('')}</select></div>
+      ${(!editing)?'':(VAULT_RETIRED_DOC_TYPES.includes(v.type)?`<div style="font-size:12px;color:var(--ink3);padding:2px 4px 8px">${L==='fa'?'این نوع سند اکنون در بخش «اسناد» نگهداری می‌شود.':'This document type is now managed in Documents.'}</div>`:'')}
     <div class="fld"><label>${L==='fa'?'پوشه':'Folder'}</label>
       <select class="finput" id="vault-f-folder"><option value="">${L==='fa'?'بدون پوشه':'No folder'}</option>
       ${folders.map(f=>`<option value="${f.id}" ${v.folderId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}</select></div>
@@ -10510,7 +10574,7 @@ function bindScreen(){
       const res=await VaultSession.tryUnlock(pin);
       pin=''; if(pinEl)pinEl.value='';   // never retain the master value
       _vaultUnlockBusy=false;
-      if(res.ok){ VaultActivity.system('unlocked'); render(); return; }
+      if(res.ok){ VaultActivity.system('unlocked'); try{ const mr=await vaultMigrateIdentityDocs(); if(mr.ran&&mr.migrated)toast((L==='fa'?mr.migrated+' سند به بخش اسناد منتقل شد':mr.migrated+' document(s) moved to Documents')); }catch(_){} render(); return; }
       if(unlockGo){ unlockGo.disabled=false; unlockGo.classList.remove('vault-unlock-loading'); unlockGo.textContent=(L==='fa'?'باز کردن':'Unlock'); }
       if(res.reason==='wrong'){ if(errEl)errEl.textContent=L==='fa'?'رمز نادرست است — دوباره وارد کنید':'Incorrect — please re-enter'; if(pinEl){ pinEl.value=''; pinEl.focus(); } }
       else if(res.reason!=='stale'&&res.reason!=='busy'){ if(errEl)errEl.textContent=L==='fa'?'خطا':'Error'; if(pinEl)pinEl.value=''; }
@@ -10529,6 +10593,7 @@ function bindScreen(){
       if(se)se.oninput=()=>{ vaultSearch=se.value; vaultListLimit=50; clearTimeout(window._vaultSearchT); window._vaultSearchT=setTimeout(()=>{ render(); const s=document.getElementById('vault-search'); if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);} },250); };
       document.querySelectorAll('[data-vault-filter]').forEach(el=>el.onclick=()=>{ vaultFilter=el.dataset.vaultFilter; vaultListLimit=50; render(); });
       document.querySelectorAll('[data-vault-open]').forEach(el=>el.onclick=()=>{ vaultActiveId=el.dataset.vaultOpen; vaultView='detail'; render(); window.scrollTo(0,0); });
+      document.querySelectorAll('[data-vault-doc-open]').forEach(el=>el.onclick=()=>{ currentModule='documents'; docActiveId=el.dataset.vaultDocOpen; docView='detail'; render(); window.scrollTo(0,0); });
       const more=document.getElementById('vault-more'); if(more)more.onclick=()=>{ vaultListLimit+=50; render(); };
       const emptyAdd=document.getElementById('vault-empty-add'); if(emptyAdd)emptyAdd.onclick=()=>vaultOpenEditor(null);
     }
