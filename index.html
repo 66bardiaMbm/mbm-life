@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v253';
+const APP_VERSION='v255';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1478,6 +1478,8 @@ function blankDB(){
       docFolders:{},  // {id,name,color,parentId,createdAt,updatedAt,archivedAt}
       trips:{},       // Travel module — see TRIP DATA MODEL below.
       tripReminderDone:{}, // {reminderId: doneISO} — completion state for projected Travel reminders (no data duplication)
+      docReminderDone:{}, // {reminderId: doneISO} — completion state for projected Document expiry reminders
+      _docPayLinks:{}, // {documentId: paymentId[]} — user-confirmed document→payment links
     }
   };
 }
@@ -1501,7 +1503,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     // ── Travel data repair (safe, no data loss) ──
     try{
@@ -2225,14 +2227,15 @@ function renderToday(){
   // Payments and Travel items project into Today exactly like dated tasks.
   const payT=(typeof paymentsAsTasks==='function'?paymentsAsTasks():[]).filter(t=>t.dueDate);
   const tripT=(typeof tripsAsTasks==='function'?tripsAsTasks():[]).filter(t=>t.dueDate);
+  const docT=(typeof documentsAsTasks==='function'?documentsAsTasks():[]).filter(t=>t.dueDate);
   const overdue=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate<ts)
-    .concat(shopT.filter(t=>t.dueDate<ts)).concat(payT.filter(t=>t.dueDate<ts)).concat(tripT.filter(t=>!t.done&&t.dueDate<ts));
+    .concat(shopT.filter(t=>t.dueDate<ts)).concat(payT.filter(t=>t.dueDate<ts)).concat(tripT.filter(t=>!t.done&&t.dueDate<ts)).concat(docT.filter(t=>!t.done&&t.dueDate<ts));
   const todayT=allT.filter(t=>!t.done&&(t.dueDate===ts||!t.dueDate))
-    .concat(shopT.filter(t=>t.dueDate===ts)).concat(payT.filter(t=>t.dueDate===ts)).concat(tripT.filter(t=>!t.done&&t.dueDate===ts));
+    .concat(shopT.filter(t=>t.dueDate===ts)).concat(payT.filter(t=>t.dueDate===ts)).concat(tripT.filter(t=>!t.done&&t.dueDate===ts)).concat(docT.filter(t=>!t.done&&t.dueDate===ts));
   const doneToday=allT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts)
-    .concat(tripT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts));
+    .concat(tripT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts)).concat(docT.filter(t=>t.done&&t.doneAt&&t.doneAt.slice(0,10)===ts));
   const upcoming=allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts)
-    .concat(shopT.filter(t=>t.dueDate>ts)).concat(payT.filter(t=>t.dueDate>ts)).concat(tripT.filter(t=>!t.done&&t.dueDate>ts));
+    .concat(shopT.filter(t=>t.dueDate>ts)).concat(payT.filter(t=>t.dueDate>ts)).concat(tripT.filter(t=>!t.done&&t.dueDate>ts)).concat(docT.filter(t=>!t.done&&t.dueDate>ts));
   // Today's appointments
   const todayAppts=Object.values(DB.entities.appts||{})
     .filter(a=>!a.archivedAt&&a.date===ts)
@@ -2328,12 +2331,13 @@ function renderListsNav(){
   const shopT=shopListsAsTasks();   // active shopping lists, task-shaped
   const payT=(typeof paymentsAsTasks==='function'?paymentsAsTasks():[]);
   const tripT=(typeof tripsAsTasks==='function'?tripsAsTasks():[]);
+  const docT=(typeof documentsAsTasks==='function'?documentsAsTasks():[]);
   const svCounts={
-    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length + payT.filter(t=>t.dueDate===ts).length + tripT.filter(t=>!t.done&&t.dueDate===ts).length,
+    myday:allT.filter(t=>!t.done&&t.dueDate===ts).length + shopT.filter(t=>t.dueDate===ts).length + payT.filter(t=>t.dueDate===ts).length + tripT.filter(t=>!t.done&&t.dueDate===ts).length + docT.filter(t=>!t.done&&t.dueDate===ts).length,
     important:allT.filter(t=>!t.done&&t.pinned).length + shopT.filter(t=>t.pinned).length + payT.filter(t=>t.pinned).length + tripT.filter(t=>!t.done&&t.pinned).length,
-    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length + payT.filter(t=>t.dueDate&&t.dueDate>ts).length + tripT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length,
+    planned:allT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + shopT.filter(t=>t.dueDate&&t.dueDate>ts).length + payT.filter(t=>t.dueDate&&t.dueDate>ts).length + tripT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length + docT.filter(t=>!t.done&&t.dueDate&&t.dueDate>ts).length,
     assigned:allT.filter(t=>!t.done&&t.assigneeId&&t.assigneeId===DB.meta.userId).length,
-    all:allT.filter(t=>!t.done).length + shopT.length + payT.length + tripT.filter(t=>!t.done).length,
+    all:allT.filter(t=>!t.done).length + shopT.length + payT.length + tripT.filter(t=>!t.done).length + docT.filter(t=>!t.done).length,
   };
   const _sShow=DB.meta.smartShow||{};
   const _autoHide=DB.meta.autoHideSmart===true;
@@ -2481,6 +2485,7 @@ function renderListDetail(){
       tasks=tasks.concat(shopListsAsTasks());
       tasks=tasks.concat(paymentsAsTasks());
       tasks=tasks.concat(tripsAsTasks());
+      if(typeof documentsAsTasks==='function')tasks=tasks.concat(documentsAsTasks());
     }
     if(activeSmartView==='myday')tasks=DB.meta.showDueMyDay===false?[]:tasks.filter(t=>t.dueDate===ts);
     else if(activeSmartView==='important')tasks=tasks.filter(t=>t.pinned);
@@ -2633,7 +2638,20 @@ function taskRowFlat(t,isOverdue){
       <div class="trow-star-wrap"><button class="trow-star${starred?' on':''}" data-trip-star="${t.tripId}" aria-label="important">${starred?'★':'☆'}</button></div>
     </div>`;
   }
-  const pr=t.priority==='p1'?`<span class="pill p1">${tr('high')}</span>`:'';
+  if(t.kind==='doc'){
+    let dmeta=`<span class="chip" style="background:${t.color}22;color:${t.color}">${t.icon} ${L==='fa'?'سند':'Document'}</span>`;
+    if(t.dueDate&&!over)dmeta+=`<span class="chip">${shortDate(t.dueDate)}</span>`;
+    if(over)dmeta+=`<span class="chip over">⚠ ${L==='fa'?'منقضی':'expired'} ${shortDate(t.dueDate)}</span>`;
+    const dOverStyle=over?'border-left:2px solid var(--danger);':'';
+    return `<div class="trow-flat" data-doc-open-task="${t.docId}" style="${dOverStyle}">
+      <div class="trow-chk-wrap"><div class="chk${t.done?' done':''}" data-doc-done="${t.id}" style="border-radius:7px">${t.done?'✓':''}</div></div>
+      <div class="trow-content">
+        <div class="trow-title${t.done?' done':''}" dir="auto">${esc(t.text)}</div>
+        <div class="trow-meta-row">${dmeta}</div>
+      </div>
+      <div class="trow-star-wrap"></div>
+    </div>`;
+  }
   let meta='';
   // In smart views or Today, show list name for context
   if(activeSmartView||screen==='today'){
@@ -4929,6 +4947,131 @@ function docExpiryBucket(d){
 
 const DocActivity={ log(type,id,name){ logActivity(type,'document',id,{name:name||''}); } };
 
+// ── Document intelligence: OCR (reuses Tesseract loader), auto-classification,
+//    metadata extraction, and duplicate detection. All best-effort and offline-safe.
+const DocIntelligence={
+  async _ensureTesseract(){ if(window.Tesseract)return true; try{ if(typeof TripExtract!=='undefined'&&TripExtract.ensureTesseract)return await TripExtract.ensureTesseract(); }catch(_){} return !!window.Tesseract; },
+  async _ensurePdfJs(){
+    if(window.pdfjsLib)return true;
+    try{
+      await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+      if(window.pdfjsLib){ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }catch(_){} }
+      return !!window.pdfjsLib;
+    }catch(_){ return false; }
+  },
+  async pdfText(dataUrl){
+    if(!dataUrl||!/^data:application\/pdf/.test(dataUrl))return '';
+    const ok=await this._ensurePdfJs(); if(!ok)return '';
+    try{
+      const b64=dataUrl.split(',')[1]; const bin=atob(b64); const bytes=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+      const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
+      let text='';
+      const maxPages=Math.min(pdf.numPages,5);
+      for(let n=1;n<=maxPages;n++){
+        const page=await pdf.getPage(n);
+        const content=await page.getTextContent();
+        text+=content.items.map(it=>it.str).join(' ')+'\n';
+      }
+      if(text.trim().length<20){
+        const tok=await this._ensureTesseract();
+        if(tok){
+          const page=await pdf.getPage(1); const vp=page.getViewport({scale:1.5});
+          const cv=document.createElement('canvas'); cv.width=vp.width; cv.height=vp.height;
+          await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+          const img=cv.toDataURL('image/png');
+          try{ const r=await window.Tesseract.recognize(img,'eng'); text=(r&&r.data&&r.data.text)||text; }catch(_){}
+        }
+      }
+      return text;
+    }catch(_){ return ''; }
+  },
+  async ocr(dataUrl){
+    if(!dataUrl)return '';
+    if(/^data:application\/pdf/.test(dataUrl))return this.pdfText(dataUrl);
+    if(!/^data:image\//.test(dataUrl))return '';
+    const ok=await this._ensureTesseract(); if(!ok)return '';
+    try{ const r=await window.Tesseract.recognize(dataUrl,'eng'); return (r&&r.data&&r.data.text)||''; }catch(_){ return ''; }
+  },
+  // Keyword-based classification → returns a DOC_TYPES value.
+  classify(text, filename){
+    const T=((text||'')+' '+(filename||'')).toLowerCase();
+    const rules=[
+      ['passport',/passport|machine readable|p<|travel document/],
+      ['visa',/visa|entry permit|residence permit/],
+      ['driver-licence',/driver.?s? licen|driving licen|licence no|dl no/],
+      ['national-id',/national id|identity card|id card|medicare/],
+      ['medicare',/medicare/],
+      ['vehicle-registration',/certificate of registration|vehicle registration|rego|number plate|vin/],
+      ['insurance',/insurance|policy no|insured|premium|cover note|comprehensive/],
+      ['tax',/tax invoice|australian taxation|abn|gst|tax file|notice of assessment/],
+      ['invoice',/invoice|invoice no|bill to|amount due/],
+      ['receipt',/receipt|total paid|change due|eftpos|thank you for your purchase/],
+      ['bank',/bank|account no|bsb|iban|swift|statement period/],
+      ['medical',/medical|prescription|patient|diagnosis|clinic|hospital|pathology/],
+      ['education',/university|certificate of completion|transcript|diploma|degree|student id/],
+      ['employment',/employment|payslip|salary|employer|contract of employment/],
+      ['warranty',/warranty|guarantee|warranted for/],
+      ['property',/lease|tenancy|property|title deed|rental agreement/],
+      ['contract',/agreement|contract|terms and conditions|hereby agree/],
+      ['certificate',/certificate|certify|certified/]
+    ];
+    for(const [type,re] of rules){ if(re.test(T))return type; }
+    return null;
+  },
+  // Extract likely dates (issue/expiry), a document number, and useful tags.
+  extract(text){
+    const out={ dates:[], number:'', expiry:'', issue:'', amount:'' };
+    if(!text)return out;
+    const T=text.replace(/\r/g,'');
+    let am=T.match(/(?:total|amount due|amount|balance)[^\d]{0,12}([$€£]?\s?\d[\d,]*\.?\d{0,2})/i) || T.match(/[$€£]\s?(\d[\d,]*\.\d{2})/);
+    if(am){ out.amount=(am[1]||am[0]).replace(/[^\d.]/g,''); }
+    // Normalise dates dd/mm/yyyy, yyyy-mm-dd, dd Mon yyyy
+    const iso=[];
+    let m; const reISO=/\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/g;
+    while((m=reISO.exec(T))){ iso.push(`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`); }
+    const reDMY=/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](20\d{2})\b/g;
+    while((m=reDMY.exec(T))){ iso.push(`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`); }
+    const months={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+    const reTxt=/\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(20\d{2})\b/g;
+    while((m=reTxt.exec(T))){ const mo=months[m[2].slice(0,3).toLowerCase()]; if(mo)iso.push(`${m[3]}-${mo}-${String(m[1]).padStart(2,'0')}`); }
+    out.dates=[...new Set(iso)].sort();
+    // Expiry: date near an "expir/valid until/valid to" keyword
+    const expM=T.match(/(expir\w*|valid\s*(?:until|to|through)|date of expiry)[^\d]{0,20}(\d{1,2}[-\/. ]\w{1,9}[-\/. ]20\d{2}|20\d{2}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]20\d{2})/i);
+    if(expM){ const p=this.extract(expM[2]); if(p.dates[0])out.expiry=p.dates[0]; }
+    // Issue: "issue/date of issue"
+    const issM=T.match(/(date of issue|issued?|issue date)[^\d]{0,20}(\d{1,2}[-\/. ]\w{1,9}[-\/. ]20\d{2}|20\d{2}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]20\d{2})/i);
+    if(issM){ const p=this.extract(issM[2]); if(p.dates[0])out.issue=p.dates[0]; }
+    if(!out.expiry&&out.dates.length){ const future=out.dates.filter(d=>d>todayStr()); if(future.length)out.expiry=future[future.length-1]; }
+    if(!out.issue&&out.dates.length){ const past=out.dates.filter(d=>d<=todayStr()); if(past.length)out.issue=past[past.length-1]; }
+    // Document number (passport/licence/policy): alnum run 6–12
+    const numM=T.match(/\b(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9]{6,12})\b/i) || T.match(/\b([A-Z]{1,2}\d{6,9})\b/);
+    if(numM)out.number=numM[1].toUpperCase();
+    return out;
+  },
+  // Auto-title from type + number/date.
+  suggestTitle(type, ex){
+    const label=type?docTypeLabel(type):'Document';
+    if(ex&&ex.number)return `${label} · ${ex.number}`;
+    if(ex&&ex.expiry)return `${label} (exp ${ex.expiry})`;
+    return label;
+  },
+  // Simple fingerprint for duplicate detection (size + first/last bytes of dataUrl).
+  fingerprint(att){
+    if(!att||!att.dataUrl)return '';
+    const s=att.dataUrl; const len=s.length;
+    return `${att.size||len}:${s.slice(0,48)}:${s.slice(-48)}`;
+  },
+  findDuplicate(att, excludeId){
+    const fp=this.fingerprint(att); if(!fp)return null;
+    for(const d of documentsLive()){
+      if(d.id===excludeId||d.secure)continue;
+      for(const a of (d.attachments||[])){ if(this.fingerprint(a)===fp)return d; }
+    }
+    return null;
+  }
+};
+
 const DocService={
   // Attachments held in payload for secure docs; inline otherwise.
   async _encPayload(payload){
@@ -4943,7 +5086,7 @@ const DocService={
       issueDate:meta.issueDate||'', expiryDate:meta.expiryDate||'', reminderDays:meta.reminderDays||0,
       notes:meta.secure?'':(meta.notes||''), favourite:!!meta.favourite, color:meta.color||'#3b82f6',
       secure:!!meta.secure, archivedAt:null, deletedAt:null, createdAt:ts, updatedAt:ts,
-      customMeta:meta.customMeta||{}, versions:[],
+      customMeta:meta.customMeta||{}, versions:[], ocrText:(meta.secure?'':(meta.ocrText||'')),
       attachments: meta.secure?[]:(attachments||[]),
       encryptedPayload:null, iv:null, encryptionVersion:meta.secure?VAULT_ENC_VER:null,
       syncVersion:1, conflictMetadata:null
@@ -4977,6 +5120,7 @@ const DocService={
       attachments:d.secure?null:(d.attachments||[]).map(a=>({...a})), notes:d.secure?null:d.notes});
     if(d.versions.length>50)d.versions=d.versions.slice(-50);
     ['title','type','folderId','tags','issueDate','expiryDate','reminderDays','favourite','color','customMeta'].forEach(k=>{ if(meta&&k in meta)d[k]=meta[k]; });
+    if(meta&&'ocrText' in meta)d.ocrText=meta.secure?'':(meta.ocrText||'');
     const wantSecure=meta&&('secure' in meta)?!!meta.secure:d.secure;
     if(wantSecure){
       const {payload:ct, iv}=await this._encPayload({notes:notes||'', attachments:attachments||[]});
@@ -6531,6 +6675,7 @@ function docFilteredList(){
         || docTypeLabel(d.type).toLowerCase().includes(q)
         || (d.tags||[]).some(t=>String(t).toLowerCase().includes(q))
         || (!d.secure && (d.notes||'').toLowerCase().includes(q))
+        || (!d.secure && (d.ocrText||'').toLowerCase().includes(q))
         || String(folder||'').toLowerCase().includes(q);
     });
   }
@@ -6662,6 +6807,8 @@ function docRenderDetail(){
       ${doc.expiryDate?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'تاریخ انقضا':'Expires'}</span><span class="pay-drow-v">${shortDate(doc.expiryDate)} ${docExpiryChip(doc)}</span></div>`:''}
       ${folder?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'پوشه':'Folder'}</span><span class="pay-drow-v">${esc(folder)}</span></div>`:''}
       ${(doc.tags&&doc.tags.length)?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'برچسب‌ها':'Tags'}</span><span class="pay-drow-v">${doc.tags.map(t=>'#'+esc(t)).join(' ')}</span></div>`:''}
+      ${(()=>{ const trips=(typeof tripsMap==='function'?Object.values(tripsMap()):[]).filter(t=>!t.deletedAt&&(t.docLinks||[]).includes(doc.id)); return trips.length?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'مرتبط با سفر':'Linked to trip'}</span><span class="pay-drow-v">${trips.map(t=>'✈ '+esc(t.title||t.destination||'')).join('، ')}</span></div>`:''; })()}
+      ${(doc.ocrText&&!doc.secure)?`<div class="pay-drow"><span class="pay-drow-k">${L==='fa'?'متن استخراج‌شده':'Extracted text'}</span><span class="pay-drow-v">${L==='fa'?'قابل جستجو':'searchable'} ✓</span></div>`:''}
     </div>`;
   if(needUnlock){
     html+=`<div class="doc-locked-box"><div style="font-size:34px">🔒</div>
@@ -6778,6 +6925,64 @@ function docExpiryReminders(){
   });
   return out.sort((a,b)=>a.days-b.days);
 }
+// Project document expiry reminders into My Day / Planned / All Tasks (auto-link to Calendar view).
+function docExpiryDoneMap(){ if(!DB.entities.docReminderDone)DB.entities.docReminderDone={}; return DB.entities.docReminderDone; }
+function docReminderToggle(rid){ const m=docExpiryDoneMap(); if(m[rid])delete m[rid]; else m[rid]=now(); saveDB(); }
+function documentsAsTasks(){
+  const out=[]; const doneMap=docExpiryDoneMap();
+  documentsLive().forEach(d=>{
+    if(!d.expiryDate)return;
+    const days=docDaysToExpiry(d); if(days===null)return;
+    const win=d.reminderDays||30;
+    if(days<=win){
+      const rid='doc:'+d.id+':expiry';
+      out.push({ id:rid, kind:'doc', docId:d.id, text:(L==='fa'?'انقضای سند: ':'Document expires: ')+(d.title||docTypeLabel(d.type)), dueDate:d.expiryDate, dueTime:'', pinned:false, done:!!doneMap[rid], doneAt:doneMap[rid]||null, icon:docTypeIcon(d.type), color:d.color||'#3b82f6' });
+    }
+  });
+  // GC orphans
+  const valid=new Set(out.map(o=>o.id)); const m=docExpiryDoneMap(); let ch=false;
+  Object.keys(m).forEach(rid=>{ if(!valid.has(rid)){ delete m[rid]; ch=true; } }); if(ch)saveDB();
+  return out;
+}
+
+// Suggest cross-module links from extracted metadata. Returns [{module,id,label,confidence}]. Never links silently.
+function docSuggestLinks(docId, meta, ex){
+  const out=[]; const type=meta.type;
+  // Travel: travel-related docs (passport/visa/insurance/ticket) → trips overlapping issue/expiry window.
+  if(['passport','visa','insurance','vehicle-registration'].includes(type) && typeof tripsMap==='function'){
+    Object.values(tripsMap()).forEach(t=>{ if(t.deletedAt)return;
+      if((t.docLinks||[]).includes(docId))return;
+      // Suggest linking travel docs to any upcoming/active trip.
+      const st=tripStatus?tripStatus(t):''; if(st==='upcoming'||st==='active'){ out.push({module:'travel',id:t.id,label:'✈ '+(t.title||t.destination||'Trip'),confidence:'suggested'}); }
+    });
+  }
+  // Payments: invoice/receipt/tax with an amount → payments with matching amount.
+  if(['invoice','receipt','tax'].includes(type) && ex && ex.amount && typeof paymentsAll==='function'){
+    const amt=parseFloat(ex.amount);
+    if(amt>0)paymentsAll().forEach(pp=>{ const pa=parseFloat(pp.amount||0); if(pa&&Math.abs(pa-amt)<0.01){ out.push({module:'payment',id:pp.id,label:'💳 '+(pp.title||pp.label||'Payment')+' · '+amt,confidence:'match'}); } });
+  }
+  return out.slice(0,6);
+}
+function docConfirmLinks(docId, suggestions){
+  const rows=suggestions.map((s,i)=>`<label style="display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--b1)"><input type="checkbox" data-dsl="${i}" ${s.confidence==='match'?'checked':''} style="width:18px;height:18px"><span style="flex:1" dir="auto">${esc(s.label)}</span><span style="font-size:11px;color:var(--ink3)">${s.confidence==='match'?(L==='fa'?'تطابق':'match'):(L==='fa'?'پیشنهاد':'suggested')}</span></label>`).join('');
+  openSheet(`<h3>${L==='fa'?'پیوندهای پیشنهادی':'Suggested links'}</h3>
+    <p style="padding:0 4px 6px;color:var(--ink3);font-size:13px">${L==='fa'?'موارد درست را انتخاب و تأیید کنید. هیچ پیوندی بدون تأیید ساخته نمی‌شود.':'Select the correct matches. Nothing is linked without your confirmation.'}</p>
+    <div>${rows}</div>
+    <div class="btn-col" style="margin-top:12px">
+      <button class="btn btn-primary" id="dsl-apply">${L==='fa'?'پیوند انتخاب‌شده‌ها':'Link selected'}</button>
+      <button class="btn btn-ghost" id="dsl-skip">${L==='fa'?'رد کردن':'Skip'}</button>
+    </div>`);
+  document.getElementById('dsl-apply').onclick=()=>{
+    let n=0;
+    document.querySelectorAll('[data-dsl]').forEach(el=>{ if(el.checked){ const s=suggestions[parseInt(el.dataset.dsl,10)];
+      if(s.module==='travel'&&typeof TripService!=='undefined'){ TripService.linkDoc(s.id, docId); n++; }
+      else if(s.module==='payment'){ if(!DB.entities._docPayLinks)DB.entities._docPayLinks={}; if(!DB.entities._docPayLinks[docId])DB.entities._docPayLinks[docId]=[]; if(!DB.entities._docPayLinks[docId].includes(s.id)){ DB.entities._docPayLinks[docId].push(s.id); n++; } }
+    }});
+    saveDB(); closeSheet(); render(); if(n)toast((L==='fa'?n+' پیوند ساخته شد':n+' link(s) created'));
+  };
+  document.getElementById('dsl-skip').onclick=()=>{ closeSheet(); render(); };
+}
+
 function docReadFileAsAttachment(file){
   return new Promise((resolve,reject)=>{
     const r=new FileReader();
@@ -6801,6 +7006,8 @@ async function docOpenEditor(id){
     try{ const data=await DocService.read(id); notes=data.notes; attachments=data.attachments.slice(); }catch(_){ toast(L==='fa'?'ولت قفل است':'Vault locked'); return; }
   }
   let workingAtts=attachments.slice();
+  let docWorkingOcr=doc.ocrText||'';
+  let docWorkingExtract=null;
   let secureFlag=!!doc.secure;
   const folders=docFoldersAll();
   const attListHTML=()=>workingAtts.map((a,i)=>`<div class="doc-eatt"><span class="doc-eatt-ic">${a.kind==='image'?'🖼':a.kind==='pdf'?'📕':'📄'}</span><span class="doc-eatt-name">${esc(a.name)}</span><button class="doc-eatt-x" data-doc-renatt="${i}" type="button" aria-label="rename" style="background:var(--s3)">✎</button><button class="doc-eatt-x" data-doc-rmatt="${i}" type="button" aria-label="delete">✕</button></div>`).join('');
@@ -6858,7 +7065,34 @@ async function docOpenEditor(id){
     const files=Array.from(inp.files||[]);
     for(const f of files){
       if(f.size>8*1024*1024){ toast(L==='fa'?'فایل بزرگ‌تر از ۸ مگابایت':'File over 8MB skipped'); continue; }
-      try{ workingAtts.push(await docReadFileAsAttachment(f)); }catch(_){}
+      try{
+        const att=await docReadFileAsAttachment(f);
+        // Duplicate detection (non-secure): warn if the same file already exists.
+        const dup=DocIntelligence.findDuplicate(att);
+        if(dup){ toast((L==='fa'?'به‌نظر تکراری است: ':'Looks like a duplicate of: ')+(dup.title||docTypeLabel(dup.type))); }
+        workingAtts.push(att);
+        // Intelligence: OCR/PDF-text → classify → extract, then auto-fill any EMPTY fields (never overwrite user input).
+        const isImg=/^data:image\//.test(att.dataUrl||''), isPdf=/^data:application\/pdf/.test(att.dataUrl||'');
+        if(isImg||isPdf){
+          toast(L==='fa'?'در حال خواندن سند…':'Reading document…');
+          const text=await DocIntelligence.ocr(att.dataUrl);
+          if(text){
+            docWorkingOcr=(docWorkingOcr?docWorkingOcr+'\n':'')+text;
+            docWorkingExtract=DocIntelligence.extract(text);
+            const type=DocIntelligence.classify(text, att.name);
+            const ex=docWorkingExtract;
+            const typeEl=document.getElementById('doc-f-type'), titleEl=document.getElementById('doc-f-title'), issEl=document.getElementById('doc-f-issue'), expEl=document.getElementById('doc-f-expiry');
+            if(type&&typeEl&&(typeEl.value==='other'||!typeEl.value))typeEl.value=type;
+            if(titleEl&&!titleEl.value.trim())titleEl.value=DocIntelligence.suggestTitle(type||(typeEl&&typeEl.value), ex);
+            if(issEl&&!issEl.value&&ex.issue)issEl.value=ex.issue;
+            if(expEl&&!expEl.value&&ex.expiry)expEl.value=ex.expiry;
+            if(ex.expiry){ const rEl=document.getElementById('doc-f-remind'); if(rEl&&(!rEl.value||rEl.value==='0'))rEl.value='30'; }
+            toast(L==='fa'?'اطلاعات سند به‌صورت خودکار پر شد':'Document details auto-filled');
+          } else if(isPdf){
+            toast(L==='fa'?'متن PDF استخراج نشد — دستی وارد کنید':'No PDF text extracted — enter manually');
+          }
+        }
+      }catch(_){}
     }
     inp.value=''; refreshAtts();
   };
@@ -6879,16 +7113,21 @@ async function docOpenEditor(id){
       reminderDays:parseInt(document.getElementById('doc-f-remind').value,10)||0,
       folderId:document.getElementById('doc-f-folder').value||null,
       tags:document.getElementById('doc-f-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
-      favourite:doc.favourite, color:doc.color, secure:secureFlag
+      favourite:doc.favourite, color:doc.color, secure:secureFlag, ocrText:docWorkingOcr||''
     };
     const notesVal=document.getElementById('doc-f-notes').value;
     if(secureFlag && !VaultSession.isUnlocked()){ closeSheet(); docPromptUnlock(()=>{}); return; }
     try{
+      let savedId=id;
       if(editing){ await DocService.update(id, meta, workingAtts, notesVal); }
-      else{ const nid=await DocService.create(meta, workingAtts, secureFlag?{notes:notesVal,attachments:workingAtts}:null); docActiveId=nid; }
+      else{ const nid=await DocService.create(meta, workingAtts, secureFlag?{notes:notesVal,attachments:workingAtts}:null); docActiveId=nid; savedId=nid; }
+      const ex=docWorkingExtract;
       // wipe plaintext refs
       workingAtts=null; notes=null;
-      closeSheet(); render();
+      closeSheet();
+      // Suggest cross-module links from extracted metadata — user confirms; never linked silently.
+      const suggestions=docSuggestLinks(savedId, meta, ex);
+      if(suggestions.length){ docConfirmLinks(savedId, suggestions); } else { render(); }
     }catch(e){ toast(L==='fa'?'خطا در ذخیره':'Save failed'); }
   };
 }
@@ -10167,6 +10406,14 @@ function bindScreen(){
     if(e.target.closest('[data-trip-star]')||e.target.closest('[data-trip-done]'))return;
     e.stopPropagation();
     screen='module'; currentModule='travel'; tripActiveId=el.dataset.tripOpenTask; travelView='detail'; tripDetailTab='overview'; render(); window.scrollTo(0,0);});
+  document.querySelectorAll('[data-doc-done]').forEach(el=>el.onclick=e=>{
+    e.stopPropagation();
+    docReminderToggle(el.dataset.docDone);
+    render();});
+  document.querySelectorAll('[data-doc-open-task]').forEach(el=>el.onclick=e=>{
+    if(e.target.closest('[data-doc-done]'))return;
+    e.stopPropagation();
+    screen='module'; currentModule='documents'; docActiveId=el.dataset.docOpenTask; docView='detail'; render(); window.scrollTo(0,0);});
   // Task row → detail panel
   document.querySelectorAll('.trow-flat').forEach(el=>el.onclick=()=>{
     if(el.dataset.tid)openTaskDetail(el.dataset.tid);});
