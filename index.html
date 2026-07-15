@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v244';
+const APP_VERSION='v245';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -5570,6 +5570,9 @@ function tripQuickCreate(){
     <div class="fld"><label>${L==='fa'?'کشور (برای اطلاعات خودکار)':'Country (for auto info)'}</label>
       <input class="finput" id="tq-country" list="tq-country-list" autocomplete="off" placeholder="${L==='fa'?'مثلاً France':'e.g. France'}">
       <datalist id="tq-country-list">${TRIP_COUNTRY_LIST.map(c=>`<option value="${c}"></option>`).join('')}</datalist></div>
+    <div class="fld"><label>${L==='fa'?'شهر':'City'}</label>
+      <input class="finput" id="tq-city" list="tq-city-list" autocomplete="off" placeholder="${L==='fa'?'ابتدا کشور را انتخاب کنید':'select a country first'}">
+      <datalist id="tq-city-list"></datalist></div>
     <div class="fld pay-form-grid">
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ شروع':'Start date'}</label><input class="finput" id="tq-start" type="date"></div>
       <div class="pay-fg-amt"><label>${L==='fa'?'تاریخ پایان':'End date'}</label><input class="finput" id="tq-end" type="date"></div>
@@ -5582,25 +5585,37 @@ function tripQuickCreate(){
     </div></div>`, {noPad:true});
   const countryEl=document.getElementById('tq-country');
   const info=document.getElementById('tq-autoinfo');
-  const showInfo=()=>{ const ci=tripCountryInfo(countryEl.value); info.innerHTML=ci?`${L==='fa'?'ارز':'Currency'}: ${ci.currency} · ${L==='fa'?'زبان':'Lang'}: ${ci.language} · ${L==='fa'?'پریز':'Plug'}: ${ci.plug} · ${L==='fa'?'اورژانس':'Emergency'}: ${ci.emergency}`:''; };
+  const cityDL=document.getElementById('tq-city-list');
+  const showInfo=()=>{
+    const ci=tripCountryInfo(countryEl.value);
+    // dependent city list
+    if(cityDL)cityDL.innerHTML=tripCitiesFor(countryEl.value).map(c=>`<option value="${c}"></option>`).join('');
+    const cityEl=document.getElementById('tq-city'); if(cityEl)cityEl.placeholder=ci?(L==='fa'?'مثلاً '+(tripCitiesFor(countryEl.value)[0]||''):'e.g. '+(tripCitiesFor(countryEl.value)[0]||'')):(L==='fa'?'ابتدا کشور را انتخاب کنید':'select a country first');
+    info.innerHTML=ci?`${ci.flag?ci.flag+' ':''}${ci.currency} · ${esc(ci.language)} · ${L==='fa'?'پریز':'Plug'} ${ci.plug} · ${L==='fa'?'اورژانس':'Emergency'} ${ci.emergency}${ci.code?' · '+ci.code:''} · ${ci.timezone}`:'';
+  };
   countryEl.addEventListener('input',showInfo); countryEl.addEventListener('change',showInfo);
   document.getElementById('tq-cancel').onclick=()=>closeSheet();
   document.getElementById('tq-save').onclick=()=>{
     const dest=document.getElementById('tq-dest').value.trim();
     const country=document.getElementById('tq-country').value.trim();
+    const city=(document.getElementById('tq-city')||{}).value ? document.getElementById('tq-city').value.trim() : '';
     const start=document.getElementById('tq-start').value;
     const end=document.getElementById('tq-end').value;
+    const errEl=document.getElementById('tq-autoinfo');
+    const showErr=(msg)=>{ if(errEl){ errEl.innerHTML=`<span style="color:#ef4444">⚠ ${msg}</span>`; } toast(msg); };
+    if(!dest){ showErr(L==='fa'?'مقصد لازم است':'Destination is required'); return; }
+    if(!start){ showErr(L==='fa'?'تاریخ شروع لازم است':'Start date is required'); return; }
+    if(!end){ showErr(L==='fa'?'تاریخ پایان لازم است':'End date is required'); return; }
+    if(end<start){ showErr(L==='fa'?'تاریخ پایان نمی‌تواند قبل از شروع باشد':'End date cannot be before start date'); return; }
     const ci=tripCountryInfo(country);
-    const meta={ title:dest||(L==='fa'?'سفر جدید':'New trip'), destination:dest, country:country,
+    const meta={ title:dest, destination:dest, country:country, city:city,
       startDate:start, endDate:end,
       currency: ci?ci.currency:(DB.meta.payDefaultCurrency||'AUD'),
       timezone: ci?ci.timezone:'' };
     const nid=TripService.create(meta);
-    // seed suggested packing from country/season
+    if(!nid||!tripsMap()[nid]){ toast(L==='fa'?'خطا در ساخت سفر':'Failed to create trip'); return; }
     tripSuggestPacking(tripsMap()[nid]).forEach(x=>TripService.listAdd(nid,'packing',x));
     tripActiveId=nid; travelView='detail'; tripDetailTab='overview';
-    // Open the Full Trip Editor directly (standalone fn, no routing branch) in the same sheet.
-    if(!nid||!tripsMap()[nid]){ toast(L==='fa'?'خطا در ساخت سفر':'Failed to create trip'); return; }
     tripOpenFullEditor(nid);
   };
 }
@@ -5671,9 +5686,11 @@ function tripOpenFullEditor(id){
     const dest=document.getElementById('trip-f-dest').value.trim();
     if(!title&&!dest){ toast(L==='fa'?'عنوان یا مقصد لازم است':'Title or destination required'); return; }
     const gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
+    const _s=gv('trip-f-start'), _e=gv('trip-f-end');
+    if(_s&&_e&&_e<_s){ toast(L==='fa'?'تاریخ پایان نمی‌تواند قبل از شروع باشد':'End date cannot be before start date'); return; }
     const meta={ title:title||dest, destination:dest,
       country:gv('trip-f-country').trim(), city:gv('trip-f-city').trim(),
-      startDate:gv('trip-f-start'), endDate:gv('trip-f-end'),
+      startDate:_s, endDate:_e,
       timezone:gv('trip-f-tz').trim(),
       budget:parseFloat(gv('trip-f-budget'))||0,
       currency:gv('trip-f-currency')||t.currency,
