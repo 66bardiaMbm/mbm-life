@@ -1304,6 +1304,8 @@ body.rtl .trow-content{text-align:right}
   padding:16px;width:100%;cursor:pointer;font-size:16px;font-weight:600;
   color:var(--ink);margin-bottom:12px;transition:background .15s;font-family:inherit}
 .auth-btn:active{background:var(--s3)}
+.act-grp-expand{animation:actExpand .18s ease}
+@keyframes actExpand{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 </style>
 </head>
 <body>
@@ -1403,7 +1405,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v261';
+const APP_VERSION='v262';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1965,6 +1967,7 @@ let activitySelMode=false;
 let activitySel=new Set();            // selected event keys
 let activityExpandedGroups=new Set(); // expanded aggregate groups
 let activitySwipeKey=null;            // row with revealed swipe actions
+let _actSortSheet=false;              // sort bottom-sheet open
 let docListLimit=60;
 let docActiveFolder=null;
 let travelView='home';     // home | detail
@@ -9674,10 +9677,19 @@ function renderActivity(){
     ${presentMods.map(m=>`<button class="pay-chip${mods.has(m)?' on':''}" data-act-modf="${m}" style="flex:none">${ACT_MODULES[m].ic} ${actModuleLabel(m)}</button>`).join('')}
   </div>`;
   const sorts=[['newest',L==='fa'?'جدیدترین':'Newest'],['oldest',L==='fa'?'قدیمی‌ترین':'Oldest'],['module',L==='fa'?'ماژول':'Module'],['type',L==='fa'?'نوع':'Type']];
-  html+=`<div style="display:flex;gap:6px;padding:0 14px 8px;overflow-x:auto;scrollbar-width:none;align-items:center">
-    <span style="font-size:11px;color:var(--ink3);flex:none">${L==='fa'?'مرتب:':'Sort:'}</span>
-    ${sorts.map(([k,l])=>`<button class="pay-chip${activitySort===k?' on':''}" data-act-sort="${k}" style="flex:none">${l}</button>`).join('')}
+  const sortLabel=(sorts.find(s=>s[0]===activitySort)||sorts[0])[1];
+  html+=`<div style="display:flex;gap:8px;padding:0 14px 8px;align-items:center">
+    <button id="act-sort-btn" class="pay-chip" style="flex:none">⇅ ${L==='fa'?'مرتب':'Sort'}: ${sortLabel}</button>
   </div>`;
+  // sort bottom sheet (overlay; DOM order irrelevant since it's fixed)
+  if(_actSortSheet){
+    html+=`<div id="act-sort-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40"></div>
+      <div style="position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--s0,var(--s1));border-top-left-radius:18px;border-top-right-radius:18px;border-top:1px solid var(--b1);padding:8px 14px calc(18px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto">
+        <div style="width:38px;height:4px;border-radius:2px;background:var(--b2);margin:8px auto 12px"></div>
+        <div style="font-size:13px;font-weight:800;color:var(--ink2);padding:0 4px 8px">${L==='fa'?'مرتب‌سازی بر اساس':'Sort by'}</div>
+        ${sorts.map(([k,l])=>`<button class="ul-row" data-act-sortopt="${k}" style="width:100%;text-align:start;display:flex;align-items:center;gap:10px;padding:12px 6px;border:none;background:transparent;cursor:pointer;font-size:15px;color:var(--ink)"><span style="width:18px;color:var(--brand)">${activitySort===k?'✓':''}</span>${l}</button>`).join('')}
+      </div>`;
+  }
 
   if(!events.length){
     html+=`<div class="hub-ph"><div class="hub-ph-ic">${archiveMode?'🗄':'⟳'}</div>
@@ -9700,13 +9712,19 @@ function renderActivity(){
   });
   if(sectMode==='date') secOrder.sort((a,b)=> (secMap[b].sec.order-secMap[a].sec.order));
 
+  window._actSecKeys={};
   secOrder.forEach(sid=>{
     const {sec,items}=secMap[sid];
+    window._actSecKeys[sid]=items.map(e=>e.key);
     const collapsed=actSectionCollapsed(sid);
-    html+=`<div data-act-sec="${sid}" style="display:flex;align-items:center;gap:8px;padding:14px 16px 6px;cursor:pointer">
-      <span style="font-size:12px;color:var(--ink3);transition:transform .15s;transform:rotate(${collapsed?'-90deg':'0'})">▾</span>
-      <span style="font-size:12.5px;font-weight:800;color:var(--ink2)">${esc(sec.label)}</span>
-      <span style="font-size:11px;color:var(--ink3);font-weight:600">${items.length}</span></div>`;
+    const badge=`<span style="min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--b2);color:var(--ink2);font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${items.length}</span>`;
+    html+=`<div style="display:flex;align-items:center;gap:8px;padding:12px 16px 4px">
+      <div data-act-sec="${sid}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">
+        <span style="font-size:12px;color:var(--ink3);transition:transform .15s;transform:rotate(${collapsed?'-90deg':'0'})">▾</span>
+        <span style="font-size:12.5px;font-weight:800;color:var(--ink2)">${esc(sec.label)}</span>
+        ${badge}
+      </div>
+      ${activitySelMode?`<button data-act-selsec="${sid}" style="flex:none;border:1px solid var(--b2);background:transparent;color:var(--brand);border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer">${L==='fa'?'انتخاب بخش':'Select'}</button>`:''}</div>`;
     if(collapsed)return;
     html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
     // group repetitive events (module+verb) with count>=3 → aggregate
@@ -9724,7 +9742,7 @@ function renderActivity(){
             <div style="font-size:11px;color:var(--ink3)">${expanded?(L==='fa'?'برای جمع‌کردن':'tap to collapse'):(L==='fa'?'برای نمایش همه':'tap to expand')}</div>
           </div>
           <span style="color:var(--ink3);opacity:.4;transform:rotate(${expanded?'90deg':'0'});transition:.15s">›</span></div>`;
-        if(expanded)list.forEach(e=>{ html+=actRow(e,true); });
+        if(expanded){ html+=`<div class="act-grp-expand">`; list.forEach(e=>{ html+=actRow(e,true); }); html+=`</div>`; }
       }else{
         list.forEach(e=>{ html+=actRow(e,false); });
       }
@@ -11435,7 +11453,7 @@ function bindScreen(){
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   if(typeof bindFamily==='function')bindFamily();
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='dashboard';famActiveMemberId=null;famActivePlaceId=null;}if(currentModule==='activity'){activitySelMode=false;activitySel.clear();activitySwipeKey=null;activityView='timeline';activityManageOpen=false;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='dashboard';famActiveMemberId=null;famActivePlaceId=null;}if(currentModule==='activity'){activitySelMode=false;activitySel.clear();activitySwipeKey=null;activityView='timeline';activityManageOpen=false;_actSortSheet=false;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -12104,8 +12122,12 @@ function bindScreen(){
     const rerender=()=>{ render(); };
     // module multi-filter (combinable)
     document.querySelectorAll('[data-act-modf]').forEach(el=>el.onclick=()=>{ const m=el.dataset.actModf; if(!m){ activityFilterMods.clear(); } else { if(activityFilterMods.has(m))activityFilterMods.delete(m); else activityFilterMods.add(m); } render(); });
-    // sort
-    document.querySelectorAll('[data-act-sort]').forEach(el=>el.onclick=()=>{ activitySort=el.dataset.actSort; render(); });
+    // sort (bottom sheet)
+    const sortBtn=document.getElementById('act-sort-btn'); if(sortBtn)sortBtn.onclick=()=>{ _actSortSheet=!_actSortSheet; render(); };
+    const sortBd=document.getElementById('act-sort-backdrop'); if(sortBd)sortBd.onclick=()=>{ _actSortSheet=false; render(); };
+    document.querySelectorAll('[data-act-sortopt]').forEach(el=>el.onclick=()=>{ activitySort=el.dataset.actSortopt; _actSortSheet=false; render(); });
+    // select whole section
+    document.querySelectorAll('[data-act-selsec]').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); const sid=el.dataset.actSelsec; const keys=(window._actSecKeys&&window._actSecKeys[sid])||[]; if(!activitySelMode)activitySelMode=true; const allSel=keys.length&&keys.every(k=>activitySel.has(k)); keys.forEach(k=>{ if(allSel)activitySel.delete(k); else activitySel.add(k); }); render(); });
     // search
     const actSearch=document.getElementById('act-search');
     if(actSearch)actSearch.oninput=()=>{ activitySearch=actSearch.value; clearTimeout(window._actSearchT); window._actSearchT=setTimeout(()=>{ render(); const s=document.getElementById('act-search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },220); };
