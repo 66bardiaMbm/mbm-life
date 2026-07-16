@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v256';
+const APP_VERSION='v257';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1947,6 +1947,10 @@ let docFilter='all';       // all | recent | expiring | expired | archived | tra
 let docSort='updated';     // name | added | updated | expiry | issue | type
 let docLayout='list';      // list | grid
 let docSearch='';
+let activityFilterModule='';
+let activityFilterType='';
+let activitySearch='';
+let activityLimit=60;
 let docListLimit=60;
 let docActiveFolder=null;
 let travelView='home';     // home | detail
@@ -9350,34 +9354,223 @@ function renderLifeHub(){
 }
 
 // ── Activity History screen: one shared timeline for every content type ──
+// ── Activity: intelligent unified timeline ──
+// Reads LIVE from every module (no duplicate storage). Merges stored ephemeral events
+// (unlock/copy/OCR/import) with derived events from module timestamps. Deduped, grouped,
+// filterable, searchable. Each event carries a nav target to open the canonical record.
+const ACT_MODULES={
+  travel:{en:'Travel',fa:'سفر',ic:'✈',color:'#06b6d4'},
+  documents:{en:'Documents',fa:'اسناد',ic:'🗂',color:'#3b82f6'},
+  vault:{en:'Vault',fa:'ولت',ic:'🔒',color:'#ef4444'},
+  payments:{en:'Payments',fa:'پرداخت',ic:'💳',color:'#22c55e'},
+  calendar:{en:'Calendar',fa:'تقویم',ic:'📅',color:'#f59e0b'},
+  tasks:{en:'Tasks',fa:'کارها',ic:'✓',color:'#6e56f8'},
+  notes:{en:'Notes',fa:'یادداشت',ic:'📝',color:'#a855f7'},
+  shopping:{en:'Shopping',fa:'خرید',ic:'🛒',color:'#ec4899'}
+};
+function actModuleLabel(m){ const x=ACT_MODULES[m]; return x?(L==='fa'?x.fa:x.en):m; }
+function actModuleColor(m){ const x=ACT_MODULES[m]; return x?x.color:'#6e56f8'; }
+const ACT_VERB={
+  created:{en:'created',fa:'ساخته شد',ic:'＋'}, updated:{en:'updated',fa:'ویرایش شد',ic:'✎'},
+  edited:{en:'edited',fa:'ویرایش شد',ic:'✎'}, completed:{en:'completed',fa:'تکمیل شد',ic:'✓'},
+  deleted:{en:'deleted',fa:'حذف شد',ic:'🗑'}, archived:{en:'archived',fa:'بایگانی شد',ic:'▤'},
+  paid:{en:'marked paid',fa:'پرداخت شد',ic:'💰'}, due:{en:'due',fa:'سررسید',ic:'⏰'},
+  expiring:{en:'expiring',fa:'در حال انقضا',ic:'⚠'}, imported:{en:'imported',fa:'وارد شد',ic:'📥'},
+  ocr:{en:'scanned (OCR)',fa:'اسکن شد',ic:'👁'}, unlocked:{en:'unlocked',fa:'باز شد',ic:'🔓'},
+  restored:{en:'restored',fa:'بازگردانی شد',ic:'↩'}, starred:{en:'starred',fa:'ستاره‌دار شد',ic:'★'},
+  copied:{en:'field copied',fa:'کپی شد',ic:'⧉'}, setup:{en:'set up',fa:'راه‌اندازی',ic:'⚙'}
+};
+function actVerb(v){ const x=ACT_VERB[v]; return x?(L==='fa'?x.fa:x.en):v; }
+function actVerbIc(v){ const x=ACT_VERB[v]; return x?x.ic:'•'; }
+
+// Map legacy stored-activity refType → module key.
+const ACT_REF_MODULE={ shopList:'shopping', shopItem:'shopping', task:'tasks', appt:'calendar', note:'notes', payment:'payments', vault:'vault', vaultSystem:'vault', document:'documents', trip:'travel' };
+
+function buildTimeline(){
+  const out=[];
+  const push=(o)=>{ if(o.at)out.push(o); };
+  // 1) Stored ephemeral/legacy events (things not reconstructable from state: unlock, copy, OCR, delete).
+  Object.values(activityMap()).forEach(e=>{
+    const module=ACT_REF_MODULE[e.refType]||'tasks';
+    push({ key:'log:'+e.id, at:e.at, module, verb:e.type, name:(e.meta&&e.meta.name)||'', refType:e.refType, refId:e.refId, source:'log' });
+  });
+  // 2) Derived live events from module state (createdAt/updatedAt/expiry/completed). Deduped by key.
+  const seen=new Set(out.map(o=>o.module+':'+o.refId+':'+o.verb+':'+(o.at||'').slice(0,16)));
+  const add=(o)=>{ const k=o.module+':'+o.refId+':'+o.verb+':'+(o.at||'').slice(0,16); if(seen.has(k))return; seen.add(k); push(o); };
+  // Travel
+  if(typeof tripsMap==='function')Object.values(tripsMap()).forEach(t=>{
+    if(t.deletedAt)return;
+    if(t.createdAt)add({key:'trip:'+t.id+':c',at:t.createdAt,module:'travel',verb:'created',name:t.title||t.destination||'',refType:'trip',refId:t.id});
+    if(t.updatedAt&&t.updatedAt!==t.createdAt)add({key:'trip:'+t.id+':u',at:t.updatedAt,module:'travel',verb:'updated',name:t.title||t.destination||'',refType:'trip',refId:t.id});
+  });
+  // Documents (+ expiring)
+  if(typeof documentsLive==='function')documentsLive().forEach(d=>{
+    if(d.createdAt)add({key:'doc:'+d.id+':c',at:d.createdAt,module:'documents',verb:'created',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
+    if(d.updatedAt&&d.updatedAt!==d.createdAt)add({key:'doc:'+d.id+':u',at:d.updatedAt,module:'documents',verb:'updated',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
+    const days=(typeof docDaysToExpiry==='function')?docDaysToExpiry(d):null;
+    if(days!==null&&days>=0&&days<=30&&d.expiryDate)add({key:'doc:'+d.id+':e',at:d.expiryDate+'T09:00:00',module:'documents',verb:'expiring',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
+  });
+  // Payments (+ due/paid)
+  if(typeof paymentsAll==='function')paymentsAll().forEach(pp=>{
+    if(pp.createdAt)add({key:'pay:'+pp.id+':c',at:pp.createdAt,module:'payments',verb:'created',name:pp.title||pp.label||'',refType:'payment',refId:pp.id});
+    const paid=(typeof payDerivedStatus==='function')?payDerivedStatus(pp)==='paid':pp.paid;
+    if(paid&&pp.paidAt)add({key:'pay:'+pp.id+':p',at:pp.paidAt,module:'payments',verb:'paid',name:pp.title||pp.label||'',refType:'payment',refId:pp.id});
+    if(!paid&&pp.dueDate)add({key:'pay:'+pp.id+':d',at:pp.dueDate+'T09:00:00',module:'payments',verb:'due',name:pp.title||pp.label||'',refType:'payment',refId:pp.id});
+  });
+  // Tasks (+ completed)
+  if(DB.entities.tasks)Object.values(DB.entities.tasks).forEach(t=>{
+    if(t.deletedAt)return;
+    if(t.createdAt)add({key:'task:'+t.id+':c',at:t.createdAt,module:'tasks',verb:'created',name:t.text||t.title||'',refType:'task',refId:t.id});
+    if(t.done&&t.doneAt)add({key:'task:'+t.id+':done',at:t.doneAt,module:'tasks',verb:'completed',name:t.text||t.title||'',refType:'task',refId:t.id});
+  });
+  // Notes
+  if(DB.entities.noteItems)Object.values(DB.entities.noteItems).forEach(n=>{
+    if(n.archivedAt||n.deletedAt)return;
+    if(n.updatedAt)add({key:'note:'+n.id+':u',at:n.updatedAt,module:'notes',verb:(n.updatedAt!==n.createdAt?'updated':'created'),name:n.title||'',refType:'note',refId:n.id});
+    else if(n.createdAt)add({key:'note:'+n.id+':c',at:n.createdAt,module:'notes',verb:'created',name:n.title||'',refType:'note',refId:n.id});
+  });
+  // Shopping
+  if(typeof shopListsAll==='function')shopListsAll().forEach(l=>{
+    if(l.createdAt)add({key:'shop:'+l.id+':c',at:l.createdAt,module:'shopping',verb:'created',name:l.name||'',refType:'shopList',refId:l.id});
+  });
+  // Calendar / appointments
+  if(DB.entities.appts)Object.values(DB.entities.appts).forEach(ap=>{
+    if(ap.archivedAt)return;
+    if(ap.createdAt)add({key:'appt:'+ap.id+':c',at:ap.createdAt,module:'calendar',verb:'created',name:ap.title||'',refType:'appt',refId:ap.id});
+  });
+  out.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+  return out;
+}
+
+function actLabel(e){
+  const kind=(()=>{ switch(e.refType){
+    case 'trip':return L==='fa'?'سفر':'Trip'; case 'document':return L==='fa'?'سند':'Document';
+    case 'payment':return L==='fa'?'پرداخت':'Payment'; case 'task':return L==='fa'?'کار':'Task';
+    case 'note':return L==='fa'?'یادداشت':'Note'; case 'shopList':return L==='fa'?'لیست خرید':'Shopping list';
+    case 'appt':return L==='fa'?'قرار':'Appointment'; case 'vault':return L==='fa'?'مورد امن':'Secure item';
+    case 'vaultSystem':return L==='fa'?'ولت':'Vault'; default:return e.refType; }
+  })();
+  return `${kind} ${e.name?'“'+e.name+'” ':''}${actVerb(e.verb)}`;
+}
+
+// AI-ready recap: deterministic today/this-week summary from the live timeline.
+function timelineSummary(range){
+  const all=buildTimeline();
+  const ts=todayStr();
+  let cutoff='0000';
+  if(range==='today')cutoff=ts;
+  else if(range==='week'){ const w=new Date(ts+'T00:00:00'); w.setDate(w.getDate()-7); cutoff=w.toISOString().slice(0,10); }
+  const events=all.filter(e=>{ const d=(e.at||'').slice(0,10); return range==='today'?d===ts:d>=cutoff; });
+  const byModule={}, byVerb={};
+  events.forEach(e=>{ byModule[e.module]=(byModule[e.module]||0)+1; byVerb[e.verb]=(byVerb[e.verb]||0)+1; });
+  const parts=[]; Object.keys(byModule).forEach(m=>{ parts.push(`${byModule[m]} ${actModuleLabel(m)}`); });
+  const headline = range==='today' ? (L==='fa'?`امروز ${events.length} رخداد`:`${events.length} events today`) : (L==='fa'?`این هفته ${events.length} رخداد`:`${events.length} events this week`);
+  return { range, count:events.length, byModule, byVerb, headline, breakdown:parts.join(' · '), events };
+}
+
+function actGroupOf(at){
+  const ts=todayStr(); const d=(at||'').slice(0,10);
+  if(d===ts)return 'today';
+  const y=new Date(ts+'T00:00:00'); y.setDate(y.getDate()-1); const yStr=y.toISOString().slice(0,10);
+  if(d===yStr)return 'yesterday';
+  const w=new Date(ts+'T00:00:00'); w.setDate(w.getDate()-7); const wStr=w.toISOString().slice(0,10);
+  if(d>=wStr)return 'week';
+  return 'earlier';
+}
+
 function renderActivity(){
-  const events=activityAll();
+  const all=buildTimeline();
+  // Filters
+  const fMod=activityFilterModule, fType=activityFilterType, q=(activitySearch||'').trim().toLowerCase();
+  let events=all.filter(e=>{
+    if(fMod&&e.module!==fMod)return false;
+    if(fType&&e.verb!==fType)return false;
+    if(q){ const hay=(e.name+' '+actModuleLabel(e.module)+' '+actVerb(e.verb)+' '+actLabel(e)).toLowerCase(); if(!hay.includes(q))return false; }
+    return true;
+  });
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
     <div style="font-size:26px;font-weight:800">${L==='fa'?'فعالیت':'Activity'}</div>
   </div>`;
+  // Search
+  html+=`<div style="padding:4px 16px 8px"><input id="act-search" class="finput" placeholder="${L==='fa'?'جستجوی فعالیت‌ها…':'Search activity…'}" value="${esc(activitySearch||'')}" style="width:100%;box-sizing:border-box"></div>`;
+  // AI-ready recap banner (deterministic now; future AI summary hook uses timelineSummary()).
+  if(!q&&!fMod&&!fType){ const sum=timelineSummary('today'); if(sum.count){ html+=`<div style="margin:0 16px 8px;padding:12px 14px;border-radius:12px;background:linear-gradient(135deg,#6e56f818,#06b6d418);border:1px solid var(--b1)"><div style="font-size:14px;font-weight:700">${esc(sum.headline)}</div><div style="font-size:12px;color:var(--ink3);margin-top:2px" dir="auto">${esc(sum.breakdown)}</div></div>`; } }
+  // Module filter chips
+  html+=`<div class="pay-chips" style="flex-wrap:wrap">
+    <button class="pay-chip${!fMod?' on':''}" data-act-mod="">${L==='fa'?'همه':'All'}</button>`;
+  Object.keys(ACT_MODULES).forEach(m=>{ const c=all.some(e=>e.module===m); if(c)html+=`<button class="pay-chip${fMod===m?' on':''}" data-act-mod="${m}">${ACT_MODULES[m].ic} ${actModuleLabel(m)}</button>`; });
+  html+=`</div>`;
+  // Type filter chips (only types that appear)
+  const typesPresent=[...new Set(all.map(e=>e.verb))];
+  if(typesPresent.length>1){
+    html+=`<div class="pay-chips" style="flex-wrap:wrap">
+      <button class="pay-chip${!fType?' on':''}" data-act-type="">${L==='fa'?'همه رخدادها':'All events'}</button>`;
+    typesPresent.forEach(v=>{ html+=`<button class="pay-chip${fType===v?' on':''}" data-act-type="${v}">${actVerbIc(v)} ${actVerb(v)}</button>`; });
+    html+=`</div>`;
+  }
   if(!events.length){
     html+=`<div class="hub-ph"><div class="hub-ph-ic">⟳</div>
-      <div class="hub-ph-t">${L==='fa'?'هنوز فعالیتی نیست':'No activity yet'}</div>
-      <div class="hub-ph-d">${L==='fa'?'ساخت، ویرایش و تکمیل لیست‌های خرید اینجا ثبت می‌شود.':'Creating, editing and completing shopping lists will show up here.'}</div></div>`;
+      <div class="hub-ph-t">${L==='fa'?'فعالیتی یافت نشد':'No activity found'}</div>
+      <div class="hub-ph-d">${L==='fa'?'با تغییر فیلترها یا جستجو دوباره امتحان کنید.':'Try adjusting the filters or search.'}</div></div>`;
     return html;
   }
-  const icons={created:'＋',edited:'✎',completed:'✓',reused:'⟳',archived:'▤',deleted:'🗑',starred:'★',unstarred:'☆'};
-  html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
-  events.slice(0,100).forEach(e=>{
-    const d=new Date(e.at);
-    const when=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    const clickable=(e.refType==='shopList'&&shopListsMap()[e.refId]&&!shopListsMap()[e.refId].archivedAt);
-    html+=`<div class="ul-row" ${clickable?`data-act-shop="${e.refId}" style="cursor:pointer"`:''}>
-      <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:var(--s3);color:var(--ink2);display:flex;align-items:center;justify-content:center;font-size:16px">${icons[e.type]||'•'}</div></div>
-      <div style="flex:1;padding:12px 0 12px 4px;min-width:0">
-        <div style="font-size:14px">${esc(activityLabel(e))}</div>
-        <div style="font-size:12px;color:var(--ink3);margin-top:2px">${esc(when)}</div>
-      </div>
-    </div>`;
+  // Lazy render: cap to activityLimit, "show more" appends.
+  const shown=events.slice(0, activityLimit);
+  const groups=[['today',L==='fa'?'امروز':'Today'],['yesterday',L==='fa'?'دیروز':'Yesterday'],['week',L==='fa'?'این هفته':'This Week'],['earlier',L==='fa'?'پیش‌تر':'Earlier']];
+  const byGroup={today:[],yesterday:[],week:[],earlier:[]};
+  shown.forEach(e=>{ byGroup[actGroupOf(e.at)].push(e); });
+  groups.forEach(([gk,gl])=>{
+    const list=byGroup[gk]; if(!list.length)return;
+    html+=`<div style="padding:16px 16px 6px;font-size:13px;font-weight:800;color:var(--ink2)">${gl} <span style="color:var(--ink3);font-weight:600">· ${list.length}</span></div>`;
+    html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
+    list.forEach(e=>{
+      const d=new Date(e.at);
+      const when=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      const col=actModuleColor(e.module);
+      const nav=actIsNavigable(e);
+      html+=`<div class="ul-row" ${nav?`data-act-open="${e.module}:${e.refId}" style="cursor:pointer"`:''}>
+        <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:${col}22;color:${col};display:flex;align-items:center;justify-content:center;font-size:15px">${actVerbIc(e.verb)}</div></div>
+        <div style="flex:1;padding:12px 0 12px 4px;min-width:0">
+          <div style="font-size:14px" dir="auto">${esc(actLabel(e))}</div>
+          <div style="font-size:12px;color:var(--ink3);margin-top:2px"><span style="color:${col}">${ACT_MODULES[e.module]?ACT_MODULES[e.module].ic:''} ${esc(actModuleLabel(e.module))}</span> · ${esc(when)}</div>
+        </div>
+        ${nav?'<span style="color:var(--ink3);opacity:.4;padding-inline-end:4px">›</span>':''}
+      </div>`;
+    });
+    html+=`</div>`;
   });
-  html+=`</div>`;
+  if(events.length>shown.length){
+    html+=`<div style="padding:12px 16px 24px"><button class="btn btn-ghost" id="act-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${events.length-shown.length})</button></div>`;
+  }
   return html;
+}
+
+// Whether an event can open its canonical record (record still exists & not deleted).
+function actIsNavigable(e){
+  switch(e.module){
+    case 'travel':return typeof tripsMap==='function'&&!!tripsMap()[e.refId]&&!tripsMap()[e.refId].deletedAt;
+    case 'documents':return typeof documentsMap==='function'&&!!documentsMap()[e.refId]&&!documentsMap()[e.refId].deletedAt;
+    case 'payments':return typeof paymentsMap==='function'&&!!paymentsMap()[e.refId];
+    case 'notes':return !!(DB.entities.noteItems&&DB.entities.noteItems[e.refId]);
+    case 'shopping':return typeof shopListsMap==='function'&&!!shopListsMap()[e.refId];
+    case 'vault':return !!(DB.entities.vaultItems&&DB.entities.vaultItems[e.refId]);
+    case 'tasks':return !!(DB.entities.tasks&&DB.entities.tasks[e.refId]);
+    default:return false;
+  }
+}
+// Open the canonical record for an activity event.
+function actOpen(module, refId){
+  screen='module';
+  if(module==='travel'){ currentModule='travel'; tripActiveId=refId; travelView='detail'; tripDetailTab='overview'; }
+  else if(module==='documents'){ currentModule='documents'; docActiveId=refId; docView='detail'; }
+  else if(module==='payments'){ currentModule='payments'; payActiveId=refId; payView='detail'; }
+  else if(module==='vault'){ currentModule='vault'; vaultActiveId=refId; vaultView='detail'; }
+  else if(module==='notes'){ currentModule='notes'; activeNoteId=refId; noteView='detail'; }
+  else if(module==='shopping'){ currentModule='shopping'; activeShopListId=refId; shopView='detail'; if(typeof shopResetSelect==='function')shopResetSelect(); }
+  else if(module==='tasks'){ screen='today'; render(); if(typeof openTaskDetail==='function')openTaskDetail(refId); return; }
+  else return;
+  render(); window.scrollTo(0,0);
 }
 
 function renderModule(){
@@ -11163,6 +11356,13 @@ function bindScreen(){
     const id=shopReuseLastList(s,l);
     shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
   };
+  // Activity timeline interactions
+  document.querySelectorAll('[data-act-mod]').forEach(el=>el.onclick=()=>{ activityFilterModule=el.dataset.actMod; activityLimit=60; render(); });
+  document.querySelectorAll('[data-act-type]').forEach(el=>el.onclick=()=>{ activityFilterType=el.dataset.actType; activityLimit=60; render(); });
+  const actMore=document.getElementById('act-more'); if(actMore)actMore.onclick=()=>{ activityLimit+=60; render(); };
+  const actSearch=document.getElementById('act-search');
+  if(actSearch)actSearch.oninput=()=>{ activitySearch=actSearch.value; activityLimit=60; clearTimeout(window._actSearchT); window._actSearchT=setTimeout(()=>{ render(); const s=document.getElementById('act-search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },220); };
+  document.querySelectorAll('[data-act-open]').forEach(el=>el.onclick=()=>{ const [mod,ref]=el.dataset.actOpen.split(':'); actOpen(mod, ref); });
   document.querySelectorAll('[data-act-shop]').forEach(el=>el.onclick=()=>{
     screen='module'; currentModule='shopping';
     activeShopListId=el.dataset.actShop; shopView='detail'; shopSearch=''; shopResetSelect();
