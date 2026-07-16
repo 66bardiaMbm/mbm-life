@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v257';
+const APP_VERSION='v258';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1542,6 +1542,8 @@ function loadDB(){
     ['myday','important','planned','assigned','all'].forEach(k=>{if(d.meta.smartShow[k]===undefined)d.meta.smartShow[k]=true;});
     if(!Array.isArray(d.meta.groups))d.meta.groups=[];
     if(!Object.keys(d.entities.lists).length)seedDB(d);
+    // Prune low-value ephemeral activity (copied/unlock/OCR) past its retention window.
+    try{ const _m=d.entities.activity; if(_m){ const now=Date.now(),RET={copied:2*864e5,unlocked:7*864e5,locked:7*864e5,ocr:14*864e5}; Object.values(_m).forEach(e=>{ const r=RET[e.type]; if(!r)return; const t=Date.parse(e.at||''); if(!isNaN(t)&&now-t>r)delete _m[e.id]; }); } }catch(_){}
     return d;
   }catch(e){return seedDB(blankDB());}
 }
@@ -2673,7 +2675,7 @@ function taskRowFlat(t,isOverdue){
     </div>
     <div class="trow-content">
       <div class="trow-title" dir="auto">${esc(t.text)}</div>
-      ${meta||pr?`<div class="trow-meta-row">${meta}${pr}</div>`:''}
+      ${meta?`<div class="trow-meta-row">${meta}</div>`:''}
     </div>
     <div class="trow-star-wrap">
       <button class="star ${t.pinned?'on':''}" data-pin="${t.id}">★</button>
@@ -9383,16 +9385,46 @@ const ACT_VERB={
 function actVerb(v){ const x=ACT_VERB[v]; return x?(L==='fa'?x.fa:x.en):v; }
 function actVerbIc(v){ const x=ACT_VERB[v]; return x?x.ic:'•'; }
 
+// Reconstructable verbs are OWNED by the derived pass (single source of truth).
+// Stored-log events may ONLY contribute non-reconstructable, ephemeral verbs;
+// this is what removes created/created and edited/updated duplication at the root.
+const ACT_STORED_VERBS=new Set(['deleted','permanently_deleted','archived','restored','unlocked','locked','copied','ocr','imported','setup','reused']);
+// Reconstructable "editing" verbs that collapse into one row per record.
+const ACT_EDIT_VERBS=new Set(['created','updated','edited']);
+// Placeholder / auto-titles that should never surface as a name.
+const ACT_PLACEHOLDERS=new Set(['new trip','سفر جدید','untitled','بدون عنوان','new note','یادداشت جدید','untitled trip','trip','سفر','new document','سند جدید','new task','کار جدید','new list','لیست جدید']);
+function actCleanName(name,refType,ref){
+  let n=(name||'').trim();
+  if(n&&ACT_PLACEHOLDERS.has(n.toLowerCase()))n='';
+  if(!n&&refType==='trip'&&ref)n=(ref.destination||'').trim();
+  return n;
+}
+// Grouped verb filters — a handful of meaningful buckets instead of ~15 chips.
+const ACT_VERB_GROUP={ created:'add', updated:'edit', edited:'edit', imported:'add', completed:'done', paid:'done', reused:'done', due:'remind', expiring:'remind', deleted:'remove', permanently_deleted:'remove', archived:'remove', restored:'remove', starred:'edit', unstarred:'edit', ocr:'add', copied:'edit', unlocked:'edit', locked:'edit', setup:'edit' };
+const ACT_GROUPS=[
+  ['add',{en:'Added',fa:'افزوده',ic:'＋'}],
+  ['edit',{en:'Updated',fa:'ویرایش',ic:'✎'}],
+  ['done',{en:'Completed',fa:'تکمیل',ic:'✓'}],
+  ['remind',{en:'Reminders',fa:'یادآوری',ic:'⏰'}],
+  ['remove',{en:'Removed',fa:'حذف',ic:'🗑'}]
+];
+function actVerbGroup(v){ return ACT_VERB_GROUP[v]||'edit'; }
+function actGroupLabel(g){ const x=ACT_GROUPS.find(a=>a[0]===g); return x?(L==='fa'?x[1].fa:x[1].en):g; }
+function actGroupIc(g){ const x=ACT_GROUPS.find(a=>a[0]===g); return x?x[1].ic:'•'; }
+
 // Map legacy stored-activity refType → module key.
 const ACT_REF_MODULE={ shopList:'shopping', shopItem:'shopping', task:'tasks', appt:'calendar', note:'notes', payment:'payments', vault:'vault', vaultSystem:'vault', document:'documents', trip:'travel' };
 
 function buildTimeline(){
   const out=[];
   const push=(o)=>{ if(o.at)out.push(o); };
-  // 1) Stored ephemeral/legacy events (things not reconstructable from state: unlock, copy, OCR, delete).
+  // 1) Stored events — ONLY non-reconstructable ephemeral verbs. Reconstructable
+  //    verbs (created/edited/updated/completed/paid…) are owned by the derived
+  //    pass below, so they are dropped here to eliminate duplication at the root.
   Object.values(activityMap()).forEach(e=>{
+    if(!ACT_STORED_VERBS.has(e.type))return;
     const module=ACT_REF_MODULE[e.refType]||'tasks';
-    push({ key:'log:'+e.id, at:e.at, module, verb:e.type, name:(e.meta&&e.meta.name)||'', refType:e.refType, refId:e.refId, source:'log' });
+    push({ key:'log:'+e.id, at:e.at, module, verb:e.type, name:actCleanName((e.meta&&e.meta.name)||'',e.refType), refType:e.refType, refId:e.refId, source:'log' });
   });
   // 2) Derived live events from module state (createdAt/updatedAt/expiry/completed). Deduped by key.
   const seen=new Set(out.map(o=>o.module+':'+o.refId+':'+o.verb+':'+(o.at||'').slice(0,16)));
@@ -9400,13 +9432,15 @@ function buildTimeline(){
   // Travel
   if(typeof tripsMap==='function')Object.values(tripsMap()).forEach(t=>{
     if(t.deletedAt)return;
-    if(t.createdAt)add({key:'trip:'+t.id+':c',at:t.createdAt,module:'travel',verb:'created',name:t.title||t.destination||'',refType:'trip',refId:t.id});
-    if(t.updatedAt&&t.updatedAt!==t.createdAt)add({key:'trip:'+t.id+':u',at:t.updatedAt,module:'travel',verb:'updated',name:t.title||t.destination||'',refType:'trip',refId:t.id});
+    const tn=actCleanName(t.title,'trip',t);
+    if(t.createdAt)add({key:'trip:'+t.id+':c',at:t.createdAt,module:'travel',verb:'created',name:tn,refType:'trip',refId:t.id});
+    if(t.updatedAt&&t.updatedAt!==t.createdAt)add({key:'trip:'+t.id+':u',at:t.updatedAt,module:'travel',verb:'updated',name:tn,refType:'trip',refId:t.id});
   });
   // Documents (+ expiring)
   if(typeof documentsLive==='function')documentsLive().forEach(d=>{
-    if(d.createdAt)add({key:'doc:'+d.id+':c',at:d.createdAt,module:'documents',verb:'created',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
-    if(d.updatedAt&&d.updatedAt!==d.createdAt)add({key:'doc:'+d.id+':u',at:d.updatedAt,module:'documents',verb:'updated',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
+    const dn=actCleanName(d.title,'document')||docTypeLabel(d.type);
+    if(d.createdAt)add({key:'doc:'+d.id+':c',at:d.createdAt,module:'documents',verb:'created',name:dn,refType:'document',refId:d.id});
+    if(d.updatedAt&&d.updatedAt!==d.createdAt)add({key:'doc:'+d.id+':u',at:d.updatedAt,module:'documents',verb:'updated',name:dn,refType:'document',refId:d.id});
     const days=(typeof docDaysToExpiry==='function')?docDaysToExpiry(d):null;
     if(days!==null&&days>=0&&days<=30&&d.expiryDate)add({key:'doc:'+d.id+':e',at:d.expiryDate+'T09:00:00',module:'documents',verb:'expiring',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
   });
@@ -9420,14 +9454,16 @@ function buildTimeline(){
   // Tasks (+ completed)
   if(DB.entities.tasks)Object.values(DB.entities.tasks).forEach(t=>{
     if(t.deletedAt)return;
-    if(t.createdAt)add({key:'task:'+t.id+':c',at:t.createdAt,module:'tasks',verb:'created',name:t.text||t.title||'',refType:'task',refId:t.id});
-    if(t.done&&t.doneAt)add({key:'task:'+t.id+':done',at:t.doneAt,module:'tasks',verb:'completed',name:t.text||t.title||'',refType:'task',refId:t.id});
+    const kn=actCleanName(t.text||t.title,'task');
+    if(t.createdAt)add({key:'task:'+t.id+':c',at:t.createdAt,module:'tasks',verb:'created',name:kn,refType:'task',refId:t.id});
+    if(t.done&&t.doneAt)add({key:'task:'+t.id+':done',at:t.doneAt,module:'tasks',verb:'completed',name:kn,refType:'task',refId:t.id});
   });
   // Notes
   if(DB.entities.noteItems)Object.values(DB.entities.noteItems).forEach(n=>{
     if(n.archivedAt||n.deletedAt)return;
-    if(n.updatedAt)add({key:'note:'+n.id+':u',at:n.updatedAt,module:'notes',verb:(n.updatedAt!==n.createdAt?'updated':'created'),name:n.title||'',refType:'note',refId:n.id});
-    else if(n.createdAt)add({key:'note:'+n.id+':c',at:n.createdAt,module:'notes',verb:'created',name:n.title||'',refType:'note',refId:n.id});
+    const nn=actCleanName(n.title,'note');
+    if(n.updatedAt)add({key:'note:'+n.id+':u',at:n.updatedAt,module:'notes',verb:(n.updatedAt!==n.createdAt?'updated':'created'),name:nn,refType:'note',refId:n.id});
+    else if(n.createdAt)add({key:'note:'+n.id+':c',at:n.createdAt,module:'notes',verb:'created',name:nn,refType:'note',refId:n.id});
   });
   // Shopping
   if(typeof shopListsAll==='function')shopListsAll().forEach(l=>{
@@ -9439,7 +9475,18 @@ function buildTimeline(){
     if(ap.createdAt)add({key:'appt:'+ap.id+':c',at:ap.createdAt,module:'calendar',verb:'created',name:ap.title||'',refType:'appt',refId:ap.id});
   });
   out.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
-  return out;
+  // Intelligent collapse: fold a record's create+edit burst on the same day into
+  // one row (the most recent), so "created → updated → updated" is a single entry.
+  const byRec={}; const collapsed=[];
+  out.forEach(e=>{
+    if(ACT_EDIT_VERBS.has(e.verb)){
+      const day=(e.at||'').slice(0,10);
+      const k=e.module+':'+e.refId+':'+day;
+      if(byRec[k]){ byRec[k]._n=(byRec[k]._n||1)+1; return; } // keep latest (out is desc)
+      byRec[k]=e; collapsed.push(e);
+    }else collapsed.push(e);
+  });
+  return collapsed;
 }
 
 function actLabel(e){
@@ -9450,7 +9497,8 @@ function actLabel(e){
     case 'appt':return L==='fa'?'قرار':'Appointment'; case 'vault':return L==='fa'?'مورد امن':'Secure item';
     case 'vaultSystem':return L==='fa'?'ولت':'Vault'; default:return e.refType; }
   })();
-  return `${kind} ${e.name?'“'+e.name+'” ':''}${actVerb(e.verb)}`;
+  const cnt=(e._n&&e._n>1)?(L==='fa'?` · ${e._n} تغییر`:` · ${e._n} edits`):'';
+  return `${kind} ${e.name?'“'+e.name+'” ':''}${actVerb(e.verb)}${cnt}`;
 }
 
 // AI-ready recap: deterministic today/this-week summary from the live timeline.
@@ -9461,11 +9509,18 @@ function timelineSummary(range){
   if(range==='today')cutoff=ts;
   else if(range==='week'){ const w=new Date(ts+'T00:00:00'); w.setDate(w.getDate()-7); cutoff=w.toISOString().slice(0,10); }
   const events=all.filter(e=>{ const d=(e.at||'').slice(0,10); return range==='today'?d===ts:d>=cutoff; });
-  const byModule={}, byVerb={};
-  events.forEach(e=>{ byModule[e.module]=(byModule[e.module]||0)+1; byVerb[e.verb]=(byVerb[e.verb]||0)+1; });
-  const parts=[]; Object.keys(byModule).forEach(m=>{ parts.push(`${byModule[m]} ${actModuleLabel(m)}`); });
-  const headline = range==='today' ? (L==='fa'?`امروز ${events.length} رخداد`:`${events.length} events today`) : (L==='fa'?`این هفته ${events.length} رخداد`:`${events.length} events this week`);
-  return { range, count:events.length, byModule, byVerb, headline, breakdown:parts.join(' · '), events };
+  const byModule={}, byGroup={};
+  events.forEach(e=>{ byModule[e.module]=(byModule[e.module]||0)+1; const g=actVerbGroup(e.verb); byGroup[g]=(byGroup[g]||0)+1; });
+  // Verb-group breakdown ("2 added · 3 completed · 1 reminder") — more meaningful than raw module counts.
+  const parts=ACT_GROUPS.filter(([g])=>byGroup[g]).map(([g])=>`${byGroup[g]} ${actGroupLabel(g).toLowerCase()}`);
+  const topMod=Object.keys(byModule).sort((a,b)=>byModule[b]-byModule[a])[0];
+  const when = range==='today' ? (L==='fa'?'امروز':'today') : (L==='fa'?'این هفته':'this week');
+  let headline;
+  if(!events.length) headline = L==='fa'?`${when} رخدادی نبود`:`Nothing logged ${when}`;
+  else headline = L==='fa'
+    ? `${when}: ${events.length} رخداد${topMod?' · بیشتر در '+actModuleLabel(topMod):''}`
+    : `${events.length} event${events.length>1?'s':''} ${when}${topMod?' · mostly '+actModuleLabel(topMod):''}`;
+  return { range, count:events.length, byModule, byGroup, headline, breakdown:parts.join(' · '), events };
 }
 
 function actGroupOf(at){
@@ -9484,7 +9539,7 @@ function renderActivity(){
   const fMod=activityFilterModule, fType=activityFilterType, q=(activitySearch||'').trim().toLowerCase();
   let events=all.filter(e=>{
     if(fMod&&e.module!==fMod)return false;
-    if(fType&&e.verb!==fType)return false;
+    if(fType&&actVerbGroup(e.verb)!==fType)return false;
     if(q){ const hay=(e.name+' '+actModuleLabel(e.module)+' '+actVerb(e.verb)+' '+actLabel(e)).toLowerCase(); if(!hay.includes(q))return false; }
     return true;
   });
@@ -9501,12 +9556,12 @@ function renderActivity(){
     <button class="pay-chip${!fMod?' on':''}" data-act-mod="">${L==='fa'?'همه':'All'}</button>`;
   Object.keys(ACT_MODULES).forEach(m=>{ const c=all.some(e=>e.module===m); if(c)html+=`<button class="pay-chip${fMod===m?' on':''}" data-act-mod="${m}">${ACT_MODULES[m].ic} ${actModuleLabel(m)}</button>`; });
   html+=`</div>`;
-  // Type filter chips (only types that appear)
-  const typesPresent=[...new Set(all.map(e=>e.verb))];
-  if(typesPresent.length>1){
+  // Grouped event filter chips (≤5 meaningful buckets, only groups that appear)
+  const groupsPresent=new Set(all.map(e=>actVerbGroup(e.verb)));
+  if(groupsPresent.size>1){
     html+=`<div class="pay-chips" style="flex-wrap:wrap">
-      <button class="pay-chip${!fType?' on':''}" data-act-type="">${L==='fa'?'همه رخدادها':'All events'}</button>`;
-    typesPresent.forEach(v=>{ html+=`<button class="pay-chip${fType===v?' on':''}" data-act-type="${v}">${actVerbIc(v)} ${actVerb(v)}</button>`; });
+      <button class="pay-chip${!fType?' on':''}" data-act-type="">${L==='fa'?'همه':'All'}</button>`;
+    ACT_GROUPS.forEach(([g])=>{ if(!groupsPresent.has(g))return; html+=`<button class="pay-chip${fType===g?' on':''}" data-act-type="${g}">${actGroupIc(g)} ${actGroupLabel(g)}</button>`; });
     html+=`</div>`;
   }
   if(!events.length){
