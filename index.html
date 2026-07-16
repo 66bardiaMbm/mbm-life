@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v260';
+const APP_VERSION='v261';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1958,6 +1958,13 @@ let activityFilterType='';
 let activitySearch='';
 let activityLimit=60;
 let activityManageOpen=false;
+let activityFilterMods=new Set();     // multi-select module filter (combinable)
+let activitySort='newest';            // newest|oldest|module|type
+let activityView='timeline';          // timeline|archive
+let activitySelMode=false;
+let activitySel=new Set();            // selected event keys
+let activityExpandedGroups=new Set(); // expanded aggregate groups
+let activitySwipeKey=null;            // row with revealed swipe actions
 let docListLimit=60;
 let docActiveFolder=null;
 let travelView='home';     // home | detail
@@ -9423,14 +9430,45 @@ function actRebuildTimeline(){
   const m=activityMap();
   // drop stored events whose canonical record no longer exists AND are reconstructable-noise
   Object.values(m).forEach(e=>{ if(ACT_STORED_VERBS.has(e.type))return; delete m[e.id]; });
-  // prune hidden keys that no longer match any current event
+  // prune hidden/archived/deleted keys that no longer match any current event
   const live=new Set(buildTimeline(true).map(e=>e.key));
-  const h=actHiddenMap(); Object.keys(h).forEach(k=>{ if(!live.has(k))delete h[k]; });
+  [actHiddenMap(),actArchivedMap(),actDeletedMap()].forEach(map=>{ Object.keys(map).forEach(k=>{ if(!live.has(k)&&k.indexOf('log:')!==0)delete map[k]; }); });
   saveDB();
 }
 // Retention: 0 (Forever) | 30 | 90 | 365. Prunes STORED log; also display-filters timeline.
 function actSetRetention(days){ DB.meta.activityRetentionDays=days|0; const d=days|0; if(d>0){ const cut=Date.now()-d*864e5; const m=activityMap(); Object.values(m).forEach(e=>{ const t=Date.parse(e.at||''); if(!isNaN(t)&&t<cut)delete m[e.id]; }); } saveDB(); }
 function actRetentionCutoffMs(){ const d=(DB.meta.activityRetentionDays|0); return d>0?Date.now()-d*864e5:0; }
+
+// ── Archive / Delete / Sections overlays — all Activity-layer only, never
+//    touching canonical data. Keyed by each event's stable `key`. ──
+function actArchivedMap(){ if(!DB.meta.activityArchived||typeof DB.meta.activityArchived!=='object')DB.meta.activityArchived={}; return DB.meta.activityArchived; }
+function actDeletedMap(){ if(!DB.meta.activityDeleted||typeof DB.meta.activityDeleted!=='object')DB.meta.activityDeleted={}; return DB.meta.activityDeleted; }
+function actSectionsMap(){ if(!DB.meta.activitySections||typeof DB.meta.activitySections!=='object')DB.meta.activitySections={}; return DB.meta.activitySections; }
+function actIsArchived(k){ return !!actArchivedMap()[k]; }
+function actIsDeleted(k){ return !!actDeletedMap()[k]; }
+function actArchivedCount(){ return Object.keys(actArchivedMap()).length; }
+function actArchive(k){ if(!k)return; actArchivedMap()[k]=new Date().toISOString(); delete actHiddenMap()[k]; }
+function actUnarchive(k){ if(!k)return; delete actArchivedMap()[k]; }
+// Permanent delete within the Activity layer: mark deleted (so derived events
+// don't reappear) and drop the stored ephemeral record if present. Canonical untouched.
+function actDeletePermanent(k){ if(!k)return; actDeletedMap()[k]=new Date().toISOString(); delete actArchivedMap()[k]; delete actHiddenMap()[k]; if(k.indexOf('log:')===0){ const id=k.slice(4); if(activityMap()[id])delete activityMap()[id]; } }
+function actSectionCollapsed(id){ const m=actSectionsMap(); return m[id]===true; }
+function actToggleSection(id){ const m=actSectionsMap(); m[id]=!m[id]; saveDB(); }
+// Apply a history-only action to one key. Never touches canonical data.
+function actApplyOne(action,key){
+  if(action==='archive')actArchive(key);
+  else if(action==='hide')actHide(key);
+  else if(action==='unarchive')actUnarchive(key);
+  else if(action==='delete')actDeletePermanent(key);
+  activitySwipeKey=null; saveDB(); render();
+}
+// Apply to all selected keys.
+function actApplyBulk(action){
+  if(!activitySel.size)return;
+  if(action==='delete'&&!confirm(L==='fa'?`حذف ${activitySel.size} مورد از تاریخچه؟ (رکورد اصلی تغییر نمی‌کند)`:`Delete ${activitySel.size} history entries? (canonical records unchanged)`))return;
+  activitySel.forEach(k=>{ if(action==='archive')actArchive(k); else if(action==='hide')actHide(k); else if(action==='unarchive')actUnarchive(k); else if(action==='delete')actDeletePermanent(k); });
+  activitySel.clear(); activitySelMode=false; saveDB(); render();
+}
 
 // includeHidden=true returns the FULL raw timeline (ignores hidden overlay &
 // retention) — used only by management actions (clear/rebuild).
@@ -9492,9 +9530,9 @@ function buildTimeline(includeHidden){
   });
   out.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
   if(includeHidden)return out;
-  // 3) Retention display cutoff + hidden overlay (Activity layer only).
-  const cut=actRetentionCutoffMs(); const hidden=actHiddenMap();
-  let vis=out.filter(e=>{ if(hidden[e.key])return false; if(cut){ const t=Date.parse(e.at||''); if(!isNaN(t)&&t<cut)return false; } return true; });
+  // 3) Retention display cutoff + hidden/archived/deleted overlays (Activity layer only).
+  const cut=actRetentionCutoffMs(); const hidden=actHiddenMap(); const arch=actArchivedMap(); const del=actDeletedMap();
+  let vis=out.filter(e=>{ if(hidden[e.key]||arch[e.key]||del[e.key])return false; if(cut){ const t=Date.parse(e.at||''); if(!isNaN(t)&&t<cut)return false; } return true; });
   // 4) Intelligent collapse: fold a record's create+edit burst on the same day
   //    into ONE row (latest), so a logical record shows a single grouped entry.
   const byRec={}; const collapsed=[];
@@ -9545,93 +9583,183 @@ function actGroupOf(at){
   return 'earlier';
 }
 
+/* ── Section bucketing for the timeline (date-based) ── */
+function actDateBucket(at){
+  const ts=todayStr(); const d=(at||'').slice(0,10); if(!d)return {id:'older:0000-00',label:L==='fa'?'قدیمی':'Older',order:0};
+  const today=new Date(ts+'T00:00:00');
+  const mk=(n)=>{ const x=new Date(today); x.setDate(x.getDate()-n); return x.toISOString().slice(0,10); };
+  if(d===ts)return {id:'today',label:L==='fa'?'امروز':'Today',order:100};
+  if(d===mk(1))return {id:'yesterday',label:L==='fa'?'دیروز':'Yesterday',order:99};
+  // this week = last 7 days (excl today/yesterday)
+  const dow=today.getDay(); // 0..6
+  const startThisWeek=mk(dow);           // most recent Sunday
+  const startLastWeek=mk(dow+7);
+  if(d>=startThisWeek)return {id:'thisweek',label:L==='fa'?'این هفته':'This Week',order:98};
+  if(d>=startLastWeek)return {id:'lastweek',label:L==='fa'?'هفته گذشته':'Last Week',order:97};
+  const startThisMonth=ts.slice(0,7)+'-01';
+  if(d>=startThisMonth)return {id:'thismonth',label:L==='fa'?'این ماه':'This Month',order:96};
+  const ym=d.slice(0,7); const dt=new Date(d+'T00:00:00');
+  const label=dt.toLocaleDateString(L==='fa'?'fa-IR':'en-AU',{month:'long',year:'numeric'});
+  return {id:'older:'+ym, label, order:parseInt(ym.replace('-',''),10)/100000 };
+}
+function actWhen(at){ const d=new Date(at); return isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+
 function renderActivity(){
-  const all=buildTimeline();
-  // Filters
-  const fMod=activityFilterModule, fType=activityFilterType, q=(activitySearch||'').trim().toLowerCase();
-  let events=all.filter(e=>{
-    if(fMod&&e.module!==fMod)return false;
-    if(fType&&e.verb!==fType)return false;
+  const archiveMode=activityView==='archive';
+  const raw = archiveMode ? buildTimeline(true).filter(e=>actIsArchived(e.key)&&!actIsDeleted(e.key)) : buildTimeline();
+  const q=(activitySearch||'').trim().toLowerCase();
+  const mods=activityFilterMods;
+  let events=raw.filter(e=>{
+    if(mods.size && !mods.has(e.module))return false;
     if(q){ const hay=(e.name+' '+actModuleLabel(e.module)+' '+actVerb(e.verb)+' '+actLabel(e)).toLowerCase(); if(!hay.includes(q))return false; }
     return true;
   });
-  const hiddenN=actHiddenCount();
-  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
-    <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
-    <div style="font-size:26px;font-weight:800;flex:1">${L==='fa'?'فعالیت':'Activity'}</div>
-    <button id="act-manage-toggle" class="ld-back" style="width:40px;height:40px;flex:none;${activityManageOpen?'color:var(--brand)':''}" aria-label="${L==='fa'?'مدیریت':'Manage'}">⚙</button>
+  // sort
+  if(activitySort==='oldest')events.sort((a,b)=>(a.at||'').localeCompare(b.at||''));
+  else if(activitySort==='newest')events.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+  else if(activitySort==='module')events.sort((a,b)=> (actModuleLabel(a.module).localeCompare(actModuleLabel(b.module))) || (b.at||'').localeCompare(a.at||''));
+  else if(activitySort==='type')events.sort((a,b)=> (actVerb(a.verb).localeCompare(actVerb(b.verb))) || (b.at||'').localeCompare(a.at||''));
+
+  // ── header ──
+  const archN=actArchivedCount(), hiddenN=actHiddenCount();
+  let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:18px 16px 6px">
+    <button class="ld-back" id="module-back" style="width:38px;height:38px;flex:none">&#8249;</button>
+    <div style="font-size:24px;font-weight:800;flex:1">${archiveMode?(L==='fa'?'بایگانی':'Archive'):(L==='fa'?'فعالیت':'Activity')}</div>
+    ${activitySelMode?'':`<button id="act-archive-view" class="ld-back" style="width:38px;height:38px;flex:none;${archiveMode?'color:var(--brand)':''}" title="${L==='fa'?'بایگانی':'Archive'}">🗄${archN?`<sup style="font-size:9px">${archN}</sup>`:''}</button>
+    <button id="act-manage-toggle" class="ld-back" style="width:38px;height:38px;flex:none;${activityManageOpen?'color:var(--brand)':''}">⚙</button>`}
   </div>`;
-  // ── Manage panel: history-only actions. None of these touch canonical records. ──
-  if(activityManageOpen){
-    const ret=(DB.meta.activityRetentionDays|0);
-    const retOpts=[[30,'30'],[90,'90'],[365,'365'],[0,L==='fa'?'همیشه':'Forever']];
-    html+=`<div style="margin:0 16px 8px;padding:12px 14px;border-radius:12px;background:var(--s1);border:1px solid var(--b1)">
-      <div style="font-size:12px;color:var(--ink3);margin-bottom:8px" dir="auto">${L==='fa'?'این اقدام‌ها فقط تاریخچهٔ فعالیت را تغییر می‌دهند و هیچ داده‌ای را حذف نمی‌کنند.':'These actions affect the Activity history only — no records are changed or deleted.'}</div>
-      <div style="font-size:12px;font-weight:700;margin-bottom:6px">${L==='fa'?'نگه‌داری':'Retention'}</div>
-      <div class="pay-chips" style="flex-wrap:wrap;margin:0 0 10px">
-        ${retOpts.map(([d,lbl])=>`<button class="pay-chip${ret===d?' on':''}" data-act-ret="${d}">${lbl}${d?(L==='fa'?' روز':'d'):''}</button>`).join('')}
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost" id="act-rebuild" style="flex:1;min-width:120px">↻ ${L==='fa'?'بازسازی':'Rebuild'}</button>
-        <button class="btn btn-ghost" id="act-restore" style="flex:1;min-width:120px"${hiddenN?'':' disabled'}>↩ ${L==='fa'?'بازگردانی پنهان‌ها':'Restore hidden'}${hiddenN?` (${hiddenN})`:''}</button>
-        <button class="btn btn-ghost" id="act-clear" style="flex:1;min-width:120px;color:var(--danger)">🗑 ${L==='fa'?'پاک‌سازی تاریخچه':'Clear history'}</button>
-      </div>
+
+  // ── selection action bar ──
+  if(activitySelMode){
+    const n=activitySel.size;
+    html+=`<div style="position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--brand);color:#fff">
+      <button id="act-sel-cancel" style="background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer">✕</button>
+      <div style="flex:1;font-weight:700">${n} ${L==='fa'?'انتخاب‌شده':'selected'}</div>
+      <button id="act-sel-all" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px">${L==='fa'?'انتخاب همه':'Select all'}</button>
     </div>`;
-  }
-  // Search
-  html+=`<div style="padding:4px 16px 8px"><input id="act-search" class="finput" placeholder="${L==='fa'?'جستجوی فعالیت‌ها…':'Search activity…'}" value="${esc(activitySearch||'')}" style="width:100%;box-sizing:border-box"></div>`;
-  // AI-ready recap banner (deterministic now; future AI summary hook uses timelineSummary()).
-  if(!q&&!fMod&&!fType){ const sum=timelineSummary('today'); if(sum.count){ html+=`<div style="margin:0 16px 8px;padding:12px 14px;border-radius:12px;background:linear-gradient(135deg,#6e56f818,#06b6d418);border:1px solid var(--b1)"><div style="font-size:14px;font-weight:700">${esc(sum.headline)}</div><div style="font-size:12px;color:var(--ink3);margin-top:2px" dir="auto">${esc(sum.breakdown)}</div></div>`; } }
-  // Module filter chips
-  html+=`<div class="pay-chips" style="flex-wrap:wrap">
-    <button class="pay-chip${!fMod?' on':''}" data-act-mod="">${L==='fa'?'همه':'All'}</button>`;
-  Object.keys(ACT_MODULES).forEach(m=>{ const c=all.some(e=>e.module===m); if(c)html+=`<button class="pay-chip${fMod===m?' on':''}" data-act-mod="${m}">${ACT_MODULES[m].ic} ${actModuleLabel(m)}</button>`; });
-  html+=`</div>`;
-  // Type filter chips (only types that appear)
-  const typesPresent=[...new Set(all.map(e=>e.verb))];
-  if(typesPresent.length>1){
-    html+=`<div class="pay-chips" style="flex-wrap:wrap">
-      <button class="pay-chip${!fType?' on':''}" data-act-type="">${L==='fa'?'همه رخدادها':'All events'}</button>`;
-    typesPresent.forEach(v=>{ html+=`<button class="pay-chip${fType===v?' on':''}" data-act-type="${v}">${actVerbIc(v)} ${actVerb(v)}</button>`; });
+    html+=`<div style="position:sticky;top:44px;z-index:5;display:flex;gap:6px;padding:8px 12px;background:var(--s1);border-bottom:1px solid var(--b1);overflow-x:auto">`;
+    if(archiveMode){
+      html+=`<button class="btn btn-ghost act-sel-act" data-selact="unarchive" style="flex:1;min-width:100px"${n?'':' disabled'}>↩ ${L==='fa'?'بازگردانی':'Restore'}</button>`;
+      html+=`<button class="btn btn-ghost act-sel-act" data-selact="delete" style="flex:1;min-width:100px;color:var(--danger)"${n?'':' disabled'}>🗑 ${L==='fa'?'حذف':'Delete'}</button>`;
+    }else{
+      html+=`<button class="btn btn-ghost act-sel-act" data-selact="archive" style="flex:1;min-width:92px"${n?'':' disabled'}>🗄 ${L==='fa'?'بایگانی':'Archive'}</button>`;
+      html+=`<button class="btn btn-ghost act-sel-act" data-selact="hide" style="flex:1;min-width:82px"${n?'':' disabled'}>🙈 ${L==='fa'?'پنهان':'Hide'}</button>`;
+      html+=`<button class="btn btn-ghost act-sel-act" data-selact="delete" style="flex:1;min-width:82px;color:var(--danger)"${n?'':' disabled'}>🗑 ${L==='fa'?'حذف':'Delete'}</button>`;
+    }
     html+=`</div>`;
   }
+
+  // ── manage panel ──
+  if(activityManageOpen&&!activitySelMode){
+    const ret=(DB.meta.activityRetentionDays|0);
+    const retOpts=[[30,'30'],[90,'90'],[365,'365'],[0,L==='fa'?'همیشه':'∞']];
+    html+=`<div style="margin:6px 14px;padding:12px;border-radius:12px;background:var(--s1);border:1px solid var(--b1)">
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:8px" dir="auto">${L==='fa'?'این اقدام‌ها فقط تاریخچهٔ فعالیت را تغییر می‌دهند؛ هیچ رکورد اصلی حذف یا تغییر نمی‌شود.':'History-only actions — no canonical record is changed or deleted.'}</div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:6px">${L==='fa'?'نگه‌داری':'Retention'}</div>
+      <div class="pay-chips" style="flex-wrap:wrap;margin:0 0 8px">${retOpts.map(([d,lbl])=>`<button class="pay-chip${ret===d?' on':''}" data-act-ret="${d}">${lbl}</button>`).join('')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost" id="act-rebuild" style="flex:1;min-width:100px">↻ ${L==='fa'?'بازسازی':'Rebuild'}</button>
+        <button class="btn btn-ghost" id="act-restore" style="flex:1;min-width:100px"${hiddenN?'':' disabled'}>↩ ${L==='fa'?'پنهان‌ها':'Hidden'}${hiddenN?` (${hiddenN})`:''}</button>
+        <button class="btn btn-ghost" id="act-clear" style="flex:1;min-width:100px;color:var(--danger)">🗑 ${L==='fa'?'پاک‌سازی':'Clear'}</button>
+      </div></div>`;
+  }
+
+  // ── search ──
+  html+=`<div style="padding:4px 14px 6px"><input id="act-search" class="finput" placeholder="${L==='fa'?'جستجو…':'Search…'}" value="${esc(activitySearch||'')}" style="width:100%;box-sizing:border-box;padding:9px 12px;font-size:14px"></div>`;
+
+  // ── filters (horizontally scrollable, combinable) + sort ──
+  const presentMods=Object.keys(ACT_MODULES).filter(m=>raw.some(e=>e.module===m));
+  html+=`<div style="display:flex;gap:6px;padding:2px 14px 6px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none">
+    <button class="pay-chip${mods.size===0?' on':''}" data-act-modf="" style="flex:none">${L==='fa'?'همه':'All'}</button>
+    ${presentMods.map(m=>`<button class="pay-chip${mods.has(m)?' on':''}" data-act-modf="${m}" style="flex:none">${ACT_MODULES[m].ic} ${actModuleLabel(m)}</button>`).join('')}
+  </div>`;
+  const sorts=[['newest',L==='fa'?'جدیدترین':'Newest'],['oldest',L==='fa'?'قدیمی‌ترین':'Oldest'],['module',L==='fa'?'ماژول':'Module'],['type',L==='fa'?'نوع':'Type']];
+  html+=`<div style="display:flex;gap:6px;padding:0 14px 8px;overflow-x:auto;scrollbar-width:none;align-items:center">
+    <span style="font-size:11px;color:var(--ink3);flex:none">${L==='fa'?'مرتب:':'Sort:'}</span>
+    ${sorts.map(([k,l])=>`<button class="pay-chip${activitySort===k?' on':''}" data-act-sort="${k}" style="flex:none">${l}</button>`).join('')}
+  </div>`;
+
   if(!events.length){
-    html+=`<div class="hub-ph"><div class="hub-ph-ic">⟳</div>
-      <div class="hub-ph-t">${L==='fa'?'فعالیتی یافت نشد':'No activity found'}</div>
-      <div class="hub-ph-d">${L==='fa'?'با تغییر فیلترها یا جستجو دوباره امتحان کنید.':'Try adjusting the filters or search.'}</div></div>`;
+    html+=`<div class="hub-ph"><div class="hub-ph-ic">${archiveMode?'🗄':'⟳'}</div>
+      <div class="hub-ph-t">${archiveMode?(L==='fa'?'بایگانی خالی است':'Archive is empty'):(L==='fa'?'فعالیتی یافت نشد':'No activity found')}</div>
+      <div class="hub-ph-d">${archiveMode?(L==='fa'?'موارد بایگانی‌شده اینجا نمایش داده می‌شوند.':'Archived items appear here.'):(L==='fa'?'با تغییر فیلتر یا جستجو دوباره امتحان کنید.':'Adjust filters or search.')}</div></div>`;
     return html;
   }
-  // Lazy render: cap to activityLimit, "show more" appends.
-  const shown=events.slice(0, activityLimit);
-  const groups=[['today',L==='fa'?'امروز':'Today'],['yesterday',L==='fa'?'دیروز':'Yesterday'],['week',L==='fa'?'این هفته':'This Week'],['earlier',L==='fa'?'پیش‌تر':'Earlier']];
-  const byGroup={today:[],yesterday:[],week:[],earlier:[]};
-  shown.forEach(e=>{ byGroup[actGroupOf(e.at)].push(e); });
-  groups.forEach(([gk,gl])=>{
-    const list=byGroup[gk]; if(!list.length)return;
-    html+=`<div style="padding:16px 16px 6px;font-size:13px;font-weight:800;color:var(--ink2)">${gl} <span style="color:var(--ink3);font-weight:600">· ${list.length}</span></div>`;
+
+  // ── section grouping ──
+  // date buckets for newest/oldest; module/type sections otherwise.
+  const sectMode = (activitySort==='module')?'module':(activitySort==='type')?'type':'date';
+  const secMap={}; const secOrder=[];
+  events.forEach(e=>{
+    let sec;
+    if(sectMode==='module') sec={id:'mod:'+e.module,label:actModuleLabel(e.module),order:0};
+    else if(sectMode==='type') sec={id:'type:'+e.verb,label:actVerb(e.verb),order:0};
+    else sec=actDateBucket(e.at);
+    if(!secMap[sec.id]){ secMap[sec.id]={sec,items:[]}; secOrder.push(sec.id); }
+    secMap[sec.id].items.push(e);
+  });
+  if(sectMode==='date') secOrder.sort((a,b)=> (secMap[b].sec.order-secMap[a].sec.order));
+
+  secOrder.forEach(sid=>{
+    const {sec,items}=secMap[sid];
+    const collapsed=actSectionCollapsed(sid);
+    html+=`<div data-act-sec="${sid}" style="display:flex;align-items:center;gap:8px;padding:14px 16px 6px;cursor:pointer">
+      <span style="font-size:12px;color:var(--ink3);transition:transform .15s;transform:rotate(${collapsed?'-90deg':'0'})">▾</span>
+      <span style="font-size:12.5px;font-weight:800;color:var(--ink2)">${esc(sec.label)}</span>
+      <span style="font-size:11px;color:var(--ink3);font-weight:600">${items.length}</span></div>`;
+    if(collapsed)return;
     html+=`<div style="background:var(--s1);border-top:1px solid var(--b1)">`;
-    list.forEach(e=>{
-      const d=new Date(e.at);
-      const when=isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-      const col=actModuleColor(e.module);
-      const nav=actIsNavigable(e);
-      html+=`<div class="ul-row" ${nav?`data-act-open="${e.module}:${e.refId}" style="cursor:pointer"`:''}>
-        <div class="ul-icon"><div style="width:34px;height:34px;border-radius:9px;background:${col}22;color:${col};display:flex;align-items:center;justify-content:center;font-size:15px">${actVerbIc(e.verb)}</div></div>
-        <div style="flex:1;padding:12px 0 12px 4px;min-width:0">
-          <div style="font-size:14px" dir="auto">${esc(actLabel(e))}</div>
-          <div style="font-size:12px;color:var(--ink3);margin-top:2px"><span style="color:${col}">${ACT_MODULES[e.module]?ACT_MODULES[e.module].ic:''} ${esc(actModuleLabel(e.module))}</span> · ${esc(when)}</div>
-        </div>
-        ${nav?'<span style="color:var(--ink3);opacity:.4;padding-inline-end:2px">›</span>':''}
-        <button class="act-del-btn" data-act-del="${encodeURIComponent(e.key)}" title="${L==='fa'?'حذف از تاریخچه':'Delete from history'}" aria-label="delete" style="flex:none;width:34px;height:34px;border:none;background:transparent;color:var(--ink3);font-size:15px;cursor:pointer;border-radius:8px">✕</button>
-      </div>`;
+    // group repetitive events (module+verb) with count>=3 → aggregate
+    const groups={}; const order=[];
+    items.forEach(e=>{ const gk=e.module+'|'+e.verb; if(!groups[gk]){ groups[gk]=[]; order.push(gk); } groups[gk].push(e); });
+    order.forEach(gk=>{
+      const list=groups[gk];
+      if(list.length>=3 && sectMode==='date'){
+        const gid=sid+'|'+gk; const expanded=activityExpandedGroups.has(gid);
+        const e0=list[0]; const col=actModuleColor(e0.module);
+        html+=`<div class="ul-row" data-act-group="${encodeURIComponent(gid)}" style="cursor:pointer">
+          <div class="ul-icon"><div style="width:30px;height:30px;border-radius:8px;background:${col}22;color:${col};display:flex;align-items:center;justify-content:center;font-size:14px">${actVerbIc(e0.verb)}</div></div>
+          <div style="flex:1;padding:9px 0 9px 4px;min-width:0">
+            <div style="font-size:13.5px;font-weight:600" dir="auto">${list.length} ${esc(actModuleLabel(e0.module))} · ${esc(actVerb(e0.verb))}</div>
+            <div style="font-size:11px;color:var(--ink3)">${expanded?(L==='fa'?'برای جمع‌کردن':'tap to collapse'):(L==='fa'?'برای نمایش همه':'tap to expand')}</div>
+          </div>
+          <span style="color:var(--ink3);opacity:.4;transform:rotate(${expanded?'90deg':'0'});transition:.15s">›</span></div>`;
+        if(expanded)list.forEach(e=>{ html+=actRow(e,true); });
+      }else{
+        list.forEach(e=>{ html+=actRow(e,false); });
+      }
     });
     html+=`</div>`;
   });
-  if(events.length>shown.length){
-    html+=`<div style="padding:12px 16px 24px"><button class="btn btn-ghost" id="act-more" style="width:100%">${L==='fa'?'نمایش بیشتر':'Show more'} (${events.length-shown.length})</button></div>`;
-  }
   return html;
 }
+
+/* Compact activity row. indent=true for grouped children. */
+function actRow(e,indent){
+  const col=actModuleColor(e.module);
+  const nav=actIsNavigable(e)&&!activitySelMode;
+  const sel=activitySel.has(e.key);
+  const swiped=activitySwipeKey===e.key && !activitySelMode;
+  const kEnc=encodeURIComponent(e.key);
+  let actions='';
+  if(swiped){
+    actions=`<div style="display:flex;flex:none">
+      <button class="act-swipe-act" data-swact="archive" data-k="${kEnc}" style="width:44px;border:none;background:#6e56f8;color:#fff;font-size:15px;cursor:pointer">🗄</button>
+      <button class="act-swipe-act" data-swact="hide" data-k="${kEnc}" style="width:44px;border:none;background:#64748b;color:#fff;font-size:15px;cursor:pointer">🙈</button>
+      <button class="act-swipe-act" data-swact="delete" data-k="${kEnc}" style="width:44px;border:none;background:var(--danger);color:#fff;font-size:15px;cursor:pointer">🗑</button></div>`;
+  }
+  return `<div class="ul-row act-row" data-act-key="${kEnc}" ${nav?`data-act-open="${e.module}:${e.refId}"`:''} style="cursor:pointer;${indent?'padding-inline-start:12px;background:var(--bg)':''}">
+    ${activitySelMode?`<div style="flex:none;width:26px;display:flex;align-items:center;justify-content:center"><span style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--brand)':'var(--b2)'};background:${sel?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px">${sel?'✓':''}</span></div>`:''}
+    <div class="ul-icon"><div style="width:30px;height:30px;border-radius:8px;background:${col}22;color:${col};display:flex;align-items:center;justify-content:center;font-size:14px">${actVerbIc(e.verb)}</div></div>
+    <div style="flex:1;padding:8px 0 8px 4px;min-width:0">
+      <div style="font-size:13.5px;line-height:1.25" dir="auto">${esc(actLabel(e))}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:1px"><span style="color:${col}">${esc(actModuleLabel(e.module))}</span> · ${esc(actWhen(e.at))}</div>
+    </div>
+    ${actions}
+    ${(!swiped&&!activitySelMode&&nav)?'<span style="color:var(--ink3);opacity:.35;padding-inline-end:4px">›</span>':''}
+  </div>`;
+}
+
 
 // Whether an event can open its canonical record (record still exists & not deleted).
 function actIsNavigable(e){
@@ -11307,7 +11435,7 @@ function bindScreen(){
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   if(typeof bindFamily==='function')bindFamily();
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='dashboard';famActiveMemberId=null;famActivePlaceId=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='dashboard';famActiveMemberId=null;famActivePlaceId=null;}if(currentModule==='activity'){activitySelMode=false;activitySel.clear();activitySwipeKey=null;activityView='timeline';activityManageOpen=false;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -11971,20 +12099,55 @@ function bindScreen(){
     const id=shopReuseLastList(s,l);
     shopArchiveViewId=null; activeShopListId=id; shopView='detail'; shopResetSelect(); render(); window.scrollTo(0,0);
   };
-  // Activity timeline interactions
-  document.querySelectorAll('[data-act-mod]').forEach(el=>el.onclick=()=>{ activityFilterModule=el.dataset.actMod; activityLimit=60; render(); });
-  document.querySelectorAll('[data-act-type]').forEach(el=>el.onclick=()=>{ activityFilterType=el.dataset.actType; activityLimit=60; render(); });
-  const actMore=document.getElementById('act-more'); if(actMore)actMore.onclick=()=>{ activityLimit+=60; render(); };
-  const actSearch=document.getElementById('act-search');
-  if(actSearch)actSearch.oninput=()=>{ activitySearch=actSearch.value; activityLimit=60; clearTimeout(window._actSearchT); window._actSearchT=setTimeout(()=>{ render(); const s=document.getElementById('act-search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },220); };
-  document.querySelectorAll('[data-act-open]').forEach(el=>el.onclick=()=>{ const [mod,ref]=el.dataset.actOpen.split(':'); actOpen(mod, ref); });
-  // ── Activity management (history-only) ──
-  const actMg=document.getElementById('act-manage-toggle'); if(actMg)actMg.onclick=()=>{ activityManageOpen=!activityManageOpen; render(); };
-  document.querySelectorAll('[data-act-ret]').forEach(el=>el.onclick=()=>{ actSetRetention(parseInt(el.dataset.actRet,10)||0); activityLimit=60; render(); });
-  const actRb=document.getElementById('act-rebuild'); if(actRb)actRb.onclick=()=>{ actRebuildTimeline(); toast(L==='fa'?'خط زمانی بازسازی شد':'Timeline rebuilt'); activityLimit=60; render(); };
-  const actRs=document.getElementById('act-restore'); if(actRs)actRs.onclick=()=>{ actRestoreHidden(); toast(L==='fa'?'فعالیت‌های پنهان بازگردانی شد':'Hidden activity restored'); activityLimit=60; render(); };
-  const actCl=document.getElementById('act-clear'); if(actCl)actCl.onclick=()=>{ if(!confirm(L==='fa'?'تمام تاریخچهٔ فعالیت پنهان شود؟ (داده‌ای حذف نمی‌شود و قابل بازگردانی است)':'Hide all Activity history? No records are deleted — this is restorable.'))return; actClearHistory(); toast(L==='fa'?'تاریخچه پاک شد':'History cleared'); activityLimit=60; render(); };
-  document.querySelectorAll('[data-act-del]').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); actHide(decodeURIComponent(el.dataset.actDel)); render(); });
+  // ── Activity (redesigned) interactions ──
+  if(screen==='module'&&currentModule==='activity'){
+    const rerender=()=>{ render(); };
+    // module multi-filter (combinable)
+    document.querySelectorAll('[data-act-modf]').forEach(el=>el.onclick=()=>{ const m=el.dataset.actModf; if(!m){ activityFilterMods.clear(); } else { if(activityFilterMods.has(m))activityFilterMods.delete(m); else activityFilterMods.add(m); } render(); });
+    // sort
+    document.querySelectorAll('[data-act-sort]').forEach(el=>el.onclick=()=>{ activitySort=el.dataset.actSort; render(); });
+    // search
+    const actSearch=document.getElementById('act-search');
+    if(actSearch)actSearch.oninput=()=>{ activitySearch=actSearch.value; clearTimeout(window._actSearchT); window._actSearchT=setTimeout(()=>{ render(); const s=document.getElementById('act-search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },220); };
+    // section collapse
+    document.querySelectorAll('[data-act-sec]').forEach(el=>el.onclick=()=>{ actToggleSection(el.dataset.actSec); render(); });
+    // aggregate group expand/collapse
+    document.querySelectorAll('[data-act-group]').forEach(el=>el.onclick=()=>{ const g=decodeURIComponent(el.dataset.actGroup); if(activityExpandedGroups.has(g))activityExpandedGroups.delete(g); else activityExpandedGroups.add(g); render(); });
+    // archive view toggle
+    const av=document.getElementById('act-archive-view'); if(av)av.onclick=()=>{ activityView=(activityView==='archive')?'timeline':'archive'; activitySwipeKey=null; render(); window.scrollTo(0,0); };
+    // manage
+    const actMg=document.getElementById('act-manage-toggle'); if(actMg)actMg.onclick=()=>{ activityManageOpen=!activityManageOpen; render(); };
+    document.querySelectorAll('[data-act-ret]').forEach(el=>el.onclick=()=>{ actSetRetention(parseInt(el.dataset.actRet,10)||0); render(); });
+    const actRb=document.getElementById('act-rebuild'); if(actRb)actRb.onclick=()=>{ actRebuildTimeline(); toast(L==='fa'?'خط زمانی بازسازی شد':'Timeline rebuilt'); render(); };
+    const actRs=document.getElementById('act-restore'); if(actRs)actRs.onclick=()=>{ actRestoreHidden(); toast(L==='fa'?'پنهان‌ها بازگردانی شد':'Hidden restored'); render(); };
+    const actCl=document.getElementById('act-clear'); if(actCl)actCl.onclick=()=>{ if(!confirm(L==='fa'?'تمام تاریخچه پنهان شود؟ (رکوردی حذف نمی‌شود و قابل بازگردانی است)':'Hide all history? No records deleted — restorable.'))return; actClearHistory(); toast(L==='fa'?'تاریخچه پاک شد':'History cleared'); render(); };
+    // selection action bar
+    const selCancel=document.getElementById('act-sel-cancel'); if(selCancel)selCancel.onclick=()=>{ activitySelMode=false; activitySel.clear(); render(); };
+    const selAll=document.getElementById('act-sel-all'); if(selAll)selAll.onclick=()=>{ const archiveMode=activityView==='archive'; const raw=archiveMode?buildTimeline(true).filter(e=>actIsArchived(e.key)&&!actIsDeleted(e.key)):buildTimeline(); const q=(activitySearch||'').trim().toLowerCase(); raw.forEach(e=>{ if(activityFilterMods.size&&!activityFilterMods.has(e.module))return; if(q){ const hay=(e.name+' '+actModuleLabel(e.module)+' '+actVerb(e.verb)+' '+actLabel(e)).toLowerCase(); if(!hay.includes(q))return; } activitySel.add(e.key); }); render(); };
+    document.querySelectorAll('.act-sel-act').forEach(el=>el.onclick=()=>{ actApplyBulk(el.dataset.selact); });
+    // swipe reveal actions
+    document.querySelectorAll('[data-swact]').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); const k=decodeURIComponent(el.dataset.k); actApplyOne(el.dataset.swact,k); });
+    // rows: tap = open (or toggle select in selMode); long-press = enter selection; swipe = reveal
+    document.querySelectorAll('.act-row').forEach(el=>{
+      const key=decodeURIComponent(el.dataset.actKey||'');
+      el.onclick=(ev)=>{
+        if(ev.target.closest('[data-swact]'))return;
+        if(activitySwipeKey && activitySwipeKey!==key){ activitySwipeKey=null; render(); return; }
+        if(activitySelMode){ if(activitySel.has(key))activitySel.delete(key); else activitySel.add(key); render(); return; }
+        if(activitySwipeKey===key){ activitySwipeKey=null; render(); return; }
+        if(el.dataset.actOpen){ const [mod,ref]=el.dataset.actOpen.split(':'); actOpen(mod,ref); }
+      };
+      // long-press → selection mode
+      let lpT=null;
+      const startLP=()=>{ lpT=setTimeout(()=>{ if(!activitySelMode){ activitySelMode=true; activitySel.clear(); } activitySel.add(key); if(navigator.vibrate)navigator.vibrate(15); render(); },500); };
+      const cancelLP=()=>{ clearTimeout(lpT); };
+      el.addEventListener('touchstart',(e)=>{ el._sx=e.touches[0].clientX; el._sy=e.touches[0].clientY; startLP(); },{passive:true});
+      el.addEventListener('mousedown',startLP);
+      el.addEventListener('touchend',cancelLP); el.addEventListener('mouseup',cancelLP); el.addEventListener('mouseleave',cancelLP);
+      // swipe left → reveal actions
+      el.addEventListener('touchmove',(e)=>{ if(activitySelMode)return; const dx=e.touches[0].clientX-(el._sx||0), dy=e.touches[0].clientY-(el._sy||0); if(Math.abs(dx)>36&&Math.abs(dx)>Math.abs(dy)){ cancelLP(); const rtl=document.body.classList.contains('rtl'); const reveal=rtl?dx>0:dx<0; if(reveal&&activitySwipeKey!==key){ activitySwipeKey=key; render(); } else if(!reveal&&activitySwipeKey===key){ activitySwipeKey=null; render(); } } },{passive:true});
+    });
+  }
   document.querySelectorAll('[data-act-shop]').forEach(el=>el.onclick=()=>{
     screen='module'; currentModule='shopping';
     activeShopListId=el.dataset.actShop; shopView='detail'; shopSearch=''; shopResetSelect();
