@@ -1403,7 +1403,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v258';
+const APP_VERSION='v260';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1503,7 +1503,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks','familyMembers','familyPlaces','familyInvites','familyTimeline']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     // ── Travel data repair (safe, no data loss) ──
     try{
@@ -1542,8 +1542,12 @@ function loadDB(){
     ['myday','important','planned','assigned','all'].forEach(k=>{if(d.meta.smartShow[k]===undefined)d.meta.smartShow[k]=true;});
     if(!Array.isArray(d.meta.groups))d.meta.groups=[];
     if(!Object.keys(d.entities.lists).length)seedDB(d);
-    // Prune low-value ephemeral activity (copied/unlock/OCR) past its retention window.
-    try{ const _m=d.entities.activity; if(_m){ const now=Date.now(),RET={copied:2*864e5,unlocked:7*864e5,locked:7*864e5,ocr:14*864e5}; Object.values(_m).forEach(e=>{ const r=RET[e.type]; if(!r)return; const t=Date.parse(e.at||''); if(!isNaN(t)&&now-t>r)delete _m[e.id]; }); } }catch(_){}
+    // ── Activity layer state (history-only; never touches canonical data) ──
+    if(!d.entities.activity)d.entities.activity={};
+    if(d.meta.activityRetentionDays===undefined)d.meta.activityRetentionDays=0; // 0 = Forever
+    if(!d.meta.activityHidden||typeof d.meta.activityHidden!=='object')d.meta.activityHidden={};
+    // Enforce retention on the STORED ephemeral log only (bounded storage).
+    try{ const days=d.meta.activityRetentionDays|0; if(days>0){ const cut=Date.now()-days*864e5; Object.values(d.entities.activity).forEach(e=>{ const t=Date.parse(e.at||''); if(!isNaN(t)&&t<cut)delete d.entities.activity[e.id]; }); } }catch(_){}
     return d;
   }catch(e){return seedDB(blankDB());}
 }
@@ -1953,6 +1957,7 @@ let activityFilterModule='';
 let activityFilterType='';
 let activitySearch='';
 let activityLimit=60;
+let activityManageOpen=false;
 let docListLimit=60;
 let docActiveFolder=null;
 let travelView='home';     // home | detail
@@ -2170,6 +2175,7 @@ function updateFab(){
     else if(currentModule==='vault') show=false; // Vault has its own Add button (and only when unlocked)
     else if(currentModule==='documents') show=false; // Documents has its own Add button
     else if(currentModule==='travel') show=false; // Travel has its own Add button
+    else if(currentModule==='family') show=false; // Family has its own buttons
     else show=moduleHasCreate(hubModule(currentModule));
   }
   else show=false; // lifehub, profile, more, search, ...
@@ -7273,7 +7279,7 @@ const HUB_MODULES=[
   {id:'travel',   icon:'✈',  color:'#06b6d4', title:'Travel',    desc:'Trips, bookings, packing & budget',  ready:true, createLabel:'New Trip', onCreate:()=>tripOpenEditor(null)},
   {id:'home',     icon:'⌂',  color:'#a855f7', title:'Home',      desc:'Maintenance & schedules',           ready:false, createLabel:'New Home Item',    onCreate:null},
   {id:'activity', icon:'⟳', color:'#0ea5e9', title:'Activity',  desc:'Recent activity across the app',    ready:true,  createLabel:null,               onCreate:null},
-  {id:'family',   icon:'♥',  color:'#ec4899', title:'Family',    desc:'Shared family space (future)',      ready:false, createLabel:'New Family Item',  onCreate:null}
+  {id:'family',   icon:'♥',  color:'#ec4899', title:'Family',    desc:'Members, places, check-in & SOS',   ready:true,  createLabel:null,               onCreate:null}
 ];
 // A module shows its own FAB only when it is ready AND defines a create handler.
 function moduleHasCreate(m){ return !!(m && m.ready && typeof m.onCreate==='function'); }
@@ -9385,54 +9391,65 @@ const ACT_VERB={
 function actVerb(v){ const x=ACT_VERB[v]; return x?(L==='fa'?x.fa:x.en):v; }
 function actVerbIc(v){ const x=ACT_VERB[v]; return x?x.ic:'•'; }
 
+// Map legacy stored-activity refType → module key.
+const ACT_REF_MODULE={ shopList:'shopping', shopItem:'shopping', task:'tasks', appt:'calendar', note:'notes', payment:'payments', vault:'vault', vaultSystem:'vault', document:'documents', trip:'travel' };
+
+/* ═══ Activity layer (history-only) — dedup, collapse & management ═══ */
 // Reconstructable verbs are OWNED by the derived pass (single source of truth).
-// Stored-log events may ONLY contribute non-reconstructable, ephemeral verbs;
-// this is what removes created/created and edited/updated duplication at the root.
+// Stored-log events may ONLY contribute non-reconstructable ephemeral verbs,
+// which removes stored+derived duplicate `created`/`edited` at the root.
 const ACT_STORED_VERBS=new Set(['deleted','permanently_deleted','archived','restored','unlocked','locked','copied','ocr','imported','setup','reused']);
-// Reconstructable "editing" verbs that collapse into one row per record.
-const ACT_EDIT_VERBS=new Set(['created','updated','edited']);
-// Placeholder / auto-titles that should never surface as a name.
-const ACT_PLACEHOLDERS=new Set(['new trip','سفر جدید','untitled','بدون عنوان','new note','یادداشت جدید','untitled trip','trip','سفر','new document','سند جدید','new task','کار جدید','new list','لیست جدید']);
+const ACT_EDIT_VERBS=new Set(['created','updated','edited']); // collapse into one row/record/day
+const ACT_PLACEHOLDERS=new Set(['new trip','سفر جدید','untitled','بدون عنوان','new note','یادداشت جدید','untitled trip','trip','سفر','new document','سند جدید','new task','کار جدید','new list','لیست جدید','shopping','خرید']);
 function actCleanName(name,refType,ref){
   let n=(name||'').trim();
   if(n&&ACT_PLACEHOLDERS.has(n.toLowerCase()))n='';
   if(!n&&refType==='trip'&&ref)n=(ref.destination||'').trim();
   return n;
 }
-// Grouped verb filters — a handful of meaningful buckets instead of ~15 chips.
-const ACT_VERB_GROUP={ created:'add', updated:'edit', edited:'edit', imported:'add', completed:'done', paid:'done', reused:'done', due:'remind', expiring:'remind', deleted:'remove', permanently_deleted:'remove', archived:'remove', restored:'remove', starred:'edit', unstarred:'edit', ocr:'add', copied:'edit', unlocked:'edit', locked:'edit', setup:'edit' };
-const ACT_GROUPS=[
-  ['add',{en:'Added',fa:'افزوده',ic:'＋'}],
-  ['edit',{en:'Updated',fa:'ویرایش',ic:'✎'}],
-  ['done',{en:'Completed',fa:'تکمیل',ic:'✓'}],
-  ['remind',{en:'Reminders',fa:'یادآوری',ic:'⏰'}],
-  ['remove',{en:'Removed',fa:'حذف',ic:'🗑'}]
-];
-function actVerbGroup(v){ return ACT_VERB_GROUP[v]||'edit'; }
-function actGroupLabel(g){ const x=ACT_GROUPS.find(a=>a[0]===g); return x?(L==='fa'?x[1].fa:x[1].en):g; }
-function actGroupIc(g){ const x=ACT_GROUPS.find(a=>a[0]===g); return x?x[1].ic:'•'; }
+// Persistent hidden-key overlay (works for BOTH stored & derived events).
+function actHiddenMap(){ if(!DB.meta.activityHidden||typeof DB.meta.activityHidden!=='object')DB.meta.activityHidden={}; return DB.meta.activityHidden; }
+function actIsHidden(key){ return !!actHiddenMap()[key]; }
+// Delete a single Activity row = hide its key (restorable). Never touches canonical data.
+function actHide(key){ if(!key)return; actHiddenMap()[key]=new Date().toISOString(); saveDB(); }
+// Clear Activity History = hide every event currently in the timeline (restorable).
+function actClearHistory(){ const m=actHiddenMap(); const now=new Date().toISOString(); buildTimeline(true).forEach(e=>{ m[e.key]=now; }); saveDB(); }
+// Restore Hidden Activity = un-hide everything.
+function actRestoreHidden(){ DB.meta.activityHidden={}; saveDB(); }
+function actHiddenCount(){ return Object.keys(actHiddenMap()).length; }
+// Rebuild Timeline = re-derive from canonical data; prune orphaned stored events
+// (canonical record gone) and dangling hidden keys. Canonical data untouched.
+function actRebuildTimeline(){
+  const m=activityMap();
+  // drop stored events whose canonical record no longer exists AND are reconstructable-noise
+  Object.values(m).forEach(e=>{ if(ACT_STORED_VERBS.has(e.type))return; delete m[e.id]; });
+  // prune hidden keys that no longer match any current event
+  const live=new Set(buildTimeline(true).map(e=>e.key));
+  const h=actHiddenMap(); Object.keys(h).forEach(k=>{ if(!live.has(k))delete h[k]; });
+  saveDB();
+}
+// Retention: 0 (Forever) | 30 | 90 | 365. Prunes STORED log; also display-filters timeline.
+function actSetRetention(days){ DB.meta.activityRetentionDays=days|0; const d=days|0; if(d>0){ const cut=Date.now()-d*864e5; const m=activityMap(); Object.values(m).forEach(e=>{ const t=Date.parse(e.at||''); if(!isNaN(t)&&t<cut)delete m[e.id]; }); } saveDB(); }
+function actRetentionCutoffMs(){ const d=(DB.meta.activityRetentionDays|0); return d>0?Date.now()-d*864e5:0; }
 
-// Map legacy stored-activity refType → module key.
-const ACT_REF_MODULE={ shopList:'shopping', shopItem:'shopping', task:'tasks', appt:'calendar', note:'notes', payment:'payments', vault:'vault', vaultSystem:'vault', document:'documents', trip:'travel' };
-
-function buildTimeline(){
+// includeHidden=true returns the FULL raw timeline (ignores hidden overlay &
+// retention) — used only by management actions (clear/rebuild).
+function buildTimeline(includeHidden){
   const out=[];
   const push=(o)=>{ if(o.at)out.push(o); };
   // 1) Stored events — ONLY non-reconstructable ephemeral verbs. Reconstructable
-  //    verbs (created/edited/updated/completed/paid…) are owned by the derived
-  //    pass below, so they are dropped here to eliminate duplication at the root.
+  //    verbs are owned by the derived pass, killing stored+derived `created` dupes.
   Object.values(activityMap()).forEach(e=>{
     if(!ACT_STORED_VERBS.has(e.type))return;
     const module=ACT_REF_MODULE[e.refType]||'tasks';
     push({ key:'log:'+e.id, at:e.at, module, verb:e.type, name:actCleanName((e.meta&&e.meta.name)||'',e.refType), refType:e.refType, refId:e.refId, source:'log' });
   });
-  // 2) Derived live events from module state (createdAt/updatedAt/expiry/completed). Deduped by key.
-  const seen=new Set(out.map(o=>o.module+':'+o.refId+':'+o.verb+':'+(o.at||'').slice(0,16)));
-  const add=(o)=>{ const k=o.module+':'+o.refId+':'+o.verb+':'+(o.at||'').slice(0,16); if(seen.has(k))return; seen.add(k); push(o); };
+  // 2) Derived live events from canonical state. Deduped by stable key.
+  const seen=new Set(out.map(o=>o.key));
+  const add=(o)=>{ if(seen.has(o.key))return; seen.add(o.key); push(o); };
   // Travel
   if(typeof tripsMap==='function')Object.values(tripsMap()).forEach(t=>{
-    if(t.deletedAt)return;
-    const tn=actCleanName(t.title,'trip',t);
+    if(t.deletedAt)return; const tn=actCleanName(t.title,'trip',t);
     if(t.createdAt)add({key:'trip:'+t.id+':c',at:t.createdAt,module:'travel',verb:'created',name:tn,refType:'trip',refId:t.id});
     if(t.updatedAt&&t.updatedAt!==t.createdAt)add({key:'trip:'+t.id+':u',at:t.updatedAt,module:'travel',verb:'updated',name:tn,refType:'trip',refId:t.id});
   });
@@ -9442,47 +9459,49 @@ function buildTimeline(){
     if(d.createdAt)add({key:'doc:'+d.id+':c',at:d.createdAt,module:'documents',verb:'created',name:dn,refType:'document',refId:d.id});
     if(d.updatedAt&&d.updatedAt!==d.createdAt)add({key:'doc:'+d.id+':u',at:d.updatedAt,module:'documents',verb:'updated',name:dn,refType:'document',refId:d.id});
     const days=(typeof docDaysToExpiry==='function')?docDaysToExpiry(d):null;
-    if(days!==null&&days>=0&&days<=30&&d.expiryDate)add({key:'doc:'+d.id+':e',at:d.expiryDate+'T09:00:00',module:'documents',verb:'expiring',name:d.title||docTypeLabel(d.type),refType:'document',refId:d.id});
+    if(days!==null&&days>=0&&days<=30&&d.expiryDate)add({key:'doc:'+d.id+':e',at:d.expiryDate+'T09:00:00',module:'documents',verb:'expiring',name:dn,refType:'document',refId:d.id});
   });
   // Payments (+ due/paid)
   if(typeof paymentsAll==='function')paymentsAll().forEach(pp=>{
-    if(pp.createdAt)add({key:'pay:'+pp.id+':c',at:pp.createdAt,module:'payments',verb:'created',name:pp.title||pp.label||'',refType:'payment',refId:pp.id});
+    const pn=actCleanName(pp.title||pp.label,'payment');
+    if(pp.createdAt)add({key:'pay:'+pp.id+':c',at:pp.createdAt,module:'payments',verb:'created',name:pn,refType:'payment',refId:pp.id});
     const paid=(typeof payDerivedStatus==='function')?payDerivedStatus(pp)==='paid':pp.paid;
-    if(paid&&pp.paidAt)add({key:'pay:'+pp.id+':p',at:pp.paidAt,module:'payments',verb:'paid',name:pp.title||pp.label||'',refType:'payment',refId:pp.id});
-    if(!paid&&pp.dueDate)add({key:'pay:'+pp.id+':d',at:pp.dueDate+'T09:00:00',module:'payments',verb:'due',name:pp.title||pp.label||'',refType:'payment',refId:pp.id});
+    if(paid&&pp.paidAt)add({key:'pay:'+pp.id+':p',at:pp.paidAt,module:'payments',verb:'paid',name:pn,refType:'payment',refId:pp.id});
+    if(!paid&&pp.dueDate)add({key:'pay:'+pp.id+':d',at:pp.dueDate+'T09:00:00',module:'payments',verb:'due',name:pn,refType:'payment',refId:pp.id});
   });
   // Tasks (+ completed)
   if(DB.entities.tasks)Object.values(DB.entities.tasks).forEach(t=>{
-    if(t.deletedAt)return;
-    const kn=actCleanName(t.text||t.title,'task');
+    if(t.deletedAt)return; const kn=actCleanName(t.text||t.title,'task');
     if(t.createdAt)add({key:'task:'+t.id+':c',at:t.createdAt,module:'tasks',verb:'created',name:kn,refType:'task',refId:t.id});
     if(t.done&&t.doneAt)add({key:'task:'+t.id+':done',at:t.doneAt,module:'tasks',verb:'completed',name:kn,refType:'task',refId:t.id});
   });
   // Notes
   if(DB.entities.noteItems)Object.values(DB.entities.noteItems).forEach(n=>{
-    if(n.archivedAt||n.deletedAt)return;
-    const nn=actCleanName(n.title,'note');
+    if(n.archivedAt||n.deletedAt)return; const nn=actCleanName(n.title,'note');
     if(n.updatedAt)add({key:'note:'+n.id+':u',at:n.updatedAt,module:'notes',verb:(n.updatedAt!==n.createdAt?'updated':'created'),name:nn,refType:'note',refId:n.id});
     else if(n.createdAt)add({key:'note:'+n.id+':c',at:n.createdAt,module:'notes',verb:'created',name:nn,refType:'note',refId:n.id});
   });
   // Shopping
   if(typeof shopListsAll==='function')shopListsAll().forEach(l=>{
-    if(l.createdAt)add({key:'shop:'+l.id+':c',at:l.createdAt,module:'shopping',verb:'created',name:l.name||'',refType:'shopList',refId:l.id});
+    if(l.createdAt)add({key:'shop:'+l.id+':c',at:l.createdAt,module:'shopping',verb:'created',name:actCleanName(l.name,'shopList'),refType:'shopList',refId:l.id});
   });
   // Calendar / appointments
   if(DB.entities.appts)Object.values(DB.entities.appts).forEach(ap=>{
     if(ap.archivedAt)return;
-    if(ap.createdAt)add({key:'appt:'+ap.id+':c',at:ap.createdAt,module:'calendar',verb:'created',name:ap.title||'',refType:'appt',refId:ap.id});
+    if(ap.createdAt)add({key:'appt:'+ap.id+':c',at:ap.createdAt,module:'calendar',verb:'created',name:actCleanName(ap.title,'appt'),refType:'appt',refId:ap.id});
   });
   out.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
-  // Intelligent collapse: fold a record's create+edit burst on the same day into
-  // one row (the most recent), so "created → updated → updated" is a single entry.
+  if(includeHidden)return out;
+  // 3) Retention display cutoff + hidden overlay (Activity layer only).
+  const cut=actRetentionCutoffMs(); const hidden=actHiddenMap();
+  let vis=out.filter(e=>{ if(hidden[e.key])return false; if(cut){ const t=Date.parse(e.at||''); if(!isNaN(t)&&t<cut)return false; } return true; });
+  // 4) Intelligent collapse: fold a record's create+edit burst on the same day
+  //    into ONE row (latest), so a logical record shows a single grouped entry.
   const byRec={}; const collapsed=[];
-  out.forEach(e=>{
+  vis.forEach(e=>{
     if(ACT_EDIT_VERBS.has(e.verb)){
-      const day=(e.at||'').slice(0,10);
-      const k=e.module+':'+e.refId+':'+day;
-      if(byRec[k]){ byRec[k]._n=(byRec[k]._n||1)+1; return; } // keep latest (out is desc)
+      const k=e.module+':'+e.refId+':'+(e.at||'').slice(0,10);
+      if(byRec[k]){ byRec[k]._n=(byRec[k]._n||1)+1; return; }
       byRec[k]=e; collapsed.push(e);
     }else collapsed.push(e);
   });
@@ -9509,18 +9528,11 @@ function timelineSummary(range){
   if(range==='today')cutoff=ts;
   else if(range==='week'){ const w=new Date(ts+'T00:00:00'); w.setDate(w.getDate()-7); cutoff=w.toISOString().slice(0,10); }
   const events=all.filter(e=>{ const d=(e.at||'').slice(0,10); return range==='today'?d===ts:d>=cutoff; });
-  const byModule={}, byGroup={};
-  events.forEach(e=>{ byModule[e.module]=(byModule[e.module]||0)+1; const g=actVerbGroup(e.verb); byGroup[g]=(byGroup[g]||0)+1; });
-  // Verb-group breakdown ("2 added · 3 completed · 1 reminder") — more meaningful than raw module counts.
-  const parts=ACT_GROUPS.filter(([g])=>byGroup[g]).map(([g])=>`${byGroup[g]} ${actGroupLabel(g).toLowerCase()}`);
-  const topMod=Object.keys(byModule).sort((a,b)=>byModule[b]-byModule[a])[0];
-  const when = range==='today' ? (L==='fa'?'امروز':'today') : (L==='fa'?'این هفته':'this week');
-  let headline;
-  if(!events.length) headline = L==='fa'?`${when} رخدادی نبود`:`Nothing logged ${when}`;
-  else headline = L==='fa'
-    ? `${when}: ${events.length} رخداد${topMod?' · بیشتر در '+actModuleLabel(topMod):''}`
-    : `${events.length} event${events.length>1?'s':''} ${when}${topMod?' · mostly '+actModuleLabel(topMod):''}`;
-  return { range, count:events.length, byModule, byGroup, headline, breakdown:parts.join(' · '), events };
+  const byModule={}, byVerb={};
+  events.forEach(e=>{ byModule[e.module]=(byModule[e.module]||0)+1; byVerb[e.verb]=(byVerb[e.verb]||0)+1; });
+  const parts=[]; Object.keys(byModule).forEach(m=>{ parts.push(`${byModule[m]} ${actModuleLabel(m)}`); });
+  const headline = range==='today' ? (L==='fa'?`امروز ${events.length} رخداد`:`${events.length} events today`) : (L==='fa'?`این هفته ${events.length} رخداد`:`${events.length} events this week`);
+  return { range, count:events.length, byModule, byVerb, headline, breakdown:parts.join(' · '), events };
 }
 
 function actGroupOf(at){
@@ -9539,14 +9551,33 @@ function renderActivity(){
   const fMod=activityFilterModule, fType=activityFilterType, q=(activitySearch||'').trim().toLowerCase();
   let events=all.filter(e=>{
     if(fMod&&e.module!==fMod)return false;
-    if(fType&&actVerbGroup(e.verb)!==fType)return false;
+    if(fType&&e.verb!==fType)return false;
     if(q){ const hay=(e.name+' '+actModuleLabel(e.module)+' '+actVerb(e.verb)+' '+actLabel(e)).toLowerCase(); if(!hay.includes(q))return false; }
     return true;
   });
+  const hiddenN=actHiddenCount();
   let html=`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
     <button class="ld-back" id="module-back" style="width:40px;height:40px;flex:none">&#8249;</button>
-    <div style="font-size:26px;font-weight:800">${L==='fa'?'فعالیت':'Activity'}</div>
+    <div style="font-size:26px;font-weight:800;flex:1">${L==='fa'?'فعالیت':'Activity'}</div>
+    <button id="act-manage-toggle" class="ld-back" style="width:40px;height:40px;flex:none;${activityManageOpen?'color:var(--brand)':''}" aria-label="${L==='fa'?'مدیریت':'Manage'}">⚙</button>
   </div>`;
+  // ── Manage panel: history-only actions. None of these touch canonical records. ──
+  if(activityManageOpen){
+    const ret=(DB.meta.activityRetentionDays|0);
+    const retOpts=[[30,'30'],[90,'90'],[365,'365'],[0,L==='fa'?'همیشه':'Forever']];
+    html+=`<div style="margin:0 16px 8px;padding:12px 14px;border-radius:12px;background:var(--s1);border:1px solid var(--b1)">
+      <div style="font-size:12px;color:var(--ink3);margin-bottom:8px" dir="auto">${L==='fa'?'این اقدام‌ها فقط تاریخچهٔ فعالیت را تغییر می‌دهند و هیچ داده‌ای را حذف نمی‌کنند.':'These actions affect the Activity history only — no records are changed or deleted.'}</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px">${L==='fa'?'نگه‌داری':'Retention'}</div>
+      <div class="pay-chips" style="flex-wrap:wrap;margin:0 0 10px">
+        ${retOpts.map(([d,lbl])=>`<button class="pay-chip${ret===d?' on':''}" data-act-ret="${d}">${lbl}${d?(L==='fa'?' روز':'d'):''}</button>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost" id="act-rebuild" style="flex:1;min-width:120px">↻ ${L==='fa'?'بازسازی':'Rebuild'}</button>
+        <button class="btn btn-ghost" id="act-restore" style="flex:1;min-width:120px"${hiddenN?'':' disabled'}>↩ ${L==='fa'?'بازگردانی پنهان‌ها':'Restore hidden'}${hiddenN?` (${hiddenN})`:''}</button>
+        <button class="btn btn-ghost" id="act-clear" style="flex:1;min-width:120px;color:var(--danger)">🗑 ${L==='fa'?'پاک‌سازی تاریخچه':'Clear history'}</button>
+      </div>
+    </div>`;
+  }
   // Search
   html+=`<div style="padding:4px 16px 8px"><input id="act-search" class="finput" placeholder="${L==='fa'?'جستجوی فعالیت‌ها…':'Search activity…'}" value="${esc(activitySearch||'')}" style="width:100%;box-sizing:border-box"></div>`;
   // AI-ready recap banner (deterministic now; future AI summary hook uses timelineSummary()).
@@ -9556,12 +9587,12 @@ function renderActivity(){
     <button class="pay-chip${!fMod?' on':''}" data-act-mod="">${L==='fa'?'همه':'All'}</button>`;
   Object.keys(ACT_MODULES).forEach(m=>{ const c=all.some(e=>e.module===m); if(c)html+=`<button class="pay-chip${fMod===m?' on':''}" data-act-mod="${m}">${ACT_MODULES[m].ic} ${actModuleLabel(m)}</button>`; });
   html+=`</div>`;
-  // Grouped event filter chips (≤5 meaningful buckets, only groups that appear)
-  const groupsPresent=new Set(all.map(e=>actVerbGroup(e.verb)));
-  if(groupsPresent.size>1){
+  // Type filter chips (only types that appear)
+  const typesPresent=[...new Set(all.map(e=>e.verb))];
+  if(typesPresent.length>1){
     html+=`<div class="pay-chips" style="flex-wrap:wrap">
-      <button class="pay-chip${!fType?' on':''}" data-act-type="">${L==='fa'?'همه':'All'}</button>`;
-    ACT_GROUPS.forEach(([g])=>{ if(!groupsPresent.has(g))return; html+=`<button class="pay-chip${fType===g?' on':''}" data-act-type="${g}">${actGroupIc(g)} ${actGroupLabel(g)}</button>`; });
+      <button class="pay-chip${!fType?' on':''}" data-act-type="">${L==='fa'?'همه رخدادها':'All events'}</button>`;
+    typesPresent.forEach(v=>{ html+=`<button class="pay-chip${fType===v?' on':''}" data-act-type="${v}">${actVerbIc(v)} ${actVerb(v)}</button>`; });
     html+=`</div>`;
   }
   if(!events.length){
@@ -9590,7 +9621,8 @@ function renderActivity(){
           <div style="font-size:14px" dir="auto">${esc(actLabel(e))}</div>
           <div style="font-size:12px;color:var(--ink3);margin-top:2px"><span style="color:${col}">${ACT_MODULES[e.module]?ACT_MODULES[e.module].ic:''} ${esc(actModuleLabel(e.module))}</span> · ${esc(when)}</div>
         </div>
-        ${nav?'<span style="color:var(--ink3);opacity:.4;padding-inline-end:4px">›</span>':''}
+        ${nav?'<span style="color:var(--ink3);opacity:.4;padding-inline-end:2px">›</span>':''}
+        <button class="act-del-btn" data-act-del="${encodeURIComponent(e.key)}" title="${L==='fa'?'حذف از تاریخچه':'Delete from history'}" aria-label="delete" style="flex:none;width:34px;height:34px;border:none;background:transparent;color:var(--ink3);font-size:15px;cursor:pointer;border-radius:8px">✕</button>
       </div>`;
     });
     html+=`</div>`;
@@ -9628,6 +9660,532 @@ function actOpen(module, refId){
   render(); window.scrollTo(0,0);
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   MBM FAMILY — production module (client-only, honest capabilities).
+   No fake live-tracking / battery / driving / geofencing / push / SOS
+   delivery claims. Everything here is real device-local functionality.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Offline QR generator (byte mode, ECC-L, versions 1–4, single block).
+   Enough for a short invite link/code. Fully self-contained (no network). ── */
+const MBMQR=(function(){
+  const EXP=new Array(256), LOG=new Array(256);
+  for(let i=0,x=1;i<255;i++){ EXP[i]=x; LOG[x]=i; x<<=1; if(x&256)x^=0x11d; }
+  EXP[255]=EXP[0];
+  const gmul=(a,b)=>(a===0||b===0)?0:EXP[(LOG[a]+LOG[b])%255];
+  function genPoly(ec){ let g=[1]; for(let i=0;i<ec;i++){ const r=new Array(g.length+1).fill(0); for(let j=0;j<g.length;j++){ r[j]^=g[j]; r[j+1]^=gmul(g[j],EXP[i]); } g=r; } return g; }
+  function rsEcc(data,ec){ const gen=genPoly(ec); const res=data.concat(new Array(ec).fill(0)); for(let i=0;i<data.length;i++){ const c=res[i]; if(c!==0)for(let j=0;j<gen.length;j++)res[i+j]^=gmul(gen[j],c); } return res.slice(data.length); }
+  const DATA_CW=[19,34,55,80], ECC_CW=[7,10,15,20]; // L, versions 1..4
+  const FORMAT_L=['111011111000100','111001011110011','111110110101010','111100010011101','110011000101111','110001100011000','110110001000001','110100101110110'];
+  function encode(text){
+    const bytes=[]; for(let i=0;i<text.length;i++){ const c=text.charCodeAt(i); if(c<128)bytes.push(c); else { const e=unescape(encodeURIComponent(text.charAt(i))); for(let k=0;k<e.length;k++)bytes.push(e.charCodeAt(k)); } }
+    let ver=-1; for(let v=0;v<4;v++){ if(bytes.length + Math.ceil((4+8)/8) <= DATA_CW[v]){ ver=v; break; } }
+    if(ver<0)return null; // too long for V1-4
+    const size=17+4*(ver+1), dataCap=DATA_CW[ver], eccLen=ECC_CW[ver];
+    // bit stream
+    let bits=''; const put=(val,len)=>{ bits+=val.toString(2).padStart(len,'0'); };
+    put(4,4); put(bytes.length,8); bytes.forEach(b=>put(b,8));
+    put(0,Math.min(4,dataCap*8-bits.length)); // terminator
+    while(bits.length%8)bits+='0';
+    const cw=[]; for(let i=0;i<bits.length;i+=8)cw.push(parseInt(bits.substr(i,8),2));
+    let pad=0xEC; while(cw.length<dataCap){ cw.push(pad); pad=(pad===0xEC)?0x11:0xEC; }
+    const ecc=rsEcc(cw,eccLen); const all=cw.concat(ecc);
+    let allBits=''; all.forEach(b=>allBits+=b.toString(2).padStart(8,'0'));
+    // matrix
+    const mod=Array.from({length:size},()=>new Array(size).fill(null));
+    const fn=Array.from({length:size},()=>new Array(size).fill(false));
+    const setF=(r,c,v)=>{ mod[r][c]=v?1:0; fn[r][c]=true; };
+    const finder=(r,c)=>{ for(let i=-1;i<=7;i++)for(let j=-1;j<=7;j++){ const rr=r+i,cc=c+j; if(rr<0||cc<0||rr>=size||cc>=size)continue; const on=(i>=0&&i<=6&&(j===0||j===6))||(j>=0&&j<=6&&(i===0||i===6))||(i>=2&&i<=4&&j>=2&&j<=4); setF(rr,cc,on); } };
+    finder(0,0); finder(0,size-7); finder(size-7,0);
+    for(let i=8;i<size-8;i++){ setF(6,i,i%2===0); setF(i,6,i%2===0); } // timing
+    if(ver>=1){ const a=size-7; for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++){ const on=(Math.max(Math.abs(i),Math.abs(j))!==1); setF(a+i,a+j,on); } } // one alignment pattern (V2-4)
+    setF(size-8,8,true); // dark module
+    // reserve format areas
+    for(let i=0;i<9;i++){ if(i!==6){ if(!fn[8][i])fn[8][i]=true; if(!fn[i][8])fn[i][8]=true; } }
+    for(let i=0;i<8;i++){ fn[8][size-1-i]=true; fn[size-1-i][8]=true; }
+    // place data (zigzag)
+    let bi=0, dir=-1, row=size-1;
+    for(let col=size-1;col>0;col-=2){ if(col===6)col--; while(true){ for(let c=0;c<2;c++){ const cc=col-c; if(!fn[row][cc]){ let dark=false; if(bi<allBits.length){ dark=allBits[bi]==='1'; bi++; } mod[row][cc]=dark?1:0; } } row+=dir; if(row<0||row>=size){ row-=dir; dir=-dir; break; } } }
+    const maskFn=[ (i,j)=>(i+j)%2===0,(i,j)=>i%2===0,(i,j)=>j%3===0,(i,j)=>(i+j)%3===0,(i,j)=>(Math.floor(i/2)+Math.floor(j/3))%2===0,(i,j)=>((i*j)%2)+((i*j)%3)===0,(i,j)=>(((i*j)%2)+((i*j)%3))%2===0,(i,j)=>(((i+j)%2)+((i*j)%3))%2===0 ];
+    function penalty(m){ let p=0; // rule 1 runs
+      for(let r=0;r<size;r++){ let rc=1,cc=1; for(let c=1;c<size;c++){ if(m[r][c]===m[r][c-1])rc++;else{ if(rc>=5)p+=3+rc-5; rc=1;} if(m[c][r]===m[c-1][r])cc++;else{ if(cc>=5)p+=3+cc-5; cc=1;} } if(rc>=5)p+=3+rc-5; if(cc>=5)p+=3+cc-5; }
+      for(let r=0;r<size-1;r++)for(let c=0;c<size-1;c++){ const v=m[r][c]; if(v===m[r][c+1]&&v===m[r+1][c]&&v===m[r+1][c+1])p+=3; } // rule2
+      let dark=0; for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(m[r][c])dark++; const ratio=dark/(size*size)*100; p+=Math.floor(Math.abs(ratio-50)/5)*10; // rule4
+      return p; }
+    let best=null,bestP=1e9,bestMask=0;
+    for(let mk=0;mk<8;mk++){ const m=mod.map(r=>r.slice()); for(let i=0;i<size;i++)for(let j=0;j<size;j++){ if(!fn[i][j]&&maskFn[mk](i,j))m[i][j]^=1; }
+      // format info for this mask
+      const fs=FORMAT_L[mk];
+      const place=(m)=>{ for(let i=0;i<15;i++){ const bit=(fs[14-i]==='1')?1:0; if(i<6)m[i][8]=bit; else if(i<8)m[i+1][8]=bit; else m[size-15+i][8]=bit; if(i<8)m[8][size-i-1]=bit; else if(i<9)m[8][15-i-1+1]=bit; else m[8][15-i-1]=bit; } m[size-8][8]=1; };
+      place(m);
+      const p=penalty(m); if(p<bestP){ bestP=p; best=m; bestMask=mk; } }
+    return { size, matrix:best };
+  }
+  function svg(text,px){ const q=encode(text); if(!q)return null; const n=q.size, quiet=4, total=n+quiet*2, s=px||220, cell=s/total;
+    let rects=''; for(let r=0;r<n;r++)for(let c=0;c<n;c++){ if(q.matrix[r][c]){ rects+=`<rect x="${((c+quiet)*cell).toFixed(2)}" y="${((r+quiet)*cell).toFixed(2)}" width="${cell.toFixed(2)}" height="${cell.toFixed(2)}"/>`; } }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" shape-rendering="crispEdges"><rect width="${s}" height="${s}" fill="#fff"/><g fill="#000">${rects}</g></svg>`;
+  }
+  return { encode, svg };
+})();
+
+/* ── Family state ── */
+let famView='dashboard';           // dashboard|members|memberEdit|places|placeEdit|invites|checkin|sos|settings|timeline|map
+let famActiveMemberId=null;
+let famActivePlaceId=null;
+let famSettingsTab='members';
+let _famSOS={timer:null,remaining:0,pos:null,gettingPos:false};
+let _famCheckin={pos:null,note:'',placeId:'',getting:false};
+
+/* ── Roles & permissions ── */
+const FAM_ROLES=['owner','admin','adult','child','guest'];
+const FAM_ROLE_RANK={owner:5,admin:4,adult:3,child:2,guest:1};
+const FAM_ROLE_LABEL={owner:{en:'Owner',fa:'مالک'},admin:{en:'Admin',fa:'مدیر'},adult:{en:'Adult',fa:'بزرگسال'},child:{en:'Child',fa:'کودک'},guest:{en:'Guest',fa:'مهمان'}};
+function famRoleLabel(r){ const x=FAM_ROLE_LABEL[r]; return x?(L==='fa'?x.fa:x.en):r; }
+// capability → minimum role rank required (defaults; user-configurable in settings)
+const FAM_CAP_DEFAULT={ manageMembers:'admin', assignRoles:'owner', managePlaces:'admin', sendInvites:'admin', configureSharing:'owner', configureSOS:'admin', triggerSOS:'guest', checkIn:'child', viewTimeline:'guest' };
+const FAM_CAP_LABEL={ manageMembers:{en:'Manage members',fa:'مدیریت اعضا'}, assignRoles:{en:'Assign roles',fa:'تعیین نقش'}, managePlaces:{en:'Manage places',fa:'مدیریت مکان‌ها'}, sendInvites:{en:'Send invitations',fa:'ارسال دعوت'}, configureSharing:{en:'Configure sharing',fa:'تنظیم اشتراک'}, configureSOS:{en:'Configure SOS',fa:'تنظیم SOS'}, triggerSOS:{en:'Trigger SOS',fa:'فعال‌سازی SOS'}, checkIn:{en:'Check in',fa:'ثبت ورود'}, viewTimeline:{en:'View timeline',fa:'مشاهده تایم‌لاین'} };
+
+const FAM_SHARE_MODULES=[['calendar',{en:'Calendar',fa:'تقویم'}],['tasks',{en:'Tasks',fa:'کارها'}],['shopping',{en:'Shopping',fa:'خرید'}],['travel',{en:'Travel',fa:'سفر'}],['documents',{en:'Documents',fa:'اسناد'}],['notes',{en:'Notes',fa:'یادداشت'}],['vault',{en:'Vault',fa:'ولت'}],['activity',{en:'Activity',fa:'فعالیت'}]];
+
+const FAM_PLACE_TYPES=[['home',{en:'Home',fa:'خانه'},'🏠'],['work',{en:'Work',fa:'محل کار'},'💼'],['school',{en:'School',fa:'مدرسه'},'🎓'],['gym',{en:'Gym',fa:'باشگاه'},'🏋'],['hospital',{en:'Hospital',fa:'بیمارستان'},'🏥'],['shopping',{en:'Shopping',fa:'خرید'},'🛒'],['custom',{en:'Custom',fa:'سفارشی'},'📍']];
+function famPlaceMeta(t){ return FAM_PLACE_TYPES.find(x=>x[0]===t)||FAM_PLACE_TYPES[6]; }
+
+/* ── Data accessors ── */
+function famMembersMap(){ if(!DB.entities.familyMembers)DB.entities.familyMembers={}; return DB.entities.familyMembers; }
+function famPlacesMap(){ if(!DB.entities.familyPlaces)DB.entities.familyPlaces={}; return DB.entities.familyPlaces; }
+function famInvitesMap(){ if(!DB.entities.familyInvites)DB.entities.familyInvites={}; return DB.entities.familyInvites; }
+function famTimelineMap(){ if(!DB.entities.familyTimeline)DB.entities.familyTimeline={}; return DB.entities.familyTimeline; }
+function famCfg(){ if(!DB.meta.family)famInit(); return DB.meta.family; }
+
+function famInit(){
+  if(DB.meta.family)return;
+  const ownerId=uid(), t=now();
+  DB.meta.family={
+    ownerId, selfId:ownerId, createdAt:t,
+    perms:Object.assign({},FAM_CAP_DEFAULT),
+    locationSharing:{ enabled:false, precise:true },
+    privacy:{ shareActivity:true, historyDays:30, paused:false, ghost:false, shareBattery:false, shareDriving:false },
+    shared:FAM_SHARE_MODULES.reduce((o,[k])=>{ o[k]={enabled:false, minRole:'adult'}; return o; },{}),
+    sos:{ countdownSec:10, contactIds:[], emergencyContacts:[] }
+  };
+  famMembersMap()[ownerId]={ id:ownerId, name:(DB.meta.displayName||'Me'), relationship:(L==='fa'?'خودم':'Me'), role:'owner', avatarId:(DB.meta.avatar||null), color:'#ec4899', self:true, createdAt:t, updatedAt:t };
+}
+function famSelf(){ const m=famMembersMap(); return m[famCfg().selfId]||Object.values(m).find(x=>x.role==='owner')||null; }
+function famRole(){ const s=famSelf(); return s?s.role:'guest'; }
+function famCan(cap){ const need=famCfg().perms[cap]||FAM_CAP_DEFAULT[cap]||'owner'; return (FAM_ROLE_RANK[famRole()]||0) >= (FAM_ROLE_RANK[need]||5); }
+function famModuleShared(id){ const s=famCfg().shared[id]; return !!(s&&s.enabled); }
+
+function famLog(type,meta){ const id=uid(); famTimelineMap()[id]={ id, type, at:now(), meta:meta||{} }; }
+function famTimelineAll(){ return Object.values(famTimelineMap()).sort((a,b)=>(b.at||'').localeCompare(a.at||'')); }
+
+/* ── Invitations ── */
+function famInviteLink(code){ let base=location.origin+location.pathname; return base+'#fi='+code; }
+function famCreateInvite(role,name){ const code=(uid()+uid()).replace(/[^a-z0-9]/gi,'').slice(0,10).toUpperCase(); const id=uid(); const t=now(); famInvitesMap()[id]={ id, code, role:role||'adult', name:(name||'').trim(), method:'link', status:'pending', createdAt:t, expiresAt:new Date(Date.now()+7*864e5).toISOString() }; famLog('invite',{code,role}); saveDB(); return famInvitesMap()[id]; }
+function famInviteStatus(inv){ if(inv.status==='pending' && inv.expiresAt && Date.parse(inv.expiresAt)<Date.now())return 'expired'; return inv.status; }
+
+/* ── Timeline label ── */
+function famEventLabel(e){
+  const m=e.meta||{};
+  switch(e.type){
+    case 'checkin': return (L==='fa'?'ثبت ورود':'Check-in')+(m.placeName?` · ${m.placeName}`:(m.note?` · ${m.note}`:''));
+    case 'sos': return (L==='fa'?'هشدار SOS فعال شد':'SOS activated');
+    case 'sos_action': return (L==='fa'?`اقدام SOS: ${m.action} باز شد`:`SOS action opened: ${m.action}`);
+    case 'sos_cancel': return (L==='fa'?'SOS لغو شد':'SOS cancelled');
+    case 'member_added': return (L==='fa'?`عضو افزوده شد: ${m.name}`:`Member added: ${m.name}`);
+    case 'member_removed': return (L==='fa'?`عضو حذف شد: ${m.name}`:`Member removed: ${m.name}`);
+    case 'role_changed': return (L==='fa'?`نقش ${m.name} → ${famRoleLabel(m.role)}`:`${m.name} role → ${famRoleLabel(m.role)}`);
+    case 'ownership': return (L==='fa'?`مالکیت به ${m.name} منتقل شد`:`Ownership transferred to ${m.name}`);
+    case 'place_added': return (L==='fa'?`مکان افزوده شد: ${m.name}`:`Place added: ${m.name}`);
+    case 'place_removed': return (L==='fa'?`مکان حذف شد: ${m.name}`:`Place removed: ${m.name}`);
+    case 'invite': return (L==='fa'?`دعوت‌نامه ساخته شد`:`Invitation created`);
+    case 'share': return (L==='fa'?`اشتراک ${m.name}: ${m.on?'روشن':'خاموش'}`:`Sharing ${m.name}: ${m.on?'on':'off'}`);
+    default: return e.type;
+  }
+}
+const FAM_EVENT_IC={checkin:'📍',sos:'🆘',sos_action:'📞',sos_cancel:'✖',member_added:'➕',member_removed:'➖',role_changed:'🎚',ownership:'👑',place_added:'📌',place_removed:'🗑',invite:'✉',share:'🔗'};
+
+/* ── Avatar bubble ── */
+function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const av=(typeof avatarById==='function'&&mem.avatarId)?avatarById(mem.avatarId):null; const inner=av?`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${av.bg};font-size:${Math.round(size*0.5)}px">${av.emoji}</div>`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${c};color:#fff;font-weight:800;font-size:${Math.round(size*0.42)}px">${esc((mem.name||'?').slice(0,1).toUpperCase())}</div>`; return `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex:none">${inner}</div>`; }
+
+/* ═══ RENDER ═══ */
+function renderFamily(){
+  famInit();
+  const head=(title,back)=>`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
+    <button class="ld-back" id="${back||'module-back'}" style="width:40px;height:40px;flex:none">&#8249;</button>
+    <div style="flex:1;font-size:26px;font-weight:800;letter-spacing:-.3px">${esc(title)}</div>
+    ${famView==='dashboard'?`<button class="ld-back" data-fam="settings" style="width:40px;height:40px;flex:none">⚙</button>`:''}
+  </div>`;
+  if(famView==='members') return head(L==='fa'?'اعضای خانواده':'Family Members')+famMembersView();
+  if(famView==='memberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famMemberEditView();
+  if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places')+famPlacesView();
+  if(famView==='placeEdit') return head(L==='fa'?'مکان':'Place','fam-back-places')+famPlaceEditView();
+  if(famView==='invites') return head(L==='fa'?'دعوت‌نامه‌ها':'Invitations')+famInvitesView();
+  if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-dash')+famCheckinView();
+  if(famView==='sos') return head('SOS','fam-back-dash')+famSOSView();
+  if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famTimelineView();
+  if(famView==='map') return head(L==='fa'?'نقشه خانواده':'Family Map','fam-back-dash')+famMapView();
+  if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-dash')+famSettingsView();
+  return head(L==='fa'?'خانواده':'Family')+famDashboardView();
+}
+
+function famTile(icon,label,act,sub){ return `<button class="ul-row" data-fam="${act}" style="width:100%;text-align:start;border:1px solid var(--b1);background:var(--s1);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer">
+  <div style="width:40px;height:40px;border-radius:11px;background:#ec489922;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icon}</div>
+  <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">${esc(label)}</div>${sub?`<div style="font-size:12px;color:var(--ink3)">${esc(sub)}</div>`:''}</div>
+  <span style="color:var(--ink3);opacity:.4">›</span></button>`; }
+
+function famDashboardView(){
+  const mem=Object.values(famMembersMap()), places=Object.values(famPlacesMap());
+  const pend=Object.values(famInvitesMap()).filter(i=>famInviteStatus(i)==='pending').length;
+  const recent=famTimelineAll().slice(0,5);
+  let h=`<div style="padding:0 16px 90px">`;
+  // self role banner
+  const s=famSelf();
+  h+=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:linear-gradient(135deg,#ec489918,#6e56f818);border:1px solid var(--b1);margin-bottom:12px">
+    ${famAvatar(s,44)}<div style="flex:1;min-width:0"><div style="font-weight:800">${esc(s.name)}</div><div style="font-size:12px;color:var(--ink3)">${famRoleLabel(s.role)} · ${mem.length} ${L==='fa'?'عضو':'members'}</div></div></div>`;
+  // primary actions
+  h+=`<div style="display:flex;gap:10px;margin-bottom:14px">
+    <button class="btn" data-fam="checkin" style="flex:1;background:#6e56f8;color:#fff">📍 ${L==='fa'?'ثبت ورود':'Check in'}</button>
+    <button class="btn" data-fam="sos" style="flex:1;background:var(--danger);color:#fff">🆘 SOS</button></div>`;
+  h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${mem.length} ${L==='fa'?'عضو':'members'}`);
+  h+=`<div style="height:8px"></div>`+famTile('📌',L==='fa'?'مکان‌ها':'Places','places',`${places.length} ${L==='fa'?'مکان':'places'}`);
+  h+=`<div style="height:8px"></div>`+famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites',pend?`${pend} ${L==='fa'?'در انتظار':'pending'}`:(L==='fa'?'دعوت جدید':'invite someone'));
+  h+=`<div style="height:8px"></div>`+famTile('🗺',L==='fa'?'نقشه خانواده':'Family Map','map',L==='fa'?'موقعیت این دستگاه':'this device location');
+  h+=`<div style="height:8px"></div>`+famTile('🕘',L==='fa'?'تایم‌لاین':'Timeline','timeline',`${famTimelineAll().length} ${L==='fa'?'رخداد':'events'}`);
+  // recent
+  if(recent.length){ h+=`<div style="margin:18px 0 6px;font-size:13px;font-weight:800;color:var(--ink2)">${L==='fa'?'اخیر':'Recent'}</div>`;
+    recent.forEach(e=>{ h+=`<div class="ul-row" style="display:flex;gap:10px;padding:10px 4px;border-top:1px solid var(--b1)"><span style="font-size:16px">${FAM_EVENT_IC[e.type]||'•'}</span><div style="flex:1;min-width:0"><div style="font-size:14px" dir="auto">${esc(famEventLabel(e))}</div><div style="font-size:11px;color:var(--ink3)">${esc(famWhen(e.at))}</div></div></div>`; }); }
+  h+=`</div>`;
+  return h;
+}
+function famWhen(at){ const d=new Date(at); return isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+
+/* ── Members ── */
+function famMembersView(){
+  const list=Object.values(famMembersMap()).sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0));
+  let h=`<div style="padding:0 16px 90px">`;
+  if(famCan('manageMembers')) h+=`<button class="btn" data-fam="member-new" style="width:100%;margin-bottom:12px">＋ ${L==='fa'?'افزودن عضو':'Add member'}</button>`;
+  else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'برای افزودن عضو نیاز به دسترسی مدیر است.':'Adding members requires admin permission.'}</div>`;
+  list.forEach(mem=>{ h+=`<div class="ul-row" data-fam="member-open" data-arg="${mem.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
+    ${famAvatar(mem,44)}
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(mem.name)}${mem.self?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+      <div style="font-size:12px;color:var(--ink3)">${esc(mem.relationship||'')}${mem.relationship?' · ':''}${famRoleLabel(mem.role)}</div></div>
+    <span style="color:var(--ink3);opacity:.4">›</span></div>`; });
+  h+=`</div>`; return h;
+}
+function famMemberEditView(){
+  const mem=famMembersMap()[famActiveMemberId]; if(!mem)return `<div style="padding:20px">—</div>`;
+  const canRole=famCan('assignRoles')&&!mem.self;
+  const canRemove=famCan('manageMembers')&&!mem.self&&mem.role!=='owner';
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(mem,72)}</div>`;
+  h+=`<label class="fl">${L==='fa'?'نام':'Name'}</label><input class="finput" id="fam-m-name" value="${esc(mem.name||'')}" ${mem.self?'':''}>`;
+  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نسبت':'Relationship'}</label><input class="finput" id="fam-m-rel" value="${esc(mem.relationship||'')}" placeholder="${L==='fa'?'همسر، فرزند…':'spouse, child…'}">`;
+  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نقش':'Role'}</label>`;
+  const shownRole=mem._pendRole||mem.role;
+  h+=`<div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.map(r=>`<button class="pay-chip${shownRole===r?' on':''}" ${canRole?`data-fam="member-role" data-arg="${r}"`:'disabled'} ${(r==='owner')?'style="display:none"':''}>${famRoleLabel(r)}</button>`).join('')}</div>`;
+  if(!canRole)h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نقش فقط توسط مالک.':'Only the owner can change roles.'}</div>`;
+  h+=`<button class="btn" data-fam="member-save" style="width:100%;margin-top:16px">${L==='fa'?'ذخیره':'Save'}</button>`;
+  if(!mem.self&&mem.role!=='owner'&&famCan('assignRoles'))h+=`<button class="btn btn-ghost" data-fam="member-transfer" style="width:100%;margin-top:8px">👑 ${L==='fa'?'انتقال مالکیت به این عضو':'Transfer ownership'}</button>`;
+  if(canRemove)h+=`<button class="btn btn-ghost" data-fam="member-remove" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'حذف عضو':'Remove member'}</button>`;
+  h+=`</div>`; return h;
+}
+
+/* ── Places ── */
+function famPlacesView(){
+  const list=Object.values(famPlacesMap()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+  let h=`<div style="padding:0 16px 90px">`;
+  if(famCan('managePlaces'))h+=`<button class="btn" data-fam="place-new" style="width:100%;margin-bottom:12px">＋ ${L==='fa'?'افزودن مکان':'Add place'}</button>`;
+  if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">📌</div><div class="hub-ph-t">${L==='fa'?'هنوز مکانی نیست':'No places yet'}</div><div class="hub-ph-d">${L==='fa'?'مکان‌های مهم مثل خانه و مدرسه را اضافه کنید.':'Add key places like Home and School.'}</div></div>`;
+  list.forEach(p=>{ const meta=famPlaceMeta(p.type); h+=`<div class="ul-row" data-fam="place-open" data-arg="${p.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
+    <div style="width:40px;height:40px;border-radius:11px;background:#ec489918;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:18px">${meta[2]}</div>
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(p.name)}</div><div style="font-size:12px;color:var(--ink3)">${(L==='fa'?meta[1].fa:meta[1].en)} · ${p.radius||150}m${p.quietHours&&p.quietHours.enabled?' · '+(L==='fa'?'ساعت آرام':'quiet hours'):''}</div></div>
+    <span style="color:var(--ink3);opacity:.4">›</span></div>`; });
+  h+=`</div>`; return h;
+}
+function famPlaceEditView(){
+  const isNew=!famActivePlaceId; if(isNew&&!_famPlaceDraft)_famPlaceDraft={type:'home',name:'',radius:150,alerts:{enter:true,exit:true},quietHours:{enabled:false,start:'22:00',end:'07:00'}}; const p=isNew?_famPlaceDraft:(famPlacesMap()[famActivePlaceId]||{});
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<label class="fl">${L==='fa'?'نوع':'Type'}</label><div class="pay-chips" style="flex-wrap:wrap">${FAM_PLACE_TYPES.map(t=>`<button class="pay-chip${(p.type||'home')===t[0]?' on':''}" data-fam="place-type" data-arg="${t[0]}">${t[2]} ${L==='fa'?t[1].fa:t[1].en}</button>`).join('')}</div>`;
+  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نام':'Name'}</label><input class="finput" id="fam-p-name" value="${esc(p.name||'')}" placeholder="${L==='fa'?'خانه':'Home'}">`;
+  h+=`<div style="display:flex;gap:8px;margin-top:10px"><div style="flex:1"><label class="fl">${L==='fa'?'عرض':'Latitude'}</label><input class="finput" id="fam-p-lat" inputmode="decimal" value="${p.lat!=null?p.lat:''}"></div><div style="flex:1"><label class="fl">${L==='fa'?'طول':'Longitude'}</label><input class="finput" id="fam-p-lon" inputmode="decimal" value="${p.lon!=null?p.lon:''}"></div></div>`;
+  h+=`<button class="btn btn-ghost" data-fam="place-usehere" style="width:100%;margin-top:8px">📍 ${L==='fa'?'استفاده از موقعیت این دستگاه':'Use this device location'}</button>`;
+  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'شعاع ورود (متر)':'Enter radius (m)'}</label><input class="finput" id="fam-p-rad" inputmode="numeric" value="${p.radius||150}">`;
+  const al=p.alerts||{enter:true,exit:true}, qh=p.quietHours||{enabled:false,start:'22:00',end:'07:00'};
+  h+=`<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+    ${famToggleRow('place-alert-enter',L==='fa'?'هشدار ورود':'Enter alerts',al.enter)}
+    ${famToggleRow('place-alert-exit',L==='fa'?'هشدار خروج':'Exit alerts',al.exit)}
+    ${famToggleRow('place-quiet',L==='fa'?'ساعت آرام (بی‌صدا)':'Quiet hours (mute)',qh.enabled)}</div>`;
+  h+=`<div id="fam-p-quiet-times" style="display:${qh.enabled?'flex':'none'};gap:8px;margin-top:8px"><div style="flex:1"><label class="fl">${L==='fa'?'از':'From'}</label><input class="finput" type="time" id="fam-p-qs" value="${qh.start||'22:00'}"></div><div style="flex:1"><label class="fl">${L==='fa'?'تا':'To'}</label><input class="finput" type="time" id="fam-p-qe" value="${qh.end||'07:00'}"></div></div>`;
+  h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'یادآوری: هشدار ورود/خروج خودکار در پس‌زمینه نیاز به اپ همراه بومی دارد؛ این نسخهٔ وب فقط تنظیمات را ذخیره می‌کند و ورود دستی را پشتیبانی می‌کند.':'Note: automatic background enter/exit alerts require a native companion app. This web version stores the preference and supports manual check-in.'}</div>`;
+  h+=`<button class="btn" data-fam="place-save" style="width:100%;margin-top:14px">${L==='fa'?'ذخیره مکان':'Save place'}</button>`;
+  if(!isNew&&famCan('managePlaces'))h+=`<button class="btn btn-ghost" data-fam="place-remove" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'حذف مکان':'Remove place'}</button>`;
+  h+=`</div>`; return h;
+}
+function famToggleRow(act,label,on){ return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--b1);border-radius:12px;background:var(--s1)"><span style="font-size:14px">${esc(label)}</span><button class="fam-tog" data-fam="${act}" style="width:44px;height:26px;border-radius:13px;border:none;cursor:pointer;background:${on?'#22c55e':'var(--b2)'};position:relative"><span style="position:absolute;top:3px;${on?'right:3px':'left:3px'};width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s"></span></button></div>`; }
+
+/* ── Invitations ── */
+function famInvitesView(){
+  const list=Object.values(famInvitesMap()).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  let h=`<div style="padding:0 16px 90px">`;
+  if(famCan('sendInvites')){
+    h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;background:var(--s1);margin-bottom:14px">
+      <label class="fl">${L==='fa'?'نقش دعوت‌شده':'Invitee role'}</label>
+      <div class="pay-chips" style="flex-wrap:wrap">${['admin','adult','child','guest'].map(r=>`<button class="pay-chip${(_famInviteRole||'adult')===r?' on':''}" data-fam="inv-role" data-arg="${r}">${famRoleLabel(r)}</button>`).join('')}</div>
+      <button class="btn" data-fam="inv-create" style="width:100%;margin-top:10px">＋ ${L==='fa'?'ساخت دعوت‌نامه':'Create invitation'}</button></div>`;
+  } else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'ارسال دعوت نیاز به دسترسی مدیر دارد.':'Sending invitations requires admin permission.'}</div>`;
+  if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">✉</div><div class="hub-ph-t">${L==='fa'?'دعوتی وجود ندارد':'No invitations'}</div></div>`;
+  list.forEach(inv=>{ const st=famInviteStatus(inv); const link=famInviteLink(inv.code); const qr=MBMQR.svg(link,180);
+    const stc={pending:'#f59e0b',accepted:'#22c55e',rejected:'#ef4444',expired:'#94a3b8'}[st]||'#94a3b8';
+    h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;margin-bottom:12px;background:var(--s1)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-weight:700">${famRoleLabel(inv.role)}</span><span class="chip" style="background:${stc}22;color:${stc}">${st}</span></div>
+      ${st==='pending'?`<div style="display:flex;justify-content:center;padding:6px 0">${qr||`<div style="font-size:12px;color:var(--ink3)">${L==='fa'?'لینک برای QR بلند است':'link too long for QR'}</div>`}</div>`:''}
+      <div style="font-size:12px;color:var(--ink3);word-break:break-all;margin:6px 0">${esc(link)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost" data-fam="inv-copy" data-arg="${inv.id}" style="flex:1;min-width:110px">${L==='fa'?'کپی لینک':'Copy link'}</button>
+        <button class="btn btn-ghost" data-fam="inv-share" data-arg="${inv.id}" style="flex:1;min-width:110px">${L==='fa'?'اشتراک‌گذاری':'Share'}</button>
+        ${st==='pending'?`<button class="btn btn-ghost" data-fam="inv-accept" data-arg="${inv.id}" style="flex:1;min-width:90px;color:#22c55e">${L==='fa'?'پذیرش':'Accept'}</button><button class="btn btn-ghost" data-fam="inv-reject" data-arg="${inv.id}" style="flex:1;min-width:90px;color:var(--danger)">${L==='fa'?'رد':'Reject'}</button>`:''}
+        <button class="btn btn-ghost" data-fam="inv-del" data-arg="${inv.id}" style="flex:1;min-width:90px">${L==='fa'?'حذف':'Delete'}</button>
+      </div></div>`; });
+  h+=`</div>`; return h;
+}
+
+/* ── Check-in ── */
+function famCheckinView(){
+  const places=Object.values(famPlacesMap());
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:16px;background:var(--s1)">
+    <div style="font-weight:700;margin-bottom:6px">${L==='fa'?'ثبت ورود با موقعیت این دستگاه':'Check in with this device location'}</div>
+    <div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'موقعیت واقعی همین گوشی از طریق GPS مرورگر گرفته می‌شود.':'Uses this phone’s real GPS via the browser.'}</div>`;
+  if(_famCheckin.pos){ const p=_famCheckin.pos; h+=`<div style="font-size:13px;margin-bottom:10px">📍 ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} <span style="color:var(--ink3)">(±${Math.round(p.acc)}m)</span> · <a href="https://maps.google.com/?q=${p.lat},${p.lon}" target="_blank" style="color:var(--brand)">${L==='fa'?'نقشه':'map'}</a></div>`; }
+  h+=`<button class="btn btn-ghost" data-fam="ci-locate" style="width:100%;margin-bottom:10px">${_famCheckin.getting?(L==='fa'?'در حال گرفتن موقعیت…':'Locating…'):(L==='fa'?'📍 گرفتن موقعیت':'📍 Get location')}</button>`;
+  if(places.length){ h+=`<label class="fl">${L==='fa'?'مقصد (اختیاری)':'Destination (optional)'}</label><select class="finput" id="fam-ci-place"><option value="">—</option>${places.map(p=>`<option value="${p.id}" ${_famCheckin.placeId===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`; }
+  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'یادداشت':'Note'}</label><input class="finput" id="fam-ci-note" value="${esc(_famCheckin.note||'')}" placeholder="${L==='fa'?'رسیدم به خانه':'Arrived home'}">`;
+  h+=`<button class="btn" data-fam="ci-send" style="width:100%;margin-top:14px" ${_famCheckin.pos?'':'disabled'}>${L==='fa'?'ثبت ورود':'Send check-in'}</button>`;
+  h+=`<button class="btn btn-ghost" data-fam="ci-emergency" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'ثبت ورود اضطراری':'Emergency check-in'}</button>`;
+  h+=`</div></div>`; return h;
+}
+
+/* ── SOS ── */
+function famSOSView(){
+  const cfg=famCfg().sos; const members=Object.values(famMembersMap()).filter(m=>!m.self);
+  let h=`<div style="padding:0 16px 90px">`;
+  if(_famSOS.remaining>0){
+    h+=`<div style="text-align:center;padding:30px 16px;border:2px solid var(--danger);border-radius:18px;background:#ef444410">
+      <div style="font-size:15px;color:var(--danger);font-weight:800;margin-bottom:8px">${L==='fa'?'ارسال SOS در':'Sending SOS in'}</div>
+      <div style="font-size:64px;font-weight:900;color:var(--danger)">${_famSOS.remaining}</div>
+      <button class="btn" data-fam="sos-cancel" style="width:100%;margin-top:16px;background:var(--ink);color:var(--bg)">${L==='fa'?'لغو':'Cancel'}</button></div>`;
+    h+=`</div>`; return h;
+  }
+  if(_famSOS.pos){ const p=_famSOS.pos; const link=`https://maps.google.com/?q=${p.lat},${p.lon}`;
+    const body=encodeURIComponent((L==='fa'?'اضطراری! موقعیت من: ':'EMERGENCY! My location: ')+link);
+    const contacts=cfg.emergencyContacts||[];
+    h+=`<div style="border:2px solid var(--danger);border-radius:16px;padding:16px;background:#ef444408">
+      <div style="font-weight:800;color:var(--danger);margin-bottom:6px">${L==='fa'?'موقعیت زندهٔ این دستگاه':'This device live location'}</div>
+      <div style="font-size:13px;margin-bottom:12px">📍 ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · <a href="${link}" target="_blank" style="color:var(--brand)">${L==='fa'?'باز کردن نقشه':'open map'}</a></div>`;
+    if(contacts.length){ contacts.forEach(c=>{ h+=`<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center"><div style="flex:1;font-size:14px">${esc(c.name)} <span style="color:var(--ink3)">${esc(c.phone)}</span></div>
+      <a class="btn btn-ghost" href="tel:${encodeURIComponent(c.phone)}" data-fam="sos-log" data-arg="call" style="padding:6px 12px">📞</a>
+      <a class="btn btn-ghost" href="sms:${encodeURIComponent(c.phone)}?body=${body}" data-fam="sos-log" data-arg="sms" style="padding:6px 12px">💬</a></div>`; }); }
+    else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:8px">${L==='fa'?'مخاطب اضطراری تنظیم نشده — در تنظیمات SOS اضافه کنید.':'No emergency contacts set — add them in SOS settings.'}</div>`;
+    h+=`<button class="btn" data-fam="sos-share" style="width:100%;margin-top:6px">${L==='fa'?'اشتراک لینک موقعیت':'Share location link'}</button>`;
+    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'این اقدام‌ها فقط تماس/پیامک/اشتراک را باز می‌کنند. تحویل پیام تضمین نمی‌شود؛ باید خودتان ارسال را کامل کنید.':'These only open your dialer / SMS / share sheet. Delivery is not guaranteed — you must complete the send.'}</div>`;
+    h+=`<button class="btn btn-ghost" data-fam="sos-reset" style="width:100%;margin-top:10px">${L==='fa'?'پایان':'Done'}</button>`;
+    h+=`</div></div>`; return h;
+  }
+  h+=`<div style="text-align:center;padding:20px 0">
+    <button class="btn" data-fam="sos-start" style="width:170px;height:170px;border-radius:50%;background:var(--danger);color:#fff;font-size:26px;font-weight:900">SOS</button>
+    <div style="font-size:13px;color:var(--ink3);margin-top:16px">${L==='fa'?`با فشردن، شمارش معکوس ${cfg.countdownSec} ثانیه‌ای شروع می‌شود و سپس موقعیت این دستگاه گرفته می‌شود.`:`Starts a ${cfg.countdownSec}s countdown, then captures this device location.`}</div></div>`;
+  h+=`</div>`; return h;
+}
+
+/* ── Family Map (honest: this device only) ── */
+function famMapView(){
+  const members=Object.values(famMembersMap());
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:16px;background:var(--s1);margin-bottom:12px">
+    <div style="font-weight:700;margin-bottom:6px">${L==='fa'?'موقعیت این دستگاه':'This device location'}</div>`;
+  if(_famCheckin.pos){ const p=_famCheckin.pos; h+=`<div style="font-size:13px">📍 ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · <a href="https://maps.google.com/?q=${p.lat},${p.lon}" target="_blank" style="color:var(--brand)">${L==='fa'?'باز کردن در نقشه':'open in maps'}</a></div>`; }
+  else h+=`<div style="font-size:13px;color:var(--ink3)">${L==='fa'?'هنوز موقعیتی گرفته نشده.':'No location captured yet.'}</div>`;
+  h+=`<button class="btn btn-ghost" data-fam="map-locate" style="width:100%;margin-top:10px">📍 ${L==='fa'?'گرفتن موقعیت این دستگاه':'Locate this device'}</button></div>`;
+  h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;background:var(--s1)">
+    <div style="font-weight:700;margin-bottom:8px">${L==='fa'?'اعضا':'Members'}</div>`;
+  members.forEach(m=>{ h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--b1)">${famAvatar(m,36)}<div style="flex:1"><div style="font-weight:600;font-size:14px">${esc(m.name)}</div><div style="font-size:12px;color:var(--ink3)">${m.self?(L==='fa'?'این دستگاه':'this device'):(L==='fa'?'موقعیت زنده نیاز به اپ همراه دارد':'live location needs companion app')}</div></div></div>`; });
+  h+=`</div>`;
+  h+=`<div style="font-size:11px;color:var(--ink3);margin-top:12px">${L==='fa'?'موقعیت زندهٔ سایر اعضا، آنلاین/آفلاین و باتری در این نسخهٔ وب در دسترس نیست و نیاز به اپ همراه بومی + سرور دارد. هیچ دادهٔ ساختگی نمایش داده نمی‌شود.':'Live location, online/offline and battery of other members are not available in this web version — they require a native companion app + server. No placeholder data is shown.'}</div>`;
+  h+=`</div>`; return h;
+}
+
+/* ── Timeline ── */
+function famTimelineView(){
+  const list=famTimelineAll();
+  let h=`<div style="padding:0 16px 90px">`;
+  if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">🕘</div><div class="hub-ph-t">${L==='fa'?'رخدادی نیست':'No events yet'}</div><div class="hub-ph-d">${L==='fa'?'ثبت ورود، SOS و تغییرات اینجا ثبت می‌شوند.':'Check-ins, SOS and changes appear here.'}</div></div>`;
+  list.forEach(e=>{ h+=`<div style="display:flex;gap:12px;padding:12px 4px;border-top:1px solid var(--b1)"><span style="font-size:18px">${FAM_EVENT_IC[e.type]||'•'}</span><div style="flex:1;min-width:0"><div style="font-size:14px" dir="auto">${esc(famEventLabel(e))}</div><div style="font-size:11px;color:var(--ink3)">${esc(famWhen(e.at))}</div></div></div>`; });
+  h+=`</div>`; return h;
+}
+
+/* ── Settings ── */
+function famSettingsView(){
+  const tabs=[['members',L==='fa'?'اعضا':'Members'],['invitations',L==='fa'?'دعوت':'Invites'],['roles',L==='fa'?'نقش‌ها':'Roles'],['location',L==='fa'?'موقعیت':'Location'],['places',L==='fa'?'مکان‌ها':'Places'],['checkin',L==='fa'?'ورود':'Check-in'],['sos','SOS'],['privacy',L==='fa'?'حریم':'Privacy'],['shared',L==='fa'?'اشتراک':'Shared']];
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div class="pay-chips" style="flex-wrap:wrap;margin-bottom:12px">${tabs.map(([k,l])=>`<button class="pay-chip${famSettingsTab===k?' on':''}" data-fam="set-tab" data-arg="${k}">${l}</button>`).join('')}</div>`;
+  const cfg=famCfg();
+  if(famSettingsTab==='members')h+=famTile('👥',L==='fa'?'مدیریت اعضا':'Manage members','members');
+  else if(famSettingsTab==='invitations')h+=famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites');
+  else if(famSettingsTab==='places')h+=famTile('📌',L==='fa'?'مکان‌ها':'Places','places');
+  else if(famSettingsTab==='checkin')h+=famTile('📍',L==='fa'?'ثبت ورود':'Check-in','checkin');
+  else if(famSettingsTab==='roles'){
+    h+=`<div style="font-size:13px;font-weight:700;margin-bottom:8px">${L==='fa'?'حداقل نقش برای هر دسترسی':'Minimum role per capability'}</div>`;
+    Object.keys(FAM_CAP_DEFAULT).forEach(cap=>{ const cur=cfg.perms[cap]||FAM_CAP_DEFAULT[cap]; h+=`<div style="padding:10px 0;border-top:1px solid var(--b1)"><div style="font-size:13px;margin-bottom:6px">${L==='fa'?FAM_CAP_LABEL[cap].fa:FAM_CAP_LABEL[cap].en}</div><div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.map(r=>`<button class="pay-chip${cur===r?' on':''}" ${famCan('assignRoles')?`data-fam="perm-set" data-arg="${cap}:${r}"`:'disabled'}>${famRoleLabel(r)}</button>`).join('')}</div></div>`; });
+    if(!famCan('assignRoles'))h+=`<div style="font-size:11px;color:var(--ink3);margin-top:8px">${L==='fa'?'فقط مالک می‌تواند دسترسی‌ها را تغییر دهد.':'Only the owner can edit permissions.'}</div>`;
+  }
+  else if(famSettingsTab==='location'){
+    const ls=cfg.locationSharing;
+    h+=famToggleRow('set-loc-enabled',L==='fa'?'اشتراک موقعیت این دستگاه':'Share this device location',ls.enabled);
+    h+=`<div style="height:8px"></div>`+famToggleRow('set-loc-precise',L==='fa'?'موقعیت دقیق':'Precise location',ls.precise);
+    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'اشتراک واقعی موقعیت بین دستگاه‌ها نیاز به اپ همراه + سرور دارد. این تنظیم ترجیح شما را ذخیره می‌کند.':'Real cross-device location sharing needs a companion app + server. This stores your preference.'}</div>`;
+  }
+  else if(famSettingsTab==='sos'){
+    h+=`<label class="fl">${L==='fa'?'شمارش معکوس (ثانیه)':'Countdown (seconds)'}</label><input class="finput" id="fam-sos-count" inputmode="numeric" value="${cfg.sos.countdownSec}">`;
+    h+=`<button class="btn btn-ghost" data-fam="sos-count-save" style="width:100%;margin-top:8px">${L==='fa'?'ذخیره':'Save'}</button>`;
+    h+=`<div style="font-weight:700;margin:16px 0 8px">${L==='fa'?'مخاطبین اضطراری':'Emergency contacts'}</div>`;
+    (cfg.sos.emergencyContacts||[]).forEach(c=>{ h+=`<div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--b1)"><div style="flex:1"><div style="font-weight:600;font-size:14px">${esc(c.name)}</div><div style="font-size:12px;color:var(--ink3)">${esc(c.phone)}</div></div><button class="btn btn-ghost" data-fam="sos-contact-del" data-arg="${c.id}" style="padding:6px 10px;color:var(--danger)">✕</button></div>`; });
+    h+=`<div style="display:flex;gap:8px;margin-top:8px"><input class="finput" id="fam-sos-cn" placeholder="${L==='fa'?'نام':'Name'}" style="flex:1"><input class="finput" id="fam-sos-cp" placeholder="${L==='fa'?'شماره':'Phone'}" style="flex:1" inputmode="tel"></div>`;
+    h+=`<button class="btn btn-ghost" data-fam="sos-contact-add" style="width:100%;margin-top:8px">＋ ${L==='fa'?'افزودن مخاطب':'Add contact'}</button>`;
+  }
+  else if(famSettingsTab==='privacy'){
+    const pv=cfg.privacy;
+    h+=famToggleRow('set-priv-pause',L==='fa'?'توقف موقت اشتراک':'Temporarily pause sharing',pv.paused);
+    h+=`<div style="height:8px"></div>`+famToggleRow('set-priv-ghost',L==='fa'?'حالت مخفی (Ghost)':'Ghost mode',pv.ghost);
+    h+=`<div style="height:8px"></div>`+famToggleRow('set-priv-activity',L==='fa'?'اشتراک فعالیت':'Share activity',pv.shareActivity);
+    h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'مدت نگهداری تاریخچه (روز)':'History duration (days)'}</label><div class="pay-chips">${[7,30,90,365].map(d=>`<button class="pay-chip${pv.historyDays===d?' on':''}" data-fam="set-priv-hist" data-arg="${d}">${d}</button>`).join('')}</div>`;
+    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'اشتراک باتری و رانندگی بین دستگاه‌ها در این نسخه پشتیبانی نمی‌شود و عمداً حذف شده است.':'Cross-device battery & driving sharing is intentionally omitted (not supported without native telemetry).'}</div>`;
+  }
+  else if(famSettingsTab==='shared'){
+    h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">${L==='fa'?'اشتراک هر ماژول با خانواده و حداقل نقش لازم:':'Share each module with the family and its minimum role:'}</div>`;
+    FAM_SHARE_MODULES.forEach(([k,l])=>{ const sc=cfg.shared[k]; h+=`<div style="padding:10px 0;border-top:1px solid var(--b1)">${famToggleRow('set-share-'+k,(L==='fa'?l.fa:l.en),sc.enabled)}${sc.enabled?`<div class="pay-chips" style="flex-wrap:wrap;margin-top:6px">${['admin','adult','child','guest'].map(r=>`<button class="pay-chip${sc.minRole===r?' on':''}" data-fam="set-share-role" data-arg="${k}:${r}">${famRoleLabel(r)}</button>`).join('')}</div>`:''}</div>`; });
+    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'دادهٔ ماژول‌ها بدون تغییر باقی می‌ماند؛ فقط تنظیم اشتراک ذخیره می‌شود. همگام‌سازی واقعی از طریق Firebase موجود انجام می‌شود.':'Module data is untouched; only the sharing preference is stored. Real sync runs through the existing Firebase layer.'}</div>`;
+  }
+  h+=`</div>`; return h;
+}
+
+let _famInviteRole='adult';
+
+/* ── Geolocation helper (real device GPS) ── */
+function famGetLocation(cb){
+  if(!navigator.geolocation){ toast(L==='fa'?'موقعیت‌یاب در دسترس نیست':'Geolocation unavailable'); cb(null); return; }
+  navigator.geolocation.getCurrentPosition(
+    p=>cb({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy||0,at:now()}),
+    err=>{ toast((L==='fa'?'خطای موقعیت: ':'Location error: ')+(err&&err.message||'')); cb(null); },
+    {enableHighAccuracy:true,timeout:12000,maximumAge:30000}
+  );
+}
+function famStartCountdown(){
+  const cfg=famCfg().sos; _famSOS.remaining=Math.max(3,cfg.countdownSec|0)||10;
+  clearInterval(_famSOS.timer);
+  _famSOS.timer=setInterval(()=>{
+    _famSOS.remaining--;
+    if(_famSOS.remaining<=0){ clearInterval(_famSOS.timer); _famSOS.timer=null;
+      famLog('sos',{});
+      famGetLocation(pos=>{ _famSOS.pos=pos; saveDB(); if(screen==='module'&&currentModule==='family')render(); });
+    }
+    if(screen==='module'&&currentModule==='family')render();
+  },1000);
+}
+
+/* ── Family action router ── */
+function bindFamily(){
+  if(!(screen==='module'&&currentModule==='family'))return;
+  const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
+  // sub-view back buttons
+  const b1=document.getElementById('fam-back-members'); if(b1)b1.onclick=()=>go('members');
+  const b2=document.getElementById('fam-back-places'); if(b2)b2.onclick=()=>go('places');
+  const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>go('dashboard');
+  document.querySelectorAll('[data-fam]').forEach(el=>{
+    if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
+    el.onclick=(ev)=>{ const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
+  });
+  // tel/sms anchors: log the action was opened (never claim delivered)
+  document.querySelectorAll('a[data-fam="sos-log"]').forEach(a=>a.addEventListener('click',()=>{ famLog('sos_action',{action:a.dataset.arg}); saveDB(); }));
+  // live-bind toggle time box for quiet hours
+  const qt=document.getElementById('fam-p-quiet-times');
+  if(qt){/* visibility handled on save/re-render */}
+}
+
+function famAction(act,arg,ev){
+  const M=famMembersMap(), P=famPlacesMap(), I=famInvitesMap(), cfg=famCfg();
+  const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
+  switch(act){
+    case 'settings': go('settings'); return;
+    case 'members': go('members'); return;
+    case 'places': go('places'); return;
+    case 'invites': go('invites'); return;
+    case 'checkin': if(!famCan('checkIn')){ toast(L==='fa'?'دسترسی کافی نیست':'Not permitted'); return;} go('checkin'); return;
+    case 'sos': if(!famCan('triggerSOS')){ toast(L==='fa'?'دسترسی کافی نیست':'Not permitted'); return;} go('sos'); return;
+    case 'timeline': go('timeline'); return;
+    case 'map': go('map'); return;
+    // members
+    case 'member-new':{ if(!famCan('manageMembers'))return; const id=uid(),t=now(); M[id]={id,name:(L==='fa'?'عضو جدید':'New member'),relationship:'',role:'adult',avatarId:null,color:'#6e56f8',createdAt:t,updatedAt:t}; famActiveMemberId=id; famLog('member_added',{name:M[id].name}); saveDB(); go('memberEdit'); return; }
+    case 'member-open': famActiveMemberId=arg; go('memberEdit'); return;
+    case 'member-role':{ const m=M[famActiveMemberId]; if(m&&famCan('assignRoles')){ m._pendRole=arg; render(); } return; }
+    case 'member-save':{ const m=M[famActiveMemberId]; if(!m)return; const nm=document.getElementById('fam-m-name'), rl=document.getElementById('fam-m-rel'); if(nm)m.name=nm.value.trim()||m.name; if(rl)m.relationship=rl.value.trim(); if(m._pendRole&&famCan('assignRoles')&&m._pendRole!==m.role){ m.role=m._pendRole; famLog('role_changed',{name:m.name,role:m.role}); } delete m._pendRole; m.updatedAt=now(); if(m.self)DB.meta.displayName=m.name; saveDB(); toast(L==='fa'?'ذخیره شد':'Saved'); go('members'); return; }
+    case 'member-transfer':{ const m=M[famActiveMemberId]; if(!m||!famCan('assignRoles'))return; if(!confirm(L==='fa'?`مالکیت به ${m.name} منتقل شود؟`:`Transfer ownership to ${m.name}?`))return; const self=famSelf(); if(self){ self.role='admin'; self.updatedAt=now(); } m.role='owner'; cfg.ownerId=m.id; m.updatedAt=now(); famLog('ownership',{name:m.name}); saveDB(); toast(L==='fa'?'مالکیت منتقل شد':'Ownership transferred'); go('members'); return; }
+    case 'member-remove':{ const m=M[famActiveMemberId]; if(!m||m.self||m.role==='owner'||!famCan('manageMembers'))return; if(!confirm(L==='fa'?`حذف ${m.name}؟`:`Remove ${m.name}?`))return; famLog('member_removed',{name:m.name}); delete M[famActiveMemberId]; saveDB(); go('members'); return; }
+    // places
+    case 'place-new': if(!famCan('managePlaces'))return; famActivePlaceId=null; _famPlaceDraft={type:'home',alerts:{enter:true,exit:true},quietHours:{enabled:false,start:'22:00',end:'07:00'}}; go('placeEdit'); return;
+    case 'place-open': famActivePlaceId=arg; _famPlaceDraft=null; go('placeEdit'); return;
+    case 'place-type':{ if(famActivePlaceId){ P[famActivePlaceId].type=arg; } else { _famPlaceDraft=_famPlaceDraft||{}; _famPlaceDraft.type=arg; } render(); return; }
+    case 'place-usehere':{ famGetLocation(pos=>{ if(!pos)return; const la=document.getElementById('fam-p-lat'), lo=document.getElementById('fam-p-lon'); if(la)la.value=pos.lat.toFixed(6); if(lo)lo.value=pos.lon.toFixed(6); toast(L==='fa'?'موقعیت گرفته شد':'Location captured'); }); return; }
+    case 'place-alert-enter': case 'place-alert-exit': case 'place-quiet':{ const cur=famActivePlaceId?P[famActivePlaceId]:(_famPlaceDraft=_famPlaceDraft||{}); cur.alerts=cur.alerts||{enter:true,exit:true}; cur.quietHours=cur.quietHours||{enabled:false,start:'22:00',end:'07:00'}; if(act==='place-alert-enter')cur.alerts.enter=!cur.alerts.enter; if(act==='place-alert-exit')cur.alerts.exit=!cur.alerts.exit; if(act==='place-quiet')cur.quietHours.enabled=!cur.quietHours.enabled; render(); return; }
+    case 'place-save':{ if(!famCan('managePlaces'))return;
+      const nm=(document.getElementById('fam-p-name')||{}).value||''; const lat=parseFloat((document.getElementById('fam-p-lat')||{}).value); const lon=parseFloat((document.getElementById('fam-p-lon')||{}).value); const rad=parseInt((document.getElementById('fam-p-rad')||{}).value,10)||150; const qs=(document.getElementById('fam-p-qs')||{}).value||'22:00'; const qe=(document.getElementById('fam-p-qe')||{}).value||'07:00';
+      if(!nm.trim()){ toast(L==='fa'?'نام لازم است':'Name required'); return; }
+      if(isNaN(lat)||isNaN(lon)){ toast(L==='fa'?'مختصات لازم است':'Coordinates required'); return; }
+      const src=famActivePlaceId?(P[famActivePlaceId]||{}):(_famPlaceDraft||{});
+      const type=src.type||'home'; const alerts=src.alerts||{enter:true,exit:true}; const quietOn=!!(src.quietHours&&src.quietHours.enabled);
+      let p; if(famActivePlaceId){ p=P[famActivePlaceId]; } else { const id=uid(); p=P[id]={id,createdAt:now()}; famActivePlaceId=id; famLog('place_added',{name:nm.trim()}); }
+      p.type=type; p.name=nm.trim(); p.lat=lat; p.lon=lon; p.radius=rad; p.alerts={enter:!!alerts.enter,exit:!!alerts.exit}; p.quietHours={enabled:quietOn,start:qs,end:qe}; p.updatedAt=now();
+      _famPlaceDraft=null; saveDB(); toast(L==='fa'?'مکان ذخیره شد':'Place saved'); go('places'); return; }
+    case 'place-remove':{ if(!famActivePlaceId||!famCan('managePlaces'))return; const p=P[famActivePlaceId]; if(!confirm(L==='fa'?'حذف مکان؟':'Remove place?'))return; famLog('place_removed',{name:p?p.name:''}); delete P[famActivePlaceId]; saveDB(); go('places'); return; }
+    // invitations
+    case 'inv-role': _famInviteRole=arg; render(); return;
+    case 'inv-create':{ if(!famCan('sendInvites'))return; famCreateInvite(_famInviteRole||'adult'); render(); return; }
+    case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
+    case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); if(navigator.share){ navigator.share({title:'MBM Family',text:(L==='fa'?'به خانواده بپیوند':'Join my family'),url:link}).catch(()=>{}); } else famCopy(link); return; }
+    case 'inv-accept':{ const inv=I[arg]; if(inv){ inv.status='accepted'; saveDB(); render(); } return; }
+    case 'inv-reject':{ const inv=I[arg]; if(inv){ inv.status='rejected'; saveDB(); render(); } return; }
+    case 'inv-del':{ delete I[arg]; saveDB(); render(); return; }
+    // check-in
+    case 'ci-locate':{ _famCheckin.getting=true; render(); famGetLocation(pos=>{ _famCheckin.getting=false; _famCheckin.pos=pos; render(); }); return; }
+    case 'ci-send':{ if(!_famCheckin.pos){ toast(L==='fa'?'ابتدا موقعیت را بگیرید':'Get location first'); return; } const sel=document.getElementById('fam-ci-place'); const noteEl=document.getElementById('fam-ci-note'); const placeId=sel?sel.value:''; const note=noteEl?noteEl.value.trim():''; const pn=placeId&&P[placeId]?P[placeId].name:''; famLog('checkin',{lat:_famCheckin.pos.lat,lon:_famCheckin.pos.lon,note,placeName:pn}); _famCheckin={pos:null,note:'',placeId:'',getting:false}; saveDB(); toast(L==='fa'?'ثبت شد':'Checked in'); go('dashboard'); return; }
+    case 'ci-emergency':{ famGetLocation(pos=>{ if(pos){ famLog('checkin',{lat:pos.lat,lon:pos.lon,note:(L==='fa'?'اضطراری':'Emergency'),placeName:''}); saveDB(); } famView='sos'; _famSOS.pos=pos; render(); }); return; }
+    // SOS
+    case 'sos-start':{ if(!famCan('triggerSOS'))return; famStartCountdown(); render(); return; }
+    case 'sos-cancel':{ clearInterval(_famSOS.timer); _famSOS.timer=null; _famSOS.remaining=0; famLog('sos_cancel',{}); saveDB(); render(); return; }
+    case 'sos-share':{ const p=_famSOS.pos; if(!p)return; const link=`https://maps.google.com/?q=${p.lat},${p.lon}`; const txt=(L==='fa'?'اضطراری! موقعیت من: ':'EMERGENCY! My location: ')+link; if(navigator.share){ navigator.share({title:'SOS',text:txt}).then(()=>{ famLog('sos_action',{action:'share'}); saveDB(); }).catch(()=>{}); } else { famCopy(link); famLog('sos_action',{action:'share'}); saveDB(); } return; }
+    case 'sos-reset':{ _famSOS.pos=null; _famSOS.remaining=0; render(); return; }
+    // settings
+    case 'set-tab': famSettingsTab=arg; render(); return;
+    case 'perm-set':{ if(!famCan('assignRoles'))return; const [cap,r]=arg.split(':'); cfg.perms[cap]=r; saveDB(); render(); return; }
+    case 'set-loc-enabled': cfg.locationSharing.enabled=!cfg.locationSharing.enabled; saveDB(); render(); return;
+    case 'set-loc-precise': cfg.locationSharing.precise=!cfg.locationSharing.precise; saveDB(); render(); return;
+    case 'set-priv-pause': cfg.privacy.paused=!cfg.privacy.paused; saveDB(); render(); return;
+    case 'set-priv-ghost': cfg.privacy.ghost=!cfg.privacy.ghost; saveDB(); render(); return;
+    case 'set-priv-activity': cfg.privacy.shareActivity=!cfg.privacy.shareActivity; saveDB(); render(); return;
+    case 'set-priv-hist': cfg.privacy.historyDays=parseInt(arg,10)||30; saveDB(); render(); return;
+    case 'sos-count-save':{ const v=parseInt((document.getElementById('fam-sos-count')||{}).value,10); if(v>=3&&v<=60){ cfg.sos.countdownSec=v; saveDB(); toast(L==='fa'?'ذخیره شد':'Saved'); } else toast(L==='fa'?'بین ۳ تا ۶۰':'Use 3–60'); return; }
+    case 'sos-contact-add':{ const n=(document.getElementById('fam-sos-cn')||{}).value||''; const p=(document.getElementById('fam-sos-cp')||{}).value||''; if(!n.trim()||!p.trim()){ toast(L==='fa'?'نام و شماره لازم است':'Name & phone required'); return; } cfg.sos.emergencyContacts=cfg.sos.emergencyContacts||[]; cfg.sos.emergencyContacts.push({id:uid(),name:n.trim(),phone:p.trim()}); saveDB(); render(); return; }
+    case 'sos-contact-del':{ cfg.sos.emergencyContacts=(cfg.sos.emergencyContacts||[]).filter(c=>c.id!==arg); saveDB(); render(); return; }
+    default:
+      if(act.indexOf('set-share-role')===0){ /* handled below */ }
+      if(act==='set-share-role'){ const [k,r]=arg.split(':'); if(cfg.shared[k]){ cfg.shared[k].minRole=r; saveDB(); render(); } return; }
+      if(act.indexOf('set-share-')===0){ const k=act.slice('set-share-'.length); if(cfg.shared[k]){ if(!famCan('configureSharing'))return; cfg.shared[k].enabled=!cfg.shared[k].enabled; famLog('share',{name:k,on:cfg.shared[k].enabled}); saveDB(); render(); } return; }
+      return;
+  }
+}
+function famCopy(txt){ try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>toast(L==='fa'?'کپی شد':'Copied')); } else { const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast(L==='fa'?'کپی شد':'Copied'); } }catch(_){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } }
+let _famPlaceDraft=null;
+
+
 function renderModule(){
   if(currentModule==='shopping') return renderShopping();
   if(currentModule==='activity') return renderActivity();
@@ -9636,6 +10194,7 @@ function renderModule(){
   if(currentModule==='vault') return renderVault();
   if(currentModule==='documents') return renderDocuments();
   if(currentModule==='travel') return renderTravel();
+  if(currentModule==='family') return renderFamily();
   const m=hubModule(currentModule);
   const title=m?m.title:'Module';
   const icon=m?m.icon:'◆';
@@ -10746,8 +11305,9 @@ function bindScreen(){
     currentModule=el.dataset.hubMod;screen='module';render();window.scrollTo(0,0);});
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
+  if(typeof bindFamily==='function')bindFamily();
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='dashboard';famActiveMemberId=null;famActivePlaceId=null;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -11418,6 +11978,13 @@ function bindScreen(){
   const actSearch=document.getElementById('act-search');
   if(actSearch)actSearch.oninput=()=>{ activitySearch=actSearch.value; activityLimit=60; clearTimeout(window._actSearchT); window._actSearchT=setTimeout(()=>{ render(); const s=document.getElementById('act-search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },220); };
   document.querySelectorAll('[data-act-open]').forEach(el=>el.onclick=()=>{ const [mod,ref]=el.dataset.actOpen.split(':'); actOpen(mod, ref); });
+  // ── Activity management (history-only) ──
+  const actMg=document.getElementById('act-manage-toggle'); if(actMg)actMg.onclick=()=>{ activityManageOpen=!activityManageOpen; render(); };
+  document.querySelectorAll('[data-act-ret]').forEach(el=>el.onclick=()=>{ actSetRetention(parseInt(el.dataset.actRet,10)||0); activityLimit=60; render(); });
+  const actRb=document.getElementById('act-rebuild'); if(actRb)actRb.onclick=()=>{ actRebuildTimeline(); toast(L==='fa'?'خط زمانی بازسازی شد':'Timeline rebuilt'); activityLimit=60; render(); };
+  const actRs=document.getElementById('act-restore'); if(actRs)actRs.onclick=()=>{ actRestoreHidden(); toast(L==='fa'?'فعالیت‌های پنهان بازگردانی شد':'Hidden activity restored'); activityLimit=60; render(); };
+  const actCl=document.getElementById('act-clear'); if(actCl)actCl.onclick=()=>{ if(!confirm(L==='fa'?'تمام تاریخچهٔ فعالیت پنهان شود؟ (داده‌ای حذف نمی‌شود و قابل بازگردانی است)':'Hide all Activity history? No records are deleted — this is restorable.'))return; actClearHistory(); toast(L==='fa'?'تاریخچه پاک شد':'History cleared'); activityLimit=60; render(); };
+  document.querySelectorAll('[data-act-del]').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); actHide(decodeURIComponent(el.dataset.actDel)); render(); });
   document.querySelectorAll('[data-act-shop]').forEach(el=>el.onclick=()=>{
     screen='module'; currentModule='shopping';
     activeShopListId=el.dataset.actShop; shopView='detail'; shopSearch=''; shopResetSelect();
