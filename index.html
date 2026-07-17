@@ -1405,7 +1405,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v267';
+const APP_VERSION='v268';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10175,6 +10175,7 @@ function famInit(){
 }
 function famSelf(){ const m=famMembersMap(); return m[famCfg().selfId]||Object.values(m).find(x=>x.role==='owner')||null; }
 function famSelfName(){ const s=famSelf(); if(!s)return DB.meta.displayName||'Me'; const ph=!s.name||s.name==='Me'||s.name==='خودم'; return (ph&&DB.meta.displayName)?DB.meta.displayName:(s.name||DB.meta.displayName||'Me'); }
+function famMemberWord(n){ return (L==='fa')?'عضو':(n===1?'member':'members'); }
 function famRole(){ const s=famSelf(); return s?s.role:'guest'; }
 function famCan(cap){ const need=famCfg().perms[cap]||FAM_CAP_DEFAULT[cap]||'owner'; return (FAM_ROLE_RANK[famRole()]||0) >= (FAM_ROLE_RANK[need]||5); }
 function famModuleShared(id){ const s=famCfg().shared[id]; return !!(s&&s.enabled); }
@@ -10248,9 +10249,9 @@ function famLaterView(title,phase,icon){
   </div>`;
 }
 
-function famTile(icon,label,act,sub){ return `<button class="ul-row" data-fam="${act}" style="width:100%;text-align:start;border:1px solid var(--b1);background:var(--s1);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer">
+function famTile(icon,label,act,sub){ return `<button class="ul-row" data-fam="${act}" style="width:100%;text-align:start;border:1px solid var(--b1);background:var(--s1);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;color:var(--ink)">
   <div style="width:40px;height:40px;border-radius:11px;background:#ec489922;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icon}</div>
-  <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">${esc(label)}</div>${sub?`<div style="font-size:12px;color:var(--ink3)">${esc(sub)}</div>`:''}</div>
+  <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px;color:var(--ink)">${esc(label)}</div>${sub?`<div style="font-size:12px;color:var(--ink3)">${esc(sub)}</div>`:''}</div>
   <span style="color:var(--ink3);opacity:.4">›</span></button>`; }
 
 function famLaterTile(icon,label,phase){ return `<button class="ul-row" data-fam="later" data-arg="${esc(label)}" style="width:100%;text-align:start;border:1px dashed var(--b2);background:transparent;border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;opacity:.72">
@@ -10276,7 +10277,7 @@ function famCloudBanner(){
         <span style="font-size:18px">✅</span>
         <div style="flex:1;min-width:0">
           <div style="font-weight:800;font-size:14px">${esc(sv.name||(L==='fa'?'خانواده':'Family'))}</div>
-          <div style="font-size:12px;color:var(--ink3)">${L==='fa'?'همگام با فضای ابری':'Synced to cloud'} · ${cnt} ${L==='fa'?'عضو':'members'}</div>
+          <div style="font-size:12px;color:var(--ink3)">${L==='fa'?'همگام با فضای ابری':'Synced to cloud'} · ${cnt} ${famMemberWord(cnt)}</div>
         </div>
         <span class="chip" style="background:#22c55e22;color:#22c55e">${L==='fa'?'متصل':'Connected'}</span>
       </div></div>`;
@@ -10314,15 +10315,14 @@ function famDashboardView(){
     <div style="display:flex;align-items:center;gap:12px">
       ${famAvatar(s,48)}
       <div style="flex:1;min-width:0">
-        <div style="font-weight:800;font-size:16px">${esc(famSelfName())}</div>
-        <div style="font-size:12px;color:var(--ink3)">${myRoleLabel} · ${memCount} ${L==='fa'?'عضو':'members'}</div>
+        <div style="font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(famSelfName())}</div>
+        <div style="font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${myRoleLabel} · ${memCount} ${famMemberWord(memCount)}</div>
       </div>
-      ${statusChip}
+      <span style="flex:none">${statusChip}</span>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--b1)">
-      <span style="font-size:16px">${inCloud?'👨‍👩‍👧‍👦':'☁️'}</span>
-      <div style="flex:1;min-width:0;font-size:13px;color:var(--ink2)" dir="auto">${esc(famName)}</div>
-      <button class="btn btn-ghost" data-fam="settings" style="padding:6px 12px;font-size:13px">${L==='fa'?'مدیریت':'Manage'}</button>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--b1)">
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" dir="auto">${esc(famName)}</div>
+      <button class="btn btn-ghost" data-fam="settings" style="flex:none;width:auto;padding:8px 16px;font-size:13px;white-space:nowrap">${L==='fa'?'مدیریت':'Manage'}</button>
     </div>`;
   if(online && !inCloud){
     h+=`<div style="display:flex;gap:8px;margin-top:10px">
@@ -10332,7 +10332,7 @@ function famDashboardView(){
   h+=`</div>`;
 
   // ── PHASE 1 features (fully usable) ──
-  h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${memCount} ${L==='fa'?'عضو':'members'}`);
+  h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${memCount} ${famMemberWord(memCount)}`);
   h+=`<div style="height:8px"></div>`+famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites',pend?`${pend} ${L==='fa'?'در انتظار — برای مشاهده بزنید':'pending — tap to view'}`:(L==='fa'?'دعوت عضو جدید':'invite a member'));
 
   // ── LATER-PHASE features (clearly marked, not fake-functional) ──
@@ -10689,7 +10689,7 @@ function famSettingsView(){
       if(canRename)h+=`<button class="btn" data-fam="cloud-rename" style="width:100%;margin-top:8px">${L==='fa'?'ذخیره نام':'Save name'}</button>`;
       else h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نام فقط توسط مالک یا مدیر.':'Only owner or admin can rename.'}</div>`;
       h+=`<div style="margin-top:14px;padding:12px;border:1px solid var(--b1);border-radius:12px;background:var(--s1)">
-        <div style="font-size:13px;color:var(--ink2)">${L==='fa'?`این خانواده در فضای ابری است · ${st.memberCount} عضو · نقش شما: ${famRoleLabel(st.role)}`:`This family is in the cloud · ${st.memberCount} members · your role: ${famRoleLabel(st.role)}`}</div></div>`;
+        <div style="font-size:13px;color:var(--ink2)">${L==='fa'?`این خانواده در فضای ابری است · ${st.memberCount} عضو · نقش شما: ${famRoleLabel(st.role)}`:`This family is in the cloud · ${st.memberCount} ${famMemberWord(st.memberCount)} · your role: ${famRoleLabel(st.role)}`}</div></div>`;
       // Leave family (§5 step 8) with transparent data-retention note
       h+=`<div style="margin-top:16px;font-size:11px;color:var(--ink3)">${L==='fa'?'با خروج، دسترسی شما به فضای خانواده قطع می‌شود. داده‌های خصوصی شما (یادداشت‌ها، اسناد، ولت و…) دست‌نخورده و در حساب شما باقی می‌ماند.':'Leaving ends your access to the family space. Your private data (Notes, Documents, Vault, etc.) stays intact in your own account.'}</div>`;
       h+=`<button class="btn btn-ghost" data-fam="cloud-leave" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'خروج از فضای ابری خانواده':'Leave cloud family space'}</button>`;
@@ -14207,6 +14207,7 @@ function appDepth(){
   if(screen==='module' && currentModule==='shopping' && shopView==='detail') d+=(shopSelectMode?4:3);
   else if(screen==='module' && currentModule==='shopping' && shopView==='archiveView') d+=(activeShopListId?5:4);
   else if(screen==='module' && currentModule==='shopping' && shopView==='archive') d+=(activeShopListId?4:3);
+  else if(screen==='module' && currentModule==='family' && famView && famView!=='dashboard') d+=3;
   else if(screen==='module') d+=2;
   else if(screen==='lifehub') d+=1;
   else if(tasksView==='detail' || (screen && screen!=='lists')) d++;
@@ -14265,6 +14266,10 @@ function onPop(){
   } else if(screen==='module' && currentModule==='notes' && noteView==='detail'){
     if(activeNoteId)noteFlushPending(activeNoteId);
     noteView='home';activeNoteId=null;render();
+  } else if(screen==='module' && currentModule==='family' && famView && famView!=='dashboard'){
+    // Family subpage (Members, Invitations, Check-in, etc.) → Family dashboard first.
+    if(famView==='joinInvite'||famView==='joinCode'){ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.clearPending)FamilyBackend.clearPending(); _famInvitePreview=null; }
+    famView='dashboard'; famActiveMemberId=null; famActivePlaceId=null; famActiveCloudUid=null; render();
   } else if(screen==='module'){
     // Life Hub module page → back to the Life Hub grid.
     currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();screen='lifehub';render();
