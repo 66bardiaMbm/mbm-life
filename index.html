@@ -1405,7 +1405,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v268';
+const APP_VERSION='v269';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1434,6 +1434,7 @@ const KEY='mbmlife_platform_v1';
   document.addEventListener('visibilitychange', onResume);
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof voiceHardStop==='function') voiceHardStop(); });
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof VaultSession!=='undefined'){ VaultSession.lock(); if(typeof _vaultReveal!=='undefined')_vaultReveal={}; if(typeof vaultWipeInputs==='function')vaultWipeInputs(); } });
+  document.addEventListener('visibilitychange', ()=>{ try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.location)FamilyBackend.location.reconcileWatch(); }catch(e){} });
   window.addEventListener('pagehide', ()=>{ if(typeof voiceHardStop==='function') voiceHardStop(); });
   window.addEventListener('pagehide', ()=>{ if(typeof VaultSession!=='undefined'){VaultSession.lock(); if(typeof vaultWipeInputs==='function')vaultWipeInputs();} });
   window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
@@ -1482,9 +1483,44 @@ function blankDB(){
       tripReminderDone:{}, // {reminderId: doneISO} — completion state for projected Travel reminders (no data duplication)
       docReminderDone:{}, // {reminderId: doneISO} — completion state for projected Document expiry reminders
       _docPayLinks:{}, // {documentId: paymentId[]} — user-confirmed document→payment links
+      // ── Family Location (Phase 2 Stage 1) — LOCAL CACHE of the canonical
+      //    server model under families/{familyId}/... Mirrored so the map can
+      //    render last-known state offline and survive close/reopen. ──
+      famLocations:{}, // {uid: LocationState} latest per member — see FAM LOCATION MODEL
+      famRoutes:{},    // {uid: {points:[RoutePoint,...], updatedAt}} bounded route breadcrumb (today-scope Phase 2)
+      famConsent:{},   // {uid: LocationConsent} per-member sharing consent (mirror of server)
     }
   };
 }
+
+/* ── FAM LOCATION MODEL (Phase 2 Stage 1) ───────────────────────────────
+   Canonical store: Firestore. Local entities above are a render cache.
+
+   LocationState (famLocations[uid], and families/{fid}/locations/{uid}):
+     { uid,
+       lat, lng, accuracy,        // last known fix (numbers) | null if never shared
+       capturedAt,                // ISO — when the device took this fix
+       source,                    // 'gps' | 'network' | 'manual-checkin' | 'companion' (future native)
+       heading, speed,            // optional, from Geolocation API when moving
+       moving,                    // bool — derived from consecutive fixes (movement detector)
+       stayStart,                 // ISO — when the member became stationary at this place (stay duration)
+       battery,                   // 0..100 | null (only if Battery API available; honest-absent otherwise)
+       reportedAt,                // ISO — server write time (freshness is measured from THIS)
+       status }                   // 'updating'|'recent'|'moving'|'stopped'|'stale'|'offline'|'paused'|'denied'|'unavailable'
+                                  //   status is DERIVED at read time from reportedAt+consent+moving; stored as a hint only.
+
+   RoutePoint (famRoutes[uid].points[]):
+     { lat, lng, at }             // at = ISO capture time. Appended on movement; ring-buffered.
+
+   LocationConsent (famConsent[uid], and families/{fid}/consent/{uid}):
+     { enabled,                   // master: is this member sharing location at all
+       precise,                   // true = precise, false = approximate (coarsened) — §6.2
+       paused,                    // temporary self-pause without revoking consent
+       updatedAt }
+   Telemetry contract: a future native companion writes the SAME LocationState
+   shape (with source:'companion') to families/{fid}/locations/{uid}; no schema
+   change needed — the web build and companion are interchangeable producers.
+   ─────────────────────────────────────────────────────────────────────── */
 
 /* ── Seed: default inbox list ── */
 function seedDB(db){
@@ -1505,7 +1541,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks','familyMembers','familyPlaces','familyInvites','familyTimeline']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks','familyMembers','familyPlaces','familyInvites','familyTimeline','famLocations','famRoutes','famConsent']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     // ── Travel data repair (safe, no data loss) ──
     try{
@@ -1549,6 +1585,10 @@ function loadDB(){
     // ── Phase 1: legacy local invitations are NOT cloud invitations. Mark them
     // legacy (non-destructive) so they never render/count as cloud invites. ──
     try{ if(!d.meta._famInviteMigrated){ Object.values(d.entities.familyInvites||{}).forEach(inv=>{ if(inv&&!inv.server){ inv.legacy=true; } }); d.meta._famInviteMigrated=true; } }catch(_){}
+    // Phase 2 Stage 1: ensure location entities exist (additive, no data touched).
+    if(!d.entities.famLocations||typeof d.entities.famLocations!=='object')d.entities.famLocations={};
+    if(!d.entities.famRoutes||typeof d.entities.famRoutes!=='object')d.entities.famRoutes={};
+    if(!d.entities.famConsent||typeof d.entities.famConsent!=='object')d.entities.famConsent={};
     if(!d.entities.activity)d.entities.activity={};
     if(d.meta.activityRetentionDays===undefined)d.meta.activityRetentionDays=0; // 0 = Forever
     if(!d.meta.activityHidden||typeof d.meta.activityHidden!=='object')d.meta.activityHidden={};
@@ -9940,6 +9980,10 @@ const FamilyBackend = (function(){
   function linkRef(){ return db().collection('workspaces').doc(wsId(myUid())).collection('familyLink').doc('current'); }
   function famRef(fid){ return db().collection('families').doc(fid); }
   function inviteRef(code){ return db().collection('familyInvites').doc(code); }
+  /* ── Phase 2 location refs (canonical store) ── */
+  function locRef(fid,uid){ return famRef(fid).collection('locations').doc(uid); }        // latest LocationState per member
+  function consentLocRef(fid,uid){ return famRef(fid).collection('consent').doc(uid); }    // per-member LocationConsent
+  function routeDoc(fid,uid){ return famRef(fid).collection('routes').doc(uid); }          // {points:[...], updatedAt} bounded
 
   /* ── current server family (cached) ── */
   function current(){ return _current; }
@@ -9961,6 +10005,7 @@ const FamilyBackend = (function(){
   function stop(){
     if(_linkUnsub){try{_linkUnsub();}catch(e){} _linkUnsub=null;}
     detachFamily();
+    try{ FamilyLocation.stopListening(); }catch(e){}
     _current=null;
   }
   function detachFamily(){ if(_famUnsub){try{_famUnsub();}catch(e){} _famUnsub=null;} }
@@ -9968,12 +10013,14 @@ const FamilyBackend = (function(){
   function watchFamily(fid){
     detachFamily();
     _famUnsub = famRef(fid).onSnapshot(snap=>{
-      if(!snap.exists){ _current=null; afterChange(); return; }
+      if(!snap.exists){ _current=null; try{FamilyLocation.stopListening();}catch(e){} afterChange(); return; }
       _current = Object.assign({id:snap.id}, snap.data());
       // If I was removed server-side, clear my pointer so UI reflects reality.
       if(_current.members && !_current.members[myUid()]){
         linkRef().delete().catch(()=>{});
       }
+      // Attach location listeners for the (possibly changed) member set.
+      try{ FamilyLocation.startListening(); }catch(e){}
       afterChange();
     }, ()=>{});
   }
@@ -10153,10 +10200,289 @@ const FamilyBackend = (function(){
              memberCount:_current&&_current.members?Object.keys(_current.members).length:0 };
   }
 
+  /* ═══════════════════════════════════════════════════════════════════
+     FamilyLocation — Phase 2 Stage 1 engine (data/architecture only).
+     Owns: canonical read/write of LocationState + consent + route,
+     status derivation, movement/stay detection, route ring-buffer,
+     freshness classification, and the telemetry contract. No UI here.
+     ═══════════════════════════════════════════════════════════════════ */
+  const FamilyLocation = (function(){
+    // Tunables (Product-Owner-adjustable; honest defaults).
+    const FRESH_MS   = 90*1000;      // <=90s since reportedAt → "updating/recent"
+    const RECENT_MS  = 10*60*1000;   // <=10m → "recent"
+    const STALE_MS   = 30*60*1000;   // <=30m → "stale"; older → "offline"
+    const MOVE_MIN_M = 40;           // >=40m between fixes ⇒ moving
+    const MOVE_MIN_MS= 20*1000;      // ...within this window
+    const ROUTE_MAX  = 300;          // ring-buffer cap for today-scope route
+    const ROUTE_MIN_M= 25;           // only append a breadcrumb if moved >=25m
+    const APPROX_DP  = 2;            // approximate-location coarsening: ~1.1km grid
+
+    let _locUnsubs=[];               // per-member location listeners
+    let _consentUnsub=null;          // my own consent listener
+    let _routeUnsub=null;            // my own route doc listener (to restore after reopen)
+
+    function nowISO(){ return new Date().toISOString(); }
+    function ageMs(iso){ const t=Date.parse(iso||''); return isNaN(t)?Infinity:(Date.now()-t); }
+    function haversine(a,b){ if(!a||!b)return Infinity; const R=6371000,toR=x=>x*Math.PI/180;
+      const dLat=toR(b.lat-a.lat),dLng=toR(b.lng-a.lng);
+      const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+      return 2*R*Math.asin(Math.min(1,Math.sqrt(s))); }
+
+    /* Derive the honest display status from raw state + consent. Never returns
+       a "live" verdict for old data; consent/pause/permission win over freshness. */
+    function deriveStatus(state, consent){
+      if(!consent||!consent.enabled) return 'unavailable';   // not sharing → no position claim
+      if(consent.paused) return 'paused';
+      if(state && state.permission==='denied') return 'denied';
+      if(!state || state.lat==null) return 'unavailable';
+      const age=ageMs(state.reportedAt||state.capturedAt);
+      if(age>STALE_MS) return 'offline';
+      if(age>RECENT_MS) return 'stale';
+      if(state.moving) return 'moving';
+      if(age<=FRESH_MS) return 'updating';
+      return 'recent';
+    }
+    function statusMeta(status){
+      // {key:{en,fa,tone}} — tone drives pin/badge color in Stage 4 UI.
+      const M={
+        updating:{en:'Updating now',fa:'در حال به‌روزرسانی',tone:'live'},
+        recent:{en:'Recently updated',fa:'به‌تازگی به‌روزرسانی شد',tone:'ok'},
+        moving:{en:'Moving',fa:'در حال حرکت',tone:'live'},
+        stopped:{en:'Stopped',fa:'متوقف',tone:'ok'},
+        stale:{en:'Location stale',fa:'موقعیت قدیمی',tone:'warn'},
+        offline:{en:'Device offline',fa:'دستگاه آفلاین',tone:'muted'},
+        paused:{en:'Sharing paused',fa:'اشتراک متوقف شده',tone:'muted'},
+        denied:{en:'Permission denied',fa:'اجازه رد شده',tone:'warn'},
+        unavailable:{en:'Not sharing',fa:'اشتراک‌گذاری نشده',tone:'muted'}
+      };
+      return M[status]||M.unavailable;
+    }
+
+    /* Coarsen a fix for approximate sharing (§6.2). */
+    function coarsen(lat,lng){ const f=Math.pow(10,APPROX_DP); return {lat:Math.round(lat*f)/f, lng:Math.round(lng*f)/f}; }
+
+    /* Movement + stay detection from previous cached state → this fix. */
+    function classifyMovement(prev, fix){
+      let moving=false, stayStart=(prev&&prev.stayStart)||fix.capturedAt;
+      if(prev && prev.lat!=null){
+        const d=haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
+        const dt=Math.abs(Date.parse(fix.capturedAt)-Date.parse(prev.capturedAt||prev.reportedAt||fix.capturedAt));
+        if(d>=MOVE_MIN_M && dt<=Math.max(MOVE_MIN_MS,dt)){ moving=true; stayStart=fix.capturedAt; }
+        else if(d<MOVE_MIN_M){ moving=false; stayStart=prev.stayStart||prev.capturedAt||fix.capturedAt; }
+        else { moving=true; stayStart=fix.capturedAt; }
+      }
+      return {moving, stayStart};
+    }
+
+    /* ── local cache accessors (mirror) ── */
+    function locMap(){ if(!DB.entities.famLocations)DB.entities.famLocations={}; return DB.entities.famLocations; }
+    function routeMap(){ if(!DB.entities.famRoutes)DB.entities.famRoutes={}; return DB.entities.famRoutes; }
+    function consentMap(){ if(!DB.entities.famConsent)DB.entities.famConsent={}; return DB.entities.famConsent; }
+
+    function myConsent(){ const c=consentMap()[myUid()]; return c||{enabled:false,precise:true,paused:false,updatedAt:null}; }
+    function memberConsent(uid){ return consentMap()[uid]||{enabled:false,precise:true,paused:false,updatedAt:null}; }
+    function memberState(uid){ return locMap()[uid]||null; }
+    function memberStatus(uid){ return deriveStatus(memberState(uid), memberConsent(uid)); }
+    function memberRoute(uid){ const r=routeMap()[uid]; return r&&Array.isArray(r.points)?r.points:[]; }
+
+    /* ── CONSENT: write my own sharing consent (canonical + mirror) ── */
+    async function setConsent(patch){
+      if(!ready()||!isMember())return;
+      const fid=familyId(), uid=myUid();
+      const cur=Object.assign({enabled:false,precise:true,paused:false},consentMap()[uid]||{});
+      const next=Object.assign(cur,patch,{updatedAt:nowISO()});
+      consentMap()[uid]=next;                                   // optimistic mirror
+      try{ persistDB(); }catch(e){}
+      await consentLocRef(fid,uid).set(next,{merge:true}).catch(()=>{});
+      // Turning sharing off/pause: stop emitting immediately; on/resume: start.
+      reconcileWatch();
+      afterChange();
+      return next;
+    }
+
+    /* ── WRITE a fix for myself (called by the Stage-3 foreground watcher).
+       Applies consent (approx vs precise), movement/stay, route append. ── */
+    async function writeMyFix(raw){
+      if(!ready()||!isMember())return;
+      const c=myConsent();
+      if(!c.enabled||c.paused)return;                           // never emit without consent
+      const uid=myUid(), fid=familyId();
+      let lat=raw.lat, lng=raw.lng;
+      if(c.precise===false){ const q=coarsen(lat,lng); lat=q.lat; lng=q.lng; }
+      const capturedAt=raw.capturedAt||nowISO();
+      const prev=memberState(uid);
+      const mv=classifyMovement(prev,{lat,lng,capturedAt});
+      const state={ uid, lat, lng,
+        accuracy:(c.precise===false?null:(raw.accuracy!=null?raw.accuracy:null)),
+        capturedAt, source:raw.source||'gps',
+        heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
+        moving:mv.moving, stayStart:mv.stayStart,
+        battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
+        permission:'granted', reportedAt:nowISO() };
+      locMap()[uid]=state;                                     // mirror
+      // route breadcrumb (only on meaningful movement, precise mode only)
+      if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt}); }
+      try{ persistDB(); }catch(e){}
+      // canonical writes
+      await locRef(fid,uid).set(state,{merge:true}).catch(()=>{});
+      if(c.precise!==false){ await flushRoute(uid).catch(()=>{}); }
+      afterChange();
+    }
+
+    function appendRouteLocal(uid,pt){
+      const rm=routeMap(); const r=rm[uid]||{points:[],updatedAt:null};
+      const last=r.points[r.points.length-1];
+      if(last && haversine({lat:last.lat,lng:last.lng},{lat:pt.lat,lng:pt.lng})<ROUTE_MIN_M) return;
+      r.points.push(pt);
+      if(r.points.length>ROUTE_MAX) r.points=r.points.slice(-ROUTE_MAX);
+      r.updatedAt=nowISO(); rm[uid]=r;
+    }
+    async function flushRoute(uid){
+      if(!ready()||!isMember())return;
+      const r=routeMap()[uid]; if(!r)return;
+      await routeDoc(familyId(),uid).set({points:r.points, updatedAt:r.updatedAt},{merge:true}).catch(()=>{});
+    }
+
+    /* ── record a manual check-in as a location source (Stage 6 reuses this) ── */
+    async function writeCheckin(raw){
+      return writeMyFix(Object.assign({},raw,{source:'manual-checkin'}));
+    }
+
+    /* ═══ Foreground watcher (Stage 2) ═══
+       Makes visibility automatic: when MY consent is enabled+not paused and the
+       app is foreground, stream Geolocation fixes into writeMyFix — no manual
+       Check-in needed. Honest by construction: the watcher only runs while the
+       app is open, so when it stops, remote viewers see the timestamp age out
+       through recent→stale→offline. This is the PWA truth; a native companion
+       (source:'companion') can later feed the same pipe in the background. */
+    let _watchId=null;              // geolocation.watchPosition id
+    let _lastWriteAt=0;             // throttle guard
+    const WRITE_THROTTLE_MS=15000;  // at most one canonical write / 15s (battery §17)
+    let _battery=null;              // cached BatteryManager
+    let _permissionState=null;      // 'granted'|'denied'|'prompt'|null
+
+    function batteryPct(){ try{ return _battery&&_battery.level!=null?Math.round(_battery.level*100):null; }catch(e){ return null; } }
+    function initBattery(){
+      if(_battery!==null)return;
+      try{ if(navigator.getBattery){ navigator.getBattery().then(b=>{_battery=b;}).catch(()=>{_battery=undefined;}); } else { _battery=undefined; } }catch(e){ _battery=undefined; }
+    }
+
+    function shouldWatch(){
+      if(!ready()||!isMember())return false;
+      const c=myConsent();
+      if(!c.enabled||c.paused)return false;
+      if(typeof document!=='undefined' && document.visibilityState==='hidden')return false;
+      return true;
+    }
+
+    function onFix(pos){
+      const c=myConsent(); if(!c.enabled||c.paused)return;
+      const now=Date.now();
+      if(now-_lastWriteAt < WRITE_THROTTLE_MS) return;   // throttle
+      _lastWriteAt=now;
+      const cr=pos.coords||{};
+      writeMyFix({
+        lat:cr.latitude, lng:cr.longitude,
+        accuracy:cr.accuracy!=null?Math.round(cr.accuracy):null,
+        heading:(cr.heading!=null&&!isNaN(cr.heading))?cr.heading:null,
+        speed:(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null,
+        battery:batteryPct(),
+        capturedAt:new Date(pos.timestamp||Date.now()).toISOString(),
+        source:'gps'
+      });
+    }
+    function onFixErr(err){
+      // Record permission/unavailable honestly on my own state so viewers see it.
+      const uid=myUid(); if(!uid)return;
+      const denied = err && err.code===1;
+      const st=Object.assign({}, memberState(uid)||{uid});
+      st.permission = denied ? 'denied' : (st.permission||'granted');
+      if(denied){ locMap()[uid]=st; try{persistDB();}catch(e){}
+        if(ready()&&isMember()){ locRef(familyId(),uid).set({permission:'denied',reportedAt:nowISO()},{merge:true}).catch(()=>{}); }
+      }
+      afterChange();
+    }
+
+    function startWatch(){
+      if(_watchId!=null)return;
+      if(!('geolocation' in navigator))return;
+      if(!shouldWatch())return;
+      initBattery();
+      const c=myConsent();
+      try{
+        _watchId=navigator.geolocation.watchPosition(onFix,onFixErr,{
+          enableHighAccuracy: c.precise!==false,
+          maximumAge: 10000,
+          timeout: 20000
+        });
+      }catch(e){ _watchId=null; }
+    }
+    function stopWatch(){
+      if(_watchId!=null){ try{navigator.geolocation.clearWatch(_watchId);}catch(e){} _watchId=null; }
+    }
+    /* Reconcile the watcher against current consent + visibility. Call on:
+       consent change, visibility change, family attach/detach. */
+    function reconcileWatch(){ if(shouldWatch())startWatch(); else stopWatch(); }
+
+    /* Permissions API (best-effort) for honest denied/prompt state. */
+    function refreshPermission(){
+      try{
+        if(navigator.permissions&&navigator.permissions.query){
+          navigator.permissions.query({name:'geolocation'}).then(p=>{
+            _permissionState=p.state;
+            if(p.state==='denied')onFixErr({code:1});
+            p.onchange=()=>{ _permissionState=p.state; reconcileWatch(); };
+          }).catch(()=>{});
+        }
+      }catch(e){}
+    }
+    function permissionState(){ return _permissionState; }
+
+    /* ── LISTEN: subscribe to all members' locations + consent + my route.
+       Called when a family becomes active; restores persisted state on reopen. */
+    function startListening(){
+      stopListening();
+      if(!ready()||!isMember())return;
+      const fid=familyId();
+      const uids=Object.keys((_current&&_current.members)||{});
+      uids.forEach(uid=>{
+        const u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ locMap()[uid]=Object.assign({uid},snap.data()); persistDB&&persistDB(); afterChange(); } },()=>{});
+        const u2=consentLocRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange(); } },()=>{});
+        _locUnsubs.push(u1,u2);
+      });
+      // my own route (so reopening restores today's breadcrumb)
+      _routeUnsub=routeDoc(fid,myUid()).onSnapshot(snap=>{ if(snap.exists){ routeMap()[myUid()]=snap.data(); persistDB&&persistDB(); } },()=>{});
+      // Stage 2: begin auto-sharing if consent allows + honest permission state.
+      refreshPermission();
+      reconcileWatch();
+    }
+    function stopListening(){
+      _locUnsubs.forEach(u=>{try{u();}catch(e){}}); _locUnsubs=[];
+      if(_routeUnsub){try{_routeUnsub();}catch(e){} _routeUnsub=null;}
+      if(_consentUnsub){try{_consentUnsub();}catch(e){} _consentUnsub=null;}
+      stopWatch();
+    }
+
+    return {
+      // read
+      memberState, memberStatus, memberConsent, memberRoute, myConsent,
+      deriveStatus, statusMeta, permissionState, batteryPct,
+      // write
+      setConsent, writeMyFix, writeCheckin, flushRoute,
+      // watcher (Stage 2)
+      reconcileWatch, refreshPermission, startWatch, stopWatch,
+      // lifecycle
+      startListening, stopListening,
+      // constants (exposed for UI/tests)
+      consts:{ FRESH_MS, RECENT_MS, STALE_MS, MOVE_MIN_M, ROUTE_MAX }
+    };
+  })();
+
   return { start, stop, ready, current, familyId, isMember, myServerRole, getState,
            createFamily, createInvite, revokeInvite, redeemInvite, previewInvite,
            leaveFamily, removeMember, setRole, renameFamily, updateSelfProfile,
-           setPending, pendingCode, clearPending };
+           setPending, pendingCode, clearPending,
+           location:FamilyLocation };
 })();
 
 
