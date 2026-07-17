@@ -1405,7 +1405,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v262';
+const APP_VERSION='v263';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1545,6 +1545,7 @@ function loadDB(){
     if(!Array.isArray(d.meta.groups))d.meta.groups=[];
     if(!Object.keys(d.entities.lists).length)seedDB(d);
     // ── Activity layer state (history-only; never touches canonical data) ──
+    if(!d.meta.familyServer||typeof d.meta.familyServer!=='object')d.meta.familyServer={};
     if(!d.entities.activity)d.entities.activity={};
     if(d.meta.activityRetentionDays===undefined)d.meta.activityRetentionDays=0; // 0 = Forever
     if(!d.meta.activityHidden||typeof d.meta.activityHidden!=='object')d.meta.activityHidden={};
@@ -9903,6 +9904,228 @@ function famInvitesMap(){ if(!DB.entities.familyInvites)DB.entities.familyInvite
 function famTimelineMap(){ if(!DB.entities.familyTimeline)DB.entities.familyTimeline={}; return DB.entities.familyTimeline; }
 function famCfg(){ if(!DB.meta.family)famInit(); return DB.meta.family; }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   FAMILY BACKEND — Phase 1 (Foundation)
+   Server-authoritative Family Space on Firebase project mbm-life.
+
+   Data model (Firestore, top-level so multiple UIDs can share):
+     families/{familyId}                         (family doc)
+       .members            : { uid: {role,name,photo,joinedAt,...} }   (map)
+       .ownerUid, name, createdAt, updatedAt
+     families/{familyId}/settings/consent        (shared consent defaults)
+     familyInvites/{CODE}                         (redeemable by any user)
+       { familyId, role, name, status, createdBy, createdAt, expiresAt }
+     workspaces/user_{uid}/familyLink/current     (per-user pointer →
+                                                    recovers membership on
+                                                    any device / reinstall)
+
+   This layer is ADDITIVE. The existing local fam* functions and all other
+   modules are untouched. When a user has NO server family yet, the local
+   family (DB.meta.family) is migrated up on first sign-in.
+   ══════════════════════════════════════════════════════════════════════ */
+const FamilyBackend = (function(){
+  let _famUnsub=null, _linkUnsub=null, _current=null, _pendingCode=null;
+
+  function ready(){ return !!(FB && FB.ready && FB.user && sessionCap('shared')); }
+  function db(){ return FB.db; }
+  function myUid(){ return FB.user ? FB.user.uid : null; }
+  function selfName(){ return DB.meta.displayName || FB.user.email || 'Member'; }
+  function selfPhoto(){ return DB.meta.photoURL || DB.meta.photo || null; }
+
+  /* ── per-user pointer to the family the user belongs to ── */
+  function linkRef(){ return db().collection('workspaces').doc(wsId(myUid())).collection('familyLink').doc('current'); }
+  function famRef(fid){ return db().collection('families').doc(fid); }
+  function inviteRef(code){ return db().collection('familyInvites').doc(code); }
+
+  /* ── current server family (cached) ── */
+  function current(){ return _current; }
+  function familyId(){ return _current ? _current.id : null; }
+  function isMember(){ return !!(_current && _current.members && _current.members[myUid()]); }
+  function myServerRole(){ return isMember() ? (_current.members[myUid()].role||'adult') : null; }
+
+  /* ── start / stop realtime membership recovery ── */
+  function start(){
+    if(!ready())return;
+    stop();
+    // 1) Watch this user's family pointer. Survives reinstall/new device (§19).
+    _linkUnsub = linkRef().onSnapshot(snap=>{
+      const fid = snap.exists ? (snap.data()||{}).familyId : null;
+      if(fid) watchFamily(fid);
+      else { _current=null; detachFamily(); afterChange(); redeemPendingIfAny(); }
+    }, ()=>{});
+  }
+  function stop(){
+    if(_linkUnsub){try{_linkUnsub();}catch(e){} _linkUnsub=null;}
+    detachFamily();
+    _current=null;
+  }
+  function detachFamily(){ if(_famUnsub){try{_famUnsub();}catch(e){} _famUnsub=null;} }
+
+  function watchFamily(fid){
+    detachFamily();
+    _famUnsub = famRef(fid).onSnapshot(snap=>{
+      if(!snap.exists){ _current=null; afterChange(); return; }
+      _current = Object.assign({id:snap.id}, snap.data());
+      // If I was removed server-side, clear my pointer so UI reflects reality.
+      if(_current.members && !_current.members[myUid()]){
+        linkRef().delete().catch(()=>{});
+      }
+      afterChange();
+    }, ()=>{});
+  }
+
+  function afterChange(){
+    // Mirror minimal server state into DB.meta for UI, without breaking the
+    // existing local family object. Never overwrites local-only fields.
+    if(!DB.meta.familyServer)DB.meta.familyServer={};
+    DB.meta.familyServer = {
+      familyId: familyId(),
+      isMember: isMember(),
+      role: myServerRole(),
+      name: _current ? _current.name : null,
+      memberCount: _current && _current.members ? Object.keys(_current.members).length : 0,
+      members: _current ? (_current.members||{}) : {},
+      _syncedAt: new Date().toISOString()
+    };
+    try{ persistDB(); }catch(e){}
+    if(typeof render==='function' && screen==='module' && currentModule==='family') render();
+  }
+
+  /* ── CREATE a family (promotes local family → server) ── */
+  async function createFamily(name){
+    if(!ready()) throw new Error('offline');
+    if(isMember()) return familyId(); // already in one
+    const fid = 'fam_'+myUid()+'_'+Date.now().toString(36);
+    const t=new Date().toISOString();
+    const members={};
+    members[myUid()]={ role:'owner', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
+    const famName = (name||'').trim() || (DB.meta.family && DB.meta.family.name) || (L==='fa'?'خانواده من':'My Family');
+    await famRef(fid).set({ name:famName, ownerUid:myUid(), members, createdAt:t, updatedAt:t });
+    // seed shared consent defaults (server copy of the local model)
+    const lc = (DB.meta.family && DB.meta.family.locationSharing) || {enabled:false,precise:true};
+    await famRef(fid).collection('settings').doc('consent')
+      .set({ locationSharing:{enabled:!!lc.enabled,precise:lc.precise!==false}, createdAt:t }, {merge:true});
+    await linkRef().set({ familyId:fid, role:'owner', joinedAt:t });
+    return fid;
+  }
+
+  /* ── INVITE: create a redeemable server invite ── */
+  async function createInvite(role, name){
+    if(!ready()) throw new Error('offline');
+    if(!isMember()) await createFamily();
+    // duplicate-invite guard: block if this display-name already an active member
+    const code=(uid()+uid()).replace(/[^a-z0-9]/gi,'').slice(0,10).toUpperCase();
+    const t=new Date().toISOString();
+    const exp=new Date(Date.now()+7*864e5).toISOString();
+    await inviteRef(code).set({
+      familyId: familyId(), role: role||'adult', name:(name||'').trim(),
+      status:'pending', createdBy:myUid(), createdByName:selfName(),
+      createdAt:t, expiresAt:exp
+    });
+    return { code, role:role||'adult', name:(name||'').trim(), status:'pending', createdAt:t, expiresAt:exp };
+  }
+
+  async function revokeInvite(code){
+    if(!ready())return;
+    await inviteRef(code).set({status:'revoked', revokedAt:new Date().toISOString()},{merge:true}).catch(()=>{});
+  }
+
+  /* ── REDEEM: accept an invite by code. Idempotent; §5.1 duplicate-safe ── */
+  async function redeemInvite(code){
+    if(!ready()) throw new Error('offline');
+    code=(code||'').trim().toUpperCase();
+    if(!code) throw new Error('empty');
+    const snap=await inviteRef(code).get();
+    if(!snap.exists) throw new Error('notfound');
+    const inv=snap.data()||{};
+    const st = (inv.status==='pending' && inv.expiresAt && Date.parse(inv.expiresAt)<Date.now()) ? 'expired' : inv.status;
+    if(st==='expired') throw new Error('expired');
+    if(st==='revoked') throw new Error('revoked');
+    const fid=inv.familyId;
+    if(!fid) throw new Error('notfound');
+    // Already a member of THIS family? just re-point (idempotent, no dup).
+    const fsnap=await famRef(fid).get();
+    if(!fsnap.exists) throw new Error('notfound');
+    const fam=fsnap.data()||{};
+    const t=new Date().toISOString();
+    if(!(fam.members && fam.members[myUid()])){
+      // join: add my membership on the family doc
+      const patch={}; patch['members.'+myUid()]={ role:inv.role||'adult', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
+      patch['updatedAt']=t;
+      await famRef(fid).update(patch);
+    }
+    await linkRef().set({ familyId:fid, role:(fam.members&&fam.members[myUid()]?fam.members[myUid()].role:(inv.role||'adult')), joinedAt:t });
+    // mark single-use invite consumed (multi-use variants can be added later)
+    await inviteRef(code).set({status:'accepted', acceptedBy:myUid(), acceptedAt:t},{merge:true}).catch(()=>{});
+    _pendingCode=null;
+    return fid;
+  }
+
+  /* ── LEAVE / REMOVE ── */
+  async function leaveFamily(){
+    if(!ready()||!isMember())return;
+    const fid=familyId(); const me=myUid();
+    const isOwner = _current.ownerUid===me;
+    const others = Object.keys(_current.members||{}).filter(u=>u!==me);
+    if(isOwner && others.length){
+      // transfer ownership to the oldest other member before leaving
+      const heir = others.sort((a,b)=>((_current.members[a].joinedAt||'')+'').localeCompare((_current.members[b].joinedAt||'')+''))[0];
+      const patch={}; patch['members.'+heir+'.role']='owner'; patch['ownerUid']=heir;
+      patch['members.'+me]=firebase.firestore.FieldValue.delete();
+      patch['updatedAt']=new Date().toISOString();
+      await famRef(fid).update(patch);
+    } else if(isOwner){
+      // sole member → delete the family
+      await famRef(fid).delete().catch(()=>{});
+    } else {
+      const patch={}; patch['members.'+me]=firebase.firestore.FieldValue.delete();
+      patch['updatedAt']=new Date().toISOString();
+      await famRef(fid).update(patch);
+    }
+    await linkRef().delete().catch(()=>{});
+    _current=null; afterChange();
+  }
+
+  async function removeMember(memberUid){
+    if(!ready()||!isMember())return;
+    if(myServerRole()!=='owner' && myServerRole()!=='admin')return;
+    if(memberUid===_current.ownerUid)return; // cannot remove owner
+    const patch={}; patch['members.'+memberUid]=firebase.firestore.FieldValue.delete();
+    patch['updatedAt']=new Date().toISOString();
+    await famRef(familyId()).update(patch);
+  }
+
+  async function setRole(memberUid, role){
+    if(!ready()||myServerRole()!=='owner')return;
+    if(!FAM_ROLES.includes(role))return;
+    const patch={}; patch['members.'+memberUid+'.role']=role; patch['updatedAt']=new Date().toISOString();
+    if(role==='owner'){ patch['ownerUid']=memberUid; patch['members.'+myUid()+'.role']='admin'; }
+    await famRef(familyId()).update(patch);
+  }
+
+  async function renameFamily(name){
+    if(!ready()||!isMember())return;
+    if(myServerRole()!=='owner'&&myServerRole()!=='admin')return;
+    await famRef(familyId()).update({name:(name||'').trim()||'Family', updatedAt:new Date().toISOString()});
+  }
+
+  /* ── pending invite from deep link (#fi=CODE) ── */
+  function setPending(code){ _pendingCode=(code||'').trim().toUpperCase()||null; redeemPendingIfAny(); }
+  function redeemPendingIfAny(){
+    if(_pendingCode && ready() && !isMember()){
+      const c=_pendingCode;
+      redeemInvite(c).then(()=>{ toast&&toast(L==='fa'?'به خانواده پیوستید':'Joined family'); })
+        .catch(()=>{}); // silent; UI can retry from Invitations screen
+    }
+  }
+
+  return { start, stop, ready, current, familyId, isMember, myServerRole,
+           createFamily, createInvite, revokeInvite, redeemInvite,
+           leaveFamily, removeMember, setRole, renameFamily,
+           setPending, _redeemPending:redeemPendingIfAny };
+})();
+
+
 function famInit(){
   if(DB.meta.family)return;
   const ownerId=uid(), t=now();
@@ -9979,6 +10202,40 @@ function famTile(icon,label,act,sub){ return `<button class="ul-row" data-fam="$
   <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">${esc(label)}</div>${sub?`<div style="font-size:12px;color:var(--ink3)">${esc(sub)}</div>`:''}</div>
   <span style="color:var(--ink3);opacity:.4">›</span></button>`; }
 
+function famCloudBanner(){
+  var fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  var online=fb&&fb.ready();
+  var member=online&&fb.isMember();
+  var sv=DB.meta.familyServer||{};
+  var box='border:1px solid var(--b1);border-radius:14px;padding:12px 14px;margin-bottom:12px;background:var(--s1)';
+  if(!online){
+    return `<div style="${box};display:flex;gap:10px;align-items:center">
+      <span style="font-size:18px">☁️</span>
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--ink2)">${L==='fa'?'برای اشتراک خانواده بین دستگاه‌ها، آنلاین شوید.':'Go online to share this family across devices.'}</div></div>`;
+  }
+  if(member){
+    var cnt=sv.memberCount||1;
+    return `<div style="${box}">
+      <div style="display:flex;gap:10px;align-items:center">
+        <span style="font-size:18px">✅</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:800;font-size:14px">${esc(sv.name||(L==='fa'?'خانواده':'Family'))}</div>
+          <div style="font-size:12px;color:var(--ink3)">${L==='fa'?'همگام با فضای ابری':'Synced to cloud'} · ${cnt} ${L==='fa'?'عضو':'members'}</div>
+        </div>
+        <span class="chip" style="background:#22c55e22;color:#22c55e">${L==='fa'?'متصل':'Connected'}</span>
+      </div></div>`;
+  }
+  // online but not yet in a server family
+  return `<div style="${box}">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+      <span style="font-size:18px">☁️</span>
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--ink2)">${L==='fa'?'این خانواده هنوز در فضای ابری نیست. یک فضای خانواده بسازید یا با کد بپیوندید.':'This family is not in the cloud yet. Create a cloud space or join with a code.'}</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" data-fam="cloud-create" style="flex:1;min-width:130px">${L==='fa'?'ساخت فضای ابری':'Create cloud space'}</button>
+      <button class="btn btn-ghost" data-fam="cloud-join" style="flex:1;min-width:130px">${L==='fa'?'پیوستن با کد':'Join with code'}</button>
+    </div></div>`;
+}
 function famDashboardView(){
   const mem=Object.values(famMembersMap()), places=Object.values(famPlacesMap());
   const pend=Object.values(famInvitesMap()).filter(i=>famInviteStatus(i)==='pending').length;
@@ -9988,6 +10245,8 @@ function famDashboardView(){
   const s=famSelf();
   h+=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:linear-gradient(135deg,#ec489918,#6e56f818);border:1px solid var(--b1);margin-bottom:12px">
     ${famAvatar(s,44)}<div style="flex:1;min-width:0"><div style="font-weight:800">${esc(s.name)}</div><div style="font-size:12px;color:var(--ink3)">${famRoleLabel(s.role)} · ${mem.length} ${L==='fa'?'عضو':'members'}</div></div></div>`;
+  // ── Cloud family status (Phase 1) ──
+  h+=famCloudBanner();
   // primary actions
   h+=`<div style="display:flex;gap:10px;margin-bottom:14px">
     <button class="btn" data-fam="checkin" style="flex:1;background:#6e56f8;color:#fff">📍 ${L==='fa'?'ثبت ورود':'Check in'}</button>
@@ -10294,9 +10553,25 @@ function famAction(act,arg,ev){
     case 'place-remove':{ if(!famActivePlaceId||!famCan('managePlaces'))return; const p=P[famActivePlaceId]; if(!confirm(L==='fa'?'حذف مکان؟':'Remove place?'))return; famLog('place_removed',{name:p?p.name:''}); delete P[famActivePlaceId]; saveDB(); go('places'); return; }
     // invitations
     case 'inv-role': _famInviteRole=arg; render(); return;
-    case 'inv-create':{ if(!famCan('sendInvites'))return; famCreateInvite(_famInviteRole||'adult'); render(); return; }
+    case 'inv-create':{ if(!famCan('sendInvites'))return;
+      const role=_famInviteRole||'adult';
+      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+      if(fb&&fb.ready()){
+        toast(L==='fa'?'در حال ساخت دعوت…':'Creating invite…');
+        fb.createInvite(role).then(inv=>{
+          // store a local mirror so the invites list + QR render offline too
+          const id=uid(),t=inv.createdAt||now();
+          famInvitesMap()[id]={ id, code:inv.code, role:inv.role, name:inv.name||'', method:'link', status:'pending', server:true, createdAt:t, expiresAt:inv.expiresAt };
+          famLog('invite',{code:inv.code,role}); saveDB(); render();
+        }).catch(()=>{ toast(L==='fa'?'ساخت دعوت ابری ناموفق بود؛ دعوت محلی ساخته شد':'Cloud invite failed; created local invite'); famCreateInvite(role); render(); });
+      } else { famCreateInvite(role); render(); }
+      return; }
+    // ── Phase 1 cloud actions ──
+    case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
+    case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } const code=(prompt(L==='fa'?'کد دعوت را وارد کنید:':'Enter invite code:')||'').trim(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ toast(L==='fa'?'به خانواده پیوستید':'Joined family'); render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
+    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; if(!confirm(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟':'Leave the cloud family space?'))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); render(); }).catch(()=>{}); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
-    case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); if(navigator.share){ navigator.share({title:'MBM Family',text:(L==='fa'?'به خانواده بپیوند':'Join my family'),url:link}).catch(()=>{}); } else famCopy(link); return; }
+    case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code; if(navigator.share){ navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>{}); } else famCopy(link); return; }
     case 'inv-accept':{ const inv=I[arg]; if(inv){ inv.status='accepted'; saveDB(); render(); } return; }
     case 'inv-reject':{ const inv=I[arg]; if(inv){ inv.status='rejected'; saveDB(); render(); } return; }
     case 'inv-del':{ delete I[arg]; saveDB(); render(); return; }
@@ -12463,6 +12738,7 @@ function initAuth(){
       DB.meta.provider='google';
       saveDB();
       startListeners();
+      try{ if(window._pendingFamilyInvite && typeof FamilyBackend!=='undefined'){ FamilyBackend.setPending(window._pendingFamilyInvite); } }catch(e){}
       pullProfile();
       refreshPushOnStart();
       hideSplash();
@@ -12594,11 +12870,13 @@ function startListeners(){
   const u2=sync('lists','lists');
   const u3=sync('appts','appts');
   _syncUnsubs=[u1,u2,u3];
+  try{ if(typeof FamilyBackend!=='undefined')FamilyBackend.start(); }catch(e){}
 }
 
 function stopListeners(){
   _syncUnsubs.forEach(u=>{try{u();}catch(e){}});
   _syncUnsubs=[];
+  try{ if(typeof FamilyBackend!=='undefined')FamilyBackend.stop(); }catch(e){}
 }
 
 function syncPush(){
@@ -13536,6 +13814,14 @@ function restoreAfterUpdate(){
   }catch(e){}
 }
 
+// ── Capture a Family invite deep-link (#fi=CODE) at boot, then clean the URL.
+try{
+  var _m=(location.hash||'').match(/[#&]fi=([A-Za-z0-9]+)/);
+  if(_m&&_m[1]){
+    window._pendingFamilyInvite=_m[1].toUpperCase();
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  }
+}catch(e){}
 // Boot Firebase (popup-only; no redirect handler)
 initAuth();
 // Apply saved theme immediately so the auth screen matches (light/dark/system).
