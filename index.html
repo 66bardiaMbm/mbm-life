@@ -1405,7 +1405,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v265';
+const APP_VERSION='v267';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -9883,7 +9883,7 @@ let famView='dashboard';           // dashboard|members|memberEdit|places|placeE
 let famActiveMemberId=null;
 let famActiveCloudUid=null;
 let famActivePlaceId=null;
-let famSettingsTab='members';
+let famSettingsTab='family';
 let _famSOS={timer:null,remaining:0,pos:null,gettingPos:false};
 let _famCheckin={pos:null,note:'',placeId:'',getting:false};
 
@@ -10174,6 +10174,7 @@ function famInit(){
   famMembersMap()[ownerId]={ id:ownerId, name:(DB.meta.displayName||'Me'), relationship:(L==='fa'?'خودم':'Me'), role:'owner', avatarId:(DB.meta.avatar||null), color:'#ec4899', self:true, createdAt:t, updatedAt:t };
 }
 function famSelf(){ const m=famMembersMap(); return m[famCfg().selfId]||Object.values(m).find(x=>x.role==='owner')||null; }
+function famSelfName(){ const s=famSelf(); if(!s)return DB.meta.displayName||'Me'; const ph=!s.name||s.name==='Me'||s.name==='خودم'; return (ph&&DB.meta.displayName)?DB.meta.displayName:(s.name||DB.meta.displayName||'Me'); }
 function famRole(){ const s=famSelf(); return s?s.role:'guest'; }
 function famCan(cap){ const need=famCfg().perms[cap]||FAM_CAP_DEFAULT[cap]||'owner'; return (FAM_ROLE_RANK[famRole()]||0) >= (FAM_ROLE_RANK[need]||5); }
 function famModuleShared(id){ const s=famCfg().shared[id]; return !!(s&&s.enabled); }
@@ -10220,23 +10221,42 @@ function renderFamily(){
   </div>`;
   if(famView==='members') return head(L==='fa'?'اعضای خانواده':'Family Members')+famMembersView();
   if(famView==='memberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famMemberEditView();
-  if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places')+famPlacesView();
+  if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places','fam-back-dash')+famLaterView(L==='fa'?'مکان‌ها و هشدارها':'Places & alerts',L==='fa'?'فاز ۳':'Phase 3','📌');
   if(famView==='placeEdit') return head(L==='fa'?'مکان':'Place','fam-back-places')+famPlaceEditView();
   if(famView==='cmemberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famCloudMemberEditView();
+  if(famView==='joinCode') return head(L==='fa'?'پیوستن با کد':'Join with code','fam-back-dash')+famJoinCodeView();
   if(famView==='joinInvite') return head(L==='fa'?'دعوت به خانواده':'Family Invitation','fam-back-dash')+famJoinInviteView();
   if(famView==='invites') return head(L==='fa'?'دعوت‌نامه‌ها':'Invitations')+famInvitesView();
-  if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-dash')+famCheckinView();
-  if(famView==='sos') return head('SOS','fam-back-dash')+famSOSView();
-  if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famTimelineView();
-  if(famView==='map') return head(L==='fa'?'نقشه خانواده':'Family Map','fam-back-dash')+famMapView();
+  // ── Later-phase features: show a clear placeholder, not a functional screen ──
+  if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-dash')+famLaterView(L==='fa'?'ثبت ورود':'Check-in',L==='fa'?'فاز ۲ — MVP موقعیت':'Phase 2 — Location MVP','📍');
+  if(famView==='sos') return head('SOS','fam-back-dash')+famLaterView('SOS',L==='fa'?'فاز ۵ — ایمنی پیشرفته':'Phase 5 — Advanced Safety','🆘');
+  if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famLaterView(L==='fa'?'تایم‌لاین':'Timeline',L==='fa'?'فاز ۲':'Phase 2','🕘');
+  if(famView==='map') return head(L==='fa'?'نقشه خانواده':'Family Map','fam-back-dash')+famLaterView(L==='fa'?'نقشه و موقعیت زنده':'Live map & location',L==='fa'?'فاز ۲ — MVP موقعیت':'Phase 2 — Location MVP','🗺');
   if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-dash')+famSettingsView();
   return head(L==='fa'?'خانواده':'Family')+famDashboardView();
+}
+
+/* ── Later-phase placeholder screen ── */
+function famLaterView(title,phase,icon){
+  return `<div style="padding:0 16px 90px">
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:40px 20px;border:1px dashed var(--b2);border-radius:18px;background:var(--s1);margin-top:8px">
+      <div style="width:72px;height:72px;border-radius:20px;background:var(--b1);display:flex;align-items:center;justify-content:center;font-size:34px;margin-bottom:16px">${icon}</div>
+      <div style="font-size:19px;font-weight:800;margin-bottom:6px">${esc(title)}</div>
+      <div style="font-size:14px;color:var(--ink2);margin-bottom:14px">${L==='fa'?'این بخش در یک فاز بعدی اضافه می‌شود.':'This feature is coming in a later phase.'}</div>
+      <span class="chip" style="background:#6e56f822;color:#8b7dfc;font-size:13px">${esc(phase)}</span>
+    </div>
+  </div>`;
 }
 
 function famTile(icon,label,act,sub){ return `<button class="ul-row" data-fam="${act}" style="width:100%;text-align:start;border:1px solid var(--b1);background:var(--s1);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer">
   <div style="width:40px;height:40px;border-radius:11px;background:#ec489922;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icon}</div>
   <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">${esc(label)}</div>${sub?`<div style="font-size:12px;color:var(--ink3)">${esc(sub)}</div>`:''}</div>
   <span style="color:var(--ink3);opacity:.4">›</span></button>`; }
+
+function famLaterTile(icon,label,phase){ return `<button class="ul-row" data-fam="later" data-arg="${esc(label)}" style="width:100%;text-align:start;border:1px dashed var(--b2);background:transparent;border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;opacity:.72">
+  <div style="width:40px;height:40px;border-radius:11px;background:var(--b1);color:var(--ink3);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icon}</div>
+  <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px;color:var(--ink2)">${esc(label)}</div><div style="font-size:12px;color:var(--ink3)">${L==='fa'?'به‌زودی':'Coming soon'}</div></div>
+  <span class="chip" style="background:var(--b1);color:var(--ink3)">${esc(phase)}</span></button>`; }
 
 function famCloudBanner(){
   var fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -10274,32 +10294,54 @@ function famCloudBanner(){
 }
 function famDashboardView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  const inCloud=fb&&fb.ready()&&fb.isMember();
-  const places=Object.values(famPlacesMap());
+  const online=fb&&fb.ready();
+  const inCloud=online&&fb.isMember();
+  const st=inCloud?fb.getState():null;
   const pend=Object.values(famInvitesMap()).filter(i=>i&&i.server&&famInviteStatus(i)==='pending').length;
-  const recent=famTimelineAll().slice(0,5);
-  // authoritative member count + my role
-  const memCount = inCloud ? fb.getState().memberCount : Object.values(famMembersMap()).length;
   const s=famSelf();
+  const memCount = inCloud ? st.memberCount : Object.values(famMembersMap()).length;
   const myRoleLabel = inCloud ? famRoleLabel(fb.myServerRole()||s.role) : famRoleLabel(s.role);
+  const famName = inCloud ? (st.name||(L==='fa'?'خانواده':'Family')) : (L==='fa'?'خانواده محلی':'Local family');
   let h=`<div style="padding:0 16px 90px">`;
-  // self role banner
-  h+=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:linear-gradient(135deg,#ec489918,#6e56f818);border:1px solid var(--b1);margin-bottom:12px">
-    ${famAvatar(s,44)}<div style="flex:1;min-width:0"><div style="font-weight:800">${esc(s.name)}</div><div style="font-size:12px;color:var(--ink3)">${myRoleLabel} · ${memCount} ${L==='fa'?'عضو':'members'}</div></div></div>`;
-  // ── Cloud family status (Phase 1) ──
-  h+=famCloudBanner();
-  // primary actions
-  h+=`<div style="display:flex;gap:10px;margin-bottom:14px">
-    <button class="btn" data-fam="checkin" style="flex:1;background:#6e56f8;color:#fff">📍 ${L==='fa'?'ثبت ورود':'Check in'}</button>
-    <button class="btn" data-fam="sos" style="flex:1;background:var(--danger);color:#fff">🆘 SOS</button></div>`;
+
+  // ── ONE unified identity + cloud-status card (no duplicate banners) ──
+  const statusChip = !online
+    ? `<span class="chip" style="background:#94a3b822;color:#94a3b8">${L==='fa'?'آفلاین':'Offline'}</span>`
+    : inCloud
+      ? `<span class="chip" style="background:#22c55e22;color:#22c55e">${L==='fa'?'متصل به ابر':'Connected'}</span>`
+      : `<span class="chip" style="background:#f59e0b22;color:#f59e0b">${L==='fa'?'فقط این دستگاه':'Local only'}</span>`;
+  h+=`<div style="padding:14px;border-radius:16px;background:linear-gradient(135deg,#ec489918,#6e56f818);border:1px solid var(--b1);margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:12px">
+      ${famAvatar(s,48)}
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:800;font-size:16px">${esc(famSelfName())}</div>
+        <div style="font-size:12px;color:var(--ink3)">${myRoleLabel} · ${memCount} ${L==='fa'?'عضو':'members'}</div>
+      </div>
+      ${statusChip}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--b1)">
+      <span style="font-size:16px">${inCloud?'👨‍👩‍👧‍👦':'☁️'}</span>
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--ink2)" dir="auto">${esc(famName)}</div>
+      <button class="btn btn-ghost" data-fam="settings" style="padding:6px 12px;font-size:13px">${L==='fa'?'مدیریت':'Manage'}</button>
+    </div>`;
+  if(online && !inCloud){
+    h+=`<div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn" data-fam="cloud-create" style="flex:1;min-width:130px">${L==='fa'?'ساخت فضای ابری':'Create cloud space'}</button>
+      <button class="btn btn-ghost" data-fam="cloud-join" style="flex:1;min-width:130px">${L==='fa'?'پیوستن با کد':'Join with code'}</button></div>`;
+  }
+  h+=`</div>`;
+
+  // ── PHASE 1 features (fully usable) ──
   h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${memCount} ${L==='fa'?'عضو':'members'}`);
-  h+=`<div style="height:8px"></div>`+famTile('📌',L==='fa'?'مکان‌ها':'Places','places',`${places.length} ${L==='fa'?'مکان':'places'}`);
-  h+=`<div style="height:8px"></div>`+famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites',pend?`${pend} ${L==='fa'?'در انتظار':'pending'}`:(L==='fa'?'دعوت جدید':'invite someone'));
-  h+=`<div style="height:8px"></div>`+famTile('🗺',L==='fa'?'نقشه خانواده':'Family Map','map',L==='fa'?'موقعیت این دستگاه':'this device location');
-  h+=`<div style="height:8px"></div>`+famTile('🕘',L==='fa'?'تایم‌لاین':'Timeline','timeline',`${famTimelineAll().length} ${L==='fa'?'رخداد':'events'}`);
-  // recent
-  if(recent.length){ h+=`<div style="margin:18px 0 6px;font-size:13px;font-weight:800;color:var(--ink2)">${L==='fa'?'اخیر':'Recent'}</div>`;
-    recent.forEach(e=>{ h+=`<div class="ul-row" style="display:flex;gap:10px;padding:10px 4px;border-top:1px solid var(--b1)"><span style="font-size:16px">${FAM_EVENT_IC[e.type]||'•'}</span><div style="flex:1;min-width:0"><div style="font-size:14px" dir="auto">${esc(famEventLabel(e))}</div><div style="font-size:11px;color:var(--ink3)">${esc(famWhen(e.at))}</div></div></div>`; }); }
+  h+=`<div style="height:8px"></div>`+famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites',pend?`${pend} ${L==='fa'?'در انتظار — برای مشاهده بزنید':'pending — tap to view'}`:(L==='fa'?'دعوت عضو جدید':'invite a member'));
+
+  // ── LATER-PHASE features (clearly marked, not fake-functional) ──
+  h+=`<div style="margin:20px 2px 8px;font-size:12px;font-weight:800;color:var(--ink3)">${L==='fa'?'به‌زودی در فازهای بعد':'Coming in later phases'}</div>`;
+  h+=famLaterTile('🗺',L==='fa'?'نقشه و موقعیت زنده':'Live map & location',L==='fa'?'فاز ۲':'Phase 2');
+  h+=`<div style="height:8px"></div>`+famLaterTile('📍',L==='fa'?'ثبت ورود':'Check-in',L==='fa'?'فاز ۲':'Phase 2');
+  h+=`<div style="height:8px"></div>`+famLaterTile('📌',L==='fa'?'مکان‌ها و هشدارها':'Places & alerts',L==='fa'?'فاز ۳':'Phase 3');
+  h+=`<div style="height:8px"></div>`+famLaterTile('🆘','SOS',L==='fa'?'فاز ۵':'Phase 5');
+
   h+=`</div>`;
   return h;
 }
@@ -10324,7 +10366,7 @@ function famMembersView(){
       h+=`<div class="ul-row" ${canManage?`data-fam="cmember-open" data-arg="${m.uid}"`:''} style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);${canManage?'cursor:pointer':''}">
         ${famAvatar(av,44)}
         <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(m.name||'Member')}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
-          <div style="font-size:12px;color:var(--ink3)">${famRoleLabel(m.role)}${m.uid===st.ownerUid?' · '+(L==='fa'?'مالک':'owner'):''}</div></div>
+          <div style="font-size:12px;color:var(--ink3)">${famRoleLabel(m.role)}</div></div>
         ${canManage?'<span style="color:var(--ink3);opacity:.4">›</span>':''}</div>`;
     });
     // Invite entry
@@ -10352,7 +10394,7 @@ function famMembersView(){
   else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'برای افزودن عضو نیاز به دسترسی مدیر است.':'Adding members requires admin permission.'}</div>`;
   list.forEach(mem=>{ h+=`<div class="ul-row" data-fam="member-open" data-arg="${mem.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
     ${famAvatar(mem,44)}
-    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(mem.name)}${mem.self?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(mem.self?famSelfName():mem.name)}${mem.self?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
       <div style="font-size:12px;color:var(--ink3)">${esc(mem.relationship||'')}${mem.relationship?' · ':''}${famRoleLabel(mem.role)}</div></div>
     <span style="color:var(--ink3);opacity:.4">›</span></div>`; });
   h+=`</div>`; return h;
@@ -10361,14 +10403,24 @@ function famMemberEditView(){
   const mem=famMembersMap()[famActiveMemberId]; if(!mem)return `<div style="padding:20px">—</div>`;
   const canRole=famCan('assignRoles')&&!mem.self;
   const canRemove=famCan('manageMembers')&&!mem.self&&mem.role!=='owner';
+  // For the self member, prefer the profile display name when the member name
+  // is empty or still the seeded placeholder ("Me"/"خودم"), so the field is never blank/generic.
+  const _selfPlaceholder = !mem.name || mem.name==='Me' || mem.name==='خودم' || mem.name===(L==='fa'?'خودم':'Me');
+  const shownName = mem.self ? ((_selfPlaceholder && DB.meta.displayName) ? DB.meta.displayName : (mem.name||'')) : (mem.name||'');
   let h=`<div style="padding:0 16px 90px">`;
-  h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(mem,72)}</div>`;
-  h+=`<label class="fl">${L==='fa'?'نام':'Name'}</label><input class="finput" id="fam-m-name" value="${esc(mem.name||'')}" ${mem.self?'':''}>`;
+  // Self member: tapping the avatar opens the shared profile photo/avatar picker.
+  if(mem.self){
+    h+=`<div style="display:flex;justify-content:center;padding:8px 0 4px"><button data-fam="member-photo" style="border:none;background:none;padding:0;cursor:pointer;position:relative">${famAvatar(mem,72)}<span style="position:absolute;right:-2px;bottom:-2px;width:26px;height:26px;border-radius:50%;background:var(--brand);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:12px">✏️</span></button></div>`;
+    h+=`<div style="text-align:center;font-size:11px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'برای تغییر عکس بزنید':'Tap to change photo'}</div>`;
+  } else {
+    h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(mem,72)}</div>`;
+  }
+  h+=`<label class="fl">${L==='fa'?'نام':'Name'}</label><input class="finput" id="fam-m-name" value="${esc(shownName)}" placeholder="${L==='fa'?'نام نمایشی':'Display name'}">`;
   h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نسبت':'Relationship'}</label><input class="finput" id="fam-m-rel" value="${esc(mem.relationship||'')}" placeholder="${L==='fa'?'همسر، فرزند…':'spouse, child…'}">`;
   h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نقش':'Role'}</label>`;
   const shownRole=mem._pendRole||mem.role;
   h+=`<div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.map(r=>`<button class="pay-chip${shownRole===r?' on':''}" ${canRole?`data-fam="member-role" data-arg="${r}"`:'disabled'} ${(r==='owner')?'style="display:none"':''}>${famRoleLabel(r)}</button>`).join('')}</div>`;
-  if(!canRole)h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نقش فقط توسط مالک.':'Only the owner can change roles.'}</div>`;
+  if(!canRole&&!mem.self)h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نقش فقط توسط مالک.':'Only the owner can change roles.'}</div>`;
   h+=`<button class="btn" data-fam="member-save" style="width:100%;margin-top:16px">${L==='fa'?'ذخیره':'Save'}</button>`;
   if(!mem.self&&mem.role!=='owner'&&famCan('assignRoles'))h+=`<button class="btn btn-ghost" data-fam="member-transfer" style="width:100%;margin-top:8px">👑 ${L==='fa'?'انتقال مالکیت به این عضو':'Transfer ownership'}</button>`;
   if(canRemove)h+=`<button class="btn btn-ghost" data-fam="member-remove" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'حذف عضو':'Remove member'}</button>`;
@@ -10424,6 +10476,22 @@ function famCloudMemberEditView(){
   h+=`<div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.filter(r=>r!=='owner').map(r=>`<button class="pay-chip${m.role===r?' on':''}" ${isOwnerMe?`data-fam="cmember-role" data-arg="${r}"`:'disabled'}>${famRoleLabel(r)}</button>`).join('')}</div>`;
   if(!isOwnerMe)h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نقش فقط توسط مالک.':'Only the owner can change roles.'}</div>`;
   h+=`<button class="btn btn-ghost" data-fam="cmember-remove" style="width:100%;margin-top:16px;color:var(--danger)">${L==='fa'?'حذف از خانواده':'Remove from family'}</button>`;
+  h+=`</div>`; return h;
+}
+
+/* ── In-app join-by-code entry (replaces raw browser prompt) ── */
+function famJoinCodeView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  let h=`<div style="padding:0 16px 90px">`;
+  if(!fb||!fb.ready()){
+    return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">☁️</div><div class="hub-ph-t">${L==='fa'?'برای پیوستن باید آنلاین باشید':'You must be online to join'}</div></div></div>`;
+  }
+  h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1)">
+    <div style="font-size:15px;font-weight:800;margin-bottom:4px">${L==='fa'?'کد دعوت را وارد کنید':'Enter your invite code'}</div>
+    <div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'کدی که از خانواده دریافت کرده‌اید را اینجا وارد کنید.':'Paste the code you received from your family.'}</div>
+    <input class="finput" id="fam-join-code" autocomplete="off" autocapitalize="characters" placeholder="${L==='fa'?'مثلاً A1B2C3D4E5':'e.g. A1B2C3D4E5'}" style="text-align:center;letter-spacing:2px;font-weight:700;text-transform:uppercase">
+    <button class="btn" data-fam="join-code-go" style="width:100%;margin-top:12px;background:#6e56f8;color:#fff">${L==='fa'?'ادامه':'Continue'}</button>
+  </div>`;
   h+=`</div>`; return h;
 }
 
@@ -10606,8 +10674,10 @@ function famTimelineView(){
 function famSettingsView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const inCloud=fb&&fb.ready()&&fb.isMember();
-  const tabs=[['family',L==='fa'?'خانواده':'Family'],['members',L==='fa'?'اعضا':'Members'],['invitations',L==='fa'?'دعوت':'Invites'],['roles',L==='fa'?'نقش‌ها':'Roles'],['location',L==='fa'?'موقعیت':'Location'],['places',L==='fa'?'مکان‌ها':'Places'],['checkin',L==='fa'?'ورود':'Check-in'],['sos','SOS'],['privacy',L==='fa'?'حریم':'Privacy'],['shared',L==='fa'?'اشتراک':'Shared']];
+  const tabs=[['family',L==='fa'?'خانواده':'Family'],['members',L==='fa'?'اعضا':'Members'],['invitations',L==='fa'?'دعوت':'Invites'],['roles',L==='fa'?'نقش‌ها':'Roles']];
   let h=`<div style="padding:0 16px 90px">`;
+  const _p1tabs=['family','members','invitations','roles'];
+  if(_p1tabs.indexOf(famSettingsTab)<0)famSettingsTab='family';
   h+=`<div class="pay-chips" style="flex-wrap:wrap;margin-bottom:12px">${tabs.map(([k,l])=>`<button class="pay-chip${famSettingsTab===k?' on':''}" data-fam="set-tab" data-arg="${k}">${l}</button>`).join('')}</div>`;
   const cfg=famCfg();
   if(famSettingsTab==='family'){
@@ -10718,6 +10788,7 @@ function famAction(act,arg,ev){
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
   switch(act){
     case 'settings': go('settings'); return;
+    case 'later':{ toast(L==='fa'?`«${arg}» در یک فاز بعدی اضافه می‌شود`:`"${arg}" is coming in a later phase`); return; }
     case 'members': go('members'); return;
     case 'places': go('places'); return;
     case 'invites': go('invites'); return;
@@ -10728,8 +10799,9 @@ function famAction(act,arg,ev){
     // members
     case 'member-new':{ if(!famCan('manageMembers'))return; const id=uid(),t=now(); M[id]={id,name:(L==='fa'?'عضو جدید':'New member'),relationship:'',role:'adult',avatarId:null,color:'#6e56f8',createdAt:t,updatedAt:t}; famActiveMemberId=id; famLog('member_added',{name:M[id].name}); saveDB(); go('memberEdit'); return; }
     case 'member-open': famActiveMemberId=arg; go('memberEdit'); return;
+    case 'member-photo':{ const mm=M[famActiveMemberId]; if(mm&&mm.self&&typeof openPhotoSheet==='function')openPhotoSheet(); return; }
     case 'member-role':{ const m=M[famActiveMemberId]; if(m&&famCan('assignRoles')){ m._pendRole=arg; render(); } return; }
-    case 'member-save':{ const m=M[famActiveMemberId]; if(!m)return; const nm=document.getElementById('fam-m-name'), rl=document.getElementById('fam-m-rel'); if(nm)m.name=nm.value.trim()||m.name; if(rl)m.relationship=rl.value.trim(); if(m._pendRole&&famCan('assignRoles')&&m._pendRole!==m.role){ m.role=m._pendRole; famLog('role_changed',{name:m.name,role:m.role}); } delete m._pendRole; m.updatedAt=now(); if(m.self)DB.meta.displayName=m.name; saveDB(); toast(L==='fa'?'ذخیره شد':'Saved'); go('members'); return; }
+    case 'member-save':{ const m=M[famActiveMemberId]; if(!m)return; const nm=document.getElementById('fam-m-name'), rl=document.getElementById('fam-m-rel'); if(nm)m.name=nm.value.trim()||m.name; if(rl)m.relationship=rl.value.trim(); if(m._pendRole&&famCan('assignRoles')&&m._pendRole!==m.role){ m.role=m._pendRole; famLog('role_changed',{name:m.name,role:m.role}); } delete m._pendRole; m.updatedAt=now(); if(m.self){ DB.meta.displayName=m.name; if(typeof pushProfile==='function')pushProfile(); try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember())FamilyBackend.updateSelfProfile(); }catch(e){} } saveDB(); toast(L==='fa'?'ذخیره شد':'Saved'); go('members'); return; }
     case 'member-transfer':{ const m=M[famActiveMemberId]; if(!m||!famCan('assignRoles'))return; if(!confirm(L==='fa'?`مالکیت به ${m.name} منتقل شود؟`:`Transfer ownership to ${m.name}?`))return; const self=famSelf(); if(self){ self.role='admin'; self.updatedAt=now(); } m.role='owner'; cfg.ownerId=m.id; m.updatedAt=now(); famLog('ownership',{name:m.name}); saveDB(); toast(L==='fa'?'مالکیت منتقل شد':'Ownership transferred'); go('members'); return; }
     case 'member-remove':{ const m=M[famActiveMemberId]; if(!m||m.self||m.role==='owner'||!famCan('manageMembers'))return; if(!confirm(L==='fa'?`حذف ${m.name}؟`:`Remove ${m.name}?`))return; famLog('member_removed',{name:m.name}); delete M[famActiveMemberId]; saveDB(); go('members'); return; }
     // places
@@ -10765,7 +10837,7 @@ function famAction(act,arg,ev){
       return; }
     // ── Phase 1 cloud actions ──
     case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
-    case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } const code=(prompt(L==='fa'?'کد دعوت را وارد کنید:':'Enter invite code:')||'').trim().toUpperCase(); if(!code)return; fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); return; }
+    case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch(()=>{ toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
     case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='dashboard'; render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
@@ -10779,7 +10851,8 @@ function famAction(act,arg,ev){
     // ── In-app invite redemption (deep-link / manual code) ──
     case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='dashboard'; render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
     case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='dashboard'; render(); return; }
-    case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } const code=(prompt(L==='fa'?'کد دعوت را وارد کنید:':'Enter invite code:')||'').trim().toUpperCase(); if(!code)return; fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); return; }
+    case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
+    case 'join-code-go':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const el=document.getElementById('fam-join-code'); const code=(el?el.value:'').trim().toUpperCase(); if(!code){ toast(L==='fa'?'کد را وارد کنید':'Enter a code'); return; } fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); window.scrollTo(0,0); return; }
     // check-in
     case 'ci-locate':{ _famCheckin.getting=true; render(); famGetLocation(pos=>{ _famCheckin.getting=false; _famCheckin.pos=pos; render(); }); return; }
     case 'ci-send':{ if(!_famCheckin.pos){ toast(L==='fa'?'ابتدا موقعیت را بگیرید':'Get location first'); return; } const sel=document.getElementById('fam-ci-place'); const noteEl=document.getElementById('fam-ci-note'); const placeId=sel?sel.value:''; const note=noteEl?noteEl.value.trim():''; const pn=placeId&&P[placeId]?P[placeId].name:''; famLog('checkin',{lat:_famCheckin.pos.lat,lon:_famCheckin.pos.lon,note,placeName:pn}); _famCheckin={pos:null,note:'',placeId:'',getting:false}; saveDB(); toast(L==='fa'?'ثبت شد':'Checked in'); go('dashboard'); return; }
