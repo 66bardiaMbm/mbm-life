@@ -1405,7 +1405,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v263';
+const APP_VERSION='v265';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1546,6 +1546,9 @@ function loadDB(){
     if(!Object.keys(d.entities.lists).length)seedDB(d);
     // ── Activity layer state (history-only; never touches canonical data) ──
     if(!d.meta.familyServer||typeof d.meta.familyServer!=='object')d.meta.familyServer={};
+    // ── Phase 1: legacy local invitations are NOT cloud invitations. Mark them
+    // legacy (non-destructive) so they never render/count as cloud invites. ──
+    try{ if(!d.meta._famInviteMigrated){ Object.values(d.entities.familyInvites||{}).forEach(inv=>{ if(inv&&!inv.server){ inv.legacy=true; } }); d.meta._famInviteMigrated=true; } }catch(_){}
     if(!d.entities.activity)d.entities.activity={};
     if(d.meta.activityRetentionDays===undefined)d.meta.activityRetentionDays=0; // 0 = Forever
     if(!d.meta.activityHidden||typeof d.meta.activityHidden!=='object')d.meta.activityHidden={};
@@ -2805,9 +2808,9 @@ function renderProfile(){
     </div>
 
     <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
-      <div class="ul-row" style="padding:0 16px;cursor:default">
+      <div class="ul-row" data-action="edit-name" style="padding:0 16px;cursor:pointer">
         <span class="ul-name">${tr('displayName')}</span>
-        <span class="ul-count">${esc(user.displayName||user.email)}</span>
+        <span class="ul-count">${esc(user.displayName||user.email)} <span style="opacity:.5">✏️</span></span>
       </div>
       <div class="ul-row" style="padding:0 16px;cursor:default">
         <span class="ul-name">${tr('email')}</span>
@@ -9878,6 +9881,7 @@ const MBMQR=(function(){
 /* ── Family state ── */
 let famView='dashboard';           // dashboard|members|memberEdit|places|placeEdit|invites|checkin|sos|settings|timeline|map
 let famActiveMemberId=null;
+let famActiveCloudUid=null;
 let famActivePlaceId=null;
 let famSettingsTab='members';
 let _famSOS={timer:null,remaining:0,pos:null,gettingPos:false};
@@ -9951,7 +9955,7 @@ const FamilyBackend = (function(){
     _linkUnsub = linkRef().onSnapshot(snap=>{
       const fid = snap.exists ? (snap.data()||{}).familyId : null;
       if(fid) watchFamily(fid);
-      else { _current=null; detachFamily(); afterChange(); redeemPendingIfAny(); }
+      else { _current=null; detachFamily(); afterChange(); }
     }, ()=>{});
   }
   function stop(){
@@ -10109,20 +10113,50 @@ const FamilyBackend = (function(){
     await famRef(familyId()).update({name:(name||'').trim()||'Family', updatedAt:new Date().toISOString()});
   }
 
-  /* ── pending invite from deep link (#fi=CODE) ── */
-  function setPending(code){ _pendingCode=(code||'').trim().toUpperCase()||null; redeemPendingIfAny(); }
-  function redeemPendingIfAny(){
-    if(_pendingCode && ready() && !isMember()){
-      const c=_pendingCode;
-      redeemInvite(c).then(()=>{ toast&&toast(L==='fa'?'به خانواده پیوستید':'Joined family'); })
-        .catch(()=>{}); // silent; UI can retry from Invitations screen
-    }
+  /* ── Keep my membership name/photo in sync with my profile (FR-17) ── */
+  async function updateSelfProfile(){
+    if(!ready()||!isMember())return;
+    const patch={}; patch['members.'+myUid()+'.name']=selfName(); patch['members.'+myUid()+'.photo']=selfPhoto()||null;
+    patch['updatedAt']=new Date().toISOString();
+    await famRef(familyId()).update(patch).catch(()=>{});
   }
 
-  return { start, stop, ready, current, familyId, isMember, myServerRole,
-           createFamily, createInvite, revokeInvite, redeemInvite,
-           leaveFamily, removeMember, setRole, renameFamily,
-           setPending, _redeemPending:redeemPendingIfAny };
+  /* ── PREVIEW an invite (read-only, for the in-app confirmation screen) ── */
+  async function previewInvite(code){
+    if(!ready()) throw new Error('offline');
+    code=(code||'').trim().toUpperCase();
+    if(!code) throw new Error('empty');
+    const snap=await inviteRef(code).get();
+    if(!snap.exists) throw new Error('notfound');
+    const inv=snap.data()||{};
+    const st = (inv.status==='pending' && inv.expiresAt && Date.parse(inv.expiresAt)<Date.now()) ? 'expired' : inv.status;
+    let famName=null;
+    if(inv.familyId){ const f=await famRef(inv.familyId).get(); if(f.exists){ famName=(f.data()||{}).name||null; } }
+    return { code, familyId:inv.familyId, role:inv.role||'adult', status:st,
+             createdByName:inv.createdByName||null, familyName:famName, expiresAt:inv.expiresAt };
+  }
+
+  /* ── pending invite from deep link (#fi=CODE) ──
+     Do NOT auto-redeem silently. Store the code so the UI can show an in-app
+     confirmation screen once the user is signed in (proposal §5 step 4:
+     explicit confirmation showing family, inviter and shared data). ── */
+  function setPending(code){ _pendingCode=(code||'').trim().toUpperCase()||null; }
+  function pendingCode(){ return _pendingCode; }
+  function clearPending(){ _pendingCode=null; }
+
+  /* ── snapshot of server state for the UI (no internal access needed) ── */
+  function getState(){
+    return { online:ready(), isMember:isMember(), familyId:familyId(),
+             role:myServerRole(), name:_current?_current.name:null,
+             ownerUid:_current?_current.ownerUid:null,
+             members:_current?(_current.members||{}):{},
+             memberCount:_current&&_current.members?Object.keys(_current.members).length:0 };
+  }
+
+  return { start, stop, ready, current, familyId, isMember, myServerRole, getState,
+           createFamily, createInvite, revokeInvite, redeemInvite, previewInvite,
+           leaveFamily, removeMember, setRole, renameFamily, updateSelfProfile,
+           setPending, pendingCode, clearPending };
 })();
 
 
@@ -10188,6 +10222,8 @@ function renderFamily(){
   if(famView==='memberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famMemberEditView();
   if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places')+famPlacesView();
   if(famView==='placeEdit') return head(L==='fa'?'مکان':'Place','fam-back-places')+famPlaceEditView();
+  if(famView==='cmemberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famCloudMemberEditView();
+  if(famView==='joinInvite') return head(L==='fa'?'دعوت به خانواده':'Family Invitation','fam-back-dash')+famJoinInviteView();
   if(famView==='invites') return head(L==='fa'?'دعوت‌نامه‌ها':'Invitations')+famInvitesView();
   if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-dash')+famCheckinView();
   if(famView==='sos') return head('SOS','fam-back-dash')+famSOSView();
@@ -10237,21 +10273,26 @@ function famCloudBanner(){
     </div></div>`;
 }
 function famDashboardView(){
-  const mem=Object.values(famMembersMap()), places=Object.values(famPlacesMap());
-  const pend=Object.values(famInvitesMap()).filter(i=>famInviteStatus(i)==='pending').length;
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const inCloud=fb&&fb.ready()&&fb.isMember();
+  const places=Object.values(famPlacesMap());
+  const pend=Object.values(famInvitesMap()).filter(i=>i&&i.server&&famInviteStatus(i)==='pending').length;
   const recent=famTimelineAll().slice(0,5);
+  // authoritative member count + my role
+  const memCount = inCloud ? fb.getState().memberCount : Object.values(famMembersMap()).length;
+  const s=famSelf();
+  const myRoleLabel = inCloud ? famRoleLabel(fb.myServerRole()||s.role) : famRoleLabel(s.role);
   let h=`<div style="padding:0 16px 90px">`;
   // self role banner
-  const s=famSelf();
   h+=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:linear-gradient(135deg,#ec489918,#6e56f818);border:1px solid var(--b1);margin-bottom:12px">
-    ${famAvatar(s,44)}<div style="flex:1;min-width:0"><div style="font-weight:800">${esc(s.name)}</div><div style="font-size:12px;color:var(--ink3)">${famRoleLabel(s.role)} · ${mem.length} ${L==='fa'?'عضو':'members'}</div></div></div>`;
+    ${famAvatar(s,44)}<div style="flex:1;min-width:0"><div style="font-weight:800">${esc(s.name)}</div><div style="font-size:12px;color:var(--ink3)">${myRoleLabel} · ${memCount} ${L==='fa'?'عضو':'members'}</div></div></div>`;
   // ── Cloud family status (Phase 1) ──
   h+=famCloudBanner();
   // primary actions
   h+=`<div style="display:flex;gap:10px;margin-bottom:14px">
     <button class="btn" data-fam="checkin" style="flex:1;background:#6e56f8;color:#fff">📍 ${L==='fa'?'ثبت ورود':'Check in'}</button>
     <button class="btn" data-fam="sos" style="flex:1;background:var(--danger);color:#fff">🆘 SOS</button></div>`;
-  h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${mem.length} ${L==='fa'?'عضو':'members'}`);
+  h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${memCount} ${L==='fa'?'عضو':'members'}`);
   h+=`<div style="height:8px"></div>`+famTile('📌',L==='fa'?'مکان‌ها':'Places','places',`${places.length} ${L==='fa'?'مکان':'places'}`);
   h+=`<div style="height:8px"></div>`+famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites',pend?`${pend} ${L==='fa'?'در انتظار':'pending'}`:(L==='fa'?'دعوت جدید':'invite someone'));
   h+=`<div style="height:8px"></div>`+famTile('🗺',L==='fa'?'نقشه خانواده':'Family Map','map',L==='fa'?'موقعیت این دستگاه':'this device location');
@@ -10266,8 +10307,47 @@ function famWhen(at){ const d=new Date(at); return isNaN(d)?'':d.toLocaleString(
 
 /* ── Members ── */
 function famMembersView(){
-  const list=Object.values(famMembersMap()).sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0));
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const inCloud=fb&&fb.ready()&&fb.isMember();
   let h=`<div style="padding:0 16px 90px">`;
+
+  if(inCloud){
+    // ── Authoritative cloud roster (real accounts) ──
+    const st=fb.getState(); const myUid=(FB.user&&FB.user.uid)||null;
+    const rows=Object.keys(st.members||{}).map(u=>Object.assign({uid:u},st.members[u]))
+      .sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0));
+    h+=`<div style="font-size:12px;font-weight:800;color:var(--ink2);margin:2px 2px 8px">${L==='fa'?'اعضای فضای ابری':'Cloud members'} · ${rows.length}</div>`;
+    rows.forEach(m=>{
+      const isMe=m.uid===myUid;
+      const av={color:m.color||'#6e56f8',name:m.name||'?',avatarId:null};
+      const canManage=(st.role==='owner'||st.role==='admin')&&!isMe&&m.uid!==st.ownerUid;
+      h+=`<div class="ul-row" ${canManage?`data-fam="cmember-open" data-arg="${m.uid}"`:''} style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);${canManage?'cursor:pointer':''}">
+        ${famAvatar(av,44)}
+        <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(m.name||'Member')}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+          <div style="font-size:12px;color:var(--ink3)">${famRoleLabel(m.role)}${m.uid===st.ownerUid?' · '+(L==='fa'?'مالک':'owner'):''}</div></div>
+        ${canManage?'<span style="color:var(--ink3);opacity:.4">›</span>':''}</div>`;
+    });
+    // Invite entry
+    if(famCan('sendInvites')) h+=`<button class="btn" data-fam="invites" style="width:100%;margin-top:14px">✉ ${L==='fa'?'دعوت عضو جدید':'Invite a member'}</button>`;
+
+    // ── Local-only members (created before/without cloud): kept, clearly separated ──
+    const locals=Object.values(famMembersMap()).filter(m=>!m.self);
+    if(locals.length){
+      h+=`<div style="font-size:12px;font-weight:800;color:var(--ink2);margin:20px 2px 8px">${L==='fa'?'یادداشت‌های محلی (بدون حساب)':'Local notes (no account)'}</div>`;
+      h+=`<div style="font-size:11px;color:var(--ink3);margin:0 2px 8px">${L==='fa'?'این‌ها فقط روی این دستگاه ذخیره شده‌اند و بخشی از فضای ابری نیستند.':'These are stored only on this device and are not part of the cloud space.'}</div>`;
+      locals.sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0)).forEach(mem=>{
+        h+=`<div class="ul-row" data-fam="member-open" data-arg="${mem.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer;opacity:.85">
+          ${famAvatar(mem,44)}
+          <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(mem.name)}</div>
+            <div style="font-size:12px;color:var(--ink3)">${esc(mem.relationship||'')}${mem.relationship?' · ':''}${famRoleLabel(mem.role)}</div></div>
+          <span style="color:var(--ink3);opacity:.4">›</span></div>`;
+      });
+    }
+    h+=`</div>`; return h;
+  }
+
+  // ── Not in a cloud family: local family only (original behaviour) ──
+  const list=Object.values(famMembersMap()).sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0));
   if(famCan('manageMembers')) h+=`<button class="btn" data-fam="member-new" style="width:100%;margin-bottom:12px">＋ ${L==='fa'?'افزودن عضو':'Add member'}</button>`;
   else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'برای افزودن عضو نیاز به دسترسی مدیر است.':'Adding members requires admin permission.'}</div>`;
   list.forEach(mem=>{ h+=`<div class="ul-row" data-fam="member-open" data-arg="${mem.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
@@ -10328,27 +10408,121 @@ function famPlaceEditView(){
 }
 function famToggleRow(act,label,on){ return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--b1);border-radius:12px;background:var(--s1)"><span style="font-size:14px">${esc(label)}</span><button class="fam-tog" data-fam="${act}" style="width:44px;height:26px;border-radius:13px;border:none;cursor:pointer;background:${on?'#22c55e':'var(--b2)'};position:relative"><span style="position:absolute;top:3px;${on?'right:3px':'left:3px'};width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s"></span></button></div>`; }
 
-/* ── Invitations ── */
-function famInvitesView(){
-  const list=Object.values(famInvitesMap()).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+/* ── Cloud member edit (owner/admin: role + remove) ── */
+function famCloudMemberEditView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(!fb||!fb.ready()||!fb.isMember())return `<div style="padding:20px">—</div>`;
+  const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid];
+  if(!m)return `<div style="padding:20px;color:var(--ink3)">${L==='fa'?'عضو یافت نشد':'Member not found'}</div>`;
+  const isOwnerMe=st.role==='owner';
+  const av={color:m.color||'#6e56f8',name:m.name||'?',avatarId:null};
   let h=`<div style="padding:0 16px 90px">`;
-  if(famCan('sendInvites')){
+  h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(av,72)}</div>`;
+  h+=`<div style="text-align:center;font-weight:800;font-size:18px">${esc(m.name||'Member')}</div>`;
+  h+=`<div style="text-align:center;font-size:12px;color:var(--ink3);margin-bottom:16px">${famRoleLabel(m.role)}${famActiveCloudUid===st.ownerUid?' · '+(L==='fa'?'مالک':'owner'):''}</div>`;
+  h+=`<label class="fl">${L==='fa'?'نقش':'Role'}</label>`;
+  h+=`<div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.filter(r=>r!=='owner').map(r=>`<button class="pay-chip${m.role===r?' on':''}" ${isOwnerMe?`data-fam="cmember-role" data-arg="${r}"`:'disabled'}>${famRoleLabel(r)}</button>`).join('')}</div>`;
+  if(!isOwnerMe)h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نقش فقط توسط مالک.':'Only the owner can change roles.'}</div>`;
+  h+=`<button class="btn btn-ghost" data-fam="cmember-remove" style="width:100%;margin-top:16px;color:var(--danger)">${L==='fa'?'حذف از خانواده':'Remove from family'}</button>`;
+  h+=`</div>`; return h;
+}
+
+/* ── In-app invite confirmation (deep-link redemption target) ── */
+let _famInvitePreview=null;   // {code,familyName,role,status,createdByName,...} | 'loading' | {error}
+function famJoinInviteView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const code=fb?fb.pendingCode():null;
+  let h=`<div style="padding:0 16px 90px">`;
+  if(!fb||!fb.ready()){
+    return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">☁️</div><div class="hub-ph-t">${L==='fa'?'برای پیوستن باید آنلاین باشید':'You must be online to join'}</div><div class="hub-ph-d">${L==='fa'?'اتصال اینترنت را بررسی کنید و دوباره باز کنید.':'Check your connection and reopen.'}</div></div></div>`;
+  }
+  if(!code){
+    return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">✉</div><div class="hub-ph-t">${L==='fa'?'دعوتی برای پیوستن نیست':'No invitation to join'}</div></div>
+      <button class="btn btn-ghost" data-fam="join-manual" style="width:100%;margin-top:12px">${L==='fa'?'وارد کردن کد دعوت':'Enter an invite code'}</button></div>`;
+  }
+  // Lazy-load preview once per code
+  if(!_famInvitePreview || _famInvitePreview.code!==code){
+    if(_famInvitePreview!=='loading'){
+      _famInvitePreview='loading';
+      fb.previewInvite(code).then(p=>{ _famInvitePreview=p; if(screen==='module'&&currentModule==='family'&&famView==='joinInvite')render(); })
+        .catch(e=>{ _famInvitePreview={code,error:(e&&e.message)||'error'}; if(screen==='module'&&currentModule==='family'&&famView==='joinInvite')render(); });
+    }
+    return h+`<div style="padding:30px 0;text-align:center;color:var(--ink3)">${L==='fa'?'در حال بارگذاری دعوت…':'Loading invitation…'}</div></div>`;
+  }
+  const p=_famInvitePreview;
+  if(p.error){
+    const msg=p.error==='expired'?(L==='fa'?'این دعوت منقضی شده است.':'This invitation has expired.')
+      :p.error==='revoked'?(L==='fa'?'این دعوت لغو شده است.':'This invitation was revoked.')
+      :p.error==='notfound'?(L==='fa'?'دعوت یافت نشد.':'Invitation not found.')
+      :(L==='fa'?'خطا در بارگذاری دعوت.':'Could not load invitation.');
+    return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ef444418;color:#ef4444">⚠</div><div class="hub-ph-t">${msg}</div></div>
+      <button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:12px">${L==='fa'?'بستن':'Close'}</button></div>`;
+  }
+  const already=fb.isMember();
+  h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1);text-align:center">
+    <div style="font-size:34px;margin-bottom:6px">👨‍👩‍👧‍👦</div>
+    <div style="font-size:20px;font-weight:800">${esc(p.familyName||(L==='fa'?'خانواده':'Family'))}</div>
+    <div style="font-size:13px;color:var(--ink3);margin-top:4px">${p.createdByName?(L==='fa'?`دعوت از ${esc(p.createdByName)}`:`Invited by ${esc(p.createdByName)}`):''}</div>
+    <div style="margin-top:10px"><span class="chip" style="background:#6e56f822;color:#8b7dfc">${famRoleLabel(p.role)}</span></div>
+  </div>`;
+  h+=`<div style="font-size:13px;color:var(--ink2);margin:14px 2px;line-height:1.7">${L==='fa'?'با پیوستن، فقط به فضای خانواده (اعضا، مکان‌ها، ثبت‌ورود و هشدارها) متصل می‌شوید. یادداشت‌ها، اسناد، ولت و سایر داده‌های خصوصی شما به اشتراک گذاشته نمی‌شود.':'By joining you connect only to the Family Space (members, places, check-ins and alerts). Your Notes, Documents, Vault and other private data are never shared.'}</div>`;
+  if(already && fb.getState().familyId!==p.familyId){
+    h+=`<div style="font-size:12px;color:#f59e0b;margin:8px 2px">${L==='fa'?'شما در حال حاضر عضو یک خانواده دیگر هستید. برای پیوستن به این خانواده ابتدا باید از خانواده فعلی خارج شوید.':'You are already in another family. Leave your current family first to join this one.'}</div>`;
+    h+=`<button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'بستن':'Close'}</button>`;
+  } else if(already){
+    h+=`<div style="font-size:13px;color:#22c55e;margin:8px 2px">${L==='fa'?'شما هم‌اکنون عضو این خانواده هستید.':'You are already a member of this family.'}</div>`;
+    h+=`<button class="btn" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'باز کردن خانواده':'Open family'}</button>`;
+  } else {
+    h+=`<button class="btn" data-fam="join-accept" style="width:100%;margin-top:8px;background:#6e56f8;color:#fff">${L==='fa'?'پیوستن به خانواده':'Join family'}</button>`;
+    h+=`<button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'انصراف':'Decline'}</button>`;
+  }
+  h+=`</div>`; return h;
+}
+
+/* ── Invitations (cloud-authoritative) ──
+   Only real Firestore invites exist. Creating one requires being online and
+   in a cloud family. The list mirrors server invites (stored locally only so
+   the QR/link render offline). No fake local "accept/reject": redemption is
+   the JOINER's action on their own device. ── */
+function famInvitesView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const online=fb&&fb.ready();
+  const inCloud=online&&fb.isMember();
+  // Show ONLY server-backed invites (invites created against a cloud family).
+  const list=Object.values(famInvitesMap()).filter(i=>i&&i.server).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  let h=`<div style="padding:0 16px 90px">`;
+
+  // Join-by-code entry (always available online)
+  if(online){
+    h+=`<button class="btn btn-ghost" data-fam="join-manual" style="width:100%;margin-bottom:14px">${L==='fa'?'پیوستن به خانواده با کد':'Join a family with a code'}</button>`;
+  }
+
+  if(!online){
+    h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;background:var(--s1);margin-bottom:14px;font-size:13px;color:var(--ink2)">${L==='fa'?'برای ساخت دعوت واقعی باید آنلاین و عضو فضای ابری خانواده باشید.':'To create real invitations you must be online and in a cloud family.'}</div>`;
+  } else if(!inCloud){
+    h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;background:var(--s1);margin-bottom:14px">
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:10px">${L==='fa'?'هنوز فضای ابری خانواده ندارید. برای ارسال دعوت، ابتدا فضای ابری بسازید.':'You have no cloud family yet. Create a cloud space to send invitations.'}</div>
+      <button class="btn" data-fam="cloud-create" style="width:100%">${L==='fa'?'ساخت فضای ابری خانواده':'Create cloud family space'}</button></div>`;
+  } else if(famCan('sendInvites')){
     h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;background:var(--s1);margin-bottom:14px">
       <label class="fl">${L==='fa'?'نقش دعوت‌شده':'Invitee role'}</label>
       <div class="pay-chips" style="flex-wrap:wrap">${['admin','adult','child','guest'].map(r=>`<button class="pay-chip${(_famInviteRole||'adult')===r?' on':''}" data-fam="inv-role" data-arg="${r}">${famRoleLabel(r)}</button>`).join('')}</div>
       <button class="btn" data-fam="inv-create" style="width:100%;margin-top:10px">＋ ${L==='fa'?'ساخت دعوت‌نامه':'Create invitation'}</button></div>`;
   } else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'ارسال دعوت نیاز به دسترسی مدیر دارد.':'Sending invitations requires admin permission.'}</div>`;
-  if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">✉</div><div class="hub-ph-t">${L==='fa'?'دعوتی وجود ندارد':'No invitations'}</div></div>`;
+
+  if(!list.length && inCloud)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">✉</div><div class="hub-ph-t">${L==='fa'?'دعوتی وجود ندارد':'No invitations'}</div></div>`;
   list.forEach(inv=>{ const st=famInviteStatus(inv); const link=famInviteLink(inv.code); const qr=MBMQR.svg(link,180);
-    const stc={pending:'#f59e0b',accepted:'#22c55e',rejected:'#ef4444',expired:'#94a3b8'}[st]||'#94a3b8';
+    const stc={pending:'#f59e0b',accepted:'#22c55e',revoked:'#ef4444',expired:'#94a3b8'}[st]||'#94a3b8';
+    const stLabel={pending:(L==='fa'?'در انتظار':'pending'),accepted:(L==='fa'?'پذیرفته':'accepted'),revoked:(L==='fa'?'لغو شده':'revoked'),expired:(L==='fa'?'منقضی':'expired')}[st]||st;
     h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;margin-bottom:12px;background:var(--s1)">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-weight:700">${famRoleLabel(inv.role)}</span><span class="chip" style="background:${stc}22;color:${stc}">${st}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-weight:700">${famRoleLabel(inv.role)}</span><span class="chip" style="background:${stc}22;color:${stc}">${stLabel}</span></div>
       ${st==='pending'?`<div style="display:flex;justify-content:center;padding:6px 0">${qr||`<div style="font-size:12px;color:var(--ink3)">${L==='fa'?'لینک برای QR بلند است':'link too long for QR'}</div>`}</div>`:''}
-      <div style="font-size:12px;color:var(--ink3);word-break:break-all;margin:6px 0">${esc(link)}</div>
+      ${st==='pending'?`<div style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;margin:4px 0">${L==='fa'?'کد':'code'}: ${esc(inv.code)}</div>`:''}
+      <div style="font-size:11px;color:var(--ink3);word-break:break-all;margin:6px 0">${esc(link)}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-ghost" data-fam="inv-copy" data-arg="${inv.id}" style="flex:1;min-width:110px">${L==='fa'?'کپی لینک':'Copy link'}</button>
         <button class="btn btn-ghost" data-fam="inv-share" data-arg="${inv.id}" style="flex:1;min-width:110px">${L==='fa'?'اشتراک‌گذاری':'Share'}</button>
-        ${st==='pending'?`<button class="btn btn-ghost" data-fam="inv-accept" data-arg="${inv.id}" style="flex:1;min-width:90px;color:#22c55e">${L==='fa'?'پذیرش':'Accept'}</button><button class="btn btn-ghost" data-fam="inv-reject" data-arg="${inv.id}" style="flex:1;min-width:90px;color:var(--danger)">${L==='fa'?'رد':'Reject'}</button>`:''}
+        ${st==='pending'?`<button class="btn btn-ghost" data-fam="inv-revoke" data-arg="${inv.id}" style="flex:1;min-width:90px;color:var(--danger)">${L==='fa'?'لغو':'Revoke'}</button>`:''}
         <button class="btn btn-ghost" data-fam="inv-del" data-arg="${inv.id}" style="flex:1;min-width:90px">${L==='fa'?'حذف':'Delete'}</button>
       </div></div>`; });
   h+=`</div>`; return h;
@@ -10430,11 +10604,34 @@ function famTimelineView(){
 
 /* ── Settings ── */
 function famSettingsView(){
-  const tabs=[['members',L==='fa'?'اعضا':'Members'],['invitations',L==='fa'?'دعوت':'Invites'],['roles',L==='fa'?'نقش‌ها':'Roles'],['location',L==='fa'?'موقعیت':'Location'],['places',L==='fa'?'مکان‌ها':'Places'],['checkin',L==='fa'?'ورود':'Check-in'],['sos','SOS'],['privacy',L==='fa'?'حریم':'Privacy'],['shared',L==='fa'?'اشتراک':'Shared']];
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const inCloud=fb&&fb.ready()&&fb.isMember();
+  const tabs=[['family',L==='fa'?'خانواده':'Family'],['members',L==='fa'?'اعضا':'Members'],['invitations',L==='fa'?'دعوت':'Invites'],['roles',L==='fa'?'نقش‌ها':'Roles'],['location',L==='fa'?'موقعیت':'Location'],['places',L==='fa'?'مکان‌ها':'Places'],['checkin',L==='fa'?'ورود':'Check-in'],['sos','SOS'],['privacy',L==='fa'?'حریم':'Privacy'],['shared',L==='fa'?'اشتراک':'Shared']];
   let h=`<div style="padding:0 16px 90px">`;
   h+=`<div class="pay-chips" style="flex-wrap:wrap;margin-bottom:12px">${tabs.map(([k,l])=>`<button class="pay-chip${famSettingsTab===k?' on':''}" data-fam="set-tab" data-arg="${k}">${l}</button>`).join('')}</div>`;
   const cfg=famCfg();
-  if(famSettingsTab==='members')h+=famTile('👥',L==='fa'?'مدیریت اعضا':'Manage members','members');
+  if(famSettingsTab==='family'){
+    if(inCloud){
+      const st=fb.getState();
+      const canRename=st.role==='owner'||st.role==='admin';
+      h+=`<label class="fl">${L==='fa'?'نام خانواده':'Family name'}</label>
+        <input class="finput" id="fam-cloud-name" value="${esc(st.name||'')}" ${canRename?'':'disabled'} placeholder="${L==='fa'?'خانواده':'Family'}">`;
+      if(canRename)h+=`<button class="btn" data-fam="cloud-rename" style="width:100%;margin-top:8px">${L==='fa'?'ذخیره نام':'Save name'}</button>`;
+      else h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نام فقط توسط مالک یا مدیر.':'Only owner or admin can rename.'}</div>`;
+      h+=`<div style="margin-top:14px;padding:12px;border:1px solid var(--b1);border-radius:12px;background:var(--s1)">
+        <div style="font-size:13px;color:var(--ink2)">${L==='fa'?`این خانواده در فضای ابری است · ${st.memberCount} عضو · نقش شما: ${famRoleLabel(st.role)}`:`This family is in the cloud · ${st.memberCount} members · your role: ${famRoleLabel(st.role)}`}</div></div>`;
+      // Leave family (§5 step 8) with transparent data-retention note
+      h+=`<div style="margin-top:16px;font-size:11px;color:var(--ink3)">${L==='fa'?'با خروج، دسترسی شما به فضای خانواده قطع می‌شود. داده‌های خصوصی شما (یادداشت‌ها، اسناد، ولت و…) دست‌نخورده و در حساب شما باقی می‌ماند.':'Leaving ends your access to the family space. Your private data (Notes, Documents, Vault, etc.) stays intact in your own account.'}</div>`;
+      h+=`<button class="btn btn-ghost" data-fam="cloud-leave" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'خروج از فضای ابری خانواده':'Leave cloud family space'}</button>`;
+    } else if(fb&&fb.ready()){
+      h+=`<div style="font-size:13px;color:var(--ink2);margin-bottom:10px">${L==='fa'?'هنوز فضای ابری خانواده ندارید.':'You have no cloud family yet.'}</div>
+        <button class="btn" data-fam="cloud-create" style="width:100%">${L==='fa'?'ساخت فضای ابری خانواده':'Create cloud family space'}</button>
+        <button class="btn btn-ghost" data-fam="cloud-join" style="width:100%;margin-top:8px">${L==='fa'?'پیوستن با کد':'Join with code'}</button>`;
+    } else {
+      h+=`<div style="font-size:13px;color:var(--ink2)">${L==='fa'?'برای مدیریت فضای ابری خانواده باید آنلاین باشید.':'Go online to manage the cloud family space.'}</div>`;
+    }
+  }
+  else if(famSettingsTab==='members')h+=famTile('👥',L==='fa'?'مدیریت اعضا':'Manage members','members');
   else if(famSettingsTab==='invitations')h+=famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites');
   else if(famSettingsTab==='places')h+=famTile('📌',L==='fa'?'مکان‌ها':'Places','places');
   else if(famSettingsTab==='checkin')h+=famTile('📍',L==='fa'?'ثبت ورود':'Check-in','checkin');
@@ -10504,7 +10701,7 @@ function bindFamily(){
   // sub-view back buttons
   const b1=document.getElementById('fam-back-members'); if(b1)b1.onclick=()=>go('members');
   const b2=document.getElementById('fam-back-places'); if(b2)b2.onclick=()=>go('places');
-  const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>go('dashboard');
+  const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>{ if(famView==='joinInvite'){ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; } go('dashboard'); };
   document.querySelectorAll('[data-fam]').forEach(el=>{
     if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
     el.onclick=(ev)=>{ const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
@@ -10556,25 +10753,33 @@ function famAction(act,arg,ev){
     case 'inv-create':{ if(!famCan('sendInvites'))return;
       const role=_famInviteRole||'adult';
       const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-      if(fb&&fb.ready()){
-        toast(L==='fa'?'در حال ساخت دعوت…':'Creating invite…');
-        fb.createInvite(role).then(inv=>{
-          // store a local mirror so the invites list + QR render offline too
-          const id=uid(),t=inv.createdAt||now();
-          famInvitesMap()[id]={ id, code:inv.code, role:inv.role, name:inv.name||'', method:'link', status:'pending', server:true, createdAt:t, expiresAt:inv.expiresAt };
-          famLog('invite',{code:inv.code,role}); saveDB(); render();
-        }).catch(()=>{ toast(L==='fa'?'ساخت دعوت ابری ناموفق بود؛ دعوت محلی ساخته شد':'Cloud invite failed; created local invite'); famCreateInvite(role); render(); });
-      } else { famCreateInvite(role); render(); }
+      if(!fb||!fb.ready()){ toast(L==='fa'?'برای ساخت دعوت باید آنلاین باشید':'You must be online to create an invitation'); return; }
+      toast(L==='fa'?'در حال ساخت دعوت…':'Creating invite…');
+      fb.createInvite(role).then(inv=>{
+        // Local mirror is a CACHE of a real server invite (server:true) so the
+        // QR/link render offline. It is never treated as a standalone invite.
+        const id=uid(),t=inv.createdAt||now();
+        famInvitesMap()[id]={ id, code:inv.code, role:inv.role, name:inv.name||'', method:'link', status:'pending', server:true, createdAt:t, expiresAt:inv.expiresAt };
+        famLog('invite',{code:inv.code,role}); saveDB(); render();
+      }).catch(()=>{ toast(L==='fa'?'ساخت دعوت ناموفق بود':'Could not create invitation'); });
       return; }
     // ── Phase 1 cloud actions ──
     case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
-    case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } const code=(prompt(L==='fa'?'کد دعوت را وارد کنید:':'Enter invite code:')||'').trim(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ toast(L==='fa'?'به خانواده پیوستید':'Joined family'); render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
-    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; if(!confirm(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟':'Leave the cloud family space?'))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); render(); }).catch(()=>{}); return; }
+    case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } const code=(prompt(L==='fa'?'کد دعوت را وارد کنید:':'Enter invite code:')||'').trim().toUpperCase(); if(!code)return; fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); return; }
+    case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch(()=>{ toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
+    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='dashboard'; render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
     case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code; if(navigator.share){ navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>{}); } else famCopy(link); return; }
-    case 'inv-accept':{ const inv=I[arg]; if(inv){ inv.status='accepted'; saveDB(); render(); } return; }
-    case 'inv-reject':{ const inv=I[arg]; if(inv){ inv.status='rejected'; saveDB(); render(); } return; }
+    case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!confirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?'))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch(()=>{ toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
     case 'inv-del':{ delete I[arg]; saveDB(); render(); return; }
+    // ── Cloud member management (owner/admin) ──
+    case 'cmember-open':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const m=(st.members||{})[arg]; if(!m)return; famActiveCloudUid=arg; go('cmemberEdit'); return; }
+    case 'cmember-role':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; if(fb.myServerRole()!=='owner'){ toast(L==='fa'?'تغییر نقش فقط توسط مالک':'Only the owner can change roles'); return; } fb.setRole(famActiveCloudUid,arg).then(()=>{ toast(L==='fa'?'نقش تغییر کرد':'Role updated'); render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
+    case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!confirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
+    // ── In-app invite redemption (deep-link / manual code) ──
+    case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='dashboard'; render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
+    case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='dashboard'; render(); return; }
+    case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } const code=(prompt(L==='fa'?'کد دعوت را وارد کنید:':'Enter invite code:')||'').trim().toUpperCase(); if(!code)return; fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); return; }
     // check-in
     case 'ci-locate':{ _famCheckin.getting=true; render(); famGetLocation(pos=>{ _famCheckin.getting=false; _famCheckin.pos=pos; render(); }); return; }
     case 'ci-send':{ if(!_famCheckin.pos){ toast(L==='fa'?'ابتدا موقعیت را بگیرید':'Get location first'); return; } const sel=document.getElementById('fam-ci-place'); const noteEl=document.getElementById('fam-ci-note'); const placeId=sel?sel.value:''; const note=noteEl?noteEl.value.trim():''; const pn=placeId&&P[placeId]?P[placeId].name:''; famLog('checkin',{lat:_famCheckin.pos.lat,lon:_famCheckin.pos.lon,note,placeName:pn}); _famCheckin={pos:null,note:'',placeId:'',getting:false}; saveDB(); toast(L==='fa'?'ثبت شد':'Checked in'); go('dashboard'); return; }
@@ -12638,6 +12843,19 @@ function bindScreen(){
     if(a==='toggle-lang'){DB.meta.lang=L==='en'?'fa':'en';saveDB();render();}
     else if(a==='toggle-theme'){DB.meta.theme=DB.meta.theme==='dark'?'light':'dark';saveDB();render();}
     else if(a==='change-photo'){openPhotoSheet();}
+    else if(a==='edit-name'){
+      const cur=DB.meta.displayName||'';
+      const nn=(prompt(L==='fa'?'نام نمایشی:':'Display name:',cur)||'').trim();
+      if(nn && nn!==cur){
+        DB.meta.displayName=nn;
+        // keep the local self member row in sync too
+        try{ const s=(typeof famSelf==='function')?famSelf():null; if(s){ s.name=nn; s.updatedAt=now(); } }catch(e){}
+        saveDB();
+        if(typeof pushProfile==='function')pushProfile();
+        try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.updateSelfProfile(); } }catch(e){}
+        render();
+      }
+    }
     else if(a==='check-update'){manualCheckForUpdate();}
     else if(a==='sign-out'){doSignOut();}
   });
@@ -12738,7 +12956,7 @@ function initAuth(){
       DB.meta.provider='google';
       saveDB();
       startListeners();
-      try{ if(window._pendingFamilyInvite && typeof FamilyBackend!=='undefined'){ FamilyBackend.setPending(window._pendingFamilyInvite); } }catch(e){}
+      try{ if(window._pendingFamilyInvite && typeof FamilyBackend!=='undefined'){ FamilyBackend.setPending(window._pendingFamilyInvite); currentModule='family'; screen='module'; famView='joinInvite'; } }catch(e){}
       pullProfile();
       refreshPushOnStart();
       hideSplash();
@@ -13133,15 +13351,18 @@ function setPhotoFromFile(file){
     DB.meta.avatar=null;
     saveDB();
     pushProfile();
+    famSyncSelfToCloud();
     closeSheet();
     render();
   });
 }
+function famSyncSelfToCloud(){ try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.updateSelfProfile(); } }catch(e){} }
 function setAvatar(id){
   DB.meta.avatar=id;
   DB.meta.photo=null;
   saveDB();
   pushProfile();
+  famSyncSelfToCloud();
   closeSheet();
   render();
 }
@@ -13150,6 +13371,7 @@ function removeProfilePhoto(){
   DB.meta.avatar=null;
   saveDB();
   pushProfile();
+  famSyncSelfToCloud();
   closeSheet();
   render();
 }
