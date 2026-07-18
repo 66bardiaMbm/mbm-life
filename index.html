@@ -1307,12 +1307,12 @@ body.rtl .trow-content{text-align:right}
 .act-grp-expand{animation:actExpand .18s ease}
 @keyframes actExpand{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 
-/* ═══ Family Live (Phase 2) ═══ */
-#fam-live-wrap{position:relative;width:100%;height:calc(100vh - 0px);height:100dvh;overflow:hidden;background:var(--s0)}
+/* ═══ Family Live (Phase 2) — redesigned: map as backdrop, persistent info panel ═══ */
+#fam-live-wrap{position:relative;width:100%;height:calc(100vh - 0px);height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column}
 #fam-map{position:absolute;inset:0;width:100%;height:100%;background:#dfe3ea;z-index:1}
 .dark #fam-map{background:#20222b}
 .fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1200;display:flex;align-items:center;gap:10px;padding:12px 14px;
-  background:linear-gradient(180deg,var(--s0) 40%,transparent);pointer-events:none}
+  background:linear-gradient(180deg,var(--s0) 55%,transparent);pointer-events:none}
 .fam-live-top>*{pointer-events:auto}
 .fam-live-title{flex:1;min-width:0}
 .fam-live-title b{display:block;font-size:17px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1321,34 +1321,49 @@ body.rtl .trow-content{text-align:right}
 .fam-mapbtn{width:42px;height:42px;border-radius:12px;border:1px solid var(--b1);background:var(--s1);color:var(--ink);
   display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 .fam-mapbtn:active{background:var(--s2)}
-/* avatar pins */
-.fam-pin{position:relative;width:44px;height:44px;transform:translate(-50%,-100%)}
-.fam-pin .fam-pin-av{width:44px;height:44px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);
+/* avatar pins — richer: photo/initial, colour ring = status, small heading chevron when moving */
+.fam-pin{position:relative;width:48px;height:56px;transform:translate(-50%,-100%);cursor:pointer}
+.fam-pin .fam-pin-av{width:48px;height:48px;border-radius:50%;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.45);
   background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
-  font-weight:800;color:#fff;font-size:16px}
-.fam-pin.sel .fam-pin-av{border-color:#6e56f8;transform:scale(1.12)}
+  font-weight:800;color:#fff;font-size:17px}
+.fam-pin.sel .fam-pin-av{border-color:#6e56f8;transform:scale(1.14)}
 .fam-pin .fam-pin-ring{position:absolute;inset:-4px;border-radius:50%;border:3px solid transparent}
 .fam-pin.tone-live .fam-pin-ring{border-color:#22c55e;animation:pinpulse 2s infinite}
 .fam-pin.tone-ok .fam-pin-ring{border-color:#22c55e}
 .fam-pin.tone-warn .fam-pin-ring{border-color:#f59e0b}
-.fam-pin.tone-muted{opacity:.7}.fam-pin.tone-muted .fam-pin-ring{border-color:#94a3b8}
+.fam-pin.tone-muted{opacity:.65}.fam-pin.tone-muted .fam-pin-ring{border-color:#94a3b8}
 @keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
-.fam-pin-tip{position:absolute;left:50%;bottom:-6px;width:10px;height:10px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
-/* member bottom sheet */
-#fam-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1300;background:var(--s1);border-radius:20px 20px 0 0;
-  box-shadow:0 -6px 30px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.2,.7,.2,1);touch-action:none;will-change:transform}
-#fam-sheet .fam-sheet-grab{width:44px;height:5px;border-radius:3px;background:var(--b2);margin:10px auto 4px}
-.fam-sheet-body{padding:0 16px 20px;max-height:72vh;overflow-y:auto}
-.fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 10px}
-.fam-pcard{flex:none;width:74px;text-align:center;cursor:pointer}
+.fam-pin-tip{position:absolute;left:50%;bottom:6px;width:10px;height:10px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
+.fam-pin-name{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);background:rgba(20,20,28,.82);color:#fff;
+  font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap;pointer-events:none}
+/* ── Persistent info panel: ALWAYS part of normal document flow at the
+   bottom of the flex column, never dependent on JS to be visible. The
+   draggable behaviour is a progressive enhancement layered on top — if drag
+   JS never runs, the panel still renders at its default (partial) height. ── */
+#fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:20px 20px 0 0;
+  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;
+  height:44vh;min-height:280px;max-height:78vh;
+  display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
+#fam-sheet.detent-0{height:130px}
+#fam-sheet.detent-2{height:78vh}
+#fam-sheet .fam-sheet-grab{width:44px;height:5px;border-radius:3px;background:var(--b2);margin:10px auto 4px;flex:none}
+.fam-sheet-body{padding:0 16px 20px;flex:1;overflow-y:auto;min-height:0}
+.fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 12px}
+.fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
+.fam-pcard.sel{background:var(--s2)}
 .fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0 auto 4px;background-size:cover;background-position:center;
   border:2px solid var(--b1);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
 .fam-pcard.sel .av{border-color:#6e56f8}
-.fam-pcard .nm{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-pcard .nm{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.fam-pcard .st{font-size:10px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fam-dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-inline-end:5px}
 .fam-dot.live{background:#22c55e}.fam-dot.ok{background:#22c55e}.fam-dot.warn{background:#f59e0b}.fam-dot.muted{background:#94a3b8}
-.fam-actionbar{display:flex;gap:8px;margin-top:12px}
-.fam-actionbar .btn{flex:1;padding:11px 8px;font-size:13px}
+.fam-actionbar{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.fam-actionbar .btn{flex:1;min-width:78px;padding:11px 8px;font-size:12.5px}
+.fam-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.fam-stat-card{background:var(--s2);border-radius:12px;padding:10px 12px}
+.fam-stat-card .lbl{font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px}
+.fam-stat-card .val{font-size:14px;font-weight:700;color:var(--ink)}
 /* honest offline / map-unavailable overlay (non-blocking; sheet stays usable) */
 .fam-map-msg{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:1100;background:var(--s1);
   border:1px solid var(--b1);border-radius:12px;padding:8px 14px;font-size:12px;color:var(--ink2);box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:88%;text-align:center}
@@ -1461,7 +1476,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v274';
+const APP_VERSION='v275';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11019,7 +11034,7 @@ function famLiveView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   // Not in a cloud family / offline → Live can't show members; send to management.
   if(!fb||!fb.ready()||!fb.isMember()){
-    return `<div id="fam-live-wrap"><div style="padding:80px 20px;text-align:center">
+    return `<div id="fam-live-wrap" style="display:flex;align-items:center;justify-content:center"><div style="padding:20px;text-align:center">
       <div style="font-size:40px;margin-bottom:12px">🗺️</div>
       <div style="font-weight:800;font-size:17px;margin-bottom:6px">${L==='fa'?'نقشه خانواده':'Family map'}</div>
       <div style="font-size:13px;color:var(--ink3);margin-bottom:16px">${L==='fa'?'برای دیدن موقعیت خانواده، ابتدا به فضای ابری خانواده بپیوندید.':'Join your cloud family space to see everyone on the map.'}</div>
@@ -11056,15 +11071,16 @@ function famLiveView(){
     h+=`<div class="fam-map-msg" style="top:auto;bottom:220px">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
       <button class="btn" data-fam="live-share-on" style="width:auto;padding:4px 10px;margin-inline-start:6px;font-size:12px">${L==='fa'?'روشن':'Turn on'}</button></div>`;
   }
-  // member sheet
+  // member sheet — ALWAYS in normal document flow (see CSS), never depends
+  // on JS positioning to be visible.
   h+=`<div id="fam-sheet"><div class="fam-sheet-grab"></div><div class="fam-sheet-body">`;
-  // presence strip
+  // presence strip: every family member, name + short live status each
   h+=`<div class="fam-presence">`;
   members.forEach(m=>{
     h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
       <div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
       <div class="nm">${esc(m.name)}</div>
-      <div style="font-size:10px;color:var(--ink3)"><span class="fam-dot ${m.meta.tone}"></span></div>
+      <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famLiveStatusLine(m))}</div>
     </div>`;
   });
   h+=`</div>`;
@@ -11081,30 +11097,55 @@ function famLiveStatusLine(m){
   if(m.consent.paused) return L==='fa'?'اشتراک متوقف شده':'Sharing paused';
   if(!m.state||m.state.lat==null) return L==='fa'?'موقعیت نامشخص':'Location unknown';
   const rel=famRelTime(m.state.reportedAt||m.state.capturedAt);
-  if(m.status==='updating') return L==='fa'?'به‌روزرسانی همین حالا':'Updated now';
+  const place=famMatchSavedPlace(m.state.lat,m.state.lng);
   if(m.status==='moving') return L==='fa'?'در حال حرکت':'Moving';
+  if(place && (m.status==='updating'||m.status==='recent'||m.status==='stopped')) return (L==='fa'?`در ${place.name}`:`At ${place.name}`);
+  if(m.status==='updating') return L==='fa'?'به‌روزرسانی همین حالا':'Updated now';
   if(m.status==='stale') return L==='fa'?`قدیمی · ${rel}`:`Stale · ${rel}`;
   if(m.status==='offline') return L==='fa'?`آفلاین · ${rel}`:`Offline · ${rel}`;
   return (L==='fa'?'به‌روزرسانی ':'Updated ')+rel;
 }
+/* Genuine place match: is this coordinate inside a SAVED place's real radius?
+   Never a guess — only reports a place name when the member's real fix falls
+   within a real, family-saved geofence. No "Driving/Walking" claims: MBM has
+   no motion-classification signal to back that up honestly. */
+function famMatchSavedPlace(lat,lng){
+  if(lat==null||lng==null)return null;
+  const places=Object.values(famPlacesMap()||{});
+  for(const p of places){
+    if(p.lat==null||p.lon==null)continue;
+    const d=famHaversineM(lat,lng,p.lat,p.lon);
+    if(d<=(p.radius||150)) return p;
+  }
+  return null;
+}
+function famHaversineM(lat1,lng1,lat2,lng2){
+  const R=6371000,toR=x=>x*Math.PI/180;
+  const dLat=toR(lat2-lat1),dLng=toR(lng2-lng1);
+  const s=Math.sin(dLat/2)**2+Math.cos(toR(lat1))*Math.cos(toR(lat2))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(s)));
+}
 
 function famLiveMemberDetail(m, isMe){
   const s=m.state||{};
+  const place=famMatchSavedPlace(s.lat,s.lng);
   let h=`<div style="margin-top:6px;padding-top:12px;border-top:1px solid var(--b1)">`;
   h+=`<div style="display:flex;align-items:center;gap:12px">
-    <div style="width:52px;height:52px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;flex:none">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
+    <div style="width:56px;height:56px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:21px;flex:none">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
     <div style="flex:1;min-width:0">
-      <div style="font-weight:800;font-size:17px">${esc(m.name)}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
-      <div style="font-size:12px;color:var(--ink3)"><span class="fam-dot ${m.meta.tone}"></span>${esc(L==='fa'?m.meta.fa:m.meta.en)} · ${esc(famRoleLabel(m.role))}</div>
+      <div style="font-weight:800;font-size:18px">${esc(m.name)}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+      <div style="font-size:12px;color:var(--ink3)"><span class="fam-dot ${m.meta.tone}"></span>${esc(famLiveStatusLine(m))} · ${esc(famRoleLabel(m.role))}</div>
     </div>`;
-  if(s.battery!=null) h+=`<div style="flex:none;font-size:13px;font-weight:700;color:var(--ink2)">🔋 ${s.battery}%</div>`;
   h+=`</div>`;
-  // location facts (only what's genuinely known)
+  // stat grid — only genuinely-known facts, each card omitted if unknown
   if(m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null){
-    h+=`<div style="margin-top:12px;font-size:14px;line-height:1.7">`;
-    if(s.stayStart&&!s.moving) h+=`<div>${L==='fa'?'اینجا برای':'Here for'} <b>${famDurSince(s.stayStart)}</b></div>`;
-    if(s.moving) h+=`<div><b>${L==='fa'?'در حال حرکت':'Moving'}</b></div>`;
-    h+=`<div style="color:var(--ink3);font-size:12px">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}: ${famRelTime(s.reportedAt||s.capturedAt)}${s.accuracy!=null?` · ±${s.accuracy}m`:''}</div>`;
+    h+=`<div class="fam-stat-grid">`;
+    if(place) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مکان':'Place'}</div><div class="val">📍 ${esc(place.name)}</div></div>`;
+    if(s.stayStart&&!s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت اقامت':'Time here'}</div><div class="val">${famDurSince(s.stayStart)}</div></div>`;
+    if(s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">🚶 ${L==='fa'?'در حال حرکت':'Moving'}</div></div>`;
+    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div></div>`;
+    if(s.accuracy!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">±${s.accuracy}m</div></div>`;
+    if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">🔋 ${s.battery}%</div></div>`;
     h+=`</div>`;
   } else {
     h+=`<div style="margin-top:12px;font-size:13px;color:var(--ink3)">${m.consent&&m.consent.paused?(L==='fa'?'این عضو اشتراک را موقتاً متوقف کرده است.':'This member has paused sharing.'):(L==='fa'?'این عضو در حال حاضر موقعیت خود را به اشتراک نمی‌گذارد.':'This member is not sharing location right now.')}</div>`;
@@ -11187,13 +11228,22 @@ function famSheetInitDrag(){
   const sheet=document.getElementById('fam-sheet'); if(!sheet)return;
   const grab=sheet.querySelector('.fam-sheet-grab'); if(!grab)return;
   const H=window.innerHeight||780;
-  const detents=[H-140, H-360, Math.round(H*0.28)];
-  function apply(i){ _famSheetDetent=Math.max(0,Math.min(2,i)); sheet.style.transform=`translateY(${detents[_famSheetDetent]}px)`; }
+  // heights in px per detent — 0=collapsed (peek), 1=partial (CSS default
+  // 44vh, no class needed), 2=full. Height-based (not transform) so the
+  // sheet is ALWAYS visible from its default CSS even if this JS never runs.
+  const heights=[130, Math.round(H*0.44), Math.round(H*0.78)];
+  function apply(i){
+    _famSheetDetent=Math.max(0,Math.min(2,i));
+    sheet.classList.remove('detent-0','detent-2');
+    if(_famSheetDetent===0)sheet.classList.add('detent-0');
+    if(_famSheetDetent===2)sheet.classList.add('detent-2');
+    sheet.style.height=heights[_famSheetDetent]+'px';
+  }
   apply(_famSheetDetent);
-  let startY=0, startT=detents[_famSheetDetent], dragging=false;
-  const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); const m=/translateY\(([-\d.]+)px\)/.exec(sheet.style.transform); startT=m?parseFloat(m[1]):detents[_famSheetDetent]; sheet.style.transition='none'; };
-  const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let t=startT+(y-startY); t=Math.max(detents[2],Math.min(detents[0],t)); sheet.style.transform=`translateY(${t}px)`; if(e.cancelable)e.preventDefault(); };
-  const onUp=()=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const m=/translateY\(([-\d.]+)px\)/.exec(sheet.style.transform); const cur=m?parseFloat(m[1]):startT; let best=0,bd=1e9; detents.forEach((d,i)=>{const dd=Math.abs(d-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); MBMMap.invalidate(); };
+  let startY=0, startH=heights[_famSheetDetent], dragging=false;
+  const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; };
+  const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt)); sheet.style.height=hgt+'px'; if(e.cancelable)e.preventDefault(); };
+  const onUp=()=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); MBMMap.invalidate(); };
   grab.addEventListener('touchstart',onDown,{passive:true}); grab.addEventListener('touchmove',onMove,{passive:false}); grab.addEventListener('touchend',onUp);
   grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
 }
