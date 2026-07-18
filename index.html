@@ -1461,7 +1461,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v270';
+const APP_VERSION='v271';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10106,17 +10106,53 @@ const FamilyBackend = (function(){
   async function createFamily(name){
     if(!ready()) throw new Error('offline');
     if(isMember()) return familyId(); // already in one
+    if(!myUid()) throw new Error('no-auth-uid');
     const fid = 'fam_'+myUid()+'_'+Date.now().toString(36);
     const t=new Date().toISOString();
     const members={};
     members[myUid()]={ role:'owner', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
     const famName = (name||'').trim() || (DB.meta.family && DB.meta.family.name) || (L==='fa'?'خانواده من':'My Family');
-    await famRef(fid).set({ name:famName, ownerUid:myUid(), members, createdAt:t, updatedAt:t });
-    // seed shared consent defaults (server copy of the local model)
     const lc = (DB.meta.family && DB.meta.family.locationSharing) || {enabled:false,precise:true};
-    await famRef(fid).collection('settings').doc('consent')
-      .set({ locationSharing:{enabled:!!lc.enabled,precise:lc.precise!==false}, createdAt:t }, {merge:true});
-    await linkRef().set({ familyId:fid, role:'owner', joinedAt:t });
+    // Step 1: create the family document ALONE. Firestore security rules
+    // evaluate each write in a batch against PRE-batch state, so bundling
+    // the settings/consent write (which requires isOwnerOrAdmin() -> reads
+    // the parent family doc) into the SAME batch as the family-doc create
+    // would see the parent as not-yet-existing and reject the whole batch
+    // with permission-denied. This was the exact cause of "Failed" with no
+    // family ever being created. Splitting into two sequential steps avoids
+    // it while keeping the family→membership relationship always consistent
+    // (the family doc itself already contains the owner's membership).
+    try{
+      await famRef(fid).set({ name:famName, ownerUid:myUid(), members, createdAt:t, updatedAt:t });
+    }catch(err){
+      console.error('[FamilyBackend.createFamily] family doc create failed', {
+        code:err&&err.code, message:err&&err.message, fid, uid:myUid()
+      });
+      throw new Error(err&&err.code==='permission-denied' ? 'permission-denied'
+        : err&&err.code==='unavailable' ? 'network-unavailable' : 'create-failed');
+    }
+    // Step 2: now that the family doc genuinely exists, seed its consent
+    // defaults and my own familyLink pointer atomically together. If this
+    // step fails, the family+owner-membership from step 1 is still intact
+    // (never a membership without a family, and never a family missing its
+    // owner) — only the non-critical consent-defaults seed is retried below.
+    try{
+      const batch=db().batch();
+      batch.set(famRef(fid).collection('settings').doc('consent'),
+        { locationSharing:{enabled:!!lc.enabled,precise:lc.precise!==false}, createdAt:t }, {merge:true});
+      batch.set(linkRef(), { familyId:fid, role:'owner', joinedAt:t });
+      await batch.commit();
+    }catch(err){
+      console.error('[FamilyBackend.createFamily] settings/link batch failed — family exists, retrying link only', {
+        code:err&&err.code, message:err&&err.message, fid, uid:myUid()
+      });
+      // The familyLink pointer is required for membership recovery on
+      // reinstall/new device (Proposal §5 step 7/§5.1) — retry it alone so
+      // the owner is never left without a recoverable pointer, even if the
+      // consent-defaults seed (non-critical) ultimately fails.
+      try{ await linkRef().set({ familyId:fid, role:'owner', joinedAt:t }); }
+      catch(err2){ console.error('[FamilyBackend.createFamily] familyLink retry also failed', err2&&err2.message); }
+    }
     return fid;
   }
 
@@ -10159,6 +10195,7 @@ const FamilyBackend = (function(){
     if(!fsnap.exists) throw new Error('notfound');
     const fam=fsnap.data()||{};
     const t=new Date().toISOString();
+    if(fam.ownerUid===myUid()) throw new Error('own-invite');
     if(!(fam.members && fam.members[myUid()])){
       // join: add my membership on the family doc
       const patch={}; patch['members.'+myUid()]={ role:inv.role||'adult', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
@@ -11582,24 +11619,24 @@ function famAction(act,arg,ev){
         const id=uid(),t=inv.createdAt||now();
         famInvitesMap()[id]={ id, code:inv.code, role:inv.role, name:inv.name||'', method:'link', status:'pending', server:true, createdAt:t, expiresAt:inv.expiresAt };
         famLog('invite',{code:inv.code,role}); saveDB(); render();
-      }).catch(()=>{ toast(L==='fa'?'ساخت دعوت ناموفق بود':'Could not create invitation'); });
+      }).catch((err)=>{ console.error('[inv-create]',err&&err.message,err); toast(L==='fa'?'ساخت دعوت ناموفق بود':'Could not create invitation'); });
       return; }
     // ── Phase 1 cloud actions ──
-    case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
+    case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch((err)=>{ console.error('[cloud-create]', err&&err.message, err); const m=(err&&err.message)||''; let msg; if(m==='permission-denied')msg=L==='fa'?'دسترسی رد شد — قوانین امنیتی Firestore را بررسی کنید':'Permission denied — check Firestore security rules'; else if(m==='network-unavailable')msg=L==='fa'?'شبکه در دسترس نیست — دوباره تلاش کنید':'Network unavailable — try again'; else if(m==='no-auth-uid')msg=L==='fa'?'ورود شما تأیید نشد — دوباره وارد شوید':'Not signed in properly — please sign in again'; else msg=L==='fa'?'ساخت فضای ابری ناموفق بود':'Could not create cloud space'; toast(msg,3200); }); return; }
     case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
-    case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch(()=>{ toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
-    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='dashboard'; render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
+    case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch((err)=>{ console.error('[cloud-rename]',err&&err.message,err); toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
+    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='live'; render(); }).catch((err)=>{ console.error('[cloud-leave]',err&&err.message,err); toast(L==='fa'?'خروج ناموفق بود':'Could not leave family'); }); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
     case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code; if(navigator.share){ navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>{}); } else famCopy(link); return; }
-    case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!confirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?'))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch(()=>{ toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
+    case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!confirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?'))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch((err)=>{ console.error('[inv-revoke]',err&&err.message,err); toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
     case 'inv-del':{ delete I[arg]; saveDB(); render(); return; }
     // ── Cloud member management (owner/admin) ──
     case 'cmember-open':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const m=(st.members||{})[arg]; if(!m)return; famActiveCloudUid=arg; go('cmemberEdit'); return; }
-    case 'cmember-role':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; if(fb.myServerRole()!=='owner'){ toast(L==='fa'?'تغییر نقش فقط توسط مالک':'Only the owner can change roles'); return; } fb.setRole(famActiveCloudUid,arg).then(()=>{ toast(L==='fa'?'نقش تغییر کرد':'Role updated'); render(); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
-    case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!confirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch(()=>{ toast(L==='fa'?'ناموفق بود':'Failed'); }); return; }
+    case 'cmember-role':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; if(fb.myServerRole()!=='owner'){ toast(L==='fa'?'تغییر نقش فقط توسط مالک':'Only the owner can change roles'); return; } fb.setRole(famActiveCloudUid,arg).then(()=>{ toast(L==='fa'?'نقش تغییر کرد':'Role updated'); render(); }).catch((err)=>{ console.error('[cmember-role]',err&&err.message,err); toast(L==='fa'?'تغییر نقش ناموفق بود':'Could not update role'); }); return; }
+    case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!confirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch((err)=>{ console.error('[cmember-remove]',err&&err.message,err); toast(L==='fa'?'حذف عضو ناموفق بود':'Could not remove member'); }); return; }
     // ── In-app invite redemption (deep-link / manual code) ──
-    case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='dashboard'; render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
-    case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='dashboard'; render(); return; }
+    case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='live'; render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):m==='own-invite'?(L==='fa'?'این دعوت متعلق به خودتان است':'This is your own invite'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
+    case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='live'; render(); return; }
     case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'join-code-go':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const el=document.getElementById('fam-join-code'); const code=(el?el.value:'').trim().toUpperCase(); if(!code){ toast(L==='fa'?'کد را وارد کنید':'Enter a code'); return; } fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); window.scrollTo(0,0); return; }
     // check-in
