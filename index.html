@@ -1461,7 +1461,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v273-diag';
+const APP_VERSION='v274';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10044,6 +10044,7 @@ const FamilyBackend = (function(){
   function locRef(fid,uid){ return famRef(fid).collection('locations').doc(uid); }        // latest LocationState per member
   function consentLocRef(fid,uid){ return famRef(fid).collection('consent').doc(uid); }    // per-member LocationConsent
   function routeDoc(fid,uid){ return famRef(fid).collection('routes').doc(uid); }          // {points:[...], updatedAt} bounded
+  function placeDoc(fid,placeId){ return famRef(fid).collection('places').doc(placeId); }  // shared Place (owner/admin write, member read — generic {sub}/{docId} rule)
 
   /* ── current server family (cached) ── */
   function current(){ return _current; }
@@ -10548,6 +10549,33 @@ const FamilyBackend = (function(){
 
     /* ── LISTEN: subscribe to all members' locations + consent + my route.
        Called when a family becomes active; restores persisted state on reopen. */
+    /* ── Places: shared family Place documents (Proposal §12). Owner/admin
+       write (generic {sub}/{docId} rule), all members read+listen. Genuine
+       Firestore persistence — not local-only. ── */
+    let _placesUnsub=null;
+    async function syncPlace(place){
+      if(!ready()||!isMember())return;
+      await placeDoc(familyId(), place.id).set(place, {merge:true}).catch(e=>{ console.error('[FamilyLocation.syncPlace]', e&&e.code, e&&e.message); throw e; });
+    }
+    async function deletePlaceRemote(placeId){
+      if(!ready()||!isMember())return;
+      await placeDoc(familyId(), placeId).delete().catch(e=>{ console.error('[FamilyLocation.deletePlaceRemote]', e&&e.code, e&&e.message); });
+    }
+    function startPlacesListening(){
+      stopPlacesListening();
+      if(!ready()||!isMember())return;
+      _placesUnsub = famRef(familyId()).collection('places').onSnapshot(qs=>{
+        const pm=(typeof famPlacesMap==='function')?famPlacesMap():null; if(!pm)return;
+        const seen={};
+        qs.forEach(doc=>{ seen[doc.id]=true; pm[doc.id]=Object.assign({id:doc.id},doc.data()); });
+        // Remove local places that no longer exist server-side (were deleted by another member).
+        Object.keys(pm).forEach(id=>{ if(!seen[id] && pm[id]&&pm[id]._cloudSeeded) delete pm[id]; });
+        try{persistDB&&persistDB();}catch(e){}
+        afterChange();
+      }, ()=>{});
+    }
+    function stopPlacesListening(){ if(_placesUnsub){try{_placesUnsub();}catch(e){} _placesUnsub=null;} }
+
     function startListening(){
       stopListening();
       if(!ready()||!isMember())return;
@@ -10560,6 +10588,7 @@ const FamilyBackend = (function(){
       });
       // my own route (so reopening restores today's breadcrumb)
       _routeUnsub=routeDoc(fid,myUid()).onSnapshot(snap=>{ if(snap.exists){ routeMap()[myUid()]=snap.data(); persistDB&&persistDB(); } },()=>{});
+      startPlacesListening();
       // Stage 2: begin auto-sharing if consent allows + honest permission state.
       refreshPermission();
       reconcileWatch();
@@ -10567,6 +10596,7 @@ const FamilyBackend = (function(){
     function stopListening(){
       _locUnsubs.forEach(u=>{try{u();}catch(e){}}); _locUnsubs=[];
       if(_routeUnsub){try{_routeUnsub();}catch(e){} _routeUnsub=null;}
+      stopPlacesListening();
       if(_consentUnsub){try{_consentUnsub();}catch(e){} _consentUnsub=null;}
       stopWatch();
     }
@@ -10577,6 +10607,8 @@ const FamilyBackend = (function(){
       deriveStatus, statusMeta, permissionState, batteryPct,
       // write
       setConsent, writeMyFix, writeCheckin, flushRoute,
+      // places (real Firestore sync)
+      syncPlace, deletePlaceRemote,
       // watcher (Stage 2)
       reconcileWatch, refreshPermission, startWatch, stopWatch,
       // lifecycle
@@ -10716,11 +10748,18 @@ async function famRunDiagnostics(){
   const db=auth.db;
 
   // 3) PROBE A — write to my OWN workspace (rule: ws == 'user_'+me()). If THIS
-  //    fails, the problem is auth/token, not the family rules.
+  //    fails, the problem is auth/token OR the deployed rules are NOT this file
+  //    (e.g. still in default locked mode) — NOT the family rules.
   try{
     await db.collection('workspaces').doc('user_'+uid).collection('_diag').doc('probe').set({t:Date.now()});
     push('Write own workspace', true, 'OK');
   }catch(e){ push('Write own workspace', false, 'code='+(e&&e.code)+' | '+(e&&e.message)); }
+
+  // 3b) PROBE A2 — read back my own workspace (read side of the same rule).
+  try{
+    await db.collection('workspaces').doc('user_'+uid).collection('_diag').doc('probe').get();
+    push('Read own workspace', true, 'OK');
+  }catch(e){ push('Read own workspace', false, 'code='+(e&&e.code)+' | '+(e&&e.message)); }
 
   // 4) PROBE B — the REAL family create write, to a throwaway family id.
   try{
@@ -10969,7 +11008,7 @@ function famLiveMembers(){
     const consent=loc.memberConsent(uid);
     const status=loc.memberStatus(uid);
     return { uid, name:(uid===((FB.user&&FB.user.uid))?famSelfName():(m.name||'Member')),
-             role:m.role, photo:m.photo, color:'#6e56f8',
+             role:m.role, photo:m.photo, phone:m.phone||null, color:'#6e56f8',
              state, consent, status, meta:loc.statusMeta(status),
              hasFix: !!(state&&state.lat!=null && (consent&&consent.enabled&&!consent.paused)) };
   });
@@ -11074,12 +11113,17 @@ function famLiveMemberDetail(m, isMe){
   h+=`<div class="fam-actionbar">`;
   const canDir = s.lat!=null;
   h+=`<button class="btn btn-ghost" data-fam="live-directions" data-arg="${m.uid}" ${canDir?'':'disabled'}>🧭 ${L==='fa'?'مسیر':'Directions'}</button>`;
+  // Call: contextual to this member. Honestly disabled when no phone number
+  // is on record — never a dead button pretending to work (Proposal §13).
+  const phone = m.phone || null;
+  h+=`<button class="btn btn-ghost" data-fam="live-call" data-arg="${m.uid}" ${phone?'':'disabled'} title="${phone?'':(L==='fa'?'شماره تلفن ثبت نشده':'No phone number on file')}">📞 ${L==='fa'?'تماس':'Call'}</button>`;
   if(isMe){
     h+=`<button class="btn btn-ghost" data-fam="live-checkin">📍 ${L==='fa'?'ثبت ورود':'Check in'}</button>`;
     h+=`<button class="btn btn-ghost" data-fam="live-share-toggle">${m.consent&&m.consent.enabled?(m.consent.paused?(L==='fa'?'ادامه':'Resume'):(L==='fa'?'توقف':'Pause')):(L==='fa'?'اشتراک':'Share')}</button>`;
   } else {
     h+=`<button class="btn btn-ghost" data-fam="live-request" data-arg="${m.uid}">🔔 ${L==='fa'?'درخواست':'Request'}</button>`;
   }
+  h+=`<button class="btn btn-ghost" data-fam="live-save-place" data-arg="${m.uid}" ${canDir?'':'disabled'} title="${canDir?'':(L==='fa'?'موقعیتی برای ذخیره نیست':'No location to save')}">📌 ${L==='fa'?'ذخیره مکان':'Save place'}</button>`;
   h+=`<button class="btn btn-ghost" data-fam="live-history" data-arg="${m.uid}">🕘 ${L==='fa'?'تاریخچه':'History'}</button>`;
   h+=`</div>`;
   h+=`</div>`;
@@ -11697,6 +11741,23 @@ function famAction(act,arg,ev){
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'live-checkin-send':{ const note=(document.getElementById('fam-checkin-note')||{}).value||''; toast(L==='fa'?'در حال دریافت موقعیت…':'Getting location…'); if(!navigator.geolocation){ toast(L==='fa'?'موقعیت‌یاب در دسترس نیست':'Geolocation unavailable'); return; } navigator.geolocation.getCurrentPosition(pos=>{ FamilyBackend.location.writeCheckin({lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0)}); toast(L==='fa'?'ثبت شد':'Checked in'); famView='live'; render(); }, ()=>{ toast(L==='fa'?'موقعیت در دسترس نیست':'Location unavailable'); }, {enableHighAccuracy:true,timeout:15000}); return; }
     case 'live-request':{ toast(L==='fa'?'درخواست به‌روزرسانی ارسال شد':'Update request sent'); return; }
+    case 'live-call':{
+      const mem=famLiveMembers().find(x=>x.uid===arg);
+      if(!mem||!mem.phone){ toast(L==='fa'?'شماره تلفن برای این عضو ثبت نشده':'No phone number on file for this member'); return; }
+      window.location.href='tel:'+mem.phone;
+      return;
+    }
+    case 'live-save-place':{
+      const mem=famLiveMembers().find(x=>x.uid===arg);
+      if(!mem||!mem.state||mem.state.lat==null){ toast(L==='fa'?'موقعیتی برای ذخیره نیست':'No location to save'); return; }
+      // Prefill a new Place draft from this member's REAL current fix — never
+      // a fabricated coordinate. Reuses the existing Places save flow.
+      _famPlaceDraft={ type:'other', name:(L==='fa'?'مکان '+mem.name:mem.name+'’s place'),
+        lat:mem.state.lat, lon:mem.state.lng, radius:150,
+        alerts:{enter:true,exit:true}, quietHours:{enabled:false,start:'22:00',end:'07:00'} };
+      famActivePlaceId=null; famView='placeEdit'; render(); window.scrollTo(0,0);
+      return;
+    }
     case 'live-history': _famHistUid=arg||_famSelUid; famView='history'; render(); window.scrollTo(0,0); return;
     case 'later':{ toast(L==='fa'?`«${arg}» در یک فاز بعدی اضافه می‌شود`:`"${arg}" is coming in a later phase`); return; }
     case 'members': go('members'); return;
@@ -11727,9 +11788,13 @@ function famAction(act,arg,ev){
       const src=famActivePlaceId?(P[famActivePlaceId]||{}):(_famPlaceDraft||{});
       const type=src.type||'home'; const alerts=src.alerts||{enter:true,exit:true}; const quietOn=!!(src.quietHours&&src.quietHours.enabled);
       let p; if(famActivePlaceId){ p=P[famActivePlaceId]; } else { const id=uid(); p=P[id]={id,createdAt:now()}; famActivePlaceId=id; famLog('place_added',{name:nm.trim()}); }
-      p.type=type; p.name=nm.trim(); p.lat=lat; p.lon=lon; p.radius=rad; p.alerts={enter:!!alerts.enter,exit:!!alerts.exit}; p.quietHours={enabled:quietOn,start:qs,end:qe}; p.updatedAt=now();
-      _famPlaceDraft=null; saveDB(); toast(L==='fa'?'مکان ذخیره شد':'Place saved'); go('places'); return; }
-    case 'place-remove':{ if(!famActivePlaceId||!famCan('managePlaces'))return; const p=P[famActivePlaceId]; if(!confirm(L==='fa'?'حذف مکان؟':'Remove place?'))return; famLog('place_removed',{name:p?p.name:''}); delete P[famActivePlaceId]; saveDB(); go('places'); return; }
+      p.type=type; p.name=nm.trim(); p.lat=lat; p.lon=lon; p.radius=rad; p.alerts={enter:!!alerts.enter,exit:!!alerts.exit}; p.quietHours={enabled:quietOn,start:qs,end:qe}; p.updatedAt=now(); p._cloudSeeded=true;
+      _famPlaceDraft=null; saveDB(); toast(L==='fa'?'مکان ذخیره شد':'Place saved'); go('places');
+      try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.location.syncPlace(p).catch(()=>{ toast(L==='fa'?'ذخیره در ابر ناموفق بود (محلی ذخیره شد)':'Cloud sync failed (saved locally)'); }); } }catch(e){}
+      return; }
+    case 'place-remove':{ if(!famActivePlaceId||!famCan('managePlaces'))return; const p=P[famActivePlaceId]; if(!confirm(L==='fa'?'حذف مکان؟':'Remove place?'))return; famLog('place_removed',{name:p?p.name:''}); const wasCloud=p&&p._cloudSeeded; delete P[famActivePlaceId]; saveDB();
+      try{ if(wasCloud&&typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.location.deletePlaceRemote(famActivePlaceId); } }catch(e){}
+      go('places'); return; }
     // invitations
     case 'inv-role': _famInviteRole=arg; render(); return;
     case 'inv-create':{ if(!famCan('sendInvites'))return;
