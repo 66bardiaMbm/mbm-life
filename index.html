@@ -1306,7 +1306,63 @@ body.rtl .trow-content{text-align:right}
 .auth-btn:active{background:var(--s3)}
 .act-grp-expand{animation:actExpand .18s ease}
 @keyframes actExpand{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+
+/* ═══ Family Live (Phase 2) ═══ */
+#fam-live-wrap{position:relative;width:100%;height:calc(100vh - 0px);height:100dvh;overflow:hidden;background:var(--s0)}
+#fam-map{position:absolute;inset:0;width:100%;height:100%;background:#dfe3ea;z-index:1}
+.dark #fam-map{background:#20222b}
+.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1200;display:flex;align-items:center;gap:10px;padding:12px 14px;
+  background:linear-gradient(180deg,var(--s0) 40%,transparent);pointer-events:none}
+.fam-live-top>*{pointer-events:auto}
+.fam-live-title{flex:1;min-width:0}
+.fam-live-title b{display:block;font-size:17px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-live-title span{display:block;font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-live-ctrls{position:absolute;right:12px;z-index:1150;display:flex;flex-direction:column;gap:8px}
+.fam-mapbtn{width:42px;height:42px;border-radius:12px;border:1px solid var(--b1);background:var(--s1);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.fam-mapbtn:active{background:var(--s2)}
+/* avatar pins */
+.fam-pin{position:relative;width:44px;height:44px;transform:translate(-50%,-100%)}
+.fam-pin .fam-pin-av{width:44px;height:44px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);
+  background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
+  font-weight:800;color:#fff;font-size:16px}
+.fam-pin.sel .fam-pin-av{border-color:#6e56f8;transform:scale(1.12)}
+.fam-pin .fam-pin-ring{position:absolute;inset:-4px;border-radius:50%;border:3px solid transparent}
+.fam-pin.tone-live .fam-pin-ring{border-color:#22c55e;animation:pinpulse 2s infinite}
+.fam-pin.tone-ok .fam-pin-ring{border-color:#22c55e}
+.fam-pin.tone-warn .fam-pin-ring{border-color:#f59e0b}
+.fam-pin.tone-muted{opacity:.7}.fam-pin.tone-muted .fam-pin-ring{border-color:#94a3b8}
+@keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.fam-pin-tip{position:absolute;left:50%;bottom:-6px;width:10px;height:10px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
+/* member bottom sheet */
+#fam-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1300;background:var(--s1);border-radius:20px 20px 0 0;
+  box-shadow:0 -6px 30px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.2,.7,.2,1);touch-action:none;will-change:transform}
+#fam-sheet .fam-sheet-grab{width:44px;height:5px;border-radius:3px;background:var(--b2);margin:10px auto 4px}
+.fam-sheet-body{padding:0 16px 20px;max-height:72vh;overflow-y:auto}
+.fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 10px}
+.fam-pcard{flex:none;width:74px;text-align:center;cursor:pointer}
+.fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0 auto 4px;background-size:cover;background-position:center;
+  border:2px solid var(--b1);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
+.fam-pcard.sel .av{border-color:#6e56f8}
+.fam-pcard .nm{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-inline-end:5px}
+.fam-dot.live{background:#22c55e}.fam-dot.ok{background:#22c55e}.fam-dot.warn{background:#f59e0b}.fam-dot.muted{background:#94a3b8}
+.fam-actionbar{display:flex;gap:8px;margin-top:12px}
+.fam-actionbar .btn{flex:1;padding:11px 8px;font-size:13px}
+/* honest offline / map-unavailable overlay (non-blocking; sheet stays usable) */
+.fam-map-msg{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:1100;background:var(--s1);
+  border:1px solid var(--b1);border-radius:12px;padding:8px 14px;font-size:12px;color:var(--ink2);box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:88%;text-align:center}
+.leaflet-container{font-family:inherit}
 </style>
+<!-- ═══ LEAFLET (map engine) ═══════════════════════════════════════════
+     DEV: referenced from official CDN, pinned to 1.9.4 with SRI.
+     PRODUCTION: replace these two tags with the vendored/inlined
+     leaflet.css + leaflet.js before release (see /vendor). The MBMMap
+     wrapper isolates all Leaflet usage, so only these two lines change. ── -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 <body>
 
@@ -1405,7 +1461,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v269';
+const APP_VERSION='v270';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2189,6 +2245,10 @@ function _renderInner(){
   else if(screen==='profile')el.innerHTML=renderProfile();
   bindScreen();
   updateFab();
+  // Mount the Leaflet map after the Family Live DOM exists.
+  if(screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard') && typeof famLiveMount==='function'){
+    famLiveMount();
+  }
 }
 let _resizeT=null;
 let _lastWideLayout=isWideLayout();
@@ -9919,7 +9979,7 @@ const MBMQR=(function(){
 })();
 
 /* ── Family state ── */
-let famView='dashboard';           // dashboard|members|memberEdit|places|placeEdit|invites|checkin|sos|settings|timeline|map
+let famView='live';           // live(map-first default)|members|memberEdit|invites|history|checkin|settings|...
 let famActiveMemberId=null;
 let famActiveCloudUid=null;
 let famActivePlaceId=null;
@@ -10539,6 +10599,10 @@ const FAM_EVENT_IC={checkin:'📍',sos:'🆘',sos_action:'📞',sos_cancel:'✖'
 function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const av=(typeof avatarById==='function'&&mem.avatarId)?avatarById(mem.avatarId):null; const inner=av?`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${av.bg};font-size:${Math.round(size*0.5)}px">${av.emoji}</div>`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${c};color:#fff;font-weight:800;font-size:${Math.round(size*0.42)}px">${esc((mem.name||'?').slice(0,1).toUpperCase())}</div>`; return `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex:none">${inner}</div>`; }
 
 /* ═══ RENDER ═══ */
+function famExitToHub(){
+  MBMMap.destroy();
+  currentModule=null; screen='lifehub'; render(); window.scrollTo(0,0);
+}
 function renderFamily(){
   famInit();
   const head=(title,back)=>`<div class="pg-head" style="display:flex;align-items:center;gap:6px;padding:20px 20px 8px">
@@ -10546,6 +10610,8 @@ function renderFamily(){
     <div style="flex:1;font-size:26px;font-weight:800;letter-spacing:-.3px">${esc(title)}</div>
     ${famView==='dashboard'?`<button class="ld-back" data-fam="settings" style="width:40px;height:40px;flex:none">⚙</button>`:''}
   </div>`;
+  // ── FAMILY LIVE is the default, map-first Family screen (Phase 2). ──
+  if(famView==='live'||famView==='dashboard') return famLiveView();
   if(famView==='members') return head(L==='fa'?'اعضای خانواده':'Family Members')+famMembersView();
   if(famView==='memberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famMemberEditView();
   if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places','fam-back-dash')+famLaterView(L==='fa'?'مکان‌ها و هشدارها':'Places & alerts',L==='fa'?'فاز ۳':'Phase 3','📌');
@@ -10554,13 +10620,13 @@ function renderFamily(){
   if(famView==='joinCode') return head(L==='fa'?'پیوستن با کد':'Join with code','fam-back-dash')+famJoinCodeView();
   if(famView==='joinInvite') return head(L==='fa'?'دعوت به خانواده':'Family Invitation','fam-back-dash')+famJoinInviteView();
   if(famView==='invites') return head(L==='fa'?'دعوت‌نامه‌ها':'Invitations')+famInvitesView();
-  // ── Later-phase features: show a clear placeholder, not a functional screen ──
-  if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-dash')+famLaterView(L==='fa'?'ثبت ورود':'Check-in',L==='fa'?'فاز ۲ — MVP موقعیت':'Phase 2 — Location MVP','📍');
+  if(famView==='history') return head(L==='fa'?'تاریخچه روزانه':'Daily History','fam-back-live')+famHistoryView();
+  if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-live')+famCheckinLiveView();
+  // ── Later-phase features: clear placeholder, not a functional screen ──
   if(famView==='sos') return head('SOS','fam-back-dash')+famLaterView('SOS',L==='fa'?'فاز ۵ — ایمنی پیشرفته':'Phase 5 — Advanced Safety','🆘');
   if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famLaterView(L==='fa'?'تایم‌لاین':'Timeline',L==='fa'?'فاز ۲':'Phase 2','🕘');
-  if(famView==='map') return head(L==='fa'?'نقشه خانواده':'Family Map','fam-back-dash')+famLaterView(L==='fa'?'نقشه و موقعیت زنده':'Live map & location',L==='fa'?'فاز ۲ — MVP موقعیت':'Phase 2 — Location MVP','🗺');
-  if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-dash')+famSettingsView();
-  return head(L==='fa'?'خانواده':'Family')+famDashboardView();
+  if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-live')+famSettingsView();
+  return famLiveView();
 }
 
 /* ── Later-phase placeholder screen ── */
@@ -10619,6 +10685,348 @@ function famCloudBanner(){
       <button class="btn btn-ghost" data-fam="cloud-join" style="flex:1;min-width:130px">${L==='fa'?'پیوستن با کد':'Join with code'}</button>
     </div></div>`;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TILE PROVIDER ABSTRACTION (Phase 2)
+   A provider is a pure descriptor; adding a future provider (alt street,
+   satellite, hybrid, paid) means adding an entry here — no UI/engine change.
+   A provider is only OFFERED in the UI if enabled:true AND it genuinely works
+   with no API key / no paid dependency at this stage. Satellite/hybrid are
+   defined but DISABLED (no legal keyless source wired) so they are never shown.
+   ═══════════════════════════════════════════════════════════════════════ */
+const TileProviders = {
+  osm: {
+    id:'osm', kind:'street', enabled:true,
+    label:{en:'Street',fa:'خیابان'},
+    url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    options:{ maxZoom:19, crossOrigin:true,
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }
+  },
+  // Future slots — DISABLED until a legal, keyless, reliable source is wired.
+  satellite:{ id:'satellite', kind:'satellite', enabled:false, label:{en:'Satellite',fa:'ماهواره'}, url:null, options:{} },
+  hybrid:{ id:'hybrid', kind:'hybrid', enabled:false, label:{en:'Hybrid',fa:'ترکیبی'}, url:null, options:{} }
+};
+function tileProvidersAvailable(){ return Object.values(TileProviders).filter(p=>p.enabled&&p.url); }
+let _famMapProvider='osm';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MBMMap — thin wrapper isolating ALL Leaflet usage behind our own API.
+   If Leaflet is swapped/vendored, only this object changes. Honest failure:
+   if Leaflet or tiles are unavailable, the map degrades to a non-blocking
+   message; the member/status sheet keeps working regardless.
+   ═══════════════════════════════════════════════════════════════════════ */
+const MBMMap = (function(){
+  let _map=null, _tiles=null, _markers={}, _routeLine=null, _elId=null, _tileErr=false;
+  // NOTE: the app uses the global `L` as the LANGUAGE variable, which shadows
+  // Leaflet's global. Always reach Leaflet through window.L via Lf().
+  function Lf(){ return (typeof window!=='undefined')?window.L:undefined; }
+  function available(){ const l=Lf(); return !!(l && l.map); }
+  function init(elId, center){
+    const l=Lf();
+    if(!available()) return null;
+    if(_map && _elId===elId) return _map;
+    destroy();
+    _elId=elId; _tileErr=false;
+    try{
+      _map = l.map(elId,{zoomControl:false,attributionControl:true}).setView(center||[-42.88,147.32], 13);
+      setProvider(_famMapProvider);
+    }catch(e){ _map=null; }
+    return _map;
+  }
+  function setProvider(id){
+    const l=Lf();
+    if(!_map||!l) return;
+    const p=TileProviders[id]||TileProviders.osm; if(!p||!p.url) return;
+    _famMapProvider=p.id;
+    if(_tiles){ try{_map.removeLayer(_tiles);}catch(e){} _tiles=null; }
+    try{
+      _tiles=l.tileLayer(p.url,p.options);
+      _tiles.on('tileerror',()=>{ _tileErr=true; if(typeof famMapTileError==='function')famMapTileError(); });
+      _tiles.addTo(_map);
+    }catch(e){ _tileErr=true; }
+  }
+  function tileError(){ return _tileErr; }
+  function setView(center,zoom){ if(_map)try{_map.setView(center,zoom==null?_map.getZoom():zoom);}catch(e){} }
+  function panTo(center){ if(_map)try{_map.panTo(center);}catch(e){} }
+  function fitAll(latlngs){ const l=Lf(); if(_map&&l&&latlngs&&latlngs.length){ try{ _map.fitBounds(l.latLngBounds(latlngs).pad(0.25)); }catch(e){} } }
+  function invalidate(){ if(_map)try{ setTimeout(()=>{try{_map.invalidateSize();}catch(e){}},60); }catch(e){} }
+  function setMarker(uid, latlng, html, selected, tone, onClick){
+    const l=Lf();
+    if(!_map||!l) return;
+    const cls='fam-pin'+(selected?' sel':'')+(tone?(' tone-'+tone):'');
+    const icon=l.divIcon({className:'', html:'<div class="'+cls+'">'+html+'<div class="fam-pin-tip"></div></div>', iconSize:[44,44], iconAnchor:[22,44]});
+    if(_markers[uid]){ _markers[uid].setLatLng(latlng); _markers[uid].setIcon(icon); }
+    else { _markers[uid]=l.marker(latlng,{icon:icon}).addTo(_map); if(onClick)_markers[uid].on('click',onClick); }
+  }
+  function clearMarkersExcept(uids){ Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{_map.removeLayer(_markers[u]);}catch(e){} delete _markers[u]; } }); }
+  function drawRoute(points){
+    const l=Lf();
+    if(!_map||!l) return;
+    if(_routeLine){ try{_map.removeLayer(_routeLine);}catch(e){} _routeLine=null; }
+    if(!points||points.length<2) return;
+    // Honest gaps: break the line where consecutive samples are far apart in
+    // time (>10 min) — never draw a precise path through unknown territory.
+    const segs=[]; let cur=[[points[0].lat,points[0].lng]];
+    for(let i=1;i<points.length;i++){
+      const a=points[i-1], b=points[i];
+      const dt=Math.abs(Date.parse(b.at)-Date.parse(a.at));
+      if(dt>10*60*1000){ segs.push(cur); cur=[]; }
+      cur.push([b.lat,b.lng]);
+    }
+    if(cur.length)segs.push(cur);
+    try{ _routeLine=l.layerGroup(segs.filter(s=>s.length>1).map(s=>l.polyline(s,{color:'#6e56f8',weight:4,opacity:.85}))).addTo(_map); }catch(e){}
+  }
+  function destroy(){
+    _markers={}; _routeLine=null; _tiles=null;
+    if(_map){ try{_map.remove();}catch(e){} _map=null; }
+    _elId=null;
+  }
+  return { available, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
+           setMarker, clearMarkersExcept, drawRoute, destroy, get:()=>_map };
+})();
+
+/* Relative time for honest freshness display (never rounds up to "now"). */
+function famRelTime(iso){
+  const t=Date.parse(iso||''); if(isNaN(t))return L==='fa'?'—':'—';
+  const s=Math.floor((Date.now()-t)/1000);
+  if(s<0) return L==='fa'?'اکنون':'now';
+  if(s<45) return L==='fa'?'همین حالا':'now';
+  const m=Math.floor(s/60); if(m<60) return L==='fa'?`${m} دقیقه پیش`:`${m} min ago`;
+  const h=Math.floor(m/60); if(h<24) return L==='fa'?`${h} ساعت پیش`:`${h} hr ago`;
+  const d=Math.floor(h/24); return L==='fa'?`${d} روز پیش`:`${d} d ago`;
+}
+/* Duration since a timestamp, e.g. "2 hr 40 min" (for stay duration). */
+function famDurSince(iso){
+  const t=Date.parse(iso||''); if(isNaN(t))return '';
+  let m=Math.max(0,Math.floor((Date.now()-t)/60000));
+  const h=Math.floor(m/60); m=m%60;
+  if(h>0) return L==='fa'?`${h} ساعت ${m} دقیقه`:`${h} hr ${m} min`;
+  return L==='fa'?`${m} دقیقه`:`${m} min`;
+}
+/* Members eligible to appear on the live map: cloud members who are sharing. */
+function famLiveMembers(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(!fb||!fb.ready()||!fb.isMember())return [];
+  const st=fb.getState(); const loc=fb.location;
+  return Object.keys(st.members||{}).map(uid=>{
+    const m=st.members[uid]||{};
+    const state=loc.memberState(uid);
+    const consent=loc.memberConsent(uid);
+    const status=loc.memberStatus(uid);
+    return { uid, name:(uid===((FB.user&&FB.user.uid))?famSelfName():(m.name||'Member')),
+             role:m.role, photo:m.photo, color:'#6e56f8',
+             state, consent, status, meta:loc.statusMeta(status),
+             hasFix: !!(state&&state.lat!=null && (consent&&consent.enabled&&!consent.paused)) };
+  });
+}
+let _famSelUid=null;   // selected member on the live map
+
+function famLiveView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  // Not in a cloud family / offline → Live can't show members; send to management.
+  if(!fb||!fb.ready()||!fb.isMember()){
+    return `<div id="fam-live-wrap"><div style="padding:80px 20px;text-align:center">
+      <div style="font-size:40px;margin-bottom:12px">🗺️</div>
+      <div style="font-weight:800;font-size:17px;margin-bottom:6px">${L==='fa'?'نقشه خانواده':'Family map'}</div>
+      <div style="font-size:13px;color:var(--ink3);margin-bottom:16px">${L==='fa'?'برای دیدن موقعیت خانواده، ابتدا به فضای ابری خانواده بپیوندید.':'Join your cloud family space to see everyone on the map.'}</div>
+      <button class="btn" data-fam="settings" style="width:auto;padding:10px 20px">${L==='fa'?'مدیریت خانواده':'Manage family'}</button>
+    </div></div>`;
+  }
+  const members=famLiveMembers();
+  const sel = members.find(m=>m.uid===_famSelUid) || members.find(m=>m.hasFix) || members[0];
+  _famSelUid = sel?sel.uid:null;
+  const myUid=FB.user&&FB.user.uid;
+  const myConsent=fb.location.myConsent();
+
+  // top header reflects the SELECTED member honestly
+  const title = sel?esc(sel.name):(L==='fa'?'خانواده':'Family');
+  const sub = sel ? famLiveStatusLine(sel) : '';
+
+  let h=`<div id="fam-live-wrap">`;
+  h+=`<div id="fam-map"></div>`;
+  // top bar
+  h+=`<div class="fam-live-top">
+    <button class="fam-mapbtn" data-fam="live-back" style="box-shadow:none">‹</button>
+    <div class="fam-live-title"><b>${title}</b><span>${sub}</span></div>
+    <button class="fam-mapbtn" data-fam="live-refresh" title="${L==='fa'?'به‌روزرسانی':'Refresh'}">↻</button>
+    <button class="fam-mapbtn" data-fam="settings" title="${L==='fa'?'مدیریت':'Manage'}">⚙</button>
+  </div>`;
+  // map controls
+  h+=`<div class="fam-live-ctrls" style="top:74px">
+    <button class="fam-mapbtn" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">◎</button>
+    <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">👤</button>
+    <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">⤢</button>
+  </div>`;
+  // honest sharing banner if I'm not sharing yet
+  if(!myConsent.enabled){
+    h+=`<div class="fam-map-msg" style="top:auto;bottom:220px">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
+      <button class="btn" data-fam="live-share-on" style="width:auto;padding:4px 10px;margin-inline-start:6px;font-size:12px">${L==='fa'?'روشن':'Turn on'}</button></div>`;
+  }
+  // member sheet
+  h+=`<div id="fam-sheet"><div class="fam-sheet-grab"></div><div class="fam-sheet-body">`;
+  // presence strip
+  h+=`<div class="fam-presence">`;
+  members.forEach(m=>{
+    h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
+      <div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
+      <div class="nm">${esc(m.name)}</div>
+      <div style="font-size:10px;color:var(--ink3)"><span class="fam-dot ${m.meta.tone}"></span></div>
+    </div>`;
+  });
+  h+=`</div>`;
+  // selected member detail
+  if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
+  h+=`</div></div>`; // sheet-body, sheet
+  h+=`</div>`; // wrap
+  return h;
+}
+
+function famLiveStatusLine(m){
+  // honest header subtitle
+  if(!m.consent||!m.consent.enabled) return L==='fa'?'اشتراک‌گذاری نشده':'Not sharing';
+  if(m.consent.paused) return L==='fa'?'اشتراک متوقف شده':'Sharing paused';
+  if(!m.state||m.state.lat==null) return L==='fa'?'موقعیت نامشخص':'Location unknown';
+  const rel=famRelTime(m.state.reportedAt||m.state.capturedAt);
+  if(m.status==='updating') return L==='fa'?'به‌روزرسانی همین حالا':'Updated now';
+  if(m.status==='moving') return L==='fa'?'در حال حرکت':'Moving';
+  if(m.status==='stale') return L==='fa'?`قدیمی · ${rel}`:`Stale · ${rel}`;
+  if(m.status==='offline') return L==='fa'?`آفلاین · ${rel}`:`Offline · ${rel}`;
+  return (L==='fa'?'به‌روزرسانی ':'Updated ')+rel;
+}
+
+function famLiveMemberDetail(m, isMe){
+  const s=m.state||{};
+  let h=`<div style="margin-top:6px;padding-top:12px;border-top:1px solid var(--b1)">`;
+  h+=`<div style="display:flex;align-items:center;gap:12px">
+    <div style="width:52px;height:52px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;flex:none">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:800;font-size:17px">${esc(m.name)}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+      <div style="font-size:12px;color:var(--ink3)"><span class="fam-dot ${m.meta.tone}"></span>${esc(L==='fa'?m.meta.fa:m.meta.en)} · ${esc(famRoleLabel(m.role))}</div>
+    </div>`;
+  if(s.battery!=null) h+=`<div style="flex:none;font-size:13px;font-weight:700;color:var(--ink2)">🔋 ${s.battery}%</div>`;
+  h+=`</div>`;
+  // location facts (only what's genuinely known)
+  if(m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null){
+    h+=`<div style="margin-top:12px;font-size:14px;line-height:1.7">`;
+    if(s.stayStart&&!s.moving) h+=`<div>${L==='fa'?'اینجا برای':'Here for'} <b>${famDurSince(s.stayStart)}</b></div>`;
+    if(s.moving) h+=`<div><b>${L==='fa'?'در حال حرکت':'Moving'}</b></div>`;
+    h+=`<div style="color:var(--ink3);font-size:12px">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}: ${famRelTime(s.reportedAt||s.capturedAt)}${s.accuracy!=null?` · ±${s.accuracy}m`:''}</div>`;
+    h+=`</div>`;
+  } else {
+    h+=`<div style="margin-top:12px;font-size:13px;color:var(--ink3)">${m.consent&&m.consent.paused?(L==='fa'?'این عضو اشتراک را موقتاً متوقف کرده است.':'This member has paused sharing.'):(L==='fa'?'این عضو در حال حاضر موقعیت خود را به اشتراک نمی‌گذارد.':'This member is not sharing location right now.')}</div>`;
+  }
+  // action bar — only genuinely-functional actions (Phase 2)
+  h+=`<div class="fam-actionbar">`;
+  const canDir = s.lat!=null;
+  h+=`<button class="btn btn-ghost" data-fam="live-directions" data-arg="${m.uid}" ${canDir?'':'disabled'}>🧭 ${L==='fa'?'مسیر':'Directions'}</button>`;
+  if(isMe){
+    h+=`<button class="btn btn-ghost" data-fam="live-checkin">📍 ${L==='fa'?'ثبت ورود':'Check in'}</button>`;
+    h+=`<button class="btn btn-ghost" data-fam="live-share-toggle">${m.consent&&m.consent.enabled?(m.consent.paused?(L==='fa'?'ادامه':'Resume'):(L==='fa'?'توقف':'Pause')):(L==='fa'?'اشتراک':'Share')}</button>`;
+  } else {
+    h+=`<button class="btn btn-ghost" data-fam="live-request" data-arg="${m.uid}">🔔 ${L==='fa'?'درخواست':'Request'}</button>`;
+  }
+  h+=`<button class="btn btn-ghost" data-fam="live-history" data-arg="${m.uid}">🕘 ${L==='fa'?'تاریخچه':'History'}</button>`;
+  h+=`</div>`;
+  h+=`</div>`;
+  return h;
+}
+
+/* ── Mount the map + paint pins/route after DOM insertion ── */
+let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
+let _famLastCentredUid=null;  // guards against fighting manual pan on refresh
+function famLiveMount(){
+  const el=document.getElementById('fam-map');
+  if(!el) return;
+  const members=famLiveMembers();
+  const sel=members.find(m=>m.uid===_famSelUid);
+  const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
+  const center = (sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
+               : (withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:[-42.88,147.32]);
+  if(!MBMMap.available()){ famMapUnavailable(L==='fa'?'موتور نقشه در دسترس نیست':'Map engine unavailable'); }
+  else {
+    const map=MBMMap.init('fam-map', center);
+    if(!map){ famMapUnavailable(L==='fa'?'نقشه بارگذاری نشد':'Map failed to load'); }
+    else {
+      MBMMap.invalidate();
+      // Overlapping members: nudge near-identical coordinates apart so every
+      // pin stays visible and tappable (Proposal §8). Deterministic by index.
+      const placed=[];
+      const withFixList=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
+      withFixList.forEach((m,idx)=>{
+        let lat=m.state.lat, lng=m.state.lng;
+        const clash=placed.find(pp=>Math.abs(pp.lat-lat)<0.0002 && Math.abs(pp.lng-lng)<0.0002);
+        if(clash){ const ang=(idx*137.5)*Math.PI/180, r=0.00035; lat+=r*Math.cos(ang); lng+=r*Math.sin(ang); }
+        placed.push({lat,lng});
+        const html=`<div class="fam-pin-av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div><div class="fam-pin-ring"></div>`;
+        MBMMap.setMarker(m.uid,[lat,lng],html,m.uid===_famSelUid,m.meta.tone,()=>{ _famSelUid=m.uid; render(); });
+      });
+      MBMMap.clearMarkersExcept(members.filter(m=>m.hasFix).map(m=>m.uid));
+      if(sel){ MBMMap.drawRoute(FamilyBackend.location.memberRoute(sel.uid)); }
+      // Centre only when the SELECTED member changed — never fight manual pan
+      // on a routine data refresh (Constitution §10.1).
+      if(sel&&sel.state&&sel.state.lat!=null && _famLastCentredUid!==sel.uid){
+        MBMMap.panTo([sel.state.lat,sel.state.lng]);
+        _famLastCentredUid=sel.uid;
+      }
+    }
+  }
+  famSheetInitDrag();
+}
+function famMapUnavailable(msg){
+  const el=document.getElementById('fam-map'); if(!el)return;
+  el.innerHTML=`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--ink3);font-size:13px">${esc(msg)}<br>${L==='fa'?'اطلاعات اعضا در پایین در دسترس است.':'Member info is available below.'}</div>`;
+}
+function famMapTileError(){
+  if(document.querySelector('.fam-map-msg.tile'))return;
+  const wrap=document.getElementById('fam-live-wrap'); if(!wrap)return;
+  const d=document.createElement('div'); d.className='fam-map-msg tile';
+  d.textContent=(L==='fa'?'نقشه به‌صورت آفلاین کامل در دسترس نیست':'Map unavailable offline');
+  wrap.appendChild(d);
+}
+/* ── Draggable member sheet (collapsed / partial / full) ── */
+function famSheetInitDrag(){
+  const sheet=document.getElementById('fam-sheet'); if(!sheet)return;
+  const grab=sheet.querySelector('.fam-sheet-grab'); if(!grab)return;
+  const H=window.innerHeight||780;
+  const detents=[H-140, H-360, Math.round(H*0.28)];
+  function apply(i){ _famSheetDetent=Math.max(0,Math.min(2,i)); sheet.style.transform=`translateY(${detents[_famSheetDetent]}px)`; }
+  apply(_famSheetDetent);
+  let startY=0, startT=detents[_famSheetDetent], dragging=false;
+  const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); const m=/translateY\(([-\d.]+)px\)/.exec(sheet.style.transform); startT=m?parseFloat(m[1]):detents[_famSheetDetent]; sheet.style.transition='none'; };
+  const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let t=startT+(y-startY); t=Math.max(detents[2],Math.min(detents[0],t)); sheet.style.transform=`translateY(${t}px)`; if(e.cancelable)e.preventDefault(); };
+  const onUp=()=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const m=/translateY\(([-\d.]+)px\)/.exec(sheet.style.transform); const cur=m?parseFloat(m[1]):startT; let best=0,bd=1e9; detents.forEach((d,i)=>{const dd=Math.abs(d-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); MBMMap.invalidate(); };
+  grab.addEventListener('touchstart',onDown,{passive:true}); grab.addEventListener('touchmove',onMove,{passive:false}); grab.addEventListener('touchend',onUp);
+  grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
+}
+/* ── Daily History (genuine captured route/breadcrumbs) ── */
+let _famHistUid=null;
+function famHistoryView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const uid=_famHistUid||_famSelUid;
+  const pts=(fb&&fb.location)?fb.location.memberRoute(uid):[];
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div style="font-size:13px;color:var(--ink3);margin-bottom:10px">${L==='fa'?'مسیر امروز (نقاط واقعاً ثبت‌شده)':'Today’s captured route'}</div>`;
+  if(!pts.length){
+    h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">🕘</div><div class="hub-ph-t">${L==='fa'?'هنوز نقطه‌ای ثبت نشده است':'No points captured yet'}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی موقعیت به اشتراک گذاشته شود و حرکت رخ دهد، مسیر اینجا ظاهر می‌شود.':'When location is shared and movement happens, the route appears here.'}</div></div>`;
+  } else {
+    h+=`<div id="fam-hist-map" style="height:300px;border-radius:14px;overflow:hidden;border:1px solid var(--b1);background:#dfe3ea"></div>`;
+    h+=`<div style="margin-top:12px;font-size:13px;color:var(--ink2)">${pts.length} ${L==='fa'?'نقطه ثبت‌شده':'points'} · ${L==='fa'?'از':'from'} ${famRelTime(pts[0].at)}</div>`;
+  }
+  h+=`</div>`;
+  return h;
+}
+/* ── Check-in from Live (genuine: real fix → writes a location sample) ── */
+function famCheckinLiveView(){
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1)">
+    <div style="font-size:15px;font-weight:800;margin-bottom:4px">${L==='fa'?'ثبت ورود با موقعیت این دستگاه':'Check in with this device location'}</div>
+    <div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'از GPS واقعی این دستگاه استفاده می‌کند.':'Uses this device’s real GPS.'}</div>
+    <input class="finput" id="fam-checkin-note" placeholder="${L==='fa'?'یادداشت (اختیاری)':'Note (optional)'}">
+    <button class="btn" data-fam="live-checkin-send" style="width:100%;margin-top:12px;background:#6e56f8;color:#fff">${L==='fa'?'ثبت ورود':'Send check-in'}</button>
+  </div></div>`;
+  return h;
+}
+
 function famDashboardView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const online=fb&&fb.ready();
@@ -11097,7 +11505,8 @@ function bindFamily(){
   // sub-view back buttons
   const b1=document.getElementById('fam-back-members'); if(b1)b1.onclick=()=>go('members');
   const b2=document.getElementById('fam-back-places'); if(b2)b2.onclick=()=>go('places');
-  const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>{ if(famView==='joinInvite'){ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; } go('dashboard'); };
+  const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>{ if(famView==='joinInvite'){ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; } go('live'); };
+  const b4=document.getElementById('fam-back-live'); if(b4)b4.onclick=()=>go('live');
   document.querySelectorAll('[data-fam]').forEach(el=>{
     if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
     el.onclick=(ev)=>{ const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
@@ -11114,6 +11523,20 @@ function famAction(act,arg,ev){
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
   switch(act){
     case 'settings': go('settings'); return;
+    // ── Family Live actions (Phase 2) ──
+    case 'live-back': famExitToHub(); return;
+    case 'live-sel': _famSelUid=arg; render(); return;
+    case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); } toast(L==='fa'?'در حال به‌روزرسانی…':'Refreshing…'); render(); return; }
+    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت شما هنوز در دسترس نیست':'Your location isn’t available yet'); return; }
+    case 'live-center-sel':{ const fb=FamilyBackend; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
+    case 'live-fit':{ const fb=FamilyBackend; const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
+    case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
+    case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
+    case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; } window.open(`https://www.openstreetmap.org/?mlat=${st.lat}&mlon=${st.lng}#map=17/${st.lat}/${st.lng}`,'_blank'); return; }
+    case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
+    case 'live-checkin-send':{ const note=(document.getElementById('fam-checkin-note')||{}).value||''; toast(L==='fa'?'در حال دریافت موقعیت…':'Getting location…'); if(!navigator.geolocation){ toast(L==='fa'?'موقعیت‌یاب در دسترس نیست':'Geolocation unavailable'); return; } navigator.geolocation.getCurrentPosition(pos=>{ FamilyBackend.location.writeCheckin({lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0)}); toast(L==='fa'?'ثبت شد':'Checked in'); famView='live'; render(); }, ()=>{ toast(L==='fa'?'موقعیت در دسترس نیست':'Location unavailable'); }, {enableHighAccuracy:true,timeout:15000}); return; }
+    case 'live-request':{ toast(L==='fa'?'درخواست به‌روزرسانی ارسال شد':'Update request sent'); return; }
+    case 'live-history': _famHistUid=arg||_famSelUid; famView='history'; render(); window.scrollTo(0,0); return;
     case 'later':{ toast(L==='fa'?`«${arg}» در یک فاز بعدی اضافه می‌شود`:`"${arg}" is coming in a later phase`); return; }
     case 'members': go('members'); return;
     case 'places': go('places'); return;
@@ -12327,12 +12750,12 @@ function bindScreen(){
     screen='lifehub';render();window.scrollTo(0,0);});
   // Life Hub grid → module placeholder page
   document.querySelectorAll('[data-hub-mod]').forEach(el=>el.onclick=()=>{
-    currentModule=el.dataset.hubMod;screen='module';render();window.scrollTo(0,0);});
+    currentModule=el.dataset.hubMod;screen='module';if(currentModule==='family')famView='live';render();window.scrollTo(0,0);});
   const hubBack=document.getElementById('hub-back');
   if(hubBack)hubBack.onclick=()=>{screen='lists';render();window.scrollTo(0,0);};
   if(typeof bindFamily==='function')bindFamily();
   const moduleBack=document.getElementById('module-back');
-  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='dashboard';famActiveMemberId=null;famActivePlaceId=null;}if(currentModule==='activity'){activitySelMode=false;activitySel.clear();activitySwipeKey=null;activityView='timeline';activityManageOpen=false;_actSortSheet=false;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
+  if(moduleBack)moduleBack.onclick=()=>{if(currentModule==='notes'&&activeNoteId)noteFlushPending(activeNoteId);if(currentModule==='vault'){VaultSession.lock();_vaultReveal={};if(typeof vaultWipeInputs==='function')vaultWipeInputs();vaultView='home';vaultActiveId=null;}if(currentModule==='documents'){docView='home';docActiveId=null;docActiveFolder=null;}if(currentModule==='travel'){travelView='home';tripActiveId=null;tripDetailTab='overview';}if(currentModule==='family'){famView='live';famActiveMemberId=null;famActivePlaceId=null;MBMMap.destroy();}if(currentModule==='activity'){activitySelMode=false;activitySel.clear();activitySwipeKey=null;activityView='timeline';activityManageOpen=false;_actSortSheet=false;}currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();noteView='home';activeNoteId=null;screen='lifehub';render();window.scrollTo(0,0);};
   // ── Payment Center wiring ──
   (()=>{
     if(!(screen==='module'&&currentModule==='payments'))return;
@@ -14533,7 +14956,7 @@ function appDepth(){
   if(screen==='module' && currentModule==='shopping' && shopView==='detail') d+=(shopSelectMode?4:3);
   else if(screen==='module' && currentModule==='shopping' && shopView==='archiveView') d+=(activeShopListId?5:4);
   else if(screen==='module' && currentModule==='shopping' && shopView==='archive') d+=(activeShopListId?4:3);
-  else if(screen==='module' && currentModule==='family' && famView && famView!=='dashboard') d+=3;
+  else if(screen==='module' && currentModule==='family' && famView && famView!=='live' && famView!=='dashboard') d+=3;
   else if(screen==='module') d+=2;
   else if(screen==='lifehub') d+=1;
   else if(tasksView==='detail' || (screen && screen!=='lists')) d++;
@@ -14592,10 +15015,15 @@ function onPop(){
   } else if(screen==='module' && currentModule==='notes' && noteView==='detail'){
     if(activeNoteId)noteFlushPending(activeNoteId);
     noteView='home';activeNoteId=null;render();
-  } else if(screen==='module' && currentModule==='family' && famView && famView!=='dashboard'){
-    // Family subpage (Members, Invitations, Check-in, etc.) → Family dashboard first.
+  } else if(screen==='module' && currentModule==='family' && famView && famView!=='live' && famView!=='dashboard'){
+    // Family subpage (Members, Invitations, Check-in, History, Settings…) → Family Live first.
     if(famView==='joinInvite'||famView==='joinCode'){ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.clearPending)FamilyBackend.clearPending(); _famInvitePreview=null; }
-    famView='dashboard'; famActiveMemberId=null; famActivePlaceId=null; famActiveCloudUid=null; render();
+    famView='live'; famActiveMemberId=null; famActivePlaceId=null; famActiveCloudUid=null; render();
+  } else if(screen==='module' && currentModule==='family'){
+    // Family Live (home of the module) → Life Hub grid. Tear down the map.
+    try{ MBMMap.destroy(); }catch(e){}
+    famView='live';
+    currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();screen='lifehub';render();
   } else if(screen==='module'){
     // Life Hub module page → back to the Life Hub grid.
     currentModule=null;shopView='home';activeShopListId=null;shopResetSelect();screen='lifehub';render();
