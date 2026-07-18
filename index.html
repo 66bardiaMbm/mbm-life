@@ -1461,7 +1461,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v272';
+const APP_VERSION='v273-diag';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10136,13 +10136,16 @@ const FamilyBackend = (function(){
     try{
       await famRef(fid).set(famDoc);
     }catch(err){
-      console.error('[FamilyBackend.createFamily] family create rejected', {
-        code: err&&err.code, message: err&&err.message,
+      const detail = { code: err&&err.code, message: err&&err.message,
         fid, authUid: uidNow, ownerUidWritten: famDoc.ownerUid,
-        memberKeys: Object.keys(members), myRole: members[uidNow] && members[uidNow].role
-      });
-      throw new Error(err&&err.code==='permission-denied' ? 'permission-denied'
+        memberKeys: Object.keys(members), myRole: members[uidNow] && members[uidNow].role };
+      console.error('[FamilyBackend.createFamily] family create rejected', detail);
+      const e = new Error(err&&err.code==='permission-denied' ? 'permission-denied'
         : err&&err.code==='unavailable' ? 'network-unavailable' : 'create-failed');
+      e.raw = detail;            // expose the EXACT Firestore code+message to the UI
+      e.rawCode = err&&err.code;
+      e.rawMessage = err&&err.message;
+      throw e;
     }
     // The familyLink pointer lives in MY OWN workspace (rule: ws == user_+me),
     // which never depends on the family doc — safe to write separately, and a
@@ -10200,7 +10203,15 @@ const FamilyBackend = (function(){
       // join: add my membership on the family doc
       const patch={}; patch['members.'+myUid()]={ role:inv.role||'adult', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
       patch['updatedAt']=t;
-      await famRef(fid).update(patch);
+      try{
+        await famRef(fid).update(patch);
+      }catch(err){
+        const detail={ code:err&&err.code, message:err&&err.message, fid, authUid:myUid(), inviteRole:inv.role };
+        console.error('[FamilyBackend.redeemInvite] join update rejected', detail);
+        const e=new Error(err&&err.code==='permission-denied'?'permission-denied':err&&err.code==='unavailable'?'network-unavailable':'join-failed');
+        e.raw=detail; e.rawCode=err&&err.code; e.rawMessage=err&&err.message;
+        throw e;
+      }
     }
     await linkRef().set({ familyId:fid, role:(fam.members&&fam.members[myUid()]?fam.members[myUid()].role:(inv.role||'adult')), joinedAt:t });
     // mark single-use invite consumed (multi-use variants can be added later)
@@ -10636,9 +10647,115 @@ const FAM_EVENT_IC={checkin:'📍',sos:'🆘',sos_action:'📞',sos_cancel:'✖'
 function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const av=(typeof avatarById==='function'&&mem.avatarId)?avatarById(mem.avatarId):null; const inner=av?`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${av.bg};font-size:${Math.round(size*0.5)}px">${av.emoji}</div>`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${c};color:#fff;font-weight:800;font-size:${Math.round(size*0.42)}px">${esc((mem.name||'?').slice(0,1).toUpperCase())}</div>`; return `<div style="width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex:none">${inner}</div>`; }
 
 /* ═══ RENDER ═══ */
+/* On-device raw-error surface: shows the EXACT Firestore code+message and the
+   auth/write context verbatim, copyable, so a real-device failure can be
+   diagnosed precisely instead of guessed. Not a friendly translation — the
+   ground truth. */
+function famShowDiag(op, err){
+  const auth=(typeof FB!=='undefined')?FB:{};
+  const cu=(auth.auth&&auth.auth.currentUser)?auth.auth.currentUser:null;
+  const lines=[
+    op+' failed',
+    'code: '+((err&&err.rawCode)||(err&&err.message)||'unknown'),
+    'message: '+((err&&err.rawMessage)||''),
+    'FB.ready: '+(!!auth.ready),
+    'FB.user.uid: '+((auth.user&&auth.user.uid)||'null'),
+    'auth.currentUser.uid: '+((cu&&cu.uid)||'null'),
+    'email: '+((auth.user&&auth.user.email)||'null'),
+    'projectId: '+((auth.app&&auth.app.options&&auth.app.options.projectId)||'null')
+  ];
+  const text=lines.join('\n');
+  let ov=document.getElementById('fam-diag'); if(ov)ov.remove();
+  ov=document.createElement('div'); ov.id='fam-diag';
+  ov.style.cssText='position:fixed;left:12px;right:12px;bottom:12px;z-index:100000;background:#1b1b26;border:1px solid #f43f5e;border-radius:14px;padding:14px;box-shadow:0 10px 40px rgba(0,0,0,.6)';
+  ov.innerHTML='<div style="font-weight:800;color:#f43f5e;font-size:13px;margin-bottom:6px">Diagnostic — send this to support</div>'+
+    '<pre id="fam-diag-text" style="white-space:pre-wrap;word-break:break-word;font-size:11px;color:#e5e7eb;margin:0 0 10px;font-family:monospace">'+esc(text)+'</pre>'+
+    '<div style="display:flex;gap:8px"><button id="fam-diag-copy" class="btn" style="flex:1;padding:9px;background:#6e56f8;color:#fff">Copy</button>'+
+    '<button id="fam-diag-close" class="btn btn-ghost" style="flex:1;padding:9px">Close</button></div>';
+  document.body.appendChild(ov);
+  document.getElementById('fam-diag-copy').onclick=()=>{ try{ navigator.clipboard.writeText(text); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ const r=document.createRange(); r.selectNode(document.getElementById('fam-diag-text')); getSelection().removeAllRanges(); getSelection().addRange(r); try{document.execCommand('copy');toast('Copied');}catch(_){} } };
+  document.getElementById('fam-diag-close').onclick=()=>ov.remove();
+}
 function famExitToHub(){
   MBMMap.destroy();
   currentModule=null; screen='lifehub'; render(); window.scrollTo(0,0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FAMILY DIAGNOSTICS — runs REAL, ISOLATED Firestore probes on the device
+   and reports the EXACT code/message for EACH one. No root-cause guessing:
+   this shows ground truth so the actual failing operation is identified.
+   Opened from Family Settings → "Run diagnostics". Writes go to a throwaway
+   path the rules already allow (the user's OWN workspace) plus the real
+   family create path, each awaited and reported independently.
+   ═══════════════════════════════════════════════════════════════════════ */
+let _famDiagResults=null, _famDiagRunning=false;
+async function famRunDiagnostics(){
+  if(_famDiagRunning) return;
+  _famDiagRunning=true; _famDiagResults=[]; render();
+  const R=_famDiagResults;
+  const push=(label,ok,detail)=>{ R.push({label,ok,detail}); render(); };
+  const auth=(typeof FB!=='undefined')?FB:{};
+  const cu=(auth.auth&&auth.auth.currentUser)?auth.auth.currentUser:null;
+
+  // 1) Environment (no writes) — the facts that usually explain permission-denied.
+  push('App version', true, (typeof APP_VERSION!=='undefined')?APP_VERSION:'?');
+  push('FB.ready', !!auth.ready, String(!!auth.ready));
+  push('projectId', !!(auth.app&&auth.app.options), (auth.app&&auth.app.options&&auth.app.options.projectId)||'null');
+  push('FB.user.uid', !!(auth.user&&auth.user.uid), (auth.user&&auth.user.uid)||'null');
+  push('auth.currentUser.uid', !!(cu&&cu.uid), (cu&&cu.uid)||'null');
+  push('uids match', !!(auth.user&&cu&&auth.user.uid===cu.uid), (auth.user&&cu)?(auth.user.uid===cu.uid?'yes':'NO — mismatch'):'n/a');
+
+  // 2) Live ID token — proves request.auth will be non-null server-side.
+  try{
+    if(cu&&cu.getIdToken){ const tok=await cu.getIdToken(); push('ID token', !!tok, tok?('present, len '+tok.length):'EMPTY'); }
+    else push('ID token', false, 'no currentUser.getIdToken');
+  }catch(e){ push('ID token', false, 'code='+(e&&e.code)+' msg='+(e&&e.message)); }
+
+  const uid=(cu&&cu.uid)||(auth.user&&auth.user.uid);
+  const db=auth.db;
+
+  // 3) PROBE A — write to my OWN workspace (rule: ws == 'user_'+me()). If THIS
+  //    fails, the problem is auth/token, not the family rules.
+  try{
+    await db.collection('workspaces').doc('user_'+uid).collection('_diag').doc('probe').set({t:Date.now()});
+    push('Write own workspace', true, 'OK');
+  }catch(e){ push('Write own workspace', false, 'code='+(e&&e.code)+' | '+(e&&e.message)); }
+
+  // 4) PROBE B — the REAL family create write, to a throwaway family id.
+  try{
+    const t=new Date().toISOString();
+    const fid='diag_'+uid+'_'+Date.now().toString(36);
+    const members={}; members[uid]={role:'owner',name:'diag',photo:null,joinedAt:t};
+    await db.collection('families').doc(fid).set({ name:'diag', ownerUid:uid, members, settings:{locationSharing:{enabled:false,precise:true}}, createdAt:t, updatedAt:t });
+    push('Create family doc', true, 'OK — fid '+fid);
+    // clean up (best effort; delete allowed for owner)
+    try{ await db.collection('families').doc(fid).delete(); push('Delete diag family', true, 'OK'); }
+    catch(e){ push('Delete diag family', false, 'code='+(e&&e.code)+' | '+(e&&e.message)); }
+  }catch(e){ push('Create family doc', false, 'code='+(e&&e.code)+' | '+(e&&e.message)); }
+
+  _famDiagRunning=false; render();
+}
+function famDiagView(){
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=`<div style="font-size:13px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'این صفحه چند نوشتن واقعی و ایزوله روی Firestore انجام می‌دهد و نتیجهٔ دقیق هرکدام را نشان می‌دهد. هیچ حدسی زده نمی‌شود.':'This runs real, isolated Firestore probes and shows the exact result of each. No guessing.'}</div>`;
+  h+=`<button class="btn" data-fam="diag-run" style="width:100%;background:#6e56f8;color:#fff;margin-bottom:14px"${_famDiagRunning?' disabled':''}>${_famDiagRunning?(L==='fa'?'در حال اجرا…':'Running…'):(L==='fa'?'اجرای تشخیص':'Run diagnostics')}</button>`;
+  if(_famDiagResults){
+    _famDiagResults.forEach(r=>{
+      const c=r.ok?'#22c55e':'#f43f5e';
+      h+=`<div style="display:flex;gap:10px;padding:10px 12px;border:1px solid var(--b1);border-radius:10px;margin-bottom:8px;background:var(--s1)">
+        <span style="color:${c};font-weight:800;flex:none">${r.ok?'✓':'✕'}</span>
+        <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">${esc(r.label)}</div>
+        <div style="font-size:11px;color:var(--ink3);word-break:break-word;font-family:monospace">${esc(String(r.detail))}</div></div>
+      </div>`;
+    });
+    if(!_famDiagRunning && _famDiagResults.length){
+      const txt=_famDiagResults.map(r=>(r.ok?'OK ':'FAIL ')+r.label+': '+r.detail).join('\n');
+      h+=`<button class="btn btn-ghost" data-fam="diag-copy" data-arg="${encodeURIComponent(txt)}" style="width:100%;margin-top:6px">${L==='fa'?'کپی نتیجه':'Copy results'}</button>`;
+    }
+  }
+  h+=`</div>`;
+  return h;
 }
 function renderFamily(){
   famInit();
@@ -10663,6 +10780,7 @@ function renderFamily(){
   if(famView==='sos') return head('SOS','fam-back-dash')+famLaterView('SOS',L==='fa'?'فاز ۵ — ایمنی پیشرفته':'Phase 5 — Advanced Safety','🆘');
   if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famLaterView(L==='fa'?'تایم‌لاین':'Timeline',L==='fa'?'فاز ۲':'Phase 2','🕘');
   if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-live')+famSettingsView();
+  if(famView==='diag') return head(L==='fa'?'تشخیص':'Diagnostics','fam-back-settings')+famDiagView();
   return famLiveView();
 }
 
@@ -11471,6 +11589,8 @@ function famSettingsView(){
     } else {
       h+=`<div style="font-size:13px;color:var(--ink2)">${L==='fa'?'برای مدیریت فضای ابری خانواده باید آنلاین باشید.':'Go online to manage the cloud family space.'}</div>`;
     }
+    // Always-available diagnostics entry (needed most when there's no cloud family yet).
+    h+=`<button class="btn btn-ghost" data-fam="diag-open" style="width:100%;margin-top:18px;font-size:13px">${L==='fa'?'🩺 اجرای تشخیص (بررسی خطای واقعی)':'🩺 Run diagnostics (find the real error)'}</button>`;
   }
   else if(famSettingsTab==='members')h+=famTile('👥',L==='fa'?'مدیریت اعضا':'Manage members','members');
   else if(famSettingsTab==='invitations')h+=famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites');
@@ -11544,6 +11664,7 @@ function bindFamily(){
   const b2=document.getElementById('fam-back-places'); if(b2)b2.onclick=()=>go('places');
   const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>{ if(famView==='joinInvite'){ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; } go('live'); };
   const b4=document.getElementById('fam-back-live'); if(b4)b4.onclick=()=>go('live');
+  const b5=document.getElementById('fam-back-settings'); if(b5)b5.onclick=()=>go('settings');
   document.querySelectorAll('[data-fam]').forEach(el=>{
     if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
     el.onclick=(ev)=>{ const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
@@ -11560,6 +11681,9 @@ function famAction(act,arg,ev){
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
   switch(act){
     case 'settings': go('settings'); return;
+    case 'diag-open': famView='diag'; _famDiagResults=null; render(); window.scrollTo(0,0); return;
+    case 'diag-run': famRunDiagnostics(); return;
+    case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
     case 'live-sel': _famSelUid=arg; render(); return;
@@ -11622,7 +11746,7 @@ function famAction(act,arg,ev){
       }).catch((err)=>{ console.error('[inv-create]',err&&err.message,err); toast(L==='fa'?'ساخت دعوت ناموفق بود':'Could not create invitation'); });
       return; }
     // ── Phase 1 cloud actions ──
-    case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch((err)=>{ console.error('[cloud-create]', err&&err.message, err); const m=(err&&err.message)||''; let msg; if(m==='permission-denied')msg=L==='fa'?'دسترسی رد شد — قوانین امنیتی Firestore را بررسی کنید':'Permission denied — check Firestore security rules'; else if(m==='network-unavailable')msg=L==='fa'?'شبکه در دسترس نیست — دوباره تلاش کنید':'Network unavailable — try again'; else if(m==='no-auth-uid')msg=L==='fa'?'ورود شما تأیید نشد — دوباره وارد شوید':'Not signed in properly — please sign in again'; else msg=L==='fa'?'ساخت فضای ابری ناموفق بود':'Could not create cloud space'; toast(msg,3200); }); return; }
+    case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch((err)=>{ console.error('[cloud-create]', err&&err.rawCode, err&&err.rawMessage, err); famShowDiag('Create cloud family', err); }); return; }
     case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch((err)=>{ console.error('[cloud-rename]',err&&err.message,err); toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
     case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='live'; render(); }).catch((err)=>{ console.error('[cloud-leave]',err&&err.message,err); toast(L==='fa'?'خروج ناموفق بود':'Could not leave family'); }); return; }
@@ -11635,7 +11759,7 @@ function famAction(act,arg,ev){
     case 'cmember-role':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; if(fb.myServerRole()!=='owner'){ toast(L==='fa'?'تغییر نقش فقط توسط مالک':'Only the owner can change roles'); return; } fb.setRole(famActiveCloudUid,arg).then(()=>{ toast(L==='fa'?'نقش تغییر کرد':'Role updated'); render(); }).catch((err)=>{ console.error('[cmember-role]',err&&err.message,err); toast(L==='fa'?'تغییر نقش ناموفق بود':'Could not update role'); }); return; }
     case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!confirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch((err)=>{ console.error('[cmember-remove]',err&&err.message,err); toast(L==='fa'?'حذف عضو ناموفق بود':'Could not remove member'); }); return; }
     // ── In-app invite redemption (deep-link / manual code) ──
-    case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='live'; render(); }).catch(e=>{ const m=(e&&e.message)||''; toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):m==='own-invite'?(L==='fa'?'این دعوت متعلق به خودتان است':'This is your own invite'):(L==='fa'?'پیوستن ناموفق بود':'Join failed')); }); return; }
+    case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code)return; toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='live'; render(); }).catch(e=>{ const m=(e&&e.message)||''; if(m==='expired'||m==='revoked'||m==='notfound'||m==='own-invite'){ toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'این دعوت متعلق به خودتان است':'This is your own invite')); } else { console.error('[join-accept]', e&&e.rawCode, e&&e.rawMessage, e); famShowDiag('Join with code', e); } }); return; }
     case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='live'; render(); return; }
     case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'join-code-go':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const el=document.getElementById('fam-join-code'); const code=(el?el.value:'').trim().toUpperCase(); if(!code){ toast(L==='fa'?'کد را وارد کنید':'Enter a code'); return; } fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); window.scrollTo(0,0); return; }
