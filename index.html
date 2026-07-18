@@ -1333,6 +1333,7 @@ body.rtl .trow-content{text-align:right}
 .fam-pin.tone-warn .fam-pin-ring{border-color:#f59e0b}
 .fam-pin.tone-muted{opacity:.65}.fam-pin.tone-muted .fam-pin-ring{border-color:#94a3b8}
 @keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+@keyframes famspin{to{transform:rotate(360deg)}}
 .fam-pin-tip{position:absolute;left:50%;bottom:6px;width:10px;height:10px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
 .fam-pin-name{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);background:rgba(20,20,28,.82);color:#fff;
   font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap;pointer-events:none}
@@ -1476,7 +1477,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v276';
+const APP_VERSION='v278';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -9999,8 +10000,6 @@ let famActiveMemberId=null;
 let famActiveCloudUid=null;
 let famActivePlaceId=null;
 let famSettingsTab='family';
-let _famSOS={timer:null,remaining:0,pos:null,gettingPos:false};
-let _famCheckin={pos:null,note:'',placeId:'',getting:false};
 
 /* ── Roles & permissions ── */
 const FAM_ROLES=['owner','admin','adult','child','guest'];
@@ -10654,15 +10653,32 @@ function famInit(){
   };
   famMembersMap()[ownerId]={ id:ownerId, name:(DB.meta.displayName||'Me'), relationship:(L==='fa'?'خودم':'Me'), role:'owner', avatarId:(DB.meta.avatar||null), color:'#ec4899', self:true, createdAt:t, updatedAt:t };
 }
-function famSelf(){ const m=famMembersMap(); return m[famCfg().selfId]||Object.values(m).find(x=>x.role==='owner')||null; }
 /* Has the user EXPLICITLY confirmed their profile (name), rather than the
    app silently inheriting whatever Google Auth returned? DB.meta.profileConfirmed
    is set ONLY by the explicit "Save" action on the profile-setup screen. */
 function famProfileComplete(){ return !!(DB.meta.profileConfirmed && (DB.meta.displayName||'').trim()); }
-function famSelfName(){ const s=famSelf(); if(!s)return DB.meta.displayName||'Me'; const ph=!s.name||s.name==='Me'||s.name==='خودم'; return (ph&&DB.meta.displayName)?DB.meta.displayName:(s.name||DB.meta.displayName||'Me'); }
+/* The real display name is simply the confirmed profile name — no longer
+   sourced from (or written back to) the legacy local "member" record. */
+function famSelfName(){ return (DB.meta.displayName||'').trim() || 'Me'; }
 function famMemberWord(n){ return (L==='fa')?'عضو':(n===1?'member':'members'); }
-function famRole(){ const s=famSelf(); return s?s.role:'guest'; }
-function famCan(cap){ const need=famCfg().perms[cap]||FAM_CAP_DEFAULT[cap]||'owner'; return (FAM_ROLE_RANK[famRole()]||0) >= (FAM_ROLE_RANK[need]||5); }
+/* The single source of truth for "what can I do": when a real cloud family
+   exists, this is the ACTUAL Firestore membership role — never the old
+   local fake-owner default. Only falls back to local-only defaults when
+   there is genuinely no cloud family (offline-first use before any cloud
+   family was ever created). */
+function famRole(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(fb&&fb.ready&&fb.ready()&&fb.isMember&&fb.isMember()){
+    return fb.myServerRole()||'guest';
+  }
+  return 'owner'; // no cloud family yet: solo local use, acting as your own owner
+}
+function famCan(cap){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const inCloud=!!(fb&&fb.ready&&fb.ready()&&fb.isMember&&fb.isMember());
+  const need=(inCloud?null:famCfg().perms[cap])||FAM_CAP_DEFAULT[cap]||'owner';
+  return (FAM_ROLE_RANK[famRole()]||0) >= (FAM_ROLE_RANK[need]||5);
+}
 function famModuleShared(id){ const s=famCfg().shared[id]; return !!(s&&s.enabled); }
 
 function famLog(type,meta){ const id=uid(); famTimelineMap()[id]={ id, type, at:now(), meta:meta||{} }; }
@@ -10859,7 +10875,6 @@ function renderFamily(){
   // ── FAMILY LIVE is the default, map-first Family screen (Phase 2). ──
   if(famView==='live'||famView==='dashboard') return famLiveView();
   if(famView==='members') return head(L==='fa'?'اعضای خانواده':'Family Members')+famMembersView();
-  if(famView==='memberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famMemberEditView();
   if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places','fam-back-dash')+famLaterView(L==='fa'?'مکان‌ها و هشدارها':'Places & alerts',L==='fa'?'فاز ۳':'Phase 3','📌');
   if(famView==='placeEdit') return head(L==='fa'?'مکان':'Place','fam-back-places')+famPlaceEditView();
   if(famView==='cmemberEdit') return head(L==='fa'?'عضو':'Member','fam-back-members')+famCloudMemberEditView();
@@ -11042,6 +11057,13 @@ function famRelTime(iso){
   const h=Math.floor(m/60); if(h<24) return L==='fa'?`${h} ساعت پیش`:`${h} hr ago`;
   const d=Math.floor(h/24); return L==='fa'?`${d} روز پیش`:`${d} d ago`;
 }
+/* Absolute clock time, so the honest relative label ("now"/"3 min ago") is
+   independently verifiable by the user — not just a claim to trust. */
+function famAbsTime(iso){
+  const t=Date.parse(iso||''); if(isNaN(t))return '';
+  const d=new Date(t);
+  return d.toLocaleTimeString(L==='fa'?'fa-IR':undefined,{hour:'2-digit',minute:'2-digit'});
+}
 /* Duration since a timestamp, e.g. "2 hr 40 min" (for stay duration). */
 function famDurSince(iso){
   const t=Date.parse(iso||''); if(isNaN(t))return '';
@@ -11116,16 +11138,22 @@ function famLiveView(){
   // member sheet — ALWAYS in normal document flow (see CSS), never depends
   // on JS positioning to be visible.
   h+=`<div id="fam-sheet"><div class="fam-sheet-grab"></div><div class="fam-sheet-body">`;
-  // presence strip: every family member, name + short live status each
-  h+=`<div class="fam-presence">`;
-  members.forEach(m=>{
-    h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
-      <div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
-      <div class="nm">${esc(m.name)}</div>
-      <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famLiveStatusLine(m))}</div>
-    </div>`;
-  });
-  h+=`</div>`;
+  // Presence strip: only shown when there's more than one member to switch
+  // between — with a single member (yourself), showing your own card twice
+  // in a row (strip + detail) is redundant clutter, not real UX.
+  if(members.length>1){
+    h+=`<div class="fam-presence">`;
+    members.forEach(m=>{
+      h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
+        <div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>
+        <div class="nm">${esc(m.name)}</div>
+        <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famLiveStatusLine(m))}</div>
+      </div>`;
+    });
+    h+=`</div>`;
+  } else if(members.length===1){
+    h+=`<div style="font-size:11px;color:var(--ink3);padding:4px 2px 2px">${L==='fa'?'شما تنها عضو خانواده هستید — با دعوت دیگران، آن‌ها اینجا ظاهر می‌شوند.':'You’re the only family member — invite others to see them here.'}</div>`;
+  }
   // selected member detail
   if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
   h+=`</div></div>`; // sheet-body, sheet
@@ -11185,7 +11213,7 @@ function famLiveMemberDetail(m, isMe){
     if(place) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مکان':'Place'}</div><div class="val">📍 ${esc(place.name)}</div></div>`;
     if(s.stayStart&&!s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت اقامت':'Time here'}</div><div class="val">${famDurSince(s.stayStart)}</div></div>`;
     if(s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">🚶 ${L==='fa'?'در حال حرکت':'Moving'}</div></div>`;
-    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div></div>`;
+    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:10px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
     if(s.accuracy!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">±${s.accuracy}m</div></div>`;
     if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">🔋 ${s.battery}%</div></div>`;
     h+=`</div>`;
@@ -11308,69 +11336,27 @@ function famHistoryView(){
   return h;
 }
 /* ── Check-in from Live (genuine: real fix → writes a location sample) ── */
+let _famCheckinPending=false, _famCheckinError=null, _famCheckinWatchId=null;
 function famCheckinLiveView(){
   let h=`<div style="padding:0 16px 90px">`;
   h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1)">
     <div style="font-size:15px;font-weight:800;margin-bottom:4px">${L==='fa'?'ثبت ورود با موقعیت این دستگاه':'Check in with this device location'}</div>
     <div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'از GPS واقعی این دستگاه استفاده می‌کند.':'Uses this device’s real GPS.'}</div>
-    <input class="finput" id="fam-checkin-note" placeholder="${L==='fa'?'یادداشت (اختیاری)':'Note (optional)'}">
-    <button class="btn" data-fam="live-checkin-send" style="width:100%;margin-top:12px;background:#6e56f8;color:#fff">${L==='fa'?'ثبت ورود':'Send check-in'}</button>
-  </div></div>`;
-  return h;
-}
-
-function famDashboardView(){
-  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  const online=fb&&fb.ready();
-  const inCloud=online&&fb.isMember();
-  const st=inCloud?fb.getState():null;
-  const pend=Object.values(famInvitesMap()).filter(i=>i&&i.server&&famInviteStatus(i)==='pending').length;
-  const s=famSelf();
-  const memCount = inCloud ? st.memberCount : Object.values(famMembersMap()).length;
-  const myRoleLabel = inCloud ? famRoleLabel(fb.myServerRole()||s.role) : famRoleLabel(s.role);
-  const famName = inCloud ? (st.name||(L==='fa'?'خانواده':'Family')) : (L==='fa'?'خانواده محلی':'Local family');
-  let h=`<div style="padding:0 16px 90px">`;
-
-  // ── ONE unified identity + cloud-status card (no duplicate banners) ──
-  const statusChip = !online
-    ? `<span class="chip" style="background:#94a3b822;color:#94a3b8">${L==='fa'?'آفلاین':'Offline'}</span>`
-    : inCloud
-      ? `<span class="chip" style="background:#22c55e22;color:#22c55e">${L==='fa'?'متصل به ابر':'Connected'}</span>`
-      : `<span class="chip" style="background:#f59e0b22;color:#f59e0b">${L==='fa'?'فقط این دستگاه':'Local only'}</span>`;
-  h+=`<div style="padding:14px;border-radius:16px;background:linear-gradient(135deg,#ec489918,#6e56f818);border:1px solid var(--b1);margin-bottom:12px">
-    <div style="display:flex;align-items:center;gap:12px">
-      ${famAvatar(s,48)}
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(famSelfName())}</div>
-        <div style="font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${myRoleLabel} · ${memCount} ${famMemberWord(memCount)}</div>
-      </div>
-      <span style="flex:none">${statusChip}</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--b1)">
-      <div style="flex:1;min-width:0;font-size:13px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" dir="auto">${esc(famName)}</div>
-      <button class="btn btn-ghost" data-fam="settings" style="flex:none;width:auto;padding:8px 16px;font-size:13px;white-space:nowrap">${L==='fa'?'مدیریت':'Manage'}</button>
+    <input class="finput" id="fam-checkin-note" placeholder="${L==='fa'?'یادداشت (اختیاری)':'Note (optional)'}" ${_famCheckinPending?'disabled':''}>`;
+  if(_famCheckinPending){
+    h+=`<div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding:12px;border-radius:10px;background:var(--s2)">
+      <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--ink3);border-top-color:transparent;animation:famspin .8s linear infinite"></div>
+      <div style="font-size:13px;color:var(--ink2)">${L==='fa'?'در حال دریافت موقعیت واقعی از GPS…':'Getting real location from GPS…'}</div>
     </div>`;
-  if(online && !inCloud){
-    h+=`<div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn" data-fam="cloud-create" style="flex:1;min-width:130px">${L==='fa'?'ساخت فضای ابری':'Create cloud space'}</button>
-      <button class="btn btn-ghost" data-fam="cloud-join" style="flex:1;min-width:130px">${L==='fa'?'پیوستن با کد':'Join with code'}</button></div>`;
+    h+=`<button class="btn btn-ghost" data-fam="live-checkin-cancel" style="width:100%;margin-top:10px">${L==='fa'?'لغو':'Cancel'}</button>`;
+  } else {
+    if(_famCheckinError) h+=`<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(244,63,94,.12);color:var(--danger);font-size:12px">${esc(_famCheckinError)}</div>`;
+    h+=`<button class="btn" data-fam="live-checkin-send" style="width:100%;margin-top:12px;background:#6e56f8;color:#fff">${_famCheckinError?(L==='fa'?'تلاش مجدد':'Try again'):(L==='fa'?'ثبت ورود':'Send check-in')}</button>`;
   }
-  h+=`</div>`;
-
-  // ── PHASE 1 features (fully usable) ──
-  h+=famTile('👥',L==='fa'?'اعضا':'Members','members',`${memCount} ${famMemberWord(memCount)}`);
-  h+=`<div style="height:8px"></div>`+famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites',pend?`${pend} ${L==='fa'?'در انتظار — برای مشاهده بزنید':'pending — tap to view'}`:(L==='fa'?'دعوت عضو جدید':'invite a member'));
-
-  // ── LATER-PHASE features (clearly marked, not fake-functional) ──
-  h+=`<div style="margin:20px 2px 8px;font-size:12px;font-weight:800;color:var(--ink3)">${L==='fa'?'به‌زودی در فازهای بعد':'Coming in later phases'}</div>`;
-  h+=famLaterTile('🗺',L==='fa'?'نقشه و موقعیت زنده':'Live map & location',L==='fa'?'فاز ۲':'Phase 2');
-  h+=`<div style="height:8px"></div>`+famLaterTile('📍',L==='fa'?'ثبت ورود':'Check-in',L==='fa'?'فاز ۲':'Phase 2');
-  h+=`<div style="height:8px"></div>`+famLaterTile('📌',L==='fa'?'مکان‌ها و هشدارها':'Places & alerts',L==='fa'?'فاز ۳':'Phase 3');
-  h+=`<div style="height:8px"></div>`+famLaterTile('🆘','SOS',L==='fa'?'فاز ۵':'Phase 5');
-
-  h+=`</div>`;
+  h+=`</div></div>`;
   return h;
 }
+
 function famWhen(at){ const d=new Date(at); return isNaN(d)?'':d.toLocaleString(L==='fa'?'fa-IR':'en-AU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 
 /* ── Members ── */
@@ -11380,11 +11366,11 @@ function famMembersView(){
   let h=`<div style="padding:0 16px 90px">`;
 
   if(inCloud){
-    // ── Authoritative cloud roster (real accounts) ──
+    // ── Authoritative cloud roster (real accounts only) ──
     const st=fb.getState(); const myUid=(FB.user&&FB.user.uid)||null;
     const rows=Object.keys(st.members||{}).map(u=>Object.assign({uid:u},st.members[u]))
       .sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0));
-    h+=`<div style="font-size:12px;font-weight:800;color:var(--ink2);margin:2px 2px 8px">${L==='fa'?'اعضای فضای ابری':'Cloud members'} · ${rows.length}</div>`;
+    h+=`<div style="font-size:12px;font-weight:800;color:var(--ink2);margin:2px 2px 8px">${L==='fa'?'اعضای خانواده':'Family members'} · ${rows.length}</div>`;
     rows.forEach(m=>{
       const isMe=m.uid===myUid;
       const av={color:m.color||'#6e56f8',name:m.name||'?',avatarId:null};
@@ -11395,61 +11381,19 @@ function famMembersView(){
           <div style="font-size:12px;color:var(--ink3)">${famRoleLabel(m.role)}</div></div>
         ${canManage?'<span style="color:var(--ink3);opacity:.4">›</span>':''}</div>`;
     });
-    // Invite entry
     if(famCan('sendInvites')) h+=`<button class="btn" data-fam="invites" style="width:100%;margin-top:14px">✉ ${L==='fa'?'دعوت عضو جدید':'Invite a member'}</button>`;
-
-    // ── Local-only members (created before/without cloud): kept, clearly separated ──
-    const locals=Object.values(famMembersMap()).filter(m=>!m.self);
-    if(locals.length){
-      h+=`<div style="font-size:12px;font-weight:800;color:var(--ink2);margin:20px 2px 8px">${L==='fa'?'یادداشت‌های محلی (بدون حساب)':'Local notes (no account)'}</div>`;
-      h+=`<div style="font-size:11px;color:var(--ink3);margin:0 2px 8px">${L==='fa'?'این‌ها فقط روی این دستگاه ذخیره شده‌اند و بخشی از فضای ابری نیستند.':'These are stored only on this device and are not part of the cloud space.'}</div>`;
-      locals.sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0)).forEach(mem=>{
-        h+=`<div class="ul-row" data-fam="member-open" data-arg="${mem.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer;opacity:.85">
-          ${famAvatar(mem,44)}
-          <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(mem.name)}</div>
-            <div style="font-size:12px;color:var(--ink3)">${esc(mem.relationship||'')}${mem.relationship?' · ':''}${famRoleLabel(mem.role)}</div></div>
-          <span style="color:var(--ink3);opacity:.4">›</span></div>`;
-      });
-    }
     h+=`</div>`; return h;
   }
 
-  // ── Not in a cloud family: local family only (original behaviour) ──
-  const list=Object.values(famMembersMap()).sort((a,b)=>(FAM_ROLE_RANK[b.role]||0)-(FAM_ROLE_RANK[a.role]||0));
-  if(famCan('manageMembers')) h+=`<button class="btn" data-fam="member-new" style="width:100%;margin-bottom:12px">＋ ${L==='fa'?'افزودن عضو':'Add member'}</button>`;
-  else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'برای افزودن عضو نیاز به دسترسی مدیر است.':'Adding members requires admin permission.'}</div>`;
-  list.forEach(mem=>{ h+=`<div class="ul-row" data-fam="member-open" data-arg="${mem.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
-    ${famAvatar(mem,44)}
-    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(mem.self?famSelfName():mem.name)}${mem.self?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
-      <div style="font-size:12px;color:var(--ink3)">${esc(mem.relationship||'')}${mem.relationship?' · ':''}${famRoleLabel(mem.role)}</div></div>
-    <span style="color:var(--ink3);opacity:.4">›</span></div>`; });
-  h+=`</div>`; return h;
-}
-function famMemberEditView(){
-  const mem=famMembersMap()[famActiveMemberId]; if(!mem)return `<div style="padding:20px">—</div>`;
-  const canRole=famCan('assignRoles')&&!mem.self;
-  const canRemove=famCan('manageMembers')&&!mem.self&&mem.role!=='owner';
-  // For the self member, prefer the profile display name when the member name
-  // is empty or still the seeded placeholder ("Me"/"خودم"), so the field is never blank/generic.
-  const _selfPlaceholder = !mem.name || mem.name==='Me' || mem.name==='خودم' || mem.name===(L==='fa'?'خودم':'Me');
-  const shownName = mem.self ? ((_selfPlaceholder && DB.meta.displayName) ? DB.meta.displayName : (mem.name||'')) : (mem.name||'');
-  let h=`<div style="padding:0 16px 90px">`;
-  // Self member: tapping the avatar opens the shared profile photo/avatar picker.
-  if(mem.self){
-    h+=`<div style="display:flex;justify-content:center;padding:8px 0 4px"><button data-fam="member-photo" style="border:none;background:none;padding:0;cursor:pointer;position:relative">${famAvatar(mem,72)}<span style="position:absolute;right:-2px;bottom:-2px;width:26px;height:26px;border-radius:50%;background:var(--brand);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:12px">✏️</span></button></div>`;
-    h+=`<div style="text-align:center;font-size:11px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'برای تغییر عکس بزنید':'Tap to change photo'}</div>`;
-  } else {
-    h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(mem,72)}</div>`;
-  }
-  h+=`<label class="fl">${L==='fa'?'نام':'Name'}</label><input class="finput" id="fam-m-name" value="${esc(shownName)}" placeholder="${L==='fa'?'نام نمایشی':'Display name'}">`;
-  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نسبت':'Relationship'}</label><input class="finput" id="fam-m-rel" value="${esc(mem.relationship||'')}" placeholder="${L==='fa'?'همسر، فرزند…':'spouse, child…'}">`;
-  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نقش':'Role'}</label>`;
-  const shownRole=mem._pendRole||mem.role;
-  h+=`<div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.map(r=>`<button class="pay-chip${shownRole===r?' on':''}" ${canRole?`data-fam="member-role" data-arg="${r}"`:'disabled'} ${(r==='owner')?'style="display:none"':''}>${famRoleLabel(r)}</button>`).join('')}</div>`;
-  if(!canRole&&!mem.self)h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نقش فقط توسط مالک.':'Only the owner can change roles.'}</div>`;
-  h+=`<button class="btn" data-fam="member-save" style="width:100%;margin-top:16px">${L==='fa'?'ذخیره':'Save'}</button>`;
-  if(!mem.self&&mem.role!=='owner'&&famCan('assignRoles'))h+=`<button class="btn btn-ghost" data-fam="member-transfer" style="width:100%;margin-top:8px">👑 ${L==='fa'?'انتقال مالکیت به این عضو':'Transfer ownership'}</button>`;
-  if(canRemove)h+=`<button class="btn btn-ghost" data-fam="member-remove" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'حذف عضو':'Remove member'}</button>`;
+  // ── No cloud family yet: real members require a real cloud family.
+  //    No fictional local "member" records — direct to Create/Join. ──
+  h+=`<div style="text-align:center;padding:30px 10px">
+    <div style="font-size:34px;margin-bottom:10px">👨‍👩‍👧‍👦</div>
+    <div style="font-weight:800;font-size:16px;margin-bottom:6px">${L==='fa'?'هنوز خانواده‌ای ندارید':'No family yet'}</div>
+    <div style="font-size:13px;color:var(--ink3);margin-bottom:18px">${L==='fa'?'برای داشتن اعضای واقعی، ابتدا یک خانواده بسازید یا به خانواده‌ای بپیوندید.':'Real members require a real family. Create one or join with a code first.'}</div>
+    <button class="btn" data-fam="cloud-create" style="width:100%;background:#6e56f8;color:#fff;margin-bottom:8px">➕ ${L==='fa'?'ساخت خانواده':'Create Family'}</button>
+    <button class="btn btn-ghost" data-fam="cloud-join" style="width:100%">🔑 ${L==='fa'?'پیوستن با کد':'Join with code'}</button>
+  </div>`;
   h+=`</div>`; return h;
 }
 
@@ -11623,79 +11567,6 @@ function famInvitesView(){
 }
 
 /* ── Check-in ── */
-function famCheckinView(){
-  const places=Object.values(famPlacesMap());
-  let h=`<div style="padding:0 16px 90px">`;
-  h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:16px;background:var(--s1)">
-    <div style="font-weight:700;margin-bottom:6px">${L==='fa'?'ثبت ورود با موقعیت این دستگاه':'Check in with this device location'}</div>
-    <div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'موقعیت واقعی همین گوشی از طریق GPS مرورگر گرفته می‌شود.':'Uses this phone’s real GPS via the browser.'}</div>`;
-  if(_famCheckin.pos){ const p=_famCheckin.pos; h+=`<div style="font-size:13px;margin-bottom:10px">📍 ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} <span style="color:var(--ink3)">(±${Math.round(p.acc)}m)</span> · <a href="https://maps.google.com/?q=${p.lat},${p.lon}" target="_blank" style="color:var(--brand)">${L==='fa'?'نقشه':'map'}</a></div>`; }
-  h+=`<button class="btn btn-ghost" data-fam="ci-locate" style="width:100%;margin-bottom:10px">${_famCheckin.getting?(L==='fa'?'در حال گرفتن موقعیت…':'Locating…'):(L==='fa'?'📍 گرفتن موقعیت':'📍 Get location')}</button>`;
-  if(places.length){ h+=`<label class="fl">${L==='fa'?'مقصد (اختیاری)':'Destination (optional)'}</label><select class="finput" id="fam-ci-place"><option value="">—</option>${places.map(p=>`<option value="${p.id}" ${_famCheckin.placeId===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`; }
-  h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'یادداشت':'Note'}</label><input class="finput" id="fam-ci-note" value="${esc(_famCheckin.note||'')}" placeholder="${L==='fa'?'رسیدم به خانه':'Arrived home'}">`;
-  h+=`<button class="btn" data-fam="ci-send" style="width:100%;margin-top:14px" ${_famCheckin.pos?'':'disabled'}>${L==='fa'?'ثبت ورود':'Send check-in'}</button>`;
-  h+=`<button class="btn btn-ghost" data-fam="ci-emergency" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'ثبت ورود اضطراری':'Emergency check-in'}</button>`;
-  h+=`</div></div>`; return h;
-}
-
-/* ── SOS ── */
-function famSOSView(){
-  const cfg=famCfg().sos; const members=Object.values(famMembersMap()).filter(m=>!m.self);
-  let h=`<div style="padding:0 16px 90px">`;
-  if(_famSOS.remaining>0){
-    h+=`<div style="text-align:center;padding:30px 16px;border:2px solid var(--danger);border-radius:18px;background:#ef444410">
-      <div style="font-size:15px;color:var(--danger);font-weight:800;margin-bottom:8px">${L==='fa'?'ارسال SOS در':'Sending SOS in'}</div>
-      <div style="font-size:64px;font-weight:900;color:var(--danger)">${_famSOS.remaining}</div>
-      <button class="btn" data-fam="sos-cancel" style="width:100%;margin-top:16px;background:var(--ink);color:var(--bg)">${L==='fa'?'لغو':'Cancel'}</button></div>`;
-    h+=`</div>`; return h;
-  }
-  if(_famSOS.pos){ const p=_famSOS.pos; const link=`https://maps.google.com/?q=${p.lat},${p.lon}`;
-    const body=encodeURIComponent((L==='fa'?'اضطراری! موقعیت من: ':'EMERGENCY! My location: ')+link);
-    const contacts=cfg.emergencyContacts||[];
-    h+=`<div style="border:2px solid var(--danger);border-radius:16px;padding:16px;background:#ef444408">
-      <div style="font-weight:800;color:var(--danger);margin-bottom:6px">${L==='fa'?'موقعیت زندهٔ این دستگاه':'This device live location'}</div>
-      <div style="font-size:13px;margin-bottom:12px">📍 ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · <a href="${link}" target="_blank" style="color:var(--brand)">${L==='fa'?'باز کردن نقشه':'open map'}</a></div>`;
-    if(contacts.length){ contacts.forEach(c=>{ h+=`<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center"><div style="flex:1;font-size:14px">${esc(c.name)} <span style="color:var(--ink3)">${esc(c.phone)}</span></div>
-      <a class="btn btn-ghost" href="tel:${encodeURIComponent(c.phone)}" data-fam="sos-log" data-arg="call" style="padding:6px 12px">📞</a>
-      <a class="btn btn-ghost" href="sms:${encodeURIComponent(c.phone)}?body=${body}" data-fam="sos-log" data-arg="sms" style="padding:6px 12px">💬</a></div>`; }); }
-    else h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:8px">${L==='fa'?'مخاطب اضطراری تنظیم نشده — در تنظیمات SOS اضافه کنید.':'No emergency contacts set — add them in SOS settings.'}</div>`;
-    h+=`<button class="btn" data-fam="sos-share" style="width:100%;margin-top:6px">${L==='fa'?'اشتراک لینک موقعیت':'Share location link'}</button>`;
-    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'این اقدام‌ها فقط تماس/پیامک/اشتراک را باز می‌کنند. تحویل پیام تضمین نمی‌شود؛ باید خودتان ارسال را کامل کنید.':'These only open your dialer / SMS / share sheet. Delivery is not guaranteed — you must complete the send.'}</div>`;
-    h+=`<button class="btn btn-ghost" data-fam="sos-reset" style="width:100%;margin-top:10px">${L==='fa'?'پایان':'Done'}</button>`;
-    h+=`</div></div>`; return h;
-  }
-  h+=`<div style="text-align:center;padding:20px 0">
-    <button class="btn" data-fam="sos-start" style="width:170px;height:170px;border-radius:50%;background:var(--danger);color:#fff;font-size:26px;font-weight:900">SOS</button>
-    <div style="font-size:13px;color:var(--ink3);margin-top:16px">${L==='fa'?`با فشردن، شمارش معکوس ${cfg.countdownSec} ثانیه‌ای شروع می‌شود و سپس موقعیت این دستگاه گرفته می‌شود.`:`Starts a ${cfg.countdownSec}s countdown, then captures this device location.`}</div></div>`;
-  h+=`</div>`; return h;
-}
-
-/* ── Family Map (honest: this device only) ── */
-function famMapView(){
-  const members=Object.values(famMembersMap());
-  let h=`<div style="padding:0 16px 90px">`;
-  h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:16px;background:var(--s1);margin-bottom:12px">
-    <div style="font-weight:700;margin-bottom:6px">${L==='fa'?'موقعیت این دستگاه':'This device location'}</div>`;
-  if(_famCheckin.pos){ const p=_famCheckin.pos; h+=`<div style="font-size:13px">📍 ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · <a href="https://maps.google.com/?q=${p.lat},${p.lon}" target="_blank" style="color:var(--brand)">${L==='fa'?'باز کردن در نقشه':'open in maps'}</a></div>`; }
-  else h+=`<div style="font-size:13px;color:var(--ink3)">${L==='fa'?'هنوز موقعیتی گرفته نشده.':'No location captured yet.'}</div>`;
-  h+=`<button class="btn btn-ghost" data-fam="map-locate" style="width:100%;margin-top:10px">📍 ${L==='fa'?'گرفتن موقعیت این دستگاه':'Locate this device'}</button></div>`;
-  h+=`<div style="border:1px solid var(--b1);border-radius:14px;padding:14px;background:var(--s1)">
-    <div style="font-weight:700;margin-bottom:8px">${L==='fa'?'اعضا':'Members'}</div>`;
-  members.forEach(m=>{ h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--b1)">${famAvatar(m,36)}<div style="flex:1"><div style="font-weight:600;font-size:14px">${esc(m.name)}</div><div style="font-size:12px;color:var(--ink3)">${m.self?(L==='fa'?'این دستگاه':'this device'):(L==='fa'?'موقعیت زنده نیاز به اپ همراه دارد':'live location needs companion app')}</div></div></div>`; });
-  h+=`</div>`;
-  h+=`<div style="font-size:11px;color:var(--ink3);margin-top:12px">${L==='fa'?'موقعیت زندهٔ سایر اعضا، آنلاین/آفلاین و باتری در این نسخهٔ وب در دسترس نیست و نیاز به اپ همراه بومی + سرور دارد. هیچ دادهٔ ساختگی نمایش داده نمی‌شود.':'Live location, online/offline and battery of other members are not available in this web version — they require a native companion app + server. No placeholder data is shown.'}</div>`;
-  h+=`</div>`; return h;
-}
-
-/* ── Timeline ── */
-function famTimelineView(){
-  const list=famTimelineAll();
-  let h=`<div style="padding:0 16px 90px">`;
-  if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">🕘</div><div class="hub-ph-t">${L==='fa'?'رخدادی نیست':'No events yet'}</div><div class="hub-ph-d">${L==='fa'?'ثبت ورود، SOS و تغییرات اینجا ثبت می‌شوند.':'Check-ins, SOS and changes appear here.'}</div></div>`;
-  list.forEach(e=>{ h+=`<div style="display:flex;gap:12px;padding:12px 4px;border-top:1px solid var(--b1)"><span style="font-size:18px">${FAM_EVENT_IC[e.type]||'•'}</span><div style="flex:1;min-width:0"><div style="font-size:14px" dir="auto">${esc(famEventLabel(e))}</div><div style="font-size:11px;color:var(--ink3)">${esc(famWhen(e.at))}</div></div></div>`; });
-  h+=`</div>`; return h;
-}
-
 /* ── Settings ── */
 function famSettingsView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -11705,7 +11576,6 @@ function famSettingsView(){
   const _p1tabs=['family','members','invitations','roles'];
   if(_p1tabs.indexOf(famSettingsTab)<0)famSettingsTab='family';
   h+=`<div class="pay-chips" style="flex-wrap:wrap;margin-bottom:12px">${tabs.map(([k,l])=>`<button class="pay-chip${famSettingsTab===k?' on':''}" data-fam="set-tab" data-arg="${k}">${l}</button>`).join('')}</div>`;
-  const cfg=famCfg();
   if(famSettingsTab==='family'){
     if(inCloud){
       const st=fb.getState();
@@ -11716,7 +11586,6 @@ function famSettingsView(){
       else h+=`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'تغییر نام فقط توسط مالک یا مدیر.':'Only owner or admin can rename.'}</div>`;
       h+=`<div style="margin-top:14px;padding:12px;border:1px solid var(--b1);border-radius:12px;background:var(--s1)">
         <div style="font-size:13px;color:var(--ink2)">${L==='fa'?`این خانواده در فضای ابری است · ${st.memberCount} عضو · نقش شما: ${famRoleLabel(st.role)}`:`This family is in the cloud · ${st.memberCount} ${famMemberWord(st.memberCount)} · your role: ${famRoleLabel(st.role)}`}</div></div>`;
-      // Leave family (§5 step 8) with transparent data-retention note
       h+=`<div style="margin-top:16px;font-size:11px;color:var(--ink3)">${L==='fa'?'با خروج، دسترسی شما به فضای خانواده قطع می‌شود. داده‌های خصوصی شما (یادداشت‌ها، اسناد، ولت و…) دست‌نخورده و در حساب شما باقی می‌ماند.':'Leaving ends your access to the family space. Your private data (Notes, Documents, Vault, etc.) stays intact in your own account.'}</div>`;
       h+=`<button class="btn btn-ghost" data-fam="cloud-leave" style="width:100%;margin-top:8px;color:var(--danger)">${L==='fa'?'خروج از فضای ابری خانواده':'Leave cloud family space'}</button>`;
     } else if(fb&&fb.ready()){
@@ -11726,44 +11595,29 @@ function famSettingsView(){
     } else {
       h+=`<div style="font-size:13px;color:var(--ink2)">${L==='fa'?'برای مدیریت فضای ابری خانواده باید آنلاین باشید.':'Go online to manage the cloud family space.'}</div>`;
     }
-    // Always-available diagnostics entry (needed most when there's no cloud family yet).
     h+=`<button class="btn btn-ghost" data-fam="diag-open" style="width:100%;margin-top:18px;font-size:13px">${L==='fa'?'🩺 اجرای تشخیص (بررسی خطای واقعی)':'🩺 Run diagnostics (find the real error)'}</button>`;
   }
   else if(famSettingsTab==='members')h+=famTile('👥',L==='fa'?'مدیریت اعضا':'Manage members','members');
   else if(famSettingsTab==='invitations')h+=famTile('✉',L==='fa'?'دعوت‌نامه‌ها':'Invitations','invites');
-  else if(famSettingsTab==='places')h+=famTile('📌',L==='fa'?'مکان‌ها':'Places','places');
-  else if(famSettingsTab==='checkin')h+=famTile('📍',L==='fa'?'ثبت ورود':'Check-in','checkin');
   else if(famSettingsTab==='roles'){
-    h+=`<div style="font-size:13px;font-weight:700;margin-bottom:8px">${L==='fa'?'حداقل نقش برای هر دسترسی':'Minimum role per capability'}</div>`;
-    Object.keys(FAM_CAP_DEFAULT).forEach(cap=>{ const cur=cfg.perms[cap]||FAM_CAP_DEFAULT[cap]; h+=`<div style="padding:10px 0;border-top:1px solid var(--b1)"><div style="font-size:13px;margin-bottom:6px">${L==='fa'?FAM_CAP_LABEL[cap].fa:FAM_CAP_LABEL[cap].en}</div><div class="pay-chips" style="flex-wrap:wrap">${FAM_ROLES.map(r=>`<button class="pay-chip${cur===r?' on':''}" ${famCan('assignRoles')?`data-fam="perm-set" data-arg="${cap}:${r}"`:'disabled'}>${famRoleLabel(r)}</button>`).join('')}</div></div>`; });
-    if(!famCan('assignRoles'))h+=`<div style="font-size:11px;color:var(--ink3);margin-top:8px">${L==='fa'?'فقط مالک می‌تواند دسترسی‌ها را تغییر دهد.':'Only the owner can edit permissions.'}</div>`;
-  }
-  else if(famSettingsTab==='location'){
-    const ls=cfg.locationSharing;
-    h+=famToggleRow('set-loc-enabled',L==='fa'?'اشتراک موقعیت این دستگاه':'Share this device location',ls.enabled);
-    h+=`<div style="height:8px"></div>`+famToggleRow('set-loc-precise',L==='fa'?'موقعیت دقیق':'Precise location',ls.precise);
-    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'اشتراک واقعی موقعیت بین دستگاه‌ها نیاز به اپ همراه + سرور دارد. این تنظیم ترجیح شما را ذخیره می‌کند.':'Real cross-device location sharing needs a companion app + server. This stores your preference.'}</div>`;
-  }
-  else if(famSettingsTab==='sos'){
-    h+=`<label class="fl">${L==='fa'?'شمارش معکوس (ثانیه)':'Countdown (seconds)'}</label><input class="finput" id="fam-sos-count" inputmode="numeric" value="${cfg.sos.countdownSec}">`;
-    h+=`<button class="btn btn-ghost" data-fam="sos-count-save" style="width:100%;margin-top:8px">${L==='fa'?'ذخیره':'Save'}</button>`;
-    h+=`<div style="font-weight:700;margin:16px 0 8px">${L==='fa'?'مخاطبین اضطراری':'Emergency contacts'}</div>`;
-    (cfg.sos.emergencyContacts||[]).forEach(c=>{ h+=`<div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--b1)"><div style="flex:1"><div style="font-weight:600;font-size:14px">${esc(c.name)}</div><div style="font-size:12px;color:var(--ink3)">${esc(c.phone)}</div></div><button class="btn btn-ghost" data-fam="sos-contact-del" data-arg="${c.id}" style="padding:6px 10px;color:var(--danger)">✕</button></div>`; });
-    h+=`<div style="display:flex;gap:8px;margin-top:8px"><input class="finput" id="fam-sos-cn" placeholder="${L==='fa'?'نام':'Name'}" style="flex:1"><input class="finput" id="fam-sos-cp" placeholder="${L==='fa'?'شماره':'Phone'}" style="flex:1" inputmode="tel"></div>`;
-    h+=`<button class="btn btn-ghost" data-fam="sos-contact-add" style="width:100%;margin-top:8px">＋ ${L==='fa'?'افزودن مخاطب':'Add contact'}</button>`;
-  }
-  else if(famSettingsTab==='privacy'){
-    const pv=cfg.privacy;
-    h+=famToggleRow('set-priv-pause',L==='fa'?'توقف موقت اشتراک':'Temporarily pause sharing',pv.paused);
-    h+=`<div style="height:8px"></div>`+famToggleRow('set-priv-ghost',L==='fa'?'حالت مخفی (Ghost)':'Ghost mode',pv.ghost);
-    h+=`<div style="height:8px"></div>`+famToggleRow('set-priv-activity',L==='fa'?'اشتراک فعالیت':'Share activity',pv.shareActivity);
-    h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'مدت نگهداری تاریخچه (روز)':'History duration (days)'}</label><div class="pay-chips">${[7,30,90,365].map(d=>`<button class="pay-chip${pv.historyDays===d?' on':''}" data-fam="set-priv-hist" data-arg="${d}">${d}</button>`).join('')}</div>`;
-    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'اشتراک باتری و رانندگی بین دستگاه‌ها در این نسخه پشتیبانی نمی‌شود و عمداً حذف شده است.':'Cross-device battery & driving sharing is intentionally omitted (not supported without native telemetry).'}</div>`;
-  }
-  else if(famSettingsTab==='shared'){
-    h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">${L==='fa'?'اشتراک هر ماژول با خانواده و حداقل نقش لازم:':'Share each module with the family and its minimum role:'}</div>`;
-    FAM_SHARE_MODULES.forEach(([k,l])=>{ const sc=cfg.shared[k]; h+=`<div style="padding:10px 0;border-top:1px solid var(--b1)">${famToggleRow('set-share-'+k,(L==='fa'?l.fa:l.en),sc.enabled)}${sc.enabled?`<div class="pay-chips" style="flex-wrap:wrap;margin-top:6px">${['admin','adult','child','guest'].map(r=>`<button class="pay-chip${sc.minRole===r?' on':''}" data-fam="set-share-role" data-arg="${k}:${r}">${famRoleLabel(r)}</button>`).join('')}</div>`:''}</div>`; });
-    h+=`<div style="font-size:11px;color:var(--ink3);margin-top:10px">${L==='fa'?'دادهٔ ماژول‌ها بدون تغییر باقی می‌ماند؛ فقط تنظیم اشتراک ذخیره می‌شود. همگام‌سازی واقعی از طریق Firebase موجود انجام می‌شود.':'Module data is untouched; only the sharing preference is stored. Real sync runs through the existing Firebase layer.'}</div>`;
+    if(!inCloud){
+      h+=`<div style="font-size:13px;color:var(--ink3)">${L==='fa'?'نقش‌ها فقط برای اعضای فضای ابری واقعی معنا دارند.':'Roles only apply to real cloud family members.'}</div>`;
+    } else {
+      // Real cloud role hierarchy (owner/admin/adult/child/guest) — read-only
+      // reference here; actual per-member role changes happen on that
+      // member's own screen (cmember-role), which writes the REAL Firestore
+      // role, not a disconnected local permissions table.
+      h+=`<div style="font-size:13px;font-weight:700;margin-bottom:10px">${L==='fa'?'سلسله‌مراتب نقش‌ها':'Role hierarchy'}</div>`;
+      const descs={
+        owner:{en:'Full control — rename/delete family, manage all members and roles.',fa:'کنترل کامل — تغییر نام/حذف خانواده، مدیریت همه اعضا و نقش‌ها.'},
+        admin:{en:'Can manage members, invitations and places.',fa:'می‌تواند اعضا، دعوت‌نامه‌ها و مکان‌ها را مدیریت کند.'},
+        adult:{en:'Full location sharing and family features.',fa:'اشتراک کامل موقعیت و امکانات خانواده.'},
+        child:{en:'Location sharing with guardian oversight.',fa:'اشتراک موقعیت با نظارت سرپرست.'},
+        guest:{en:'Limited, temporary access.',fa:'دسترسی محدود و موقت.'}
+      };
+      FAM_ROLES.forEach(r=>{ h+=`<div style="padding:10px 0;border-top:1px solid var(--b1)"><div style="font-weight:700;font-size:14px">${famRoleLabel(r)}</div><div style="font-size:12px;color:var(--ink3);margin-top:2px">${L==='fa'?descs[r].fa:descs[r].en}</div></div>`; });
+      h+=`<div style="font-size:11px;color:var(--ink3);margin-top:12px">${L==='fa'?'برای تغییر نقش یک عضو، از صفحه «اعضا» روی آن عضو بزنید.':'To change a member’s role, open them from the Members screen.'}</div>`;
+    }
   }
   h+=`</div>`; return h;
 }
@@ -11779,19 +11633,6 @@ function famGetLocation(cb){
     {enableHighAccuracy:true,timeout:12000,maximumAge:30000}
   );
 }
-function famStartCountdown(){
-  const cfg=famCfg().sos; _famSOS.remaining=Math.max(3,cfg.countdownSec|0)||10;
-  clearInterval(_famSOS.timer);
-  _famSOS.timer=setInterval(()=>{
-    _famSOS.remaining--;
-    if(_famSOS.remaining<=0){ clearInterval(_famSOS.timer); _famSOS.timer=null;
-      famLog('sos',{});
-      famGetLocation(pos=>{ _famSOS.pos=pos; saveDB(); if(screen==='module'&&currentModule==='family')render(); });
-    }
-    if(screen==='module'&&currentModule==='family')render();
-  },1000);
-}
-
 /* ── Family action router ── */
 function bindFamily(){
   if(!(screen==='module'&&currentModule==='family'))return;
@@ -11814,7 +11655,7 @@ function bindFamily(){
 }
 
 function famAction(act,arg,ev){
-  const M=famMembersMap(), P=famPlacesMap(), I=famInvitesMap(), cfg=famCfg();
+  const P=famPlacesMap(), I=famInvitesMap(), cfg=famCfg();
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
   switch(act){
     case 'settings': go('settings'); return;
@@ -11825,7 +11666,6 @@ function famAction(act,arg,ev){
       const nm=(el?el.value:'').trim();
       if(!nm){ toast(L==='fa'?'نام لازم است':'Name required'); return; }
       DB.meta.displayName=nm; DB.meta.profileConfirmed=true;
-      const self=famSelf(); if(self)self.name=nm;
       if(typeof pushProfile==='function')pushProfile();
       try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember())FamilyBackend.updateSelfProfile(); }catch(e){}
       saveDB(); toast(L==='fa'?'پروفایل ذخیره شد':'Profile saved');
@@ -11845,7 +11685,31 @@ function famAction(act,arg,ev){
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
     case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; } window.open(`https://www.openstreetmap.org/?mlat=${st.lat}&mlon=${st.lng}#map=17/${st.lat}/${st.lng}`,'_blank'); return; }
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
-    case 'live-checkin-send':{ const note=(document.getElementById('fam-checkin-note')||{}).value||''; toast(L==='fa'?'در حال دریافت موقعیت…':'Getting location…'); if(!navigator.geolocation){ toast(L==='fa'?'موقعیت‌یاب در دسترس نیست':'Geolocation unavailable'); return; } navigator.geolocation.getCurrentPosition(pos=>{ FamilyBackend.location.writeCheckin({lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0)}); toast(L==='fa'?'ثبت شد':'Checked in'); famView='live'; render(); }, ()=>{ toast(L==='fa'?'موقعیت در دسترس نیست':'Location unavailable'); }, {enableHighAccuracy:true,timeout:15000}); return; }
+    case 'live-checkin-send':{
+      if(!navigator.geolocation){ _famCheckinError=(L==='fa'?'موقعیت‌یاب در این دستگاه در دسترس نیست':'Geolocation is not available on this device'); render(); return; }
+      _famCheckinPending=true; _famCheckinError=null; render();
+      const noteEl=document.getElementById('fam-checkin-note'); const note=noteEl?noteEl.value:'';
+      _famCheckinWatchId = navigator.geolocation.getCurrentPosition(
+        pos=>{
+          if(!_famCheckinPending)return; // cancelled before resolving
+          _famCheckinPending=false;
+          FamilyBackend.location.writeCheckin({lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0),note}).catch(()=>{});
+          toast(L==='fa'?'ثبت شد':'Checked in');
+          famView='live'; render(); window.scrollTo(0,0);
+        },
+        err=>{
+          if(!_famCheckinPending)return;
+          _famCheckinPending=false;
+          _famCheckinError = err&&err.code===1 ? (L==='fa'?'اجازه دسترسی به موقعیت رد شد':'Location permission denied')
+            : err&&err.code===3 ? (L==='fa'?'دریافت موقعیت خیلی طول کشید — دوباره تلاش کنید':'Getting your location took too long — try again')
+            : (L==='fa'?'موقعیت در دسترس نیست':'Location unavailable');
+          render();
+        },
+        {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+      );
+      return;
+    }
+    case 'live-checkin-cancel':{ _famCheckinPending=false; _famCheckinError=null; render(); return; }
     case 'live-request':{ toast(L==='fa'?'درخواست به‌روزرسانی ارسال شد':'Update request sent'); return; }
     case 'live-call':{
       const mem=famLiveMembers().find(x=>x.uid===arg);
@@ -11874,13 +11738,7 @@ function famAction(act,arg,ev){
     case 'timeline': go('timeline'); return;
     case 'map': go('map'); return;
     // members
-    case 'member-new':{ if(!famCan('manageMembers'))return; const id=uid(),t=now(); M[id]={id,name:(L==='fa'?'عضو جدید':'New member'),relationship:'',role:'adult',avatarId:null,color:'#6e56f8',createdAt:t,updatedAt:t}; famActiveMemberId=id; famLog('member_added',{name:M[id].name}); saveDB(); go('memberEdit'); return; }
-    case 'member-open': famActiveMemberId=arg; go('memberEdit'); return;
-    case 'member-photo':{ const mm=M[famActiveMemberId]; if(mm&&mm.self&&typeof openPhotoSheet==='function')openPhotoSheet(); return; }
-    case 'member-role':{ const m=M[famActiveMemberId]; if(m&&famCan('assignRoles')){ m._pendRole=arg; render(); } return; }
-    case 'member-save':{ const m=M[famActiveMemberId]; if(!m)return; const nm=document.getElementById('fam-m-name'), rl=document.getElementById('fam-m-rel'); if(nm)m.name=nm.value.trim()||m.name; if(rl)m.relationship=rl.value.trim(); if(m._pendRole&&famCan('assignRoles')&&m._pendRole!==m.role){ m.role=m._pendRole; famLog('role_changed',{name:m.name,role:m.role}); } delete m._pendRole; m.updatedAt=now(); if(m.self){ DB.meta.displayName=m.name; if(typeof pushProfile==='function')pushProfile(); try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember())FamilyBackend.updateSelfProfile(); }catch(e){} } saveDB(); toast(L==='fa'?'ذخیره شد':'Saved'); go('members'); return; }
-    case 'member-transfer':{ const m=M[famActiveMemberId]; if(!m||!famCan('assignRoles'))return; if(!confirm(L==='fa'?`مالکیت به ${m.name} منتقل شود؟`:`Transfer ownership to ${m.name}?`))return; const self=famSelf(); if(self){ self.role='admin'; self.updatedAt=now(); } m.role='owner'; cfg.ownerId=m.id; m.updatedAt=now(); famLog('ownership',{name:m.name}); saveDB(); toast(L==='fa'?'مالکیت منتقل شد':'Ownership transferred'); go('members'); return; }
-    case 'member-remove':{ const m=M[famActiveMemberId]; if(!m||m.self||m.role==='owner'||!famCan('manageMembers'))return; if(!confirm(L==='fa'?`حذف ${m.name}؟`:`Remove ${m.name}?`))return; famLog('member_removed',{name:m.name}); delete M[famActiveMemberId]; saveDB(); go('members'); return; }
+    case 'member-photo':{ if(typeof openPhotoSheet==='function')openPhotoSheet(); return; }
     // places
     case 'place-new': if(!famCan('managePlaces'))return; famActivePlaceId=null; _famPlaceDraft={type:'home',alerts:{enter:true,exit:true},quietHours:{enabled:false,start:'22:00',end:'07:00'}}; go('placeEdit'); return;
     case 'place-open': famActivePlaceId=arg; _famPlaceDraft=null; go('placeEdit'); return;
@@ -11934,32 +11792,9 @@ function famAction(act,arg,ev){
     case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='live'; render(); return; }
     case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'join-code-go':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const el=document.getElementById('fam-join-code'); const code=(el?el.value:'').trim().toUpperCase(); if(!code){ toast(L==='fa'?'کد را وارد کنید':'Enter a code'); return; } fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); window.scrollTo(0,0); return; }
-    // check-in
-    case 'ci-locate':{ _famCheckin.getting=true; render(); famGetLocation(pos=>{ _famCheckin.getting=false; _famCheckin.pos=pos; render(); }); return; }
-    case 'ci-send':{ if(!_famCheckin.pos){ toast(L==='fa'?'ابتدا موقعیت را بگیرید':'Get location first'); return; } const sel=document.getElementById('fam-ci-place'); const noteEl=document.getElementById('fam-ci-note'); const placeId=sel?sel.value:''; const note=noteEl?noteEl.value.trim():''; const pn=placeId&&P[placeId]?P[placeId].name:''; famLog('checkin',{lat:_famCheckin.pos.lat,lon:_famCheckin.pos.lon,note,placeName:pn}); _famCheckin={pos:null,note:'',placeId:'',getting:false}; saveDB(); toast(L==='fa'?'ثبت شد':'Checked in'); go('dashboard'); return; }
-    case 'ci-emergency':{ famGetLocation(pos=>{ if(pos){ famLog('checkin',{lat:pos.lat,lon:pos.lon,note:(L==='fa'?'اضطراری':'Emergency'),placeName:''}); saveDB(); } famView='sos'; _famSOS.pos=pos; render(); }); return; }
-    // SOS
-    case 'sos-start':{ if(!famCan('triggerSOS'))return; famStartCountdown(); render(); return; }
-    case 'sos-cancel':{ clearInterval(_famSOS.timer); _famSOS.timer=null; _famSOS.remaining=0; famLog('sos_cancel',{}); saveDB(); render(); return; }
-    case 'sos-share':{ const p=_famSOS.pos; if(!p)return; const link=`https://maps.google.com/?q=${p.lat},${p.lon}`; const txt=(L==='fa'?'اضطراری! موقعیت من: ':'EMERGENCY! My location: ')+link; if(navigator.share){ navigator.share({title:'SOS',text:txt}).then(()=>{ famLog('sos_action',{action:'share'}); saveDB(); }).catch(()=>{}); } else { famCopy(link); famLog('sos_action',{action:'share'}); saveDB(); } return; }
-    case 'sos-reset':{ _famSOS.pos=null; _famSOS.remaining=0; render(); return; }
     // settings
     case 'set-tab': famSettingsTab=arg; render(); return;
-    case 'perm-set':{ if(!famCan('assignRoles'))return; const [cap,r]=arg.split(':'); cfg.perms[cap]=r; saveDB(); render(); return; }
-    case 'set-loc-enabled': cfg.locationSharing.enabled=!cfg.locationSharing.enabled; saveDB(); render(); return;
-    case 'set-loc-precise': cfg.locationSharing.precise=!cfg.locationSharing.precise; saveDB(); render(); return;
-    case 'set-priv-pause': cfg.privacy.paused=!cfg.privacy.paused; saveDB(); render(); return;
-    case 'set-priv-ghost': cfg.privacy.ghost=!cfg.privacy.ghost; saveDB(); render(); return;
-    case 'set-priv-activity': cfg.privacy.shareActivity=!cfg.privacy.shareActivity; saveDB(); render(); return;
-    case 'set-priv-hist': cfg.privacy.historyDays=parseInt(arg,10)||30; saveDB(); render(); return;
-    case 'sos-count-save':{ const v=parseInt((document.getElementById('fam-sos-count')||{}).value,10); if(v>=3&&v<=60){ cfg.sos.countdownSec=v; saveDB(); toast(L==='fa'?'ذخیره شد':'Saved'); } else toast(L==='fa'?'بین ۳ تا ۶۰':'Use 3–60'); return; }
-    case 'sos-contact-add':{ const n=(document.getElementById('fam-sos-cn')||{}).value||''; const p=(document.getElementById('fam-sos-cp')||{}).value||''; if(!n.trim()||!p.trim()){ toast(L==='fa'?'نام و شماره لازم است':'Name & phone required'); return; } cfg.sos.emergencyContacts=cfg.sos.emergencyContacts||[]; cfg.sos.emergencyContacts.push({id:uid(),name:n.trim(),phone:p.trim()}); saveDB(); render(); return; }
-    case 'sos-contact-del':{ cfg.sos.emergencyContacts=(cfg.sos.emergencyContacts||[]).filter(c=>c.id!==arg); saveDB(); render(); return; }
-    default:
-      if(act.indexOf('set-share-role')===0){ /* handled below */ }
-      if(act==='set-share-role'){ const [k,r]=arg.split(':'); if(cfg.shared[k]){ cfg.shared[k].minRole=r; saveDB(); render(); } return; }
-      if(act.indexOf('set-share-')===0){ const k=act.slice('set-share-'.length); if(cfg.shared[k]){ if(!famCan('configureSharing'))return; cfg.shared[k].enabled=!cfg.shared[k].enabled; famLog('share',{name:k,on:cfg.shared[k].enabled}); saveDB(); render(); } return; }
-      return;
+    default: return;
   }
 }
 function famCopy(txt){ try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>toast(L==='fa'?'کپی شد':'Copied')); } else { const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast(L==='fa'?'کپی شد':'Copied'); } }catch(_){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } }
@@ -14002,8 +13837,6 @@ function bindScreen(){
       const nn=(prompt(L==='fa'?'نام نمایشی:':'Display name:',cur)||'').trim();
       if(nn && nn!==cur){
         DB.meta.displayName=nn;
-        // keep the local self member row in sync too
-        try{ const s=(typeof famSelf==='function')?famSelf():null; if(s){ s.name=nn; s.updatedAt=now(); } }catch(e){}
         saveDB();
         if(typeof pushProfile==='function')pushProfile();
         try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.updateSelfProfile(); } }catch(e){}
