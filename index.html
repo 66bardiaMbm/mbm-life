@@ -1461,7 +1461,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v271';
+const APP_VERSION='v272';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10107,51 +10107,51 @@ const FamilyBackend = (function(){
     if(!ready()) throw new Error('offline');
     if(isMember()) return familyId(); // already in one
     if(!myUid()) throw new Error('no-auth-uid');
-    const fid = 'fam_'+myUid()+'_'+Date.now().toString(36);
+    // Re-assert the LIVE Firebase Auth user (not just our cached FB.user), so
+    // request.auth.uid server-side is guaranteed to equal the uid we write.
+    const authUser = (FB.auth && FB.auth.currentUser) ? FB.auth.currentUser : FB.user;
+    if(!authUser || !authUser.uid) throw new Error('no-auth-uid');
+    const uidNow = authUser.uid;
+    const fid = 'fam_'+uidNow+'_'+Date.now().toString(36);
     const t=new Date().toISOString();
     const members={};
-    members[myUid()]={ role:'owner', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
+    members[uidNow]={ role:'owner', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
     const famName = (name||'').trim() || (DB.meta.family && DB.meta.family.name) || (L==='fa'?'خانواده من':'My Family');
     const lc = (DB.meta.family && DB.meta.family.locationSharing) || {enabled:false,precise:true};
-    // Step 1: create the family document ALONE. Firestore security rules
-    // evaluate each write in a batch against PRE-batch state, so bundling
-    // the settings/consent write (which requires isOwnerOrAdmin() -> reads
-    // the parent family doc) into the SAME batch as the family-doc create
-    // would see the parent as not-yet-existing and reject the whole batch
-    // with permission-denied. This was the exact cause of "Failed" with no
-    // family ever being created. Splitting into two sequential steps avoids
-    // it while keeping the family→membership relationship always consistent
-    // (the family doc itself already contains the owner's membership).
+    // ── SINGLE atomic create write ──
+    // The family document is created in ONE write whose ONLY rule is the
+    // family create rule (ownerUid == me, members[me].role == 'owner'). No
+    // second write, no subcollection doc, and NO rule that performs get() on
+    // the not-yet-committed parent. Consent defaults live as a FIELD on the
+    // family document itself (settings.locationSharing), so there is nothing
+    // else to write and nothing else that can be permission-denied.
+    const famDoc = {
+      name: famName,
+      ownerUid: uidNow,
+      members,
+      settings: { locationSharing: { enabled: !!lc.enabled, precise: lc.precise!==false } },
+      createdAt: t,
+      updatedAt: t
+    };
     try{
-      await famRef(fid).set({ name:famName, ownerUid:myUid(), members, createdAt:t, updatedAt:t });
+      await famRef(fid).set(famDoc);
     }catch(err){
-      console.error('[FamilyBackend.createFamily] family doc create failed', {
-        code:err&&err.code, message:err&&err.message, fid, uid:myUid()
+      console.error('[FamilyBackend.createFamily] family create rejected', {
+        code: err&&err.code, message: err&&err.message,
+        fid, authUid: uidNow, ownerUidWritten: famDoc.ownerUid,
+        memberKeys: Object.keys(members), myRole: members[uidNow] && members[uidNow].role
       });
       throw new Error(err&&err.code==='permission-denied' ? 'permission-denied'
         : err&&err.code==='unavailable' ? 'network-unavailable' : 'create-failed');
     }
-    // Step 2: now that the family doc genuinely exists, seed its consent
-    // defaults and my own familyLink pointer atomically together. If this
-    // step fails, the family+owner-membership from step 1 is still intact
-    // (never a membership without a family, and never a family missing its
-    // owner) — only the non-critical consent-defaults seed is retried below.
+    // The familyLink pointer lives in MY OWN workspace (rule: ws == user_+me),
+    // which never depends on the family doc — safe to write separately, and a
+    // failure here does not lose the family (membership is recoverable by the
+    // family doc itself; the pointer is a convenience for fast recovery).
     try{
-      const batch=db().batch();
-      batch.set(famRef(fid).collection('settings').doc('consent'),
-        { locationSharing:{enabled:!!lc.enabled,precise:lc.precise!==false}, createdAt:t }, {merge:true});
-      batch.set(linkRef(), { familyId:fid, role:'owner', joinedAt:t });
-      await batch.commit();
+      await linkRef().set({ familyId:fid, role:'owner', joinedAt:t });
     }catch(err){
-      console.error('[FamilyBackend.createFamily] settings/link batch failed — family exists, retrying link only', {
-        code:err&&err.code, message:err&&err.message, fid, uid:myUid()
-      });
-      // The familyLink pointer is required for membership recovery on
-      // reinstall/new device (Proposal §5 step 7/§5.1) — retry it alone so
-      // the owner is never left without a recoverable pointer, even if the
-      // consent-defaults seed (non-critical) ultimately fails.
-      try{ await linkRef().set({ familyId:fid, role:'owner', joinedAt:t }); }
-      catch(err2){ console.error('[FamilyBackend.createFamily] familyLink retry also failed', err2&&err2.message); }
+      console.error('[FamilyBackend.createFamily] familyLink write failed (family exists, non-fatal)', err&&err.message);
     }
     return fid;
   }
