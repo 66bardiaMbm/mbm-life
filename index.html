@@ -1311,7 +1311,7 @@ body.rtl .trow-content{text-align:right}
 #fam-live-wrap{position:relative;width:100%;height:calc(100vh - 0px);height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column}
 #fam-map{position:absolute;inset:0;width:100%;height:100%;background:#dfe3ea;z-index:1}
 .dark #fam-map{background:#20222b}
-.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1200;display:flex;align-items:center;gap:10px;padding:12px 14px;
+.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:10px;padding:12px 14px;
   background:linear-gradient(180deg,var(--s0) 55%,transparent);pointer-events:none}
 .fam-live-top>*{pointer-events:auto}
 .fam-live-title{flex:1;min-width:0}
@@ -1342,10 +1342,10 @@ body.rtl .trow-content{text-align:right}
    JS never runs, the panel still renders at its default (partial) height. ── */
 #fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:20px 20px 0 0;
   box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;
-  height:44vh;min-height:280px;max-height:78vh;
+  height:40vh;min-height:260px;max-height:calc(100% - 90px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
-#fam-sheet.detent-2{height:78vh}
+#fam-sheet.detent-2{height:calc(100% - 90px)}
 #fam-sheet .fam-sheet-grab{width:44px;height:5px;border-radius:3px;background:var(--b2);margin:10px auto 4px;flex:none}
 .fam-sheet-body{padding:0 16px 20px;flex:1;overflow-y:auto;min-height:0}
 .fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 12px}
@@ -1476,7 +1476,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v275';
+const APP_VERSION='v276';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10655,6 +10655,10 @@ function famInit(){
   famMembersMap()[ownerId]={ id:ownerId, name:(DB.meta.displayName||'Me'), relationship:(L==='fa'?'خودم':'Me'), role:'owner', avatarId:(DB.meta.avatar||null), color:'#ec4899', self:true, createdAt:t, updatedAt:t };
 }
 function famSelf(){ const m=famMembersMap(); return m[famCfg().selfId]||Object.values(m).find(x=>x.role==='owner')||null; }
+/* Has the user EXPLICITLY confirmed their profile (name), rather than the
+   app silently inheriting whatever Google Auth returned? DB.meta.profileConfirmed
+   is set ONLY by the explicit "Save" action on the profile-setup screen. */
+function famProfileComplete(){ return !!(DB.meta.profileConfirmed && (DB.meta.displayName||'').trim()); }
 function famSelfName(){ const s=famSelf(); if(!s)return DB.meta.displayName||'Me'; const ph=!s.name||s.name==='Me'||s.name==='خودم'; return (ph&&DB.meta.displayName)?DB.meta.displayName:(s.name||DB.meta.displayName||'Me'); }
 function famMemberWord(n){ return (L==='fa')?'عضو':(n===1?'member':'members'); }
 function famRole(){ const s=famSelf(); return s?s.role:'guest'; }
@@ -10722,6 +10726,32 @@ function famShowDiag(op, err){
   document.body.appendChild(ov);
   document.getElementById('fam-diag-copy').onclick=()=>{ try{ navigator.clipboard.writeText(text); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ const r=document.createRange(); r.selectNode(document.getElementById('fam-diag-text')); getSelection().removeAllRanges(); getSelection().addRange(r); try{document.execCommand('copy');toast('Copied');}catch(_){} } };
   document.getElementById('fam-diag-close').onclick=()=>ov.remove();
+}
+/* ═══ Profile setup gate (Foundation step 1) ═══
+   A real user-confirmed profile is required before Family creation/join or
+   Family Live are reachable. Never silently borrows the Google Auth name
+   without the user explicitly confirming/editing it here first. */
+function famProfileGateView(){
+  const nameVal = (DB.meta.displayName||'').trim();
+  const photo = DB.meta.photoURL || DB.meta.photo || null;
+  const initials = nameVal ? nameVal.slice(0,1).toUpperCase() : '?';
+  let h=`<div style="padding:24px 20px 90px;max-width:420px;margin:0 auto">`;
+  h+=`<div style="text-align:center;margin-bottom:22px">
+    <div style="font-size:22px;font-weight:800;margin-bottom:6px">${L==='fa'?'تکمیل پروفایل':'Complete your profile'}</div>
+    <div style="font-size:13px;color:var(--ink3)">${L==='fa'?'قبل از ساخت یا پیوستن به خانواده، نام و عکس خود را تأیید کنید.':'Confirm your name and photo before creating or joining a family.'}</div>
+  </div>`;
+  h+=`<div style="display:flex;justify-content:center;margin-bottom:18px">
+    <button data-fam="profile-photo" style="border:none;background:none;padding:0;cursor:pointer;position:relative">
+      <div style="width:88px;height:88px;border-radius:50%;background:${photo?`url(${esc(photo)})`:'#6e56f8'};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:30px;border:3px solid var(--b1)">${photo?'':esc(initials)}</div>
+      <span style="position:absolute;right:-2px;bottom:-2px;width:28px;height:28px;border-radius:50%;background:var(--brand,#6e56f8);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:13px">✏️</span>
+    </button>
+  </div>`;
+  h+=`<div style="text-align:center;font-size:11px;color:var(--ink3);margin-bottom:18px">${photo?(L==='fa'?'برای تغییر عکس بزنید':'Tap to change photo'):(L==='fa'?'افزودن عکس (اختیاری)':'Add photo (optional)')}</div>`;
+  h+=`<label class="fl">${L==='fa'?'نام نمایشی':'Display name'}</label>
+    <input class="finput" id="fam-profile-name" value="${esc(nameVal)}" placeholder="${L==='fa'?'نام و نام خانوادگی':'Your full name'}">`;
+  h+=`<button class="btn" data-fam="profile-save" style="width:100%;margin-top:18px;background:#6e56f8;color:#fff">${L==='fa'?'ذخیره و ادامه':'Save and continue'}</button>`;
+  h+=`</div>`;
+  return h;
 }
 function famExitToHub(){
   MBMMap.destroy();
@@ -10818,6 +10848,14 @@ function renderFamily(){
     <div style="flex:1;font-size:26px;font-weight:800;letter-spacing:-.3px">${esc(title)}</div>
     ${famView==='dashboard'?`<button class="ld-back" data-fam="settings" style="width:40px;height:40px;flex:none">⚙</button>`:''}
   </div>`;
+  // ── FOUNDATION GATE: a real, user-confirmed profile is required before
+  // Family Live, family creation, invitations or joining are reachable
+  // (Proposal §5/§7 FR-17 — never silently borrow the Auth display name).
+  // Settings/roles/etc. remain reachable so an existing user isn't locked out.
+  const _profileExemptViews=['settings'];
+  if(!famProfileComplete() && _profileExemptViews.indexOf(famView)<0){
+    return head(L==='fa'?'پروفایل':'Profile','fam-back-live')+famProfileGateView();
+  }
   // ── FAMILY LIVE is the default, map-first Family screen (Phase 2). ──
   if(famView==='live'||famView==='dashboard') return famLiveView();
   if(famView==='members') return head(L==='fa'?'اعضای خانواده':'Family Members')+famMembersView();
@@ -11034,11 +11072,15 @@ function famLiveView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   // Not in a cloud family / offline → Live can't show members; send to management.
   if(!fb||!fb.ready()||!fb.isMember()){
-    return `<div id="fam-live-wrap" style="display:flex;align-items:center;justify-content:center"><div style="padding:20px;text-align:center">
-      <div style="font-size:40px;margin-bottom:12px">🗺️</div>
-      <div style="font-weight:800;font-size:17px;margin-bottom:6px">${L==='fa'?'نقشه خانواده':'Family map'}</div>
-      <div style="font-size:13px;color:var(--ink3);margin-bottom:16px">${L==='fa'?'برای دیدن موقعیت خانواده، ابتدا به فضای ابری خانواده بپیوندید.':'Join your cloud family space to see everyone on the map.'}</div>
-      <button class="btn" data-fam="settings" style="width:auto;padding:10px 20px">${L==='fa'?'مدیریت خانواده':'Manage family'}</button>
+    return `<div id="fam-live-wrap" style="display:flex;align-items:center;justify-content:center;overflow-y:auto"><div style="padding:24px 20px;max-width:380px;width:100%">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:40px;margin-bottom:10px">👨‍👩‍👧‍👦</div>
+        <div style="font-weight:800;font-size:19px;margin-bottom:6px">${L==='fa'?'شروع خانواده شما':'Set up your family'}</div>
+        <div style="font-size:13px;color:var(--ink3)">${L==='fa'?'برای دیدن نقشه زنده و اعضا، ابتدا یک خانواده بسازید یا به خانواده‌ای بپیوندید.':'To see the live map and members, create a family or join one first.'}</div>
+      </div>
+      <button class="btn" data-fam="cloud-create" style="width:100%;background:#6e56f8;color:#fff;margin-bottom:10px">➕ ${L==='fa'?'ساخت خانواده':'Create Family'}</button>
+      <button class="btn btn-ghost" data-fam="cloud-join" style="width:100%">🔑 ${L==='fa'?'پیوستن با کد دعوت':'Join with invite code'}</button>
+      <div style="font-size:11px;color:var(--ink3);text-align:center;margin-top:16px">${L==='fa'?'بعد از ساخت خانواده، می‌توانید اعضا را دعوت کنید.':'After creating a family, you can invite members.'}</div>
     </div></div>`;
   }
   const members=famLiveMembers();
@@ -11229,9 +11271,10 @@ function famSheetInitDrag(){
   const grab=sheet.querySelector('.fam-sheet-grab'); if(!grab)return;
   const H=window.innerHeight||780;
   // heights in px per detent — 0=collapsed (peek), 1=partial (CSS default
-  // 44vh, no class needed), 2=full. Height-based (not transform) so the
-  // sheet is ALWAYS visible from its default CSS even if this JS never runs.
-  const heights=[130, Math.round(H*0.44), Math.round(H*0.78)];
+  // 40vh), 2=full but NEVER covering the 90px header reserved by CSS
+  // max-height. Height-based (not transform) so the sheet is ALWAYS visible
+  // from its default CSS even if this JS never runs.
+  const heights=[130, Math.round(H*0.40), Math.max(200,H-90)];
   function apply(i){
     _famSheetDetent=Math.max(0,Math.min(2,i));
     sheet.classList.remove('detent-0','detent-2');
@@ -11776,6 +11819,19 @@ function famAction(act,arg,ev){
   switch(act){
     case 'settings': go('settings'); return;
     case 'diag-open': famView='diag'; _famDiagResults=null; render(); window.scrollTo(0,0); return;
+    case 'profile-photo':{ if(typeof openPhotoSheet==='function')openPhotoSheet(); return; }
+    case 'profile-save':{
+      const el=document.getElementById('fam-profile-name');
+      const nm=(el?el.value:'').trim();
+      if(!nm){ toast(L==='fa'?'نام لازم است':'Name required'); return; }
+      DB.meta.displayName=nm; DB.meta.profileConfirmed=true;
+      const self=famSelf(); if(self)self.name=nm;
+      if(typeof pushProfile==='function')pushProfile();
+      try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember())FamilyBackend.updateSelfProfile(); }catch(e){}
+      saveDB(); toast(L==='fa'?'پروفایل ذخیره شد':'Profile saved');
+      famView='live'; render(); window.scrollTo(0,0);
+      return;
+    }
     case 'diag-run': famRunDiagnostics(); return;
     case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
     // ── Family Live actions (Phase 2) ──
