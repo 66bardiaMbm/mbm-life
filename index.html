@@ -1329,24 +1329,39 @@ body.rtl .trow-content{text-align:right}
 .fam-live-ctrls{position:absolute;right:14px;z-index:1150;display:flex;flex-direction:column;gap:12px}
 /* Reference-matched control buttons: larger dark rounded squares with soft
    shadow, like the Life360 map controls. */
-.fam-mapbtn{width:50px;height:50px;border-radius:15px;border:none;background:var(--s1);color:var(--ink);
-  display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.28)}
+.fam-mapbtn{width:50px;height:50px;border-radius:50%;border:none;background:var(--s1);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
 .dark .fam-mapbtn{background:#2a2d38;color:#eef0f4}
+/* top-bar buttons: plain transparent icon buttons (reference has no filled
+   circle on back/refresh); the refresh uses the purple accent. */
+.fam-topbtn{width:44px;height:44px;border:none;background:transparent;color:var(--ink);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:12px}
+.fam-topbtn.accent{color:var(--brand,#6e56f8)}
+.fam-topbtn:active{background:var(--s2)}
+.fam-topbtn svg{width:24px;height:24px}
 .fam-mapbtn:active{transform:scale(.94)}
 .fam-mapbtn svg{width:22px;height:22px}
-/* avatar pins — larger, reference-matched: photo/initial, colour ring = status, heading chevron when moving */
-.fam-pin{position:relative;width:60px;height:70px;cursor:pointer}
-.fam-pin .fam-pin-av{width:58px;height:58px;border-radius:50%;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.5);
+/* avatar pins — Life360-style: circular photo, colored status ring, and a
+   small pointed tail (not a big diamond). Sized to the reference. */
+.fam-pin{position:relative;width:64px;height:74px;cursor:pointer}
+.fam-pin .fam-pin-av{position:absolute;top:0;left:2px;width:60px;height:60px;border-radius:50%;
   background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
-  font-weight:800;color:#fff;font-size:20px}
-.fam-pin.sel .fam-pin-av{transform:scale(1.06)}
-.fam-pin .fam-pin-ring{position:absolute;left:-1px;top:-1px;width:60px;height:60px;border-radius:50%;border:3px solid transparent}
-.fam-pin.tone-live .fam-pin-ring{border-color:#22c55e;animation:pinpulse 2s infinite}
-.fam-pin.tone-ok .fam-pin-ring{border-color:#22c55e}
-.fam-pin.tone-warn .fam-pin-ring{border-color:#f59e0b}
-.fam-pin.sel .fam-pin-ring{box-shadow:0 0 0 3px rgba(110,86,248,.9)}
-.fam-pin.tone-muted{opacity:.65}.fam-pin.tone-muted .fam-pin-ring{border-color:#94a3b8}
-@keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+  font-weight:800;color:#fff;font-size:21px;box-shadow:0 3px 10px rgba(0,0,0,.35);z-index:2}
+.fam-pin .fam-pin-ring{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;border:4px solid #2fce6b;z-index:1;box-sizing:border-box}
+.fam-pin.tone-live .fam-pin-ring{border-color:#2fce6b}
+.fam-pin.tone-ok .fam-pin-ring{border-color:#2fce6b}
+.fam-pin.tone-warn .fam-pin-ring{border-color:#f5a623}
+.fam-pin.tone-muted{opacity:.7}.fam-pin.tone-muted .fam-pin-ring{border-color:#9aa1ad}
+.fam-pin.sel .fam-pin-ring{border-width:4px;box-shadow:0 0 0 3px rgba(110,86,248,.35)}
+/* pointed tail: a rotated square whose top is tucked under the avatar so only
+   a downward triangle shows — reads as a clean pin point, not a floating diamond */
+.fam-pin .fam-pin-tip{position:absolute;left:50%;top:52px;width:16px;height:16px;background:#fff;
+  transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 4px rgba(0,0,0,.18);z-index:1;border-radius:2px}
+.fam-pin.tone-live .fam-pin-tip,.fam-pin.tone-ok .fam-pin-tip{background:#2fce6b}
+.fam-pin.tone-warn .fam-pin-tip{background:#f5a623}
+.fam-pin.tone-muted .fam-pin-tip{background:#9aa1ad}
+.fam-pin.sel .fam-pin-tip{background:#6e56f8}
+@keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(47,206,107,.5)}70%{box-shadow:0 0 0 12px rgba(47,206,107,0)}100%{box-shadow:0 0 0 0 rgba(47,206,107,0)}}
 @keyframes famspin{to{transform:rotate(360deg)}}
 .fam-pin-tip{position:absolute;left:50%;bottom:8px;width:12px;height:12px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
 .fam-pin-name{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);background:rgba(20,20,28,.82);color:#fff;
@@ -1355,15 +1370,15 @@ body.rtl .trow-content{text-align:right}
    bottom of the flex column, never dependent on JS to be visible. The
    draggable behaviour is a progressive enhancement layered on top — if drag
    JS never runs, the panel still renders at its default (partial) height. ── */
-#fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:20px 20px 0 0;
+#fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:22px 22px 0 0;
   box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;
-  height:40vh;min-height:260px;max-height:calc(100% - 90px);
+  height:42vh;min-height:280px;max-height:calc(100% - 90px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
-#fam-sheet.detent-0{height:130px}
+#fam-sheet.detent-0{height:150px}
 #fam-sheet.detent-2{height:calc(100% - 90px)}
-#fam-sheet .fam-sheet-grab{width:44px;height:5px;border-radius:3px;background:var(--b2);margin:10px auto 4px;flex:none}
-.fam-sheet-body{padding:0 16px 20px;flex:1;overflow-y:auto;min-height:0}
-.fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 12px}
+#fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);margin:12px auto 6px;flex:none}
+.fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
+.fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
 .fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
 .fam-pcard.sel{background:var(--s2)}
 .fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0 auto 4px;background-size:cover;background-position:center;
@@ -1371,18 +1386,41 @@ body.rtl .trow-content{text-align:right}
 .fam-pcard.sel .av{border-color:#6e56f8}
 .fam-pcard .nm{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 .fam-pcard .st{font-size:10px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fam-dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-inline-end:5px}
-.fam-dot.live{background:#22c55e}.fam-dot.ok{background:#22c55e}.fam-dot.warn{background:#f59e0b}.fam-dot.muted{background:#94a3b8}
-.fam-actionbar{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.fam-actionbar .btn{flex:1;min-width:78px;padding:11px 8px;font-size:12.5px}
-.fam-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
-.fam-stat-card{background:var(--s2);border-radius:12px;padding:10px 12px}
-.fam-stat-card .lbl{font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px}
-.fam-stat-card .val{font-size:14px;font-weight:700;color:var(--ink)}
+.fam-dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-inline-end:6px}
+.fam-dot.live{background:#2fce6b}.fam-dot.ok{background:#2fce6b}.fam-dot.warn{background:#f5a623}.fam-dot.muted{background:#9aa1ad}
+.fam-actionbar{display:flex;gap:10px;margin-top:16px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.fam-actionbar::-webkit-scrollbar{display:none}
+.fam-actionbar .btn{flex:none;min-width:auto;padding:13px 18px;font-size:14px;border-radius:22px;background:var(--s1);
+  border:1px solid var(--b1);box-shadow:0 2px 8px rgba(0,0,0,.06);white-space:nowrap;font-weight:700}
+.dark .fam-actionbar .btn{background:#2a2d38;border-color:transparent}
+/* Reference-matched 2×2 stat cards: generous padding, uppercase muted label,
+   large value, soft rounded surface. */
+.fam-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.fam-stat-card{background:var(--s2);border-radius:16px;padding:16px 18px}
+.fam-stat-card .lbl{font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;font-weight:600}
+.fam-stat-card .val{font-size:22px;font-weight:800;color:var(--ink);line-height:1.1}
+/* Battery pill (reference: rounded chip with a battery glyph + %) */
+.fam-batt-pill{display:inline-flex;align-items:center;gap:7px;background:var(--s2);border-radius:12px;padding:8px 12px;font-weight:800;font-size:14px;flex:none}
+.fam-batt-ic{position:relative;width:22px;height:12px;border:2px solid var(--ink3);border-radius:3px}
+.fam-batt-ic::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:4px;background:var(--ink3);border-radius:0 1px 1px 0}
+.fam-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:linear-gradient(90deg,#f5a623,#f5c451);border-radius:1px}
+/* Save Place card (reference: soft rounded card, pin-with-plus icon + label) */
+.fam-saveplace{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  background:var(--s2);border:none;border-radius:18px;padding:14px 18px;min-width:96px;cursor:pointer;color:var(--ink);font-weight:800;font-size:14px}
+.fam-saveplace:active{transform:scale(.97)}
+.fam-saveplace-ic{position:relative;display:flex}
+.fam-saveplace-ic svg{width:26px;height:26px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-saveplace-plus{position:absolute;right:-5px;top:-3px;font-size:14px;font-weight:900;line-height:1}
 /* honest offline / map-unavailable overlay (non-blocking; sheet stays usable) */
 .fam-map-msg{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:1100;background:var(--s1);
   border:1px solid var(--b1);border-radius:12px;padding:8px 14px;font-size:12px;color:var(--ink2);box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:88%;text-align:center}
 .maplibregl-map{font-family:inherit}
+/* Life360-like cast for the keyless RASTER fallback basemap (OSM/Esri are
+   cold/standard by default). The reference light theme is a bright, slightly
+   warm off-white with mint parks — a gentle brighten + tiny warm shift + soft
+   contrast gets close without the brown of a heavy sepia. Vector styles get
+   real per-layer colours instead. */
+.fam-map-warm .maplibregl-canvas{filter:brightness(1.07) saturate(.86) sepia(.10) hue-rotate(-4deg) contrast(.94)}
 /* ── Map loading state: shown instead of a bare grey area until first tiles paint ── */
 #fam-map-load{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
   background:var(--s0);color:var(--ink3);font-size:13px;transition:opacity .35s}
@@ -1397,8 +1435,8 @@ body.rtl .trow-content{text-align:right}
 .fam-approx{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--warn);
   background:rgba(245,158,11,.12);border-radius:8px;padding:2px 8px}
 /* ── heading chevron on a moving pin ── */
-.fam-pin-head{position:absolute;left:50%;top:-8px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
-  border-bottom:8px solid var(--brand,#6e56f8);transform-origin:50% 37px}
+.fam-pin-head{position:absolute;left:50%;top:-9px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;
+  border-bottom:9px solid #2fce6b;transform-origin:50% 39px;z-index:0}
 /* ── member list rows (rich: photo, place, since, battery, state) ── */
 .fam-mrow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer}
 /* ── clustered multi-avatar pin: 2+ members sharing one bubble (like the
@@ -1558,7 +1596,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v281';
+const APP_VERSION='v283';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11296,7 +11334,7 @@ const MBMMap = (function(){
         // no default UI; we render our own controls to match the reference.
         renderWorldCopies:true });
       _map.touchZoomRotate && _map.touchZoomRotate.disableRotation();
-      _map.on('load', ()=>{ _styleReady=true; _tilesLoaded=true; applyLifeStyle(); ensureGeoLayers(); if(typeof famMapLoaded==='function')famMapLoaded(); });
+      _map.on('load', ()=>{ _styleReady=true; _tilesLoaded=true; applyLifeStyle(); applyRasterWarmth(); ensureGeoLayers(); if(typeof famMapLoaded==='function')famMapLoaded(); });
       _map.on('styledata', ()=>{ applyLifeStyle(); ensureGeoLayers(); });
       _map.on('error', (e)=>{ /* tile/style errors: degrade, don't crash */ _tileErr=true; });
       _map.on('data', (e)=>{ if(e && e.isSourceLoaded){ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); } });
@@ -11308,31 +11346,55 @@ const MBMMap = (function(){
   }
   function softRefresh(){ if(!_map)return; try{ _map.resize(); }catch(e){} }
 
-  /* Runtime restyle pass toward the Life360 reference — applied on top of the
-     vector style: mute the palette, thin road casings, hide noisy POI icons,
-     soften building fills, tune label typography. No-op on raster fallback
-     (raster has no vector layers to restyle). */
+  /* Runtime restyle pass toward the Life360 reference. Palette sampled directly
+     from the real Life360 screenshots: warm beige land, near-white warm roads,
+     tan buildings, soft green parks, muted labels. Applied on top of the vector
+     style. No-op on raster (raster has no vector layers). */
+  const LIFE = {
+    land:'#f4f0e5', water:'#8fdaed', park:'#d2f8e1', building:'#eae7dc', buildingLine:'#e2ded1',
+    roadMajor:'#ffffff', roadMajorCase:'#e9e4d6', roadMinor:'#ffffff', roadMinorCase:'#ece8db',
+    label:'#5b5f66', labelHalo:'#ffffff'
+  };
   function applyLifeStyle(){
     if(!_map)return;
     let layers; try{ layers=_map.getStyle().layers||[]; }catch(e){ return; }
     layers.forEach(ly=>{
-      const id=ly.id||''; const type=ly.type;
+      const id=(ly.id||'').toLowerCase(); const type=ly.type;
       try{
-        if(type==='background'){ _map.setPaintProperty(id,'background-color','#eceef2'); }
-        else if(type==='fill' && /building/i.test(id)){ _map.setPaintProperty(id,'fill-color','#e2e5ea'); _map.setPaintProperty(id,'fill-opacity',0.9); _map.setPaintProperty(id,'fill-outline-color','#dcdfe6'); }
-        else if(type==='fill' && /(water|ocean|sea|river)/i.test(id)){ _map.setPaintProperty(id,'fill-color','#bcd7e8'); }
-        else if(type==='fill' && /(park|wood|forest|grass|green|golf|pitch)/i.test(id)){ _map.setPaintProperty(id,'fill-color','#d6e8cf'); }
-        else if(type==='line' && /(motorway|trunk|primary)/i.test(id)){ _map.setPaintProperty(id,'line-color','#f4d58d'); }
-        else if(type==='line' && /(secondary|tertiary)/i.test(id)){ _map.setPaintProperty(id,'line-color','#ffffff'); }
-        else if(type==='line' && /(residential|street|service|minor)/i.test(id)){ _map.setPaintProperty(id,'line-color','#ffffff'); }
-        else if(type==='symbol' && /(poi|shop|amenity|transit|station|rail)/i.test(id)){ _map.setLayoutProperty(id,'visibility','none'); } // reduce clutter
-        else if(type==='symbol'){ // labels: neutral dark grey, subtle halo
-          try{ _map.setPaintProperty(id,'text-color','#6b7280'); _map.setPaintProperty(id,'text-halo-color','#ffffff'); _map.setPaintProperty(id,'text-halo-width',1.2); }catch(_){}
+        if(type==='background'){ _map.setPaintProperty(ly.id,'background-color',LIFE.land); }
+        else if(type==='fill'){
+          if(/(building)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.building); _map.setPaintProperty(ly.id,'fill-opacity',0.85); if(ly.paint&&'fill-outline-color'in (ly.paint||{})){} }
+          else if(/(water|ocean|sea|river|lake|pond|bay)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.water); }
+          else if(/(wood|forest|park|grass|green|golf|pitch|garden|cemetery|recreation|scrub|meadow|nature|farmland)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.park); }
+          else if(/(sand|beach)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color','#efe6d2'); }
+          else if(/(landuse|landcover|earth|land|residential|commercial|industrial)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.land); }
+        }
+        else if(type==='line'){
+          if(/(water|river|stream|canal)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.water); }
+          else if(/(motorway|trunk|primary|highway).*(case|outline|border)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMajorCase); }
+          else if(/(motorway|trunk|primary|highway)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMajor); }
+          else if(/.*(case|outline|border)/.test(id) && /(road|street|secondary|tertiary|residential|service|minor|path)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMinorCase); }
+          else if(/(road|street|secondary|tertiary|residential|service|minor)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMinor); }
+          else if(/(rail|transit|transport)/.test(id)){ _map.setPaintProperty(ly.id,'line-color','#d9cdbb'); }
+          else if(/(boundary|admin|border)/.test(id)){ try{_map.setPaintProperty(ly.id,'line-opacity',0.25);}catch(_){} }
+        }
+        else if(type==='symbol'){
+          if(/(poi|shop|amenity|transit|station|rail|aerodrome|airport|entrance|address|housenumber|building)/.test(id)){ _map.setLayoutProperty(ly.id,'visibility','none'); } // reduce clutter like Life360
+          else { try{ _map.setPaintProperty(ly.id,'text-color',LIFE.label); _map.setPaintProperty(ly.id,'text-halo-color',LIFE.labelHalo); _map.setPaintProperty(ly.id,'text-halo-width',1.4); }catch(_){}
+            try{ if(/(road|street)/.test(id)) _map.setLayoutProperty(ly.id,'visibility','none'); }catch(_){} } // hide most road-name labels (Life360 shows few)
         }
       }catch(_){}
     });
   }
 
+  function applyRasterWarmth(){
+    // Without a vector key the basemap is standard OSM/Esri raster. Give it the
+    // warm Life360-like cast via a canvas filter so it isn't cold grey. Vector
+    // styles get real per-layer colours (applyLifeStyle) and no filter.
+    const el=_elId?document.getElementById(_elId):null; if(!el)return;
+    const raster = !MAPTILER_KEY && (_curType!=='satellite');
+    if(raster) el.classList.add('fam-map-warm'); else el.classList.remove('fam-map-warm');
+  }
   function ensureGeoLayers(){
     if(!_map||!_styleReady)return;
     const empty={ type:'FeatureCollection', features:[] };
@@ -11353,7 +11415,7 @@ const MBMMap = (function(){
     if(!_map)return; _famMapProvider=typeId; _famMapType=typeId; _curType=typeId; _tilesLoaded=false;
     try{
       _map.setStyle(famStyleFor(typeId).style);
-      _map.once('styledata', ()=>{ _styleReady=true; applyLifeStyle(); ensureGeoLayers(); repaintAllGeo(); _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
+      _map.once('styledata', ()=>{ _styleReady=true; applyLifeStyle(); applyRasterWarmth(); ensureGeoLayers(); repaintAllGeo(); _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
     }catch(e){ _tileErr=true; }
   }
   // remember last geo payloads so a style switch can repaint them
@@ -11586,10 +11648,10 @@ let _famRosterSig=null;
 function famLiveHeaderHtml(sel){
   const title = sel?esc(sel.name):(L==='fa'?'خانواده':'Family');
   const sub = sel ? esc(famLiveStatusLine(sel)) : '';
-  return `<button class="fam-mapbtn" data-fam="live-back" style="box-shadow:none">${famIcon('back')}</button>
+  return `<button class="fam-topbtn" data-fam="live-back">${famIcon('back')}</button>
     <div class="fam-live-title"><b>${title}</b><span>${sub}</span></div>
-    <button class="fam-mapbtn" data-fam="live-refresh" title="${L==='fa'?'به‌روزرسانی':'Refresh'}">${famIcon('refresh')}</button>
-    <button class="fam-mapbtn" data-fam="settings" title="${L==='fa'?'مدیریت':'Manage'}">${famIcon('gear')}</button>`;
+    <button class="fam-topbtn accent" data-fam="live-refresh" title="${L==='fa'?'به‌روزرسانی':'Refresh'}">${famIcon('refresh')}</button>
+    <button class="fam-topbtn" data-fam="settings" title="${L==='fa'?'مدیریت':'Manage'}">${famIcon('gear')}</button>`;
 }
 
 /* Sheet body (presence strip + selected member detail). Shared by the full
@@ -11645,7 +11707,7 @@ function famLiveView(){
   // top bar
   h+=`<div class="fam-live-top" id="fam-live-top">${famLiveHeaderHtml(sel)}</div>`;
   // map controls
-  h+=`<div class="fam-live-ctrls" style="top:74px">
+  h+=`<div class="fam-live-ctrls" style="top:88px">
     <button class="fam-mapbtn" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
     <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
@@ -11766,30 +11828,46 @@ function famLiveMemberDetail(m, isMe){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const acc=famAccuracyInfo(s.accuracy);
   const avPhoto=m.photo?`background-image:url('${(''+m.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${m.color}`;
-  let h=`<div style="margin-top:6px;padding-top:12px;border-top:1px solid var(--b1)">`;
-  h+=`<div style="display:flex;align-items:center;gap:12px">
-    <div style="width:56px;height:56px;border-radius:50%;${avPhoto};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:21px;flex:none">${m.photo?'':esc((m.name||'?').slice(0,1).toUpperCase())}</div>
-    <div style="flex:1;min-width:0">
-      <div style="font-weight:800;font-size:18px">${esc(m.name)}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
-      <div style="font-size:12px;color:var(--ink3)"><span class="fam-dot ${m.meta.tone}"></span>${esc(famLiveStatusLine(m))} · ${esc(famRoleLabel(m.role))}</div>
+  let h=`<div style="margin-top:2px;padding-top:12px">`;
+  // Name row: big bold name + green status dot on the left, battery pill on the right
+  const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
+    ? `<div class="fam-batt-pill"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
+  h+=`<div style="display:flex;align-items:center;gap:10px">
+    <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px">
+      <div style="font-weight:800;font-size:26px;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:14px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+      <span class="fam-dot ${m.meta.tone}" style="width:11px;height:11px;margin:0"></span>
+    </div>
+    ${battPill}
+  </div>`;
+  // Address / place + Save Place card (reference layout for the selected member)
+  const showLoc = m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null;
+  if(showLoc){
+    const since = fb&&fb.location?fb.location.hereSince(m.uid):(s.stayStart||null);
+    const line1 = place?esc(place.name):(L==='fa'?'موقعیت زنده':'Live location');
+    const sinceTxt = since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`;
+    h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:12px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:800;font-size:19px;line-height:1.15">${line1}</div>
+        <div style="font-size:14px;color:var(--ink3);margin-top:3px">${esc(famLiveStatusLine(m))}</div>
+        <div style="font-size:14px;color:var(--ink3);margin-top:2px">${sinceTxt}</div>
+      </div>
+      <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
+        <span class="fam-saveplace-ic">${famIcon('pin')}<span class="fam-saveplace-plus">+</span></span>
+        <span>${L==='fa'?'ذخیره مکان':'Save Place'}</span>
+      </button>
     </div>`;
-  h+=`</div>`;
-  // Approximate-location banner: when the real fix is poor, say so plainly
-  // instead of presenting a huge ±value as if it were a normal reading.
-  if(m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null&&acc.approx){
+  }
+  // Approximate-location note when the real fix is poor (honest, not a raw ±value)
+  if(showLoc&&acc.approx){
     h+=`<div style="margin-top:10px"><span class="fam-approx">${famIcon('crosshair')} ${esc(acc.text)}</span></div>`;
   }
-  // stat grid — only genuinely-known facts, each card omitted if unknown
-  if(m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null){
-    // Real "here since": prefer the last arrival EVENT timestamp, then stay-start.
+  // secondary detail grid — only genuinely-known facts, each card omitted if unknown
+  if(showLoc){
     const since = fb&&fb.location?fb.location.hereSince(m.uid):(s.stayStart||null);
     h+=`<div class="fam-stat-grid">`;
-    if(place) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مکان':'Place'}</div><div class="val">${esc(place.name)}</div></div>`;
-    if(since&&!s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div><div style="font-size:10px;color:var(--ink3);margin-top:2px">${L==='fa'?'از':'since'} ${famAbsTime(since)}</div></div>`;
+    if(since&&!s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div></div>`;
     if(s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال حرکت':'Moving'}</div></div>`;
-    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:10px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
-    // Accuracy card ONLY when it's a genuinely good fix; poor accuracy is shown
-    // as the "Approximate location" banner above, never as a raw ±2000m stat.
+    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
     if(acc.level==='good') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">${esc(acc.text)}</div></div>`;
     if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">${s.battery}%</div></div>`;
     h+=`</div>`;
@@ -11832,7 +11910,6 @@ function famLiveMemberDetail(m, isMe){
   } else {
     h+=`<button class="btn btn-ghost" data-fam="live-request" data-arg="${m.uid}">${famIcon('bell')} ${L==='fa'?'درخواست':'Request'}</button>`;
   }
-  h+=`<button class="btn btn-ghost" data-fam="live-save-place" data-arg="${m.uid}" ${canDir?'':'disabled'} title="${canDir?'':(L==='fa'?'موقعیتی برای ذخیره نیست':'No location to save')}">${famIcon('pin')} ${L==='fa'?'ذخیره مکان':'Save place'}</button>`;
   h+=`<button class="btn btn-ghost" data-fam="live-history" data-arg="${m.uid}">${famIcon('clock')} ${L==='fa'?'تاریخچه':'History'}</button>`;
   h+=`</div>`;
   h+=`</div>`;
