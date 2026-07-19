@@ -1438,18 +1438,29 @@ body.rtl .trow-content{text-align:right}
 .fam-pin-head{position:absolute;left:50%;top:-9px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;
   border-bottom:9px solid #2fce6b;transform-origin:50% 39px;z-index:0}
 /* ── member list rows (rich: photo, place, since, battery, state) ── */
-.fam-mrow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer}
+.fam-mrow{display:flex;align-items:center;gap:14px;padding:16px 4px;border-top:1px solid var(--b1);cursor:pointer}
+.fam-mrow:first-child{border-top:none}
+.fam-mrow-av{position:relative;width:58px;height:58px;border-radius:50%;flex:none;
+  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;background-size:cover;background-position:center}
+.fam-mrow-batt{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:3px;
+  background:var(--s1);border:1px solid var(--b1);border-radius:9px;padding:1px 5px;font-size:10px;font-weight:800;color:var(--ink2);white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.fam-mrow-batt-ic{position:relative;width:14px;height:8px;border:1.5px solid var(--ink3);border-radius:2px}
+.fam-mrow-batt-ic::after{content:"";position:absolute;right:-3px;top:1.5px;width:1.5px;height:3px;background:var(--ink3);border-radius:0 1px 1px 0}
+.fam-mrow-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:#3fbf6a;border-radius:1px}
+.fam-mrow-fav{flex:none;border:none;background:transparent;color:var(--ink3);cursor:pointer;padding:6px}
+.fam-mrow-fav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-mrow-fav.on svg{fill:#f5476b;stroke:#f5476b}
 /* ── clustered multi-avatar pin: 2+ members sharing one bubble (like the
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
-.fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 3px 8px rgba(0,0,0,.4))}
-.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:34px;padding:4px}
+.fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
+.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:40px;padding:6px}
 .fam-cluster.sel .fam-cluster-row{outline:3px solid #6e56f8}
-.fam-cluster-av{width:48px;height:48px;border-radius:50%;border:3px solid #fff;margin-inline-start:-14px;
-  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px;overflow:hidden}
+.fam-cluster-av{width:52px;height:52px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;
+  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:18px;overflow:hidden}
 .fam-cluster-av:first-child{margin-inline-start:0}
-.fam-cluster-more{width:40px;height:40px;border-radius:50%;border:3px solid #fff;margin-inline-start:-14px;background:#6e56f8;color:#fff;
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
-.fam-cluster-tip{position:absolute;left:50%;bottom:-7px;width:14px;height:14px;background:#fff;transform:translateX(-50%) rotate(45deg)}
+.fam-cluster-more{width:46px;height:46px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;background:#6e56f8;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+.fam-cluster-tip{position:absolute;left:50%;bottom:-8px;width:16px;height:16px;background:#fff;transform:translateX(-50%) rotate(45deg)}
 /* ── "arrived X ago" map bubble above a pin/cluster (Life360-style) ── */
 .fam-arrived{position:relative;background:#fff;border-radius:16px;padding:8px 14px 8px 12px;
   display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;pointer-events:none}
@@ -1457,6 +1468,9 @@ body.rtl .trow-content{text-align:right}
 .fam-arrived .fam-arrived-ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-arrived .fam-arrived-t{font-size:12.5px;color:var(--ink2)}
 .fam-arrived .fam-arrived-t b{color:var(--ink);font-weight:800}
+.fam-arrived-2l{display:flex;flex-direction:column;line-height:1.2}
+.fam-arrived-2l b{font-size:13px;color:#1a1a24;font-weight:800}
+.fam-arrived-2l small{font-size:12px;color:#8a8f9a}
 .fam-arrived-tip{position:absolute;left:50%;bottom:-6px;width:12px;height:12px;background:#fff;transform:translateX(-50%) rotate(45deg)}
 /* ── History day slider (scrub through the day's captured points) ── */
 .fam-hist-slider{display:flex;align-items:center;gap:10px;margin-top:12px}
@@ -1471,8 +1485,8 @@ body.rtl .trow-content{text-align:right}
 .fam-maptype.on .lbl{color:#6e56f8}
 .fam-maptype.disabled{opacity:.4;pointer-events:none}
 .fam-mrow .mmeta{flex:1;min-width:0}
-.fam-mrow .mmeta .mn{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fam-mrow .mmeta .ms{font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-mrow .mmeta .mn{font-weight:800;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-mrow .mmeta .ms{font-size:14px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .fam-mrow .mside{text-align:end;flex:none;font-size:11px;color:var(--ink3)}
 .fam-mrow .mbatt{font-size:11px;color:var(--ink3)}
 /* ── history / place event timeline ── */
@@ -1596,7 +1610,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v283';
+const APP_VERSION='v286';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11580,7 +11594,8 @@ const FAM_ICON = {
   pause:'<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>',
   play:'<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>',
   share:'<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>',
-  layers:'<svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>'
+  layers:'<svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>',
+  heart:'<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
@@ -11671,7 +11686,7 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     });
     h+=`</div>`;
   } else if(members.length===1){
-    h+=`<div style="font-size:11px;color:var(--ink3);padding:4px 2px 2px">${L==='fa'?'شما تنها عضو خانواده هستید — با دعوت دیگران، آن‌ها اینجا ظاهر می‌شوند.':'You’re the only family member — invite others to see them here.'}</div>`;
+    h+=`<div style="font-size:14px;color:var(--ink3);padding:6px 2px 14px;border-bottom:1px solid var(--b1);margin-bottom:6px">${L==='fa'?'شما تنها عضو خانواده هستید — با دعوت دیگران، آن‌ها اینجا ظاهر می‌شوند.':'You’re the only family member — invite others to see them here.'}</div>`;
   }
   if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
   return h;
@@ -11805,6 +11820,110 @@ function famLiveStatusLine(m){
    Never a guess — only reports a place name when the member's real fix falls
    within a real, family-saved geofence. No "Driving/Walking" claims: MBM has
    no motion-classification signal to back that up honestly. */
+/* ═══════════════════════════════════════════════════════════════════════
+   REVERSE GEOCODING (coords → civic address), Life360-style.
+   Turns a member's real GPS fix into a human address for the sheet/list:
+     • house number + street present → "12 Elizabeth Street" + "New Town, TAS"
+     • street but no number           → "Near Elizabeth Street" + suburb line
+     • neither                         → nearest named feature, else "Live location"
+   Uses OpenStreetMap Nominatim /reverse (no key). Honest + polite:
+     - results CACHED per ~11m coordinate cell so we never re-query on every
+       render or Firestore snapshot;
+     - a single-flight queue enforces >=1s between network calls (Nominatim
+       usage policy);
+     - on failure we keep the last known text or fall back to a saved-place /
+       "Live location" — never a fabricated street.
+   ═══════════════════════════════════════════════════════════════════════ */
+const FamGeo = (function(){
+  const cache = {};          // key -> {line1,line2,full,ts}
+  const pending = {};        // key -> true (in flight / queued)
+  let queue = [];            // [{key,lat,lng}]
+  let lastCall = 0;
+  const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
+  const TTL = 6*3600*1000;   // 6h cache lifetime
+  function key(lat,lng){ return lat.toFixed(4)+','+lng.toFixed(4); } // ~11m cells
+  function get(lat,lng){ const k=key(lat,lng); const c=cache[k]; if(c && (Date.now()-c.ts)<TTL) return c; return null; }
+  // Build the two display lines from a Nominatim address object, Life360-style.
+  function format(a, displayName){
+    a=a||{};
+    const road = a.road || a.pedestrian || a.footway || a.residential || a.path || a.cycleway || a.street;
+    const num  = a.house_number;
+    const suburb = a.suburb || a.neighbourhood || a.quarter || a.city_district || a.town || a.village || a.hamlet || a.city || a.municipality;
+    const region = a.state_code || a.state || a.region || a.province;
+    const suburbLine = [suburb, region].filter(Boolean).join(', ');
+    let line1, full;
+    if(road && num){ line1 = `${num} ${road}`; full = [line1, suburbLine].filter(Boolean).join(', '); }
+    else if(road){ line1 = (L==='fa'? `نزدیک ${road}` : `Near ${road}`); full = [road, suburbLine].filter(Boolean).join(', '); }
+    else {
+      // no road: use the nearest named thing Nominatim gave us, else generic
+      const named = a.building || a.amenity || a.shop || a.leisure || a.tourism || a.name
+                    || (displayName?displayName.split(',')[0]:null);
+      if(named){ line1 = (L==='fa'? `نزدیک ${named}` : `Near ${named}`); full=[named, suburbLine].filter(Boolean).join(', '); }
+      else { line1 = suburb || (L==='fa'?'موقعیت زنده':'Live location'); full=suburbLine||line1; }
+    }
+    return { line1, line2: suburbLine, full };
+  }
+  function pump(){
+    if(!queue.length) return;
+    const wait = Math.max(0, MIN_INTERVAL - (Date.now()-lastCall));
+    setTimeout(()=>{
+      const job = queue.shift(); if(!job){ return; }
+      lastCall = Date.now();
+      const k=job.key;
+      const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
+      fetch(url,{headers:{'Accept':'application/json'}})
+        .then(r=>r.json())
+        .then(res=>{
+          if(res && (res.address || res.display_name)){
+            const f=format(res.address, res.display_name);
+            cache[k]={ line1:f.line1, line2:f.line2, full:f.full, ts:Date.now() };
+          }
+        })
+        .catch(()=>{ /* keep whatever we had; no fabricated address */ })
+        .then(()=>{ delete pending[k]; if(typeof afterGeoResolved==='function')afterGeoResolved(); if(queue.length)pump(); });
+    }, wait);
+  }
+  // Public: request an address for a fix. Returns cached result immediately (or
+  // null) and schedules a lookup if not cached. Caller re-renders on resolve.
+  function request(lat,lng){
+    if(lat==null||lng==null) return null;
+    const k=key(lat,lng);
+    const c=cache[k]; if(c && (Date.now()-c.ts)<TTL) return c;
+    if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng}); pump(); }
+    return null;
+  }
+  return { request, get, format, _key:key };
+})();
+// Re-render the Family surface when a reverse-geocode resolves (throttled by
+// the queue itself). Only touches the live/members screens.
+let _geoRerenderT=null;
+function afterGeoResolved(){
+  if(_geoRerenderT) return;
+  _geoRerenderT=setTimeout(()=>{ _geoRerenderT=null;
+    if(typeof render==='function' && screen==='module' && currentModule==='family'){
+      if((famView==='live'||famView==='dashboard') && typeof famLiveApply==='function') famLiveApply();
+      else if(famView==='members') render();
+    }
+  }, 120);
+}
+/* Resolve the best display lines for a member's current fix, Life360-style:
+   1) a SAVED place name wins (user-defined geofence) — most meaningful;
+   2) else the reverse-geocoded civic address (house number + street + suburb);
+   3) else a pending/'Live location' placeholder until the lookup resolves.
+   While the member is actively moving we DON'T queue a fresh lookup for every
+   ~11m cell (that would spam Nominatim); we show the last cached address if any,
+   else a neutral placeholder, and let it resolve once they settle. */
+function famLocationLines(lat,lng,moving){
+  const place=famMatchSavedPlace(lat,lng);
+  if(place) return { line1: place.name, line2:'', source:'place' };
+  const cached=FamGeo.get(lat,lng);
+  if(cached) return { line1:cached.line1, line2:cached.line2, source:'geo' };
+  if(moving) return { line1:(L==='fa'?'در حال حرکت':'On the move'), line2:'', source:'moving' };
+  const g=FamGeo.request(lat,lng);
+  if(g) return { line1:g.line1, line2:g.line2, source:'geo' };
+  return { line1:(L==='fa'?'موقعیت زنده':'Live location'), line2:'', source:'pending' };
+}
+
 function famMatchSavedPlace(lat,lng){
   if(lat==null||lng==null)return null;
   const places=Object.values(famPlacesMap()||{});
@@ -11833,9 +11952,9 @@ function famLiveMemberDetail(m, isMe){
   const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
     ? `<div class="fam-batt-pill"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
   h+=`<div style="display:flex;align-items:center;gap:10px">
-    <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px">
-      <div style="font-weight:800;font-size:26px;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:14px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
-      <span class="fam-dot ${m.meta.tone}" style="width:11px;height:11px;margin:0"></span>
+    <div style="flex:1;min-width:0;display:flex;align-items:center;gap:12px">
+      <div style="font-weight:800;font-size:32px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+      <span class="fam-dot ${m.meta.tone}" style="width:12px;height:12px;margin:0;flex:none"></span>
     </div>
     ${battPill}
   </div>`;
@@ -11843,13 +11962,14 @@ function famLiveMemberDetail(m, isMe){
   const showLoc = m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null;
   if(showLoc){
     const since = fb&&fb.location?fb.location.hereSince(m.uid):(s.stayStart||null);
-    const line1 = place?esc(place.name):(L==='fa'?'موقعیت زنده':'Live location');
+    const loc = famLocationLines(s.lat, s.lng, s.moving);
+    const line1 = esc(loc.line1);
     const sinceTxt = since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`;
-    h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:12px">
+    h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px">
       <div style="flex:1;min-width:0">
-        <div style="font-weight:800;font-size:19px;line-height:1.15">${line1}</div>
-        <div style="font-size:14px;color:var(--ink3);margin-top:3px">${esc(famLiveStatusLine(m))}</div>
-        <div style="font-size:14px;color:var(--ink3);margin-top:2px">${sinceTxt}</div>
+        <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
+        ${loc.line2?`<div style="font-size:15px;color:var(--ink3);margin-top:5px">${esc(loc.line2)}</div>`:''}
+        <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
         <span class="fam-saveplace-ic">${famIcon('pin')}<span class="fam-saveplace-plus">+</span></span>
@@ -11988,7 +12108,7 @@ function famPaintArrivedBubble(sel){
   if(!arr || sel.state.moving){ MBMMap.clearArrivedBubble(); return; }
   const rel=famRelTime(arr.at);
   const nm=esc((sel.name||'').split(' ')[0]||sel.name||'');
-  const txt=(L==='fa')?`<b>${nm}</b> ${rel} رسید`:`<b>${nm}</b> arrived ${rel}`;
+  const txt=(L==='fa')?`<span class="fam-arrived-2l"><b>${nm}</b> رسید<small>${rel}</small></span>`:`<span class="fam-arrived-2l"><b>${nm} arrived</b><small>${rel}</small></span>`;
   MBMMap.setArrivedBubble([sel.state.lat,sel.state.lng], txt);
 }
 
@@ -12205,22 +12325,32 @@ function famMembersView(){
     rows.forEach(m=>{
       const isMe=m.uid===myUid;
       const lm=liveByUid[m.uid];
-      const av={color:m.color||'#6e56f8',name:m.name||'?',avatarId:null,photo:m.photo||null};
+      const av={color:m.color||'#6e56f8',name:m.name||'?',photo:m.photo||null};
       const canManage=(st.role==='owner'||st.role==='admin')&&!isMe&&m.uid!==st.ownerUid;
-      // real presence sub-line + side (battery / last-updated) — never fabricated
-      let sub=famRoleLabel(m.role), side='';
-      if(lm){ sub=famLiveStatusLine(lm); const s=lm.state||{};
-        if(s.battery!=null) side=`<div class="mbatt">${s.battery}%</div>`;
-        if(s.lat!=null&&lm.consent&&lm.consent.enabled&&!lm.consent.paused) side+=`<div>${famAbsTime(s.reportedAt||s.capturedAt)}</div>`;
-      }
+      // Location lines + battery, from real state only (never fabricated).
+      let line1='', line2='', batt=null;
+      if(lm){ const s=lm.state||{};
+        if(s.battery!=null) batt=s.battery;
+        if(s.lat!=null&&lm.consent&&lm.consent.enabled&&!lm.consent.paused){
+          const since=fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null);
+          const loc=famLocationLines(s.lat,s.lng,s.moving);
+          line1=loc.line1;
+          line2=since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:(loc.line2||famLiveStatusLine(lm));
+        } else {
+          line1=famLiveStatusLine(lm); // e.g. "No network or phone off", "Sharing paused"
+        }
+      } else { line1=famRoleLabel(m.role); }
       const photoStyle=av.photo?`background-image:url('${(''+av.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${av.color}`;
-      const dot=lm?`<span class="fam-dot ${lm.meta.tone}"></span>`:'';
+      const battBadge = batt!=null ? `<span class="fam-mrow-batt"><span class="fam-mrow-batt-ic" style="--lvl:${Math.max(8,Math.min(100,batt))}%"></span>${batt}%</span>` : '';
       h+=`<div class="fam-mrow" ${canManage?`data-fam="cmember-open" data-arg="${m.uid}"`:`data-fam="live-sel-open" data-arg="${m.uid}"`}>
-        <div style="width:44px;height:44px;border-radius:50%;${photoStyle};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;flex:none">${av.photo?'':esc((av.name).slice(0,1).toUpperCase())}</div>
-        <div class="mmeta"><div class="mn">${esc(m.name||'Member')}${isMe?` <span style="font-size:11px;color:var(--ink3)">(${L==='fa'?'شما':'you'})</span>`:''}</div>
-          <div class="ms">${dot}${esc(sub)}</div></div>
-        ${side?`<div class="mside">${side}</div>`:''}
-        ${canManage?'<span style="color:var(--ink3);opacity:.4">›</span>':''}</div>`;
+        <div class="fam-mrow-av" style="${photoStyle}">${av.photo?'':esc((av.name).slice(0,1).toUpperCase())}${battBadge}</div>
+        <div class="mmeta">
+          <div class="mn">${esc(m.name||'Member')}${isMe?` <span style="font-size:12px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+          ${line1?`<div class="ms">${esc(line1)}</div>`:''}
+          ${line2?`<div class="ms">${esc(line2)}</div>`:''}
+        </div>
+        <button class="fam-mrow-fav${(DB.meta.famFavorites&&DB.meta.famFavorites[m.uid])?' on':''}" data-fam="fav-toggle" data-arg="${m.uid}" title="${L==='fa'?'علاقه‌مندی':'Favorite'}">${famIcon('heart')}</button>
+      </div>`;
     });
     if(famCan('sendInvites')) h+=`<button class="btn" data-fam="invites" style="width:100%;margin-top:14px">✉ ${L==='fa'?'دعوت عضو جدید':'Invite a member'}</button>`;
     h+=`</div>`; return h;
@@ -12568,7 +12698,7 @@ function bindFamily(){
   const b5=document.getElementById('fam-back-settings'); if(b5)b5.onclick=()=>go('settings');
   document.querySelectorAll('[data-fam]').forEach(el=>{
     if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
-    el.onclick=(ev)=>{ const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
+    el.onclick=(ev)=>{ ev.stopPropagation(); const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
   });
   // tel/sms anchors: log the action was opened (never claim delivered)
   document.querySelectorAll('a[data-fam="sos-log"]').forEach(a=>a.addEventListener('click',()=>{ famLog('sos_action',{action:a.dataset.arg}); saveDB(); }));
@@ -12683,6 +12813,12 @@ function famAction(act,arg,ev){
     case 'hist-prev': _famHistDayOffset++; _famHistCursor=null; render(); return;
     case 'hist-next': if(_famHistDayOffset>0)_famHistDayOffset--; _famHistCursor=null; render(); return;
     case 'later':{ toast(L==='fa'?`«${arg}» در یک فاز بعدی اضافه می‌شود`:`"${arg}" is coming in a later phase`); return; }
+    case 'fav-toggle':{
+      if(!DB.meta.famFavorites)DB.meta.famFavorites={};
+      DB.meta.famFavorites[arg]=!DB.meta.famFavorites[arg];
+      try{saveDB();}catch(e){}
+      render(); return;
+    }
     case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; famView='live'; render(); window.scrollTo(0,0); return;
     case 'members': go('members'); return;
     case 'places': go('places'); return;
