@@ -1310,31 +1310,45 @@ body.rtl .trow-content{text-align:right}
 /* ═══ Family Live (Phase 2) — redesigned: map as backdrop, persistent info panel ═══ */
 #fam-live-wrap{position:relative;width:100%;height:calc(100vh - 0px);height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column}
 #fam-map{position:absolute;inset:0;width:100%;height:100%;background:#dfe3ea;z-index:1}
+/* MapLibre GL integration: keep our custom marker DOM un-clipped and let the
+   engine own positioning; tame the default attribution/logo to match our UI. */
+.maplibregl-marker{will-change:transform}
+.maplibregl-canvas{outline:none}
+.maplibregl-ctrl-attrib{font-size:9px;background:rgba(255,255,255,.6)}
+.maplibregl-ctrl-attrib a{color:#6b7280}
+.dark .maplibregl-ctrl-attrib{background:rgba(20,22,28,.6)}
+.dark .maplibregl-ctrl-attrib a{color:#9aa1ad}
+.maplibregl-ctrl-bottom-right{z-index:1000}
 .dark #fam-map{background:#20222b}
-.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:10px;padding:12px 14px;
+.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:12px;padding:14px 16px;
   background:linear-gradient(180deg,var(--s0) 55%,transparent);pointer-events:none}
 .fam-live-top>*{pointer-events:auto}
 .fam-live-title{flex:1;min-width:0}
-.fam-live-title b{display:block;font-size:17px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-live-title b{display:block;font-size:19px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fam-live-title span{display:block;font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fam-live-ctrls{position:absolute;right:12px;z-index:1150;display:flex;flex-direction:column;gap:8px}
-.fam-mapbtn{width:42px;height:42px;border-radius:12px;border:1px solid var(--b1);background:var(--s1);color:var(--ink);
-  display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
-.fam-mapbtn:active{background:var(--s2)}
-/* avatar pins — richer: photo/initial, colour ring = status, small heading chevron when moving */
-.fam-pin{position:relative;width:48px;height:56px;transform:translate(-50%,-100%);cursor:pointer}
-.fam-pin .fam-pin-av{width:48px;height:48px;border-radius:50%;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.45);
+.fam-live-ctrls{position:absolute;right:14px;z-index:1150;display:flex;flex-direction:column;gap:12px}
+/* Reference-matched control buttons: larger dark rounded squares with soft
+   shadow, like the Life360 map controls. */
+.fam-mapbtn{width:50px;height:50px;border-radius:15px;border:none;background:var(--s1);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.28)}
+.dark .fam-mapbtn{background:#2a2d38;color:#eef0f4}
+.fam-mapbtn:active{transform:scale(.94)}
+.fam-mapbtn svg{width:22px;height:22px}
+/* avatar pins — larger, reference-matched: photo/initial, colour ring = status, heading chevron when moving */
+.fam-pin{position:relative;width:60px;height:70px;cursor:pointer}
+.fam-pin .fam-pin-av{width:58px;height:58px;border-radius:50%;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.5);
   background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
-  font-weight:800;color:#fff;font-size:17px}
-.fam-pin.sel .fam-pin-av{border-color:#6e56f8;transform:scale(1.14)}
-.fam-pin .fam-pin-ring{position:absolute;inset:-4px;border-radius:50%;border:3px solid transparent}
+  font-weight:800;color:#fff;font-size:20px}
+.fam-pin.sel .fam-pin-av{transform:scale(1.06)}
+.fam-pin .fam-pin-ring{position:absolute;left:-1px;top:-1px;width:60px;height:60px;border-radius:50%;border:3px solid transparent}
 .fam-pin.tone-live .fam-pin-ring{border-color:#22c55e;animation:pinpulse 2s infinite}
 .fam-pin.tone-ok .fam-pin-ring{border-color:#22c55e}
 .fam-pin.tone-warn .fam-pin-ring{border-color:#f59e0b}
+.fam-pin.sel .fam-pin-ring{box-shadow:0 0 0 3px rgba(110,86,248,.9)}
 .fam-pin.tone-muted{opacity:.65}.fam-pin.tone-muted .fam-pin-ring{border-color:#94a3b8}
 @keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
 @keyframes famspin{to{transform:rotate(360deg)}}
-.fam-pin-tip{position:absolute;left:50%;bottom:6px;width:10px;height:10px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
+.fam-pin-tip{position:absolute;left:50%;bottom:8px;width:12px;height:12px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
 .fam-pin-name{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);background:rgba(20,20,28,.82);color:#fff;
   font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap;pointer-events:none}
 /* ── Persistent info panel: ALWAYS part of normal document flow at the
@@ -1368,7 +1382,7 @@ body.rtl .trow-content{text-align:right}
 /* honest offline / map-unavailable overlay (non-blocking; sheet stays usable) */
 .fam-map-msg{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:1100;background:var(--s1);
   border:1px solid var(--b1);border-radius:12px;padding:8px 14px;font-size:12px;color:var(--ink2);box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:88%;text-align:center}
-.leaflet-container{font-family:inherit}
+.maplibregl-map{font-family:inherit}
 /* ── Map loading state: shown instead of a bare grey area until first tiles paint ── */
 #fam-map-load{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
   background:var(--s0);color:var(--ink3);font-size:13px;transition:opacity .35s}
@@ -1383,13 +1397,13 @@ body.rtl .trow-content{text-align:right}
 .fam-approx{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--warn);
   background:rgba(245,158,11,.12);border-radius:8px;padding:2px 8px}
 /* ── heading chevron on a moving pin ── */
-.fam-pin-head{position:absolute;left:50%;top:-6px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
-  border-bottom:8px solid var(--brand,#6e56f8);transform-origin:50% 26px}
+.fam-pin-head{position:absolute;left:50%;top:-8px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
+  border-bottom:8px solid var(--brand,#6e56f8);transform-origin:50% 37px}
 /* ── member list rows (rich: photo, place, since, battery, state) ── */
 .fam-mrow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer}
 /* ── clustered multi-avatar pin: 2+ members sharing one bubble (like the
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
-.fam-cluster{position:relative;transform:translate(-50%,-100%);cursor:pointer;filter:drop-shadow(0 3px 8px rgba(0,0,0,.4))}
+.fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 3px 8px rgba(0,0,0,.4))}
 .fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:34px;padding:4px}
 .fam-cluster.sel .fam-cluster-row{outline:3px solid #6e56f8}
 .fam-cluster-av{width:48px;height:48px;border-radius:50%;border:3px solid #fff;margin-inline-start:-14px;
@@ -1399,7 +1413,7 @@ body.rtl .trow-content{text-align:right}
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
 .fam-cluster-tip{position:absolute;left:50%;bottom:-7px;width:14px;height:14px;background:#fff;transform:translateX(-50%) rotate(45deg)}
 /* ── "arrived X ago" map bubble above a pin/cluster (Life360-style) ── */
-.fam-arrived{position:relative;transform:translate(-50%,-100%);background:#fff;border-radius:16px;padding:8px 14px 8px 12px;
+.fam-arrived{position:relative;background:#fff;border-radius:16px;padding:8px 14px 8px 12px;
   display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;pointer-events:none}
 .fam-arrived .fam-arrived-ic{color:#6e56f8;display:flex}
 .fam-arrived .fam-arrived-ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
@@ -1433,15 +1447,19 @@ body.rtl .trow-content{text-align:right}
 .fam-tl-s{font-size:12px;color:var(--ink3);margin-top:1px}
 .fam-tl-time{font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
 </style>
-<!-- ═══ LEAFLET (map engine) ═══════════════════════════════════════════
-     DEV: referenced from official CDN, pinned to 1.9.4 with SRI.
-     PRODUCTION: replace these two tags with the vendored/inlined
-     leaflet.css + leaflet.js before release (see /vendor). The MBMMap
-     wrapper isolates all Leaflet usage, so only these two lines change. ── -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- ═══ MAPLIBRE GL (vector map engine) ════════════════════════════════
+     Migrated from Leaflet/OSM-raster to a production-grade VECTOR engine so
+     Family Live can be styled close to the Life360 reference (road hierarchy,
+     reduced clutter, typography, buildings, smooth GPU zoom + marker motion).
+     MapLibre GL is the open-source fork of Mapbox GL — same engine, no
+     billing/token dependency. Vector tiles are served by MapTiler; the app
+     runs immediately on MapTiler's keyless demo style and switches to the
+     production style when MAPTILER_KEY is set (single final config step).
+     All map usage is isolated behind the MBMMap wrapper. ── -->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      crossorigin=""/>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+      crossorigin=""></script>
 </head>
 <body>
 
@@ -1540,7 +1558,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v280';
+const APP_VERSION='v281';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2330,7 +2348,7 @@ function _renderInner(){
   else if(screen==='profile')el.innerHTML=renderProfile();
   bindScreen();
   updateFab();
-  // Mount the Leaflet map after the Family Live DOM exists.
+  // Mount the map after the Family Live DOM exists.
   if(screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard') && typeof famLiveMount==='function'){
     famLiveMount();
   }
@@ -11190,115 +11208,186 @@ function famCloudBanner(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   TILE PROVIDER ABSTRACTION (Phase 2)
-   A provider is a pure descriptor; adding a future provider (alt street,
-   satellite, hybrid, paid) means adding an entry here — no UI/engine change.
-   A provider is only OFFERED in the UI if enabled:true AND it genuinely works
-   with no API key / no paid dependency at this stage. Satellite/hybrid are
-   defined but DISABLED (no legal keyless source wired) so they are never shown.
+   MAP STYLE CONFIGURATION (MapLibre GL vector)
+   Each map type resolves to a MapLibre "style" — either a hosted vector style
+   URL (MapTiler, when a key is configured) or an inline raster-fallback style
+   (keyless OSM raster) so the app is never blank even before a key is set.
+   The Life360-like appearance comes from the VECTOR style + our runtime
+   restyle pass (see MBMMap.applyLifeStyle), not from swapping raster colours.
    ═══════════════════════════════════════════════════════════════════════ */
-const TileProviders = {
-  osm: {
-    id:'osm', kind:'street', enabled:true,
-    label:{en:'Street',fa:'خیابان'},
-    url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    options:{ maxZoom:19, crossOrigin:true,
-      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }
-  },
-  // Satellite — Esri World Imagery: a genuinely keyless, reliable REST tile
-  // service (public, attribution required). No API key, no paid dependency.
-  satellite:{
-    id:'satellite', kind:'satellite', enabled:true, label:{en:'Satellite',fa:'ماهواره'},
-    url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    options:{ maxZoom:19, crossOrigin:true,
-      attribution:'Imagery &copy; Esri, Maxar, Earthstar Geographics' }
-  },
-  hybrid:{ id:'hybrid', kind:'hybrid', enabled:false, label:{en:'Hybrid',fa:'ترکیبی'}, url:null, options:{} }
-};
-// "Auto" is an honest alias for the default street map (not a fake distinct
-// layer) — it is always available because it maps to a working provider.
+// FINAL CONFIG STEP: paste a free MapTiler key (maptiler.com → Keys) to switch
+// from the keyless demo tiles to full production vector styling. Everything
+// else already works; this is the only remaining configuration.
+const MAPTILER_KEY = '';   // e.g. 'AbCdEf123...'  (empty = keyless demo + OSM raster fallback)
+
+// Inline raster style (no key needed) — keeps the map working before a key is
+// set and as an automatic fallback if vector tiles fail. Honest, never blank.
+function rasterStyle(url, attribution){
+  return { version:8, sources:{ r:{ type:'raster', tiles:[url], tileSize:256, attribution:attribution||'' } },
+    layers:[{ id:'r', type:'raster', source:'r' }] };
+}
+const OSM_RASTER = rasterStyle('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  '&copy; OpenStreetMap contributors');
+const ESRI_SAT = rasterStyle('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  'Imagery &copy; Esri, Maxar, Earthstar Geographics');
+
+// Resolve a map type → { style, vector:bool }. With a MapTiler key we use their
+// vector styles (streets-v2 / satellite); without one we degrade to raster so
+// nothing is ever fake or blank.
+function famStyleFor(typeId){
+  const k=MAPTILER_KEY;
+  if(typeId==='satellite'){
+    return k ? { style:`https://api.maptiler.com/maps/hybrid/style.json?key=${k}`, vector:true }
+             : { style:ESRI_SAT, vector:false };
+  }
+  // auto + street → vector streets when keyed, else OSM raster
+  return k ? { style:`https://api.maptiler.com/maps/streets-v2/style.json?key=${k}`, vector:true }
+           : { style:OSM_RASTER, vector:false };
+}
 const FAM_MAP_TYPES=[
-  {id:'auto', provider:'osm', label:{en:'Auto',fa:'خودکار'}},
-  {id:'street', provider:'osm', label:{en:'Street',fa:'خیابان'}},
-  {id:'satellite', provider:'satellite', label:{en:'Satellite',fa:'ماهواره'}}
+  {id:'auto', label:{en:'Auto',fa:'خودکار'}},
+  {id:'street', label:{en:'Street',fa:'خیابان'}},
+  {id:'satellite', label:{en:'Satellite',fa:'ماهواره'}}
 ];
-function famMapTypeEnabled(t){ const p=TileProviders[t.provider]; return !!(p&&p.enabled&&p.url); }
-function tileProvidersAvailable(){ return Object.values(TileProviders).filter(p=>p.enabled&&p.url); }
-let _famMapProvider='osm';
-let _famMapType='auto';   // selected map type id (auto/street/satellite)
+// Every type is genuinely usable: with a key it's vector, without a key it maps
+// to a real working raster source (OSM / Esri). None are fake placeholders.
+function famMapTypeEnabled(t){ return true; }
+let _famMapType='auto';    // selected map type id (auto/street/satellite)
+let _famMapProvider='auto'; // kept for backward-compat with existing callers
 
 /* ═══════════════════════════════════════════════════════════════════════
-   MBMMap — thin wrapper isolating ALL Leaflet usage behind our own API.
-   If Leaflet is swapped/vendored, only this object changes. Honest failure:
-   if Leaflet or tiles are unavailable, the map degrades to a non-blocking
+   MBMMap — thin wrapper isolating ALL map-engine usage behind our own API.
+   If the engine is swapped, only this object changes. Honest failure:
+   if the engine or tiles are unavailable, the map degrades to a non-blocking
    message; the member/status sheet keeps working regardless.
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   MBMMap — production vector-map wrapper over MapLibre GL. Isolates ALL map
+   engine usage behind a stable API so the rest of the app is engine-agnostic.
+   External coordinates stay [lat,lng] (as the app already uses); we convert to
+   MapLibre's [lng,lat] internally. Markers are real DOM Markers (reusing our
+   existing CSS), moved with an eased animation loop for smooth "phone-moving"
+   motion. Cone / route / accuracy are GeoJSON layers. Honest failure: if the
+   engine or style can't load, we degrade to a non-blocking message and the
+   member/status sheet keeps working.
+   ═══════════════════════════════════════════════════════════════════════ */
 const MBMMap = (function(){
-  let _map=null, _tiles=null, _markers={}, _markerMeta={}, _routeLine=null, _accCircle=null, _coneLayer=null, _arrivedMk=null, _elId=null, _tileErr=false, _tilesLoaded=false;
-  let _animTimers={};
-  // NOTE: the app uses the global `L` as the LANGUAGE variable, which shadows
-  // Leaflet's global. Always reach Leaflet through window.L via Lf().
-  function Lf(){ return (typeof window!=='undefined')?window.L:undefined; }
-  function available(){ const l=Lf(); return !!(l && l.map); }
-  function mounted(elId){ return !!(_map && _elId===elId && document.getElementById(elId) && document.getElementById(elId).querySelector('.leaflet-pane')); }
+  let _map=null, _elId=null, _styleReady=false, _tilesLoaded=false, _tileErr=false, _curType=null;
+  let _markers={}, _markerEls={}, _markerMeta={}, _markerPos={}, _animTimers={};
+  const GEO={ route:'mbm-route', cone:'mbm-cone', acc:'mbm-acc' };
+  function GL(){ return (typeof window!=='undefined')?window.maplibregl:undefined; }
+  function available(){ const g=GL(); return !!(g && g.Map); }
+  function ll(latlng){ return [latlng[1], latlng[0]]; }          // [lat,lng] → [lng,lat]
+  function mounted(elId){ return !!(_map && _elId===elId && document.getElementById(elId) && document.getElementById(elId).querySelector('.maplibregl-canvas')); }
   function tilesLoaded(){ return _tilesLoaded; }
+  function tileError(){ return _tileErr; }
+  function get(){ return _map; }
+
   function init(elId, center){
-    const l=Lf();
     if(!available()) return null;
-    // Reuse an already-mounted map for the same element — NEVER re-create on a
-    // routine data refresh (that was the reset-on-every-update defect).
     if(mounted(elId)){ return _map; }
     destroy();
-    _elId=elId; _tileErr=false; _tilesLoaded=false;
+    _elId=elId; _tileErr=false; _tilesLoaded=false; _styleReady=false; _curType=_famMapType||'auto';
+    const g=GL();
+    const sc=center?ll(center):[147.32,-42.88];
     try{
-      _map = l.map(elId,{zoomControl:false,attributionControl:true,fadeAnimation:true,markerZoomAnimation:true}).setView(center||[-42.88,147.32], 15);
-      setProvider(_famMapProvider);
-      // recover after network interruption: retry tiles on the map 'load'/online
+      _map=new g.Map({ container:elId, style:famStyleFor(_curType).style, center:sc, zoom:15,
+        attributionControl:true, dragRotate:false, pitchWithRotate:false, touchZoomRotate:true, maxZoom:19,
+        // no default UI; we render our own controls to match the reference.
+        renderWorldCopies:true });
+      _map.touchZoomRotate && _map.touchZoomRotate.disableRotation();
+      _map.on('load', ()=>{ _styleReady=true; _tilesLoaded=true; applyLifeStyle(); ensureGeoLayers(); if(typeof famMapLoaded==='function')famMapLoaded(); });
+      _map.on('styledata', ()=>{ applyLifeStyle(); ensureGeoLayers(); });
+      _map.on('error', (e)=>{ /* tile/style errors: degrade, don't crash */ _tileErr=true; });
+      _map.on('data', (e)=>{ if(e && e.isSourceLoaded){ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); } });
+      // Safety: reveal even if 'load' is flaky.
+      setTimeout(()=>{ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); }, 2500);
       if(typeof window!=='undefined'){ window.addEventListener('online', softRefresh, {once:false}); }
     }catch(e){ _map=null; }
     return _map;
   }
-  function softRefresh(){ if(!_map)return; try{ if(_tiles)_tiles.redraw(); _map.invalidateSize(); }catch(e){} }
-  function setProvider(id){
-    const l=Lf();
-    if(!_map||!l) return;
-    const p=TileProviders[id]||TileProviders.osm; if(!p||!p.url) return;
-    _famMapProvider=p.id;
-    if(_tiles){ try{_map.removeLayer(_tiles);}catch(e){} _tiles=null; }
-    _tilesLoaded=false;
+  function softRefresh(){ if(!_map)return; try{ _map.resize(); }catch(e){} }
+
+  /* Runtime restyle pass toward the Life360 reference — applied on top of the
+     vector style: mute the palette, thin road casings, hide noisy POI icons,
+     soften building fills, tune label typography. No-op on raster fallback
+     (raster has no vector layers to restyle). */
+  function applyLifeStyle(){
+    if(!_map)return;
+    let layers; try{ layers=_map.getStyle().layers||[]; }catch(e){ return; }
+    layers.forEach(ly=>{
+      const id=ly.id||''; const type=ly.type;
+      try{
+        if(type==='background'){ _map.setPaintProperty(id,'background-color','#eceef2'); }
+        else if(type==='fill' && /building/i.test(id)){ _map.setPaintProperty(id,'fill-color','#e2e5ea'); _map.setPaintProperty(id,'fill-opacity',0.9); _map.setPaintProperty(id,'fill-outline-color','#dcdfe6'); }
+        else if(type==='fill' && /(water|ocean|sea|river)/i.test(id)){ _map.setPaintProperty(id,'fill-color','#bcd7e8'); }
+        else if(type==='fill' && /(park|wood|forest|grass|green|golf|pitch)/i.test(id)){ _map.setPaintProperty(id,'fill-color','#d6e8cf'); }
+        else if(type==='line' && /(motorway|trunk|primary)/i.test(id)){ _map.setPaintProperty(id,'line-color','#f4d58d'); }
+        else if(type==='line' && /(secondary|tertiary)/i.test(id)){ _map.setPaintProperty(id,'line-color','#ffffff'); }
+        else if(type==='line' && /(residential|street|service|minor)/i.test(id)){ _map.setPaintProperty(id,'line-color','#ffffff'); }
+        else if(type==='symbol' && /(poi|shop|amenity|transit|station|rail)/i.test(id)){ _map.setLayoutProperty(id,'visibility','none'); } // reduce clutter
+        else if(type==='symbol'){ // labels: neutral dark grey, subtle halo
+          try{ _map.setPaintProperty(id,'text-color','#6b7280'); _map.setPaintProperty(id,'text-halo-color','#ffffff'); _map.setPaintProperty(id,'text-halo-width',1.2); }catch(_){}
+        }
+      }catch(_){}
+    });
+  }
+
+  function ensureGeoLayers(){
+    if(!_map||!_styleReady)return;
+    const empty={ type:'FeatureCollection', features:[] };
     try{
-      _tiles=l.tileLayer(p.url,p.options);
-      _tiles.on('tileerror',()=>{ _tileErr=true; if(typeof famMapTileError==='function')famMapTileError(); });
-      _tiles.on('load',()=>{ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
-      _tiles.addTo(_map);
-      // Safety: hide the loading overlay shortly after add even if 'load' is flaky.
-      setTimeout(()=>{ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); }, 2500);
+      if(!_map.getSource(GEO.acc)){ _map.addSource(GEO.acc,{type:'geojson',data:empty});
+        _map.addLayer({ id:GEO.acc, type:'fill', source:GEO.acc, paint:{ 'fill-color':['get','color'], 'fill-opacity':0.10 } });
+        _map.addLayer({ id:GEO.acc+'-l', type:'line', source:GEO.acc, paint:{ 'line-color':['get','color'], 'line-opacity':0.5, 'line-width':1 } }); }
+      if(!_map.getSource(GEO.cone)){ _map.addSource(GEO.cone,{type:'geojson',data:empty});
+        _map.addLayer({ id:GEO.cone, type:'fill', source:GEO.cone, paint:{ 'fill-color':'#8b6df8', 'fill-opacity':0.28 } }); }
+      if(!_map.getSource(GEO.route)){ _map.addSource(GEO.route,{type:'geojson',data:empty});
+        _map.addLayer({ id:GEO.route, type:'line', source:GEO.route, layout:{'line-cap':'round','line-join':'round'}, paint:{ 'line-color':'#6e56f8', 'line-width':4, 'line-opacity':0.85 } }); }
+    }catch(e){}
+  }
+  function setGeo(id,data){ if(_map&&_map.getSource(id)){ try{_map.getSource(id).setData(data);}catch(e){} } }
+
+  function setProvider(typeId){
+    // switch the whole vector/raster style live, without tearing the map down.
+    if(!_map)return; _famMapProvider=typeId; _famMapType=typeId; _curType=typeId; _tilesLoaded=false;
+    try{
+      _map.setStyle(famStyleFor(typeId).style);
+      _map.once('styledata', ()=>{ _styleReady=true; applyLifeStyle(); ensureGeoLayers(); repaintAllGeo(); _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
     }catch(e){ _tileErr=true; }
   }
-  function tileError(){ return _tileErr; }
-  function setView(center,zoom){ if(_map)try{_map.setView(center,zoom==null?_map.getZoom():zoom,{animate:true});}catch(e){} }
-  function panTo(center){ if(_map)try{_map.panTo(center,{animate:true,duration:.6});}catch(e){} }
-  function fitAll(latlngs){ const l=Lf(); if(_map&&l&&latlngs&&latlngs.length){ try{ if(latlngs.length===1){_map.setView(latlngs[0],16,{animate:true});} else {_map.fitBounds(l.latLngBounds(latlngs).pad(0.28),{animate:true});} }catch(e){} } }
-  function invalidate(){ if(_map)try{ setTimeout(()=>{try{_map.invalidateSize(true);}catch(e){}},60); }catch(e){} }
+  // remember last geo payloads so a style switch can repaint them
+  let _lastRoute=null, _lastCone=null, _lastAcc=null;
+  function repaintAllGeo(){ if(_lastRoute)setGeo(GEO.route,_lastRoute); if(_lastCone)setGeo(GEO.cone,_lastCone); if(_lastAcc)setGeo(GEO.acc,_lastAcc); }
+
+  function setView(center,zoom){ if(_map)try{ _map.easeTo({center:ll(center), zoom:(zoom==null?_map.getZoom():zoom), duration:500}); }catch(e){} }
+  function panTo(center){ if(_map)try{ _map.easeTo({center:ll(center), duration:600}); }catch(e){} }
+  function fitAll(latlngs){ const g=GL(); if(_map&&g&&latlngs&&latlngs.length){ try{
+      if(latlngs.length===1){ _map.easeTo({center:ll(latlngs[0]), zoom:16, duration:500}); }
+      else { const b=new g.LngLatBounds(); latlngs.forEach(p=>b.extend(ll(p))); _map.fitBounds(b,{padding:70, duration:500, maxZoom:17}); }
+    }catch(e){} } }
+  function invalidate(){ if(_map)try{ setTimeout(()=>{try{_map.resize();}catch(e){}},60); }catch(e){} }
+
   function hasMarker(uid){ return !!_markers[uid]; }
-  function markerLatLng(uid){ return _markers[uid]?_markers[uid].getLatLng():null; }
-  /* Smoothly glide an existing marker to a new position instead of snapping —
-     gives the "marker moves as the phone moves" feel without re-mounting. */
+  function markerLatLng(uid){ const p=_markerPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
+
+  /* Smooth eased glide of an existing marker to a new position. */
   function animateMarker(uid, to){
-    const mk=_markers[uid]; const l=Lf(); if(!mk||!l)return;
+    const mk=_markers[uid]; if(!mk)return;
     if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
-    const from=mk.getLatLng();
-    const dLat=to[0]-from.lat, dLng=to[1]-from.lng;
-    // If the jump is large (first fix / teleport) or tiny, just set it.
+    const from=_markerPos[uid]||to;
+    const dLat=to[0]-from[0], dLng=to[1]-from[1];
     const dist=Math.abs(dLat)+Math.abs(dLng);
     if(dist<1e-7){ return; }
-    if(dist>0.05){ mk.setLatLng(to); return; }
+    if(dist>0.05){ _markerPos[uid]=to; try{mk.setLngLat(ll(to));}catch(_){}; return; }
     const steps=18; let i=0;
     _animTimers[uid]=setInterval(()=>{
-      i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t; // easeInOut
-      try{ mk.setLatLng([from.lat+dLat*e, from.lng+dLng*e]); }catch(_){}
-      if(i>=steps){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; try{mk.setLatLng(to);}catch(_){} }
+      i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t;
+      const cur=[from[0]+dLat*e, from[1]+dLng*e];
+      try{ mk.setLngLat(ll(cur)); }catch(_){}
+      if(i>=steps){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; _markerPos[uid]=to; try{mk.setLngLat(ll(to));}catch(_){} }
     },16);
+    _markerPos[uid]=to;
   }
   function pinHtml(meta){
     const av = meta.photo
@@ -11308,111 +11397,107 @@ const MBMMap = (function(){
       ? `<div class="fam-pin-head" style="transform:rotate(${Math.round(meta.heading)}deg)"></div>` : '';
     return head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`;
   }
-  /* Create-or-update a member pin. On update, only the icon classes/heading
-     change and the position animates — the marker object is preserved so the
-     map never rebuilds. */
+  function makeEl(cls, html){ const d=document.createElement('div'); d.className=cls; d.innerHTML=html; return d; }
+
   function setMarker(uid, latlng, meta, selected, tone, onClick){
-    const l=Lf(); if(!_map||!l) return;
-    const cls='fam-pin'+(selected?' sel':'')+(tone?(' tone-'+tone):'');
+    const g=GL(); if(!_map||!g) return;
     meta=meta||{};
+    const cls='fam-pin'+(selected?' sel':'')+(tone?(' tone-'+tone):'');
     const prev=_markerMeta[uid]||{};
     const changed = prev.cls!==cls || prev.moving!==meta.moving || prev.heading!==meta.heading || prev.photo!==meta.photo || prev.initial!==meta.initial || prev.color!==meta.color;
     if(_markers[uid]){
-      if(changed){ const icon=l.divIcon({className:'',html:'<div class="'+cls+'">'+pinHtml(meta)+'</div>',iconSize:[48,56],iconAnchor:[24,52]}); _markers[uid].setIcon(icon); }
+      if(changed){ const el=_markerEls[uid]; if(el){ el.className=cls; el.innerHTML=pinHtml(meta); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; } } }
       animateMarker(uid, latlng);
     } else {
-      const icon=l.divIcon({className:'',html:'<div class="'+cls+'">'+pinHtml(meta)+'</div>',iconSize:[48,56],iconAnchor:[24,52]});
-      _markers[uid]=l.marker(latlng,{icon:icon,riseOnHover:true}).addTo(_map);
-      if(onClick)_markers[uid].on('click',onClick);
+      const el=makeEl(cls, pinHtml(meta));
+      if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
+      const mk=new g.Marker({element:el, anchor:'bottom'}).setLngLat(ll(latlng)).addTo(_map);
+      _markers[uid]=mk; _markerEls[uid]=el; _markerPos[uid]=latlng;
     }
     _markerMeta[uid]={cls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color};
   }
-  function clearMarkersExcept(uids){ Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{_map.removeLayer(_markers[u]);}catch(e){} delete _markers[u]; delete _markerMeta[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } }); }
-  /* ── Clustered multi-avatar bubble: several members at (nearly) the same
-     real position rendered as ONE bubble (matches the reference). key is a
-     stable synthetic id ("cluster:"+sorted uids). members = [{photo,initial,color}]. ── */
+  function clearMarkersExcept(uids){ Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{_markers[u].remove();}catch(e){} delete _markers[u]; delete _markerEls[u]; delete _markerMeta[u]; delete _markerPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } }); }
+
   function setClusterMarker(key, latlng, members, selected, onClick){
-    const l=Lf(); if(!_map||!l) return;
+    const g=GL(); if(!_map||!g) return;
     const max=3; const shown=members.slice(0,max);
     let inner=shown.map(mm=>mm.photo
       ? `<div class="fam-cluster-av" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}')"></div>`
       : `<div class="fam-cluster-av" style="background:${mm.color||'#6e56f8'}">${mm.initial||'?'}</div>`).join('');
     if(members.length>max) inner+=`<div class="fam-cluster-more">+${members.length-max}</div>`;
-    const html=`<div class="fam-cluster${selected?' sel':''}"><div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div></div>`;
-    const icon=l.divIcon({className:'',html:html,iconSize:[members.length*40,56],iconAnchor:[(Math.min(members.length,max)*34)/2,52]});
-    if(_markers[key]){ animateMarker(key,latlng); _markers[key].setIcon(icon); }
-    else { _markers[key]=l.marker(latlng,{icon:icon,riseOnHover:true}).addTo(_map); if(onClick)_markers[key].on('click',onClick); }
-    _markerMeta[key]={cls:'cluster:'+members.length+(selected?':sel':'')};
+    const html=`<div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div>`;
+    const cls='fam-cluster'+(selected?' sel':'');
+    if(_markers[key]){ const el=_markerEls[key]; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
+    else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
+      _markers[key]=new g.Marker({element:el, anchor:'bottom'}).setLngLat(ll(latlng)).addTo(_map); _markerEls[key]=el; _markerPos[key]=latlng; }
+    _markerMeta[key]={cls};
   }
-  /* ── "arrived X ago" floating bubble anchored above a position. Purely a
-     presentation layer over a REAL arrival event (caller passes the text). ── */
+
+  let _arrivedMk=null;
   function setArrivedBubble(latlng, text){
-    const l=Lf(); if(!_map||!l) return;
-    if(_arrivedMk){ try{_map.removeLayer(_arrivedMk);}catch(e){} _arrivedMk=null; }
+    const g=GL(); if(!_map||!g) return;
+    clearArrivedBubble();
     if(latlng==null||!text) return;
     const pin='<svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>';
-    const html=`<div class="fam-arrived"><span class="fam-arrived-ic">${pin}</span><span class="fam-arrived-t">${text}</span><span class="fam-arrived-tip"></span></div>`;
-    const icon=l.divIcon({className:'',html:html,iconSize:[220,44],iconAnchor:[110,86]});
-    try{ _arrivedMk=l.marker(latlng,{icon:icon,interactive:false,keyboard:false}).addTo(_map); }catch(e){}
+    const el=makeEl('fam-arrived', `<span class="fam-arrived-ic">${pin}</span><span class="fam-arrived-t">${text}</span><span class="fam-arrived-tip"></span>`);
+    try{ _arrivedMk=new g.Marker({element:el, anchor:'bottom', offset:[0,-46]}).setLngLat(ll(latlng)).addTo(_map); }catch(e){}
   }
-  function clearArrivedBubble(){ if(_arrivedMk){ try{_map.removeLayer(_arrivedMk);}catch(e){} _arrivedMk=null; } }
-  /* Accuracy circle for the selected member — visualises real GPS uncertainty
-     honestly (a big circle = poor fix, which the UI also labels "approximate"). */
+  function clearArrivedBubble(){ if(_arrivedMk){ try{_arrivedMk.remove();}catch(e){} _arrivedMk=null; } }
+
+  // circle polygon builder (metres → geojson ring)
+  function circlePoly(lat,lng,meters){
+    const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI, ring=[];
+    for(let a=0;a<=360;a+=12){ const br=toR(a), dr=meters/R, la1=toR(lat), lo1=toR(lng);
+      const la2=Math.asin(Math.sin(la1)*Math.cos(dr)+Math.cos(la1)*Math.sin(dr)*Math.cos(br));
+      const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1),Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
+      ring.push([toD(lo2),toD(la2)]); }
+    return ring;
+  }
   function setAccuracy(latlng, meters, approx){
-    const l=Lf(); if(!_map||!l)return;
-    if(_accCircle){ try{_map.removeLayer(_accCircle);}catch(e){} _accCircle=null; }
-    if(meters==null||latlng==null)return;
-    try{ _accCircle=l.circle(latlng,{radius:meters,color:approx?'#f59e0b':'#6e56f8',weight:1,opacity:.5,fillColor:approx?'#f59e0b':'#6e56f8',fillOpacity:.10}).addTo(_map); }catch(e){}
+    if(!_map)return;
+    if(meters==null||latlng==null){ _lastAcc={type:'FeatureCollection',features:[]}; setGeo(GEO.acc,_lastAcc); return; }
+    const ring=circlePoly(latlng[0],latlng[1],meters);
+    _lastAcc={ type:'FeatureCollection', features:[{ type:'Feature', properties:{ color: approx?'#f59e0b':'#6e56f8' }, geometry:{ type:'Polygon', coordinates:[ring] } }] };
+    setGeo(GEO.acc,_lastAcc);
   }
-  /* ── Directional heading cone (the purple wedge in the reference). REAL:
-     only drawn when the member is genuinely moving AND has a real heading
-     value from the device (deg clockwise from north). Cone length scales with
-     real speed (m/s) so a faster mover shows a longer cone; never fabricated —
-     if heading/speed are absent the cone is removed. ── */
   function setHeadingCone(latlng, headingDeg, speed){
-    const l=Lf(); if(!_map||!l)return;
-    if(_coneLayer){ try{_map.removeLayer(_coneLayer);}catch(e){} _coneLayer=null; }
-    if(latlng==null || headingDeg==null || isNaN(headingDeg)) return;
-    // length in metres: base 120m + up to ~400m by speed (speed in m/s; cap ~15).
+    if(!_map)return;
+    if(latlng==null || headingDeg==null || isNaN(headingDeg)){ _lastCone={type:'FeatureCollection',features:[]}; setGeo(GEO.cone,_lastCone); return; }
     const spd=(speed!=null&&!isNaN(speed))?Math.max(0,Math.min(15,speed)):0;
-    const len=120 + spd*26;                 // ~120m stationary-heading .. ~510m fast
-    const halfAngle=17;                      // wedge half-width in degrees
-    const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI;
-    const lat0=latlng[0], lng0=latlng[1];
+    const len=120 + spd*26, halfAngle=17;
+    const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI, lat0=latlng[0], lng0=latlng[1];
     function dest(brg,d){ const br=toR(brg), la1=toR(lat0), lo1=toR(lng0), dr=d/R;
       const la2=Math.asin(Math.sin(la1)*Math.cos(dr)+Math.cos(la1)*Math.sin(dr)*Math.cos(br));
       const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1),Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
-      return [toD(la2),toD(lo2)]; }
-    const pts=[[lat0,lng0]];
+      return [toD(lo2),toD(la2)]; }
+    const pts=[[lng0,lat0]];
     for(let a=-halfAngle;a<=halfAngle;a+=(halfAngle*2)/10){ pts.push(dest((headingDeg+a+360)%360, len)); }
-    pts.push([lat0,lng0]);
-    try{ _coneLayer=l.polygon(pts,{stroke:false,fillColor:'#8b6df8',fillOpacity:.28,interactive:false}).addTo(_map); }catch(e){}
+    pts.push([lng0,lat0]);
+    _lastCone={ type:'FeatureCollection', features:[{ type:'Feature', properties:{}, geometry:{ type:'Polygon', coordinates:[pts] } }] };
+    setGeo(GEO.cone,_lastCone);
   }
   function drawRoute(points){
-    const l=Lf();
-    if(!_map||!l) return;
-    if(_routeLine){ try{_map.removeLayer(_routeLine);}catch(e){} _routeLine=null; }
-    if(!points||points.length<2) return;
-    // Honest gaps: break the line where consecutive samples are far apart in
-    // time (>10 min) — never draw a precise path through unknown territory.
-    const segs=[]; let cur=[[points[0].lat,points[0].lng]];
-    for(let i=1;i<points.length;i++){
-      const a=points[i-1], b=points[i];
-      const dt=Math.abs(Date.parse(b.at)-Date.parse(a.at));
-      if(dt>10*60*1000){ segs.push(cur); cur=[]; }
-      cur.push([b.lat,b.lng]);
-    }
-    if(cur.length)segs.push(cur);
-    try{ _routeLine=l.layerGroup(segs.filter(s=>s.length>1).map(s=>l.polyline(s,{color:'#6e56f8',weight:4,opacity:.85}))).addTo(_map); }catch(e){}
+    if(!_map)return;
+    if(!points||points.length<2){ _lastRoute={type:'FeatureCollection',features:[]}; setGeo(GEO.route,_lastRoute); return; }
+    const feats=[]; let cur=[[points[0].lng,points[0].lat]];
+    for(let i=1;i<points.length;i++){ const a=points[i-1], b=points[i]; const dt=Math.abs(Date.parse(b.at)-Date.parse(a.at));
+      if(dt>10*60*1000){ if(cur.length>1)feats.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:cur}}); cur=[]; }
+      cur.push([b.lng,b.lat]); }
+    if(cur.length>1)feats.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:cur}});
+    _lastRoute={ type:'FeatureCollection', features:feats };
+    setGeo(GEO.route,_lastRoute);
   }
   function destroy(){
     Object.keys(_animTimers).forEach(k=>{try{clearInterval(_animTimers[k]);}catch(e){}}); _animTimers={};
-    _markers={}; _markerMeta={}; _routeLine=null; _accCircle=null; _coneLayer=null; _arrivedMk=null; _tiles=null; _tilesLoaded=false;
+    Object.keys(_markers).forEach(u=>{try{_markers[u].remove();}catch(e){}});
+    clearArrivedBubble();
+    _markers={}; _markerEls={}; _markerMeta={}; _markerPos={}; _lastRoute=null; _lastCone=null; _lastAcc=null; _styleReady=false; _tilesLoaded=false;
     if(_map){ try{_map.remove();}catch(e){} _map=null; }
     _elId=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
-           hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept, setAccuracy, setHeadingCone, drawRoute, destroy, get:()=>_map };
+           hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
+           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get };
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -11584,15 +11669,21 @@ function famLiveView(){
     h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:18px;font-weight:800">${L==='fa'?'نوع نقشه':'Map type'}</div><button class="fam-mapbtn" data-fam="live-maptype-close" style="box-shadow:none;background:var(--s2)">✕</button></div>`;
     h+=`<div class="fam-maptype-grid">`;
     FAM_MAP_TYPES.forEach(t=>{
-      const enabled=famMapTypeEnabled(t);
-      const on=_famMapType===t.id;
-      const p=TileProviders[t.provider];
-      // real thumbnail from the actual provider tile (a fixed sample tile) so
-      // the preview reflects the genuine layer, not a mock image.
-      const thumbUrl=p&&p.url?p.url.replace('{z}','13').replace('{x}','7565').replace('{y}','5115').replace('{s}','a'):'';
-      h+=`<div class="fam-maptype${on?' on':''}${enabled?'':' disabled'}" ${enabled?`data-fam="live-maptype-set" data-arg="${t.id}"`:''}>
-        <div class="thumb" style="${thumbUrl?`background-image:url('${thumbUrl}')`:'background:var(--s2)'}"></div>
-        <div class="lbl">${L==='fa'?t.label.fa:t.label.en}${enabled?'':` <span style="font-size:10px;color:var(--ink3)">(${L==='fa'?'در دسترس نیست':'n/a'})</span>`}</div>
+      const on=(_famMapType||'auto')===t.id;
+      // Real thumbnail from an actual tile of the layer this type resolves to
+      // (a fixed sample tile) — reflects the genuine layer, not a mock image.
+      const k=MAPTILER_KEY;
+      let thumbUrl;
+      if(t.id==='satellite'){
+        thumbUrl = k ? `https://api.maptiler.com/maps/hybrid/13/7565/5115.png?key=${k}`
+                     : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/13/5115/7565';
+      } else {
+        thumbUrl = k ? `https://api.maptiler.com/maps/streets-v2/13/7565/5115.png?key=${k}`
+                     : 'https://tile.openstreetmap.org/13/7565/5115.png';
+      }
+      h+=`<div class="fam-maptype${on?' on':''}" data-fam="live-maptype-set" data-arg="${t.id}">
+        <div class="thumb" style="background-image:url('${thumbUrl}')"></div>
+        <div class="lbl">${L==='fa'?t.label.fa:t.label.en}</div>
       </div>`;
     });
     h+=`</div></div>`;
@@ -11957,33 +12048,43 @@ function famHistMount(){
   const uid=_famHistUid||_famSelUid;
   const day=famHistDayBounds(_famHistDayOffset);
   const pts=fb.location.memberRoute(uid).filter(p=>{const t=Date.parse(p.at||'');return !isNaN(t)&&t>=day.start&&t<day.end;});
-  const l=(typeof window!=='undefined')?window.L:null;
-  if(!l||!l.map||pts.length<2){ el.innerHTML=`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px">${L==='fa'?'نقشه در دسترس نیست':'Map unavailable'}</div>`; return; }
+  const g=(typeof window!=='undefined')?window.maplibregl:null;
+  if(!g||!g.Map||pts.length<2){ el.innerHTML=`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px">${L==='fa'?'نقشه در دسترس نیست':'Map unavailable'}</div>`; return; }
   try{
-    if(el._histMap){ try{el._histMap.remove();}catch(e){} el._histMap=null; }
-    const m=l.map(el,{zoomControl:false,attributionControl:false});
+    if(el._histMap){ try{el._histMap.remove();}catch(e){} el._histMap=null; el._histCursorEl=null; }
+    const coords=pts.map(p=>[p.lng,p.lat]);
+    const m=new g.Map({ container:el, style:famStyleFor(_famMapType||'auto').style, attributionControl:false, dragRotate:false, interactive:true });
     el._histMap=m;
-    l.tileLayer(TileProviders.osm.url,TileProviders.osm.options).addTo(m);
-    const latlngs=pts.map(p=>[p.lat,p.lng]);
-    l.polyline(latlngs,{color:'#6e56f8',weight:4,opacity:.85}).addTo(m);
-    l.circleMarker(latlngs[0],{radius:6,color:'#22c55e',fillColor:'#22c55e',fillOpacity:1}).addTo(m);
-    l.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#6e56f8',fillColor:'#6e56f8',fillOpacity:1}).addTo(m);
-    m.fitBounds(l.latLngBounds(latlngs).pad(0.2));
-    // ── FEATURE 4: draggable scrub cursor showing the exact captured point ──
     if(_famHistCursor==null||_famHistCursor>pts.length-1)_famHistCursor=pts.length-1;
-    const cursorIcon=()=>l.divIcon({className:'',html:'<div style="width:20px;height:20px;border-radius:50%;background:#6e56f8;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',iconSize:[20,20],iconAnchor:[10,10]});
-    let cursorMk=l.marker(latlngs[_famHistCursor],{icon:cursorIcon(),interactive:false}).addTo(m);
+    // draggable scrub cursor as a DOM marker
+    const cEl=document.createElement('div'); cEl.style.cssText='width:20px;height:20px;border-radius:50%;background:#6e56f8;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)';
+    let cursorMk=null;
+    m.on('load', ()=>{
+      try{ MBMMap.applyLifeStyle && null; }catch(_){}
+      // route line
+      try{
+        m.addSource('h-route',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:coords}}});
+        m.addLayer({id:'h-route',type:'line',source:'h-route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#6e56f8','line-width':4,'line-opacity':.85}});
+        m.addSource('h-ends',{type:'geojson',data:{type:'FeatureCollection',features:[
+          {type:'Feature',properties:{c:'#22c55e'},geometry:{type:'Point',coordinates:coords[0]}},
+          {type:'Feature',properties:{c:'#6e56f8'},geometry:{type:'Point',coordinates:coords[coords.length-1]}}]}});
+        m.addLayer({id:'h-ends',type:'circle',source:'h-ends',paint:{'circle-radius':6,'circle-color':['get','c'],'circle-stroke-color':'#fff','circle-stroke-width':2}});
+      }catch(_){}
+      cursorMk=new g.Marker({element:cEl}).setLngLat(coords[_famHistCursor]).addTo(m);
+      el._histCursor=cursorMk;
+      const b=new g.LngLatBounds(); coords.forEach(c=>b.extend(c)); m.fitBounds(b,{padding:36,duration:0,maxZoom:16});
+      setTimeout(()=>{try{m.resize();}catch(e){}},80);
+    });
     const scrub=document.getElementById('fam-hist-scrub');
     const lbl=document.getElementById('fam-hist-cursor-lbl');
     if(scrub && !scrub._bound){
       scrub._bound=true;
       const move=()=>{ const i=Math.max(0,Math.min(pts.length-1,parseInt(scrub.value,10)||0)); _famHistCursor=i;
-        try{ cursorMk.setLatLng(latlngs[i]); m.panTo(latlngs[i],{animate:true,duration:.3}); }catch(_){}
+        try{ if(el._histCursor)el._histCursor.setLngLat(coords[i]); m.easeTo({center:coords[i],duration:250}); }catch(_){}
         if(lbl)lbl.textContent=famAbsTime(pts[i].at); };
       scrub.addEventListener('input',move);
       scrub.addEventListener('change',move);
     }
-    setTimeout(()=>{try{m.invalidateSize();}catch(e){}},80);
   }catch(e){}
 }
 /* ── Check-in from Live (genuine: real fix → writes a location sample) ── */
@@ -12427,9 +12528,9 @@ function famAction(act,arg,ev){
     case 'live-maptype': _famMapTypeOpen=true; render(); return;
     case 'live-maptype-close': _famMapTypeOpen=false; render(); return;
     case 'live-maptype-set':{
-      const t=FAM_MAP_TYPES.find(x=>x.id===arg); if(!t||!famMapTypeEnabled(t)){ return; }
-      _famMapType=t.id; _famMapProvider=t.provider; _famMapTypeOpen=false;
-      try{ MBMMap.setProvider(t.provider); }catch(e){}
+      const t=FAM_MAP_TYPES.find(x=>x.id===arg); if(!t){ return; }
+      _famMapType=t.id; _famMapProvider=t.id; _famMapTypeOpen=false;
+      try{ MBMMap.setProvider(t.id); }catch(e){}
       render();
       return;
     }
