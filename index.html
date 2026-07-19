@@ -1479,9 +1479,10 @@ body.rtl .trow-content{text-align:right}
 /* ── Map type sheet (Auto / Street / Satellite) ── */
 .fam-maptype-grid{display:flex;gap:12px;margin-top:6px}
 .fam-maptype{flex:1;text-align:center;cursor:pointer}
-.fam-maptype .thumb{height:78px;border-radius:14px;border:2px solid var(--b1);background-size:cover;background-position:center;overflow:hidden}
+.fam-maptype .thumb{height:92px;border-radius:16px;border:2px solid var(--b1);background-size:cover;background-position:center;overflow:hidden;background-color:#e7e2d6}
+.fam-maptype .thumb.warm{filter:brightness(1.07) saturate(.86) sepia(.10) hue-rotate(-4deg) contrast(.94)}
 .fam-maptype.on .thumb{border-color:#6e56f8}
-.fam-maptype .lbl{font-size:13px;font-weight:700;margin-top:6px;color:var(--ink2)}
+.fam-maptype .lbl{font-size:14px;font-weight:800;margin-top:8px;color:var(--ink2)}
 .fam-maptype.on .lbl{color:#6e56f8}
 .fam-maptype.disabled{opacity:.4;pointer-events:none}
 .fam-mrow .mmeta{flex:1;min-width:0}
@@ -1610,7 +1611,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v286';
+const APP_VERSION='v287';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11745,21 +11746,40 @@ function famLiveView(){
     h+=`<div style="position:absolute;left:0;right:0;bottom:0;z-index:1501;background:var(--s1);border-radius:20px 20px 0 0;padding:18px 18px 26px;box-shadow:0 -6px 30px rgba(0,0,0,.4)">`;
     h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:18px;font-weight:800">${L==='fa'?'نوع نقشه':'Map type'}</div><button class="fam-mapbtn" data-fam="live-maptype-close" style="box-shadow:none;background:var(--s2)">✕</button></div>`;
     h+=`<div class="fam-maptype-grid">`;
+    // Live previews centered on the SELECTED member's real location (fallback to
+    // a sensible default) so each thumbnail shows the actual area — like Life360.
+    const sel0 = famLiveMembers().find(mm=>mm.uid===_famSelUid) || famLiveMembers()[0];
+    const pv = (sel0 && sel0.state && sel0.state.lat!=null) ? {lat:sel0.state.lat,lng:sel0.state.lng} : {lat:-42.88,lng:147.32};
+    const pz = 15;
+    // slippy-tile math: lat/lng + zoom → integer tile x/y
+    const n = Math.pow(2,pz);
+    const tx = Math.floor((pv.lng+180)/360*n);
+    const latRad = pv.lat*Math.PI/180;
+    const ty = Math.floor((1 - Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2 * n);
+    const k=MAPTILER_KEY;
+    // Per-type REAL tile URL at the member's location + whether to warm-filter it
+    function previewFor(id){
+      if(id==='satellite'){
+        return { url: k ? `https://api.maptiler.com/maps/satellite/${pz}/${tx}/${ty}.jpg?key=${k}`
+                        : `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${pz}/${ty}/${tx}`,
+                 warm:false };
+      }
+      if(id==='street'){
+        return { url: k ? `https://api.maptiler.com/maps/streets-v2/${pz}/${tx}/${ty}.png?key=${k}`
+                        : `https://tile.openstreetmap.org/${pz}/${tx}/${ty}.png`,
+                 warm:false };                       // Street = raw street tile
+      }
+      // Auto: same street base but shown with the Life360 warm cast (matches how
+      // the live Auto map is styled) so it's visibly distinct from plain Street.
+      return { url: k ? `https://api.maptiler.com/maps/streets-v2/${pz}/${tx}/${ty}.png?key=${k}`
+                      : `https://tile.openstreetmap.org/${pz}/${tx}/${ty}.png`,
+               warm: !k };                            // warm only in keyless mode
+    }
     FAM_MAP_TYPES.forEach(t=>{
       const on=(_famMapType||'auto')===t.id;
-      // Real thumbnail from an actual tile of the layer this type resolves to
-      // (a fixed sample tile) — reflects the genuine layer, not a mock image.
-      const k=MAPTILER_KEY;
-      let thumbUrl;
-      if(t.id==='satellite'){
-        thumbUrl = k ? `https://api.maptiler.com/maps/hybrid/13/7565/5115.png?key=${k}`
-                     : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/13/5115/7565';
-      } else {
-        thumbUrl = k ? `https://api.maptiler.com/maps/streets-v2/13/7565/5115.png?key=${k}`
-                     : 'https://tile.openstreetmap.org/13/7565/5115.png';
-      }
+      const p=previewFor(t.id);
       h+=`<div class="fam-maptype${on?' on':''}" data-fam="live-maptype-set" data-arg="${t.id}">
-        <div class="thumb" style="background-image:url('${thumbUrl}')"></div>
+        <div class="thumb${p.warm?' warm':''}" style="background-image:url('${p.url}')"></div>
         <div class="lbl">${L==='fa'?t.label.fa:t.label.en}</div>
       </div>`;
     });
