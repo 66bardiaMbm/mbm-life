@@ -1308,7 +1308,9 @@ body.rtl .trow-content{text-align:right}
 @keyframes actExpand{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 
 /* ═══ Family Live (Phase 2) — redesigned: map as backdrop, persistent info panel ═══ */
-#fam-live-wrap{position:relative;width:100%;height:calc(100vh - 0px);height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column}
+#fam-live-wrap{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
+  max-width:var(--shell-w);margin:0 auto;
+  width:100%;height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column;z-index:60}
 #fam-map{position:absolute;inset:0;width:100%;height:100%;background:#dfe3ea;z-index:1}
 /* MapLibre GL integration: keep our custom marker DOM un-clipped and let the
    engine own positioning; tame the default attribution/logo to match our UI. */
@@ -1662,7 +1664,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v293';
+const APP_VERSION='v294';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10592,15 +10594,24 @@ const FamilyBackend = (function(){
 
     /* Movement + stay detection from previous cached state → this fix. */
     function classifyMovement(prev, fix){
-      let moving=false, stayStart=(prev&&prev.stayStart)||fix.capturedAt;
-      if(prev && prev.lat!=null){
-        const d=haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
-        const dt=Math.abs(Date.parse(fix.capturedAt)-Date.parse(prev.capturedAt||prev.reportedAt||fix.capturedAt));
-        if(d>=MOVE_MIN_M && dt<=Math.max(MOVE_MIN_MS,dt)){ moving=true; stayStart=fix.capturedAt; }
-        else if(d<MOVE_MIN_M){ moving=false; stayStart=prev.stayStart||prev.capturedAt||fix.capturedAt; }
-        else { moving=true; stayStart=fix.capturedAt; }
+      // Honest "here since" logic:
+      //  - First-ever fix: stayStart = now (just arrived, as far as we know).
+      //  - Same place (moved < MOVE_MIN_M since the previous fix): KEEP the
+      //    existing stayStart — this is what makes "Here for 11 hrs" survive
+      //    every GPS callback instead of resetting on jitter or refresh.
+      //  - Genuinely relocated (moved >= MOVE_MIN_M): this fix becomes the new
+      //    arrival point → stayStart resets to now. moving=true only flags the
+      //    single fix where the jump was detected; the NEXT fix (once distance
+      //    drops back under threshold) settles into the new stayStart already.
+      if(!prev || prev.lat==null){
+        return { moving:false, stayStart: fix.capturedAt };
       }
-      return {moving, stayStart};
+      const d = haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
+      if(d >= MOVE_MIN_M){
+        return { moving:true, stayStart: fix.capturedAt };   // genuinely relocated
+      }
+      // Still within the same spot — never touch stayStart on ordinary fixes.
+      return { moving:false, stayStart: prev.stayStart || prev.capturedAt || fix.capturedAt };
     }
 
     /* ── local cache accessors (mirror) ── */
@@ -11983,6 +11994,7 @@ let _famMapTypeOpen=false;
 let _famCat='people';   // active category row selection (people is the live one)
 let _famFollow=false;   // live-follow: keep map centred on me as I move
 let _famLiveFixKicked=false;  // one-shot fresh fix when opening live
+let _famDurTickTimer=null;    // interval that refreshes "Here for"/"Since" text only
 
 /* ── In-place live update: repaint markers + patch header/sheet WITHOUT
    rebuilding the map DOM. Falls back to a full render only when the roster
@@ -12352,14 +12364,28 @@ function famLivePaintMarkers(members, sel){
    their latest real event is an arrival they haven't since departed from. */
 function famPaintArrivedBubble(sel){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  if(!fb||!fb.location||!fb.location.memberEvents){ MBMMap.clearArrivedBubble(); return; }
-  const evs=fb.location.memberEvents(sel.uid);
-  let arr=null;
-  for(let i=evs.length-1;i>=0;i--){ if(evs[i].type==='departure'){arr=null;break;} if(evs[i].type==='arrival'){arr=evs[i];break;} }
-  if(!arr || sel.state.moving){ MBMMap.clearArrivedBubble(); return; }
-  const rel=famRelTime(arr.at);
+  if(!fb||!fb.location||!sel||!sel.state||sel.state.lat==null){ MBMMap.clearArrivedBubble(); return; }
+  if(sel.state.moving){ MBMMap.clearArrivedBubble(); return; }   // only show while stationary
+  // Single source of truth for "how long have they been here": the real
+  // stay-timer (stayStart), the SAME value the sheet's "Since HH:MM" line uses.
+  // This is never a page-open time or a raw GPS-callback timestamp.
+  const since = fb.location.hereSince ? fb.location.hereSince(sel.uid) : (sel.state.stayStart||null);
+  if(!since){ MBMMap.clearArrivedBubble(); return; }
   const nm=esc((sel.name||'').split(' ')[0]||sel.name||'');
-  const txt=(L==='fa')?`<span class="fam-arrived-2l"><b>${nm}</b> رسید<small>${rel}</small></span>`:`<span class="fam-arrived-2l"><b>${nm} arrived</b><small>${rel}</small></span>`;
+  const stayMs = Date.now()-Date.parse(since);
+  let txt;
+  if(stayMs < 5*60*1000){
+    // Just settled here (< 5 min) — Life360 shows the "arrived" moment first.
+    const rel=famRelTime(since);
+    txt=(L==='fa')?`<span class="fam-arrived-2l"><b>${nm}</b> رسید<small>${rel}</small></span>`
+                  :`<span class="fam-arrived-2l"><b>${nm} arrived</b><small>${rel}</small></span>`;
+  } else {
+    // Been here a while — switch to the real elapsed duration, like the
+    // reference ("Here for 11 hrs, 48 mins"), computed live from stayStart.
+    const dur=famDurSince(since);
+    txt=(L==='fa')?`<span class="fam-arrived-2l"><b>${L==='fa'?'اینجا از':'Here for'}</b><small>${dur}</small></span>`
+                  :`<span class="fam-arrived-2l"><b>Here for</b><small>${dur}</small></span>`;
+  }
   MBMMap.setArrivedBubble([sel.state.lat,sel.state.lng], txt);
 }
 
@@ -12369,6 +12395,17 @@ let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
 function famLiveMount(){
   const el=document.getElementById('fam-map');
   if(!el) return;
+  // Keep "Here for X" / "Since HH:MM" text ticking forward while this screen is
+  // open, even if no new GPS fix arrives — it's a pure clock read (stayStart is
+  // untouched), so it never resets the real duration, only refreshes its display.
+  if(_famDurTickTimer)clearInterval(_famDurTickTimer);
+  _famDurTickTimer=setInterval(()=>{
+    if(!(famView==='live'||famView==='dashboard')){ clearInterval(_famDurTickTimer); _famDurTickTimer=null; return; }
+    const sel=famLiveMembers().find(m=>m.uid===_famSelUid);
+    if(sel) famPaintArrivedBubble(sel);
+    const body=document.getElementById('fam-sheet-body');
+    if(body){ const my=FB.user&&FB.user.uid; body.innerHTML=famLiveSheetBodyHtml(famLiveMembers(), sel, my); if(typeof bindFamily==='function')bindFamily(); }
+  }, 30000);
   // Restore the user's remembered map type (Life360 remembers the choice).
   if(DB.meta && DB.meta.famMapType && FAM_MAP_TYPES.some(t=>t.id===DB.meta.famMapType)){ _famMapType=DB.meta.famMapType; _famMapProvider=DB.meta.famMapType; }
   const members=famLiveMembers();
