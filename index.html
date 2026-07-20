@@ -1662,7 +1662,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v292';
+const APP_VERSION='v293';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10648,19 +10648,23 @@ const FamilyBackend = (function(){
         moving:mv.moving, stayStart:mv.stayStart,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO() };
-      locMap()[uid]=state;                                     // mirror
+      locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
       // route breadcrumb (only on meaningful movement, precise mode only)
       if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt}); }
       try{ persistDB(); }catch(e){}
-      // ── REAL geofence evaluation: compare my previous vs current fix against
-      //    each saved Place radius and emit a genuine arrival/departure event
-      //    when the boundary is actually crossed. Never simulated by a UI timer. ──
       try{ evalGeofences(uid, prev, {lat,lng,capturedAt}); }catch(e){}
       try{ evalNoShows(); }catch(e){}
-      // canonical writes
-      await locRef(fid,uid).set(state,{merge:true}).catch(()=>{});
-      if(c.precise!==false){ await flushRoute(uid).catch(()=>{}); }
-      afterChange();
+      afterChange();                                           // REPAINT marker/address NOW, before any network
+      // ── Canonical Firestore write is THROTTLED for bandwidth, but the local
+      //    marker above already moved. The remote write is best-effort. ──
+      if(raw._remote!==false){
+        const now=Date.now();
+        if(now-_lastRemoteWriteAt >= WRITE_THROTTLE_MS){
+          _lastRemoteWriteAt=now;
+          await locRef(fid,uid).set(state,{merge:true}).catch(()=>{});
+          if(c.precise!==false){ await flushRoute(uid).catch(()=>{}); }
+        }
+      }
     }
 
     /* ── Places-in-scope for geofence checks (from the local mirror, which is
@@ -10809,7 +10813,9 @@ const FamilyBackend = (function(){
        through recent→stale→offline. This is the PWA truth; a native companion
        (source:'companion') can later feed the same pipe in the background. */
     let _watchId=null;              // geolocation.watchPosition id
-    let _lastWriteAt=0;             // throttle guard
+    let _lastWriteAt=0;             // (legacy) throttle guard
+    let _lastRemoteWriteAt=0;       // throttle for the Firestore write only
+    let _lastCallbackAt=0;          // time of the last real watch callback
     const WRITE_THROTTLE_MS=15000;  // at most one canonical write / 15s (battery §17)
     let _battery=null;              // cached BatteryManager
     let _permissionState=null;      // 'granted'|'denied'|'prompt'|null
@@ -10828,8 +10834,10 @@ const FamilyBackend = (function(){
     function locDiag(){ return _locDiag.slice(); }
     function lastFixInfo(){
       const uid=myUid(); const st=uid?memberState(uid):null;
-      if(!st||st.lat==null)return null;
-      return { lat:st.lat, lng:st.lng, accuracy:st.accuracy, at:st.capturedAt||st.reportedAt, source:st.source||'gps', state:_locState };
+      if(!st||st.lat==null)return { lat:null, lng:null, accuracy:null, at:null, source:null, state:_locState, lastCallbackAt:_lastCallbackAt, callbackAgeMs:_lastCallbackAt?Date.now()-_lastCallbackAt:null };
+      return { lat:st.lat, lng:st.lng, accuracy:st.accuracy, at:st.capturedAt||st.reportedAt, source:st.source||'gps', state:_locState,
+               lastCallbackAt:_lastCallbackAt, callbackAgeMs:_lastCallbackAt?Date.now()-_lastCallbackAt:null,
+               markerPos:(typeof MBMMap!=='undefined'&&MBMMap.markerLatLng)?MBMMap.markerLatLng(uid):null };
     }
 
     function batteryPct(){ try{ return _battery&&_battery.level!=null?Math.round(_battery.level*100):null; }catch(e){ return null; } }
@@ -10850,11 +10858,14 @@ const FamilyBackend = (function(){
       const c=myConsent(); if(!c.enabled||c.paused)return;
       const cr=pos.coords||{};
       const provider=(cr.accuracy!=null&&cr.accuracy<=50)?'gps':'network';
-      diag('fix',{lat:cr.latitude,lng:cr.longitude,acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,ts:pos.timestamp});
+      // Distance from the previous rendered fix (proves movement is flowing).
+      const prev=memberState(myUid());
+      const moved=(prev&&prev.lat!=null)?Math.round(haversine({lat:prev.lat,lng:prev.lng},{lat:cr.latitude,lng:cr.longitude})):null;
+      _lastCallbackAt=Date.now();
+      diag('fix',{lat:+cr.latitude.toFixed(6),lng:+cr.longitude.toFixed(6),acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,movedM:moved,ts:pos.timestamp});
       setLocState('active');
-      const now=Date.now();
-      if(now-_lastWriteAt < WRITE_THROTTLE_MS) return;   // throttle canonical writes
-      _lastWriteAt=now;
+      // Update the LOCAL marker on EVERY valid callback (no throttle here). The
+      // Firestore write inside writeMyFix is what's throttled, not the marker.
       writeMyFix({
         lat:cr.latitude, lng:cr.longitude,
         accuracy:cr.accuracy!=null?Math.round(cr.accuracy):null,
@@ -10971,7 +10982,19 @@ const FamilyBackend = (function(){
       const fid=familyId();
       const uids=Object.keys((_current&&_current.members)||{});
       uids.forEach(uid=>{
-        const u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ locMap()[uid]=Object.assign({uid},snap.data()); persistDB&&persistDB(); afterChange(); } },()=>{});
+        const u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){
+          const incoming=Object.assign({uid},snap.data());
+          // For MY OWN doc, never let the round-tripped server value clobber a
+          // newer local GPS fix (that would snap the marker back). Keep whichever
+          // reportedAt is newer. Other members always take the server value.
+          if(uid===myUid()){
+            const localSt=locMap()[uid];
+            const lt=localSt&&localSt.reportedAt?Date.parse(localSt.reportedAt):0;
+            const it=incoming.reportedAt?Date.parse(incoming.reportedAt):0;
+            if(lt>it) return;   // my local fix is newer — ignore stale echo
+          }
+          locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
+        } },()=>{});
         const u2=consentLocRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange(); } },()=>{});
         _locUnsubs.push(u1,u2);
       });
@@ -11259,9 +11282,12 @@ function famDiagView(){
         <div>state: <b>${esc(ls)}</b></div>
         <div>permission: <b>${esc(perm||'unknown')}</b></div>
         <div>provider: <b>${li?esc(li.source||'—'):'—'}</b></div>
-        <div>lat/lng: <b>${li&&li.lat!=null?li.lat.toFixed(6)+', '+li.lng.toFixed(6):'—'}</b></div>
+        <div>raw/db lat,lng: <b>${li&&li.lat!=null?li.lat.toFixed(6)+', '+li.lng.toFixed(6):'—'}</b></div>
+        <div>marker lat,lng: <b>${li&&li.markerPos?li.markerPos.lat.toFixed(6)+', '+li.markerPos.lng.toFixed(6):'—'}</b></div>
+        <div>marker matches db: <b>${(()=>{ if(!li||li.lat==null||!li.markerPos)return '—'; const d=Math.round(famHaversineM(li.lat,li.lng,li.markerPos.lat,li.markerPos.lng)); return d<=2?'yes ('+d+'m)':'NO ('+d+'m off)'; })()}</b></div>
         <div>accuracy: <b>${li&&li.accuracy!=null?'±'+li.accuracy+'m':'—'}</b></div>
-        <div>timestamp: <b>${li&&li.at?esc(li.at):'—'}</b></div>
+        <div>last GPS callback: <b>${li&&li.callbackAgeMs!=null?Math.round(li.callbackAgeMs/1000)+'s ago':'never'}</b></div>
+        <div>fix timestamp: <b>${li&&li.at?esc(li.at.slice(11,19)):'—'}</b></div>
       </div>
       <button class="btn" data-fam="loc-freshfix" style="width:100%;margin-top:10px;background:#6e56f8;color:#fff">${L==='fa'?'گرفتن fix تازهٔ GPS (تست)':'Get fresh GPS fix (test)'}</button>
       <div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'رویدادها':'Event log'}</div>
@@ -12148,18 +12174,23 @@ function famLiveMemberDetail(m, isMe){
   </div>`;
   // ── Honest LIVE-STATE banner for me: explicit lifecycle + accuracy + age ──
   if(isMe && fb && fb.location && fb.location.locState){
-    const ls=fb.location.locState();
+    let ls=fb.location.locState();
+    const li=fb.location.lastFixInfo?fb.location.lastFixInfo():null;
+    // #9/#10: only claim "active" if a real watch callback arrived recently.
+    // If it's been too long since the last callback, downgrade to "stale".
+    const STALE_CB_MS=45000;
+    if(ls==='active' && li && li.callbackAgeMs!=null && li.callbackAgeMs>STALE_CB_MS) ls='stale';
     const map={
       requesting:{fa:'در حال درخواست اجازه…',en:'Requesting permission…',c:'#f5a623'},
       obtaining:{fa:'در حال دریافت موقعیت…',en:'Obtaining location…',c:'#f5a623'},
       active:{fa:'موقعیت زنده فعال',en:'Live location active',c:'#2fce6b'},
+      stale:{fa:'موقعیت قدیمی',en:'Location stale',c:'#f5a623'},
       denied:{fa:'اجازهٔ موقعیت رد شد',en:'Location permission denied',c:'#e0447a'},
       disabled:{fa:'GPS/موقعیت خاموش است',en:'GPS/location disabled',c:'#e0447a'},
       unavailable:{fa:'موقعیت در دسترس نیست',en:'Location unavailable',c:'#9aa1ad'},
       idle:{fa:'آماده',en:'Idle',c:'#9aa1ad'}
     };
     const info=map[ls]||map.idle;
-    const li=fb.location.lastFixInfo?fb.location.lastFixInfo():null;
     const accTxt=(li&&li.accuracy!=null)?`±${li.accuracy}m`:'';
     const ageTxt=(li&&li.at)?famRelTime(li.at):'';
     h+=`<div class="fam-locstate" style="--sc:${info.c}">
