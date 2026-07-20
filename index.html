@@ -1625,7 +1625,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v289';
+const APP_VERSION='v290';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12155,6 +12155,8 @@ let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
 function famLiveMount(){
   const el=document.getElementById('fam-map');
   if(!el) return;
+  // Restore the user's remembered map type (Life360 remembers the choice).
+  if(DB.meta && DB.meta.famMapType && FAM_MAP_TYPES.some(t=>t.id===DB.meta.famMapType)){ _famMapType=DB.meta.famMapType; _famMapProvider=DB.meta.famMapType; }
   const members=famLiveMembers();
   const sel=members.find(m=>m.uid===_famSelUid);
   const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
@@ -12774,6 +12776,7 @@ function famAction(act,arg,ev){
     case 'live-maptype-set':{
       const t=FAM_MAP_TYPES.find(x=>x.id===arg); if(!t){ return; }
       _famMapType=t.id; _famMapProvider=t.id; _famMapTypeOpen=false;
+      DB.meta.famMapType=t.id; try{saveDB();}catch(e){}   // remember choice like Life360
       try{ MBMMap.setProvider(t.id); }catch(e){}
       render();
       return;
@@ -12818,7 +12821,16 @@ function famAction(act,arg,ev){
       return;
     }
     case 'live-checkin-cancel':{ _famCheckinPending=false; _famCheckinError=null; render(); return; }
-    case 'live-request':{ toast(L==='fa'?'درخواست به‌روزرسانی ارسال شد':'Update request sent'); return; }
+    case 'live-request':{
+      // Honest behaviour: a browser PWA can't push a notification to another
+      // member's device to force a fresh GPS fix (that needs a native wrapper +
+      // push service — platform limitation). What we CAN do is re-sync from
+      // Firestore so we show their latest shared position immediately.
+      const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); }
+      if(typeof famLiveApply==='function')famLiveApply();
+      toast(L==='fa'?'در حال دریافت آخرین موقعیت به‌اشتراک‌گذاشته‌شده…':'Fetching their latest shared location…');
+      return;
+    }
     case 'live-call':{
       const mem=famLiveMembers().find(x=>x.uid===arg);
       if(!mem||!mem.phone){ toast(L==='fa'?'شماره تلفن برای این عضو ثبت نشده':'No phone number on file for this member'); return; }
