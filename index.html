@@ -1371,6 +1371,7 @@ body.rtl .trow-content{text-align:right}
 .fam-topbtn:active{background:var(--s2)}
 .fam-topbtn svg{width:24px;height:24px}
 .fam-mapbtn:active{transform:scale(.94)}
+.fam-mapbtn.on{background:#6e56f8;color:#fff}
 .fam-mapbtn svg{width:22px;height:22px}
 /* avatar pins — Life360-style: circular photo, colored status ring, and a
    small pointed tail (not a big diamond). Sized to the reference. */
@@ -1445,6 +1446,11 @@ body.rtl .trow-content{text-align:right}
 .fam-stat-card .lbl{font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;font-weight:600}
 .fam-stat-card .val{font-size:22px;font-weight:800;color:var(--ink);line-height:1.1}
 /* Battery pill (reference: rounded chip with a battery glyph + %) */
+.fam-locstate{display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;border-radius:12px;background:var(--s2);font-size:13px;font-weight:700}
+.fam-locstate-dot{width:9px;height:9px;border-radius:50%;background:var(--sc,#9aa1ad);flex:none;box-shadow:0 0 0 3px color-mix(in srgb, var(--sc,#9aa1ad) 22%, transparent)}
+.fam-locstate-txt{color:var(--ink)}
+.fam-locstate-meta{color:var(--ink3);font-weight:600}
+.fam-locstate-meta::before{content:"·";margin-inline-end:6px;color:var(--ink3)}
 .fam-batt-pill{display:inline-flex;align-items:center;gap:7px;background:var(--s2);border-radius:12px;padding:8px 12px;font-weight:800;font-size:14px;flex:none}
 .fam-batt-ic{position:relative;width:22px;height:12px;border:2px solid var(--ink3);border-radius:3px}
 .fam-batt-ic::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:4px;background:var(--ink3);border-radius:0 1px 1px 0}
@@ -1656,7 +1662,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v291';
+const APP_VERSION='v292';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10807,6 +10813,24 @@ const FamilyBackend = (function(){
     const WRITE_THROTTLE_MS=15000;  // at most one canonical write / 15s (battery §17)
     let _battery=null;              // cached BatteryManager
     let _permissionState=null;      // 'granted'|'denied'|'prompt'|null
+    // ── Explicit, honest location lifecycle state (surfaced in the UI) ──
+    //   idle | requesting | obtaining | active | denied | disabled | unavailable
+    let _locState='idle';
+    let _locStateAt=0;
+    let _locDiag=[];                // rolling diagnostic log (last 60 entries)
+    function setLocState(s){ if(s!==_locState){ _locState=s; _locStateAt=Date.now(); diag('state',s); if(typeof afterChange==='function')afterChange(); } }
+    function locState(){ return _locState; }
+    function diag(kind,detail){
+      const e={ t:new Date().toISOString(), kind, detail };
+      _locDiag.push(e); if(_locDiag.length>60)_locDiag.shift();
+      try{ console.debug('[famloc]', kind, detail!==undefined?detail:''); }catch(_){}
+    }
+    function locDiag(){ return _locDiag.slice(); }
+    function lastFixInfo(){
+      const uid=myUid(); const st=uid?memberState(uid):null;
+      if(!st||st.lat==null)return null;
+      return { lat:st.lat, lng:st.lng, accuracy:st.accuracy, at:st.capturedAt||st.reportedAt, source:st.source||'gps', state:_locState };
+    }
 
     function batteryPct(){ try{ return _battery&&_battery.level!=null?Math.round(_battery.level*100):null; }catch(e){ return null; } }
     function initBattery(){
@@ -10824,10 +10848,13 @@ const FamilyBackend = (function(){
 
     function onFix(pos){
       const c=myConsent(); if(!c.enabled||c.paused)return;
-      const now=Date.now();
-      if(now-_lastWriteAt < WRITE_THROTTLE_MS) return;   // throttle
-      _lastWriteAt=now;
       const cr=pos.coords||{};
+      const provider=(cr.accuracy!=null&&cr.accuracy<=50)?'gps':'network';
+      diag('fix',{lat:cr.latitude,lng:cr.longitude,acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,ts:pos.timestamp});
+      setLocState('active');
+      const now=Date.now();
+      if(now-_lastWriteAt < WRITE_THROTTLE_MS) return;   // throttle canonical writes
+      _lastWriteAt=now;
       writeMyFix({
         lat:cr.latitude, lng:cr.longitude,
         accuracy:cr.accuracy!=null?Math.round(cr.accuracy):null,
@@ -10835,13 +10862,18 @@ const FamilyBackend = (function(){
         speed:(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null,
         battery:batteryPct(),
         capturedAt:new Date(pos.timestamp||Date.now()).toISOString(),
-        source:'gps'
+        source:provider
       });
     }
     function onFixErr(err){
-      // Record permission/unavailable honestly on my own state so viewers see it.
       const uid=myUid(); if(!uid)return;
-      const denied = err && err.code===1;
+      const code=err&&err.code;
+      diag('error',{code,message:err&&err.message});
+      if(code===1) setLocState('denied');
+      else if(code===2) setLocState('disabled');
+      else if(code===3) setLocState('obtaining');
+      else setLocState('unavailable');
+      const denied = code===1;
       const st=Object.assign({}, memberState(uid)||{uid});
       st.permission = denied ? 'denied' : (st.permission||'granted');
       if(denied){ locMap()[uid]=st; try{persistDB();}catch(e){}
@@ -10850,22 +10882,39 @@ const FamilyBackend = (function(){
       afterChange();
     }
 
+    /* Force a brand-new high-accuracy GPS fix RIGHT NOW (never cached). */
+    function requestFreshFix(opts){
+      opts=opts||{};
+      if(!('geolocation' in navigator)){ setLocState('unavailable'); diag('freshfix','no geolocation'); if(opts.cb)opts.cb(null); return; }
+      const c=myConsent();
+      if(!c.enabled||c.paused){ diag('freshfix','no consent'); if(opts.cb)opts.cb(null); return; }
+      setLocState('obtaining'); diag('freshfix','requesting getCurrentPosition');
+      try{
+        navigator.geolocation.getCurrentPosition(
+          pos=>{ _lastWriteAt=0; onFix(pos); diag('freshfix','ok'); if(opts.cb)opts.cb(pos); },
+          err=>{ onFixErr(err); diag('freshfix','err '+(err&&err.code)); if(opts.cb)opts.cb(null); },
+          { enableHighAccuracy:true, timeout:opts.timeout||20000, maximumAge:0 }
+        );
+      }catch(e){ diag('freshfix','throw'); setLocState('unavailable'); if(opts.cb)opts.cb(null); }
+    }
+
     function startWatch(){
       if(_watchId!=null)return;
-      if(!('geolocation' in navigator))return;
+      if(!('geolocation' in navigator)){ setLocState('unavailable'); return; }
       if(!shouldWatch())return;
       initBattery();
       const c=myConsent();
+      setLocState('obtaining'); diag('watch','starting watchPosition');
       try{
         _watchId=navigator.geolocation.watchPosition(onFix,onFixErr,{
           enableHighAccuracy: c.precise!==false,
-          maximumAge: 10000,
+          maximumAge: 5000,
           timeout: 20000
         });
-      }catch(e){ _watchId=null; }
+      }catch(e){ _watchId=null; setLocState('unavailable'); diag('watch','throw'); }
     }
     function stopWatch(){
-      if(_watchId!=null){ try{navigator.geolocation.clearWatch(_watchId);}catch(e){} _watchId=null; }
+      if(_watchId!=null){ try{navigator.geolocation.clearWatch(_watchId);}catch(e){} _watchId=null; diag('watch','stopped'); }
     }
     /* Reconcile the watcher against current consent + visibility. Call on:
        consent change, visibility change, family attach/detach. */
@@ -10877,8 +10926,10 @@ const FamilyBackend = (function(){
         if(navigator.permissions&&navigator.permissions.query){
           navigator.permissions.query({name:'geolocation'}).then(p=>{
             _permissionState=p.state;
-            if(p.state==='denied')onFixErr({code:1});
-            p.onchange=()=>{ _permissionState=p.state; reconcileWatch(); };
+            diag('permission',p.state);
+            if(p.state==='denied'){ setLocState('denied'); onFixErr({code:1}); }
+            else if(p.state==='prompt'){ setLocState('requesting'); }
+            p.onchange=()=>{ _permissionState=p.state; diag('permission-change',p.state); reconcileWatch(); };
           }).catch(()=>{});
         }
       }catch(e){}
@@ -10957,6 +11008,7 @@ const FamilyBackend = (function(){
       setNoShow, cancelNoShow, memberNoShows,
       // watcher (Stage 2)
       reconcileWatch, refreshPermission, startWatch, stopWatch,
+      requestFreshFix, locState, locDiag, lastFixInfo,
       // lifecycle
       startListening, stopListening,
       // constants (exposed for UI/tests)
@@ -11193,6 +11245,31 @@ async function famRunDiagnostics(){
 }
 function famDiagView(){
   let h=`<div style="padding:0 16px 90px">`;
+  // ── Live-location diagnostics (permission / provider / lat / lng / accuracy /
+  //    timestamp / errors) — real values from the location backend. ──
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(fb&&fb.location&&fb.location.locState){
+    const ls=fb.location.locState();
+    const li=fb.location.lastFixInfo?fb.location.lastFixInfo():null;
+    const perm=fb.location.permissionState?fb.location.permissionState():null;
+    const log=fb.location.locDiag?fb.location.locDiag():[];
+    h+=`<div style="border:1px solid var(--b1);border-radius:12px;padding:12px;margin-bottom:14px;background:var(--s1)">
+      <div style="font-weight:800;font-size:14px;margin-bottom:8px">${L==='fa'?'تشخیص موقعیت زنده':'Live-location diagnostics'}</div>
+      <div style="font-family:monospace;font-size:12px;line-height:1.7;color:var(--ink2)">
+        <div>state: <b>${esc(ls)}</b></div>
+        <div>permission: <b>${esc(perm||'unknown')}</b></div>
+        <div>provider: <b>${li?esc(li.source||'—'):'—'}</b></div>
+        <div>lat/lng: <b>${li&&li.lat!=null?li.lat.toFixed(6)+', '+li.lng.toFixed(6):'—'}</b></div>
+        <div>accuracy: <b>${li&&li.accuracy!=null?'±'+li.accuracy+'m':'—'}</b></div>
+        <div>timestamp: <b>${li&&li.at?esc(li.at):'—'}</b></div>
+      </div>
+      <button class="btn" data-fam="loc-freshfix" style="width:100%;margin-top:10px;background:#6e56f8;color:#fff">${L==='fa'?'گرفتن fix تازهٔ GPS (تست)':'Get fresh GPS fix (test)'}</button>
+      <div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'رویدادها':'Event log'}</div>
+      <div style="max-height:180px;overflow:auto;font-family:monospace;font-size:11px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+        ${log.length?log.slice().reverse().map(e=>`<div>${esc(e.t.slice(11,19))} · ${esc(e.kind)} · ${esc(typeof e.detail==='object'?JSON.stringify(e.detail):String(e.detail==null?'':e.detail))}</div>`).join(''):'<div>'+(L==='fa'?'هنوز رویدادی نیست':'no events yet')+'</div>'}
+      </div>
+    </div>`;
+  }
   h+=`<div style="font-size:13px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'این صفحه چند نوشتن واقعی و ایزوله روی Firestore انجام می‌دهد و نتیجهٔ دقیق هرکدام را نشان می‌دهد. هیچ حدسی زده نمی‌شود.':'This runs real, isolated Firestore probes and shows the exact result of each. No guessing.'}</div>`;
   h+=`<button class="btn" data-fam="diag-run" style="width:100%;background:#6e56f8;color:#fff;margin-bottom:14px"${_famDiagRunning?' disabled':''}>${_famDiagRunning?(L==='fa'?'در حال اجرا…':'Running…'):(L==='fa'?'اجرای تشخیص':'Run diagnostics')}</button>`;
   if(_famDiagResults){
@@ -11396,6 +11473,9 @@ const MBMMap = (function(){
       _map.touchZoomRotate && _map.touchZoomRotate.disableRotation();
       _map.on('load', ()=>{ _styleReady=true; _tilesLoaded=true; applyLifeStyle(); applyRasterWarmth(); ensureGeoLayers(); if(typeof famMapLoaded==='function')famMapLoaded(); });
       _map.on('styledata', ()=>{ applyLifeStyle(); ensureGeoLayers(); });
+      // User-initiated pan turns OFF live-follow (Life360 behaviour) so the map
+      // doesn't fight the user; the crosshair re-enables it.
+      _map.on('dragstart', ()=>{ try{ if(typeof _famFollow!=='undefined' && _map._famUserDrag!==false) _famFollow=false; }catch(e){} });
       _map.on('error', (e)=>{ /* tile/style errors: degrade, don't crash */ _tileErr=true; });
       _map.on('data', (e)=>{ if(e && e.isSourceLoaded){ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); } });
       // Safety: reveal even if 'load' is flaky.
@@ -11796,7 +11876,7 @@ function famLiveView(){
   h+=`<div class="fam-live-top" id="fam-live-top">${famLiveHeaderHtml(sel)}</div>`;
   // map controls
   h+=`<div class="fam-live-ctrls" style="top:88px">
-    <button class="fam-mapbtn" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
+    <button class="fam-mapbtn${_famFollow?' on':''}" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
     <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
     <button class="fam-mapbtn" data-fam="live-maptype" title="${L==='fa'?'نوع نقشه':'Map type'}">${famIcon('layers')}</button>
@@ -11875,6 +11955,8 @@ function famLiveView(){
 }
 let _famMapTypeOpen=false;
 let _famCat='people';   // active category row selection (people is the live one)
+let _famFollow=false;   // live-follow: keep map centred on me as I move
+let _famLiveFixKicked=false;  // one-shot fresh fix when opening live
 
 /* ── In-place live update: repaint markers + patch header/sheet WITHOUT
    rebuilding the map DOM. Falls back to a full render only when the roster
@@ -12064,6 +12146,29 @@ function famLiveMemberDetail(m, isMe){
     </div>
     ${battPill}
   </div>`;
+  // ── Honest LIVE-STATE banner for me: explicit lifecycle + accuracy + age ──
+  if(isMe && fb && fb.location && fb.location.locState){
+    const ls=fb.location.locState();
+    const map={
+      requesting:{fa:'در حال درخواست اجازه…',en:'Requesting permission…',c:'#f5a623'},
+      obtaining:{fa:'در حال دریافت موقعیت…',en:'Obtaining location…',c:'#f5a623'},
+      active:{fa:'موقعیت زنده فعال',en:'Live location active',c:'#2fce6b'},
+      denied:{fa:'اجازهٔ موقعیت رد شد',en:'Location permission denied',c:'#e0447a'},
+      disabled:{fa:'GPS/موقعیت خاموش است',en:'GPS/location disabled',c:'#e0447a'},
+      unavailable:{fa:'موقعیت در دسترس نیست',en:'Location unavailable',c:'#9aa1ad'},
+      idle:{fa:'آماده',en:'Idle',c:'#9aa1ad'}
+    };
+    const info=map[ls]||map.idle;
+    const li=fb.location.lastFixInfo?fb.location.lastFixInfo():null;
+    const accTxt=(li&&li.accuracy!=null)?`±${li.accuracy}m`:'';
+    const ageTxt=(li&&li.at)?famRelTime(li.at):'';
+    h+=`<div class="fam-locstate" style="--sc:${info.c}">
+      <span class="fam-locstate-dot"></span>
+      <span class="fam-locstate-txt">${L==='fa'?info.fa:info.en}</span>
+      ${accTxt?`<span class="fam-locstate-meta">${accTxt}</span>`:''}
+      ${ageTxt?`<span class="fam-locstate-meta">${L==='fa'?'به‌روزرسانی':'updated'} ${ageTxt}</span>`:''}
+    </div>`;
+  }
   // Address / place + Save Place card (reference layout for the selected member)
   const showLoc = m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null;
   if(showLoc){
@@ -12205,6 +12310,12 @@ function famLivePaintMarkers(members, sel){
     MBMMap.panTo([sel.state.lat,sel.state.lng]);
     _famLastCentredUid=sel.uid;
   }
+  // ── Live-follow: when enabled, keep the map centred on ME as my fix moves ──
+  if(_famFollow){
+    const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+    const mine=my?members.find(m=>m.uid===my):null;
+    if(mine&&mine.state&&mine.state.lat!=null){ try{ MBMMap.panTo([mine.state.lat,mine.state.lng]); }catch(e){} }
+  }
 }
 /* Show the "<name> arrived <rel> ago" bubble above the selected member when
    their latest real event is an arrival they haven't since departed from. */
@@ -12242,6 +12353,18 @@ function famLiveMount(){
       MBMMap.invalidate();
       famLivePaintMarkers(members, sel);
       if(MBMMap.tilesLoaded()) famMapLoaded();
+      // On entering Location, genuinely (re)start the watcher and force ONE
+      // fresh high-accuracy fix so the map reflects the device now, not a
+      // stored position. Guarded so it only kicks once per mount.
+      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+      if(fb&&fb.location){
+        try{ fb.location.refreshPermission(); }catch(e){}
+        try{ fb.location.reconcileWatch(); }catch(e){}
+        if(!_famLiveFixKicked){
+          _famLiveFixKicked=true;
+          try{ fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }catch(e){}
+        }
+      }
     }
   }
   famSheetInitDrag();
@@ -12842,7 +12965,7 @@ function famAction(act,arg,ev){
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
     case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); return;
-    case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); } toast(L==='fa'?'در حال به‌روزرسانی…':'Refreshing…'); if(typeof famLiveApply==='function')famLiveApply(); else render(); return; }
+    case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); } toast(L==='fa'?'در حال گرفتن موقعیت جدید…':'Getting a new GPS fix…'); return; }
     case 'live-maptype': _famMapTypeOpen=true; render(); return;
     case 'live-maptype-close': _famMapTypeOpen=false; render(); return;
     case 'live-maptype-set':{
@@ -12853,8 +12976,8 @@ function famAction(act,arg,ev){
       render();
       return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت شما هنوز در دسترس نیست':'Your location isn’t available yet'); return; }
-    case 'live-center-sel':{ const fb=FamilyBackend; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
+    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=true; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=false; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
     case 'live-fit':{ const fb=FamilyBackend; const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
@@ -12868,6 +12991,7 @@ function famAction(act,arg,ev){
       const navUrl=`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving`;
       window.open(navUrl,'_blank'); return; }
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
+    case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
     case 'live-sos': famView='sos'; render(); window.scrollTo(0,0); return;
     // Bottom navigation — Location is live; others are honest later-phase screens
     case 'nav-location': famView='live'; render(); return;
