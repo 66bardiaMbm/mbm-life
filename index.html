@@ -1320,6 +1320,37 @@ body.rtl .trow-content{text-align:right}
 .dark .maplibregl-ctrl-attrib a{color:#9aa1ad}
 .maplibregl-ctrl-bottom-right{z-index:1000}
 .dark #fam-map{background:#20222b}
+/* ── Life360 Home header: circular white buttons, centered Family dropdown ── */
+.fam-hbtn{width:46px;height:46px;border-radius:50%;border:none;background:#fff;color:#3d2f8f;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.18);position:relative;flex:none}
+.dark .fam-hbtn{background:#2a2d38;color:#c9c2ff}
+.fam-hbtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-hbtn:active{transform:scale(.93)}
+.fam-htop-right{display:flex;gap:10px;flex:none}
+.fam-fampill{flex:1;max-width:230px;margin:0 auto;height:46px;border-radius:23px;border:none;background:#fff;color:var(--ink);
+  display:flex;align-items:center;justify-content:center;gap:6px;font-weight:800;font-size:17px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.18)}
+.dark .fam-fampill{background:#2a2d38}
+.fam-fampill svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.5}
+.fam-fampill:active{transform:scale(.98)}
+.fam-hbadge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#ff4d4f;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--s0)}
+/* ── Category row (People / Pets / Keys / Places) in the sheet ── */
+.fam-cats{display:flex;gap:10px;padding:4px 0 14px}
+.fam-cat{flex:1;height:44px;border-radius:22px;border:none;background:var(--s2);color:#6e56f8;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.fam-cat svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-cat.on{background:#6e56f8;color:#fff}
+.fam-cat:active{transform:scale(.96)}
+/* ── Check in / SOS floating pills on the map ── */
+.fam-map-cta{position:absolute;left:0;right:0;z-index:1150;display:flex;gap:14px;justify-content:center;bottom:calc(42vh + 14px);pointer-events:none}
+.fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
+.dark .fam-map-cta .fam-cta{background:#2a2d38;color:#c9c2ff}
+.fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-cta-sos{color:#e0447a}
+.fam-cta:active{transform:scale(.96)}
+/* ── Life360 bottom navigation ── */
+.fam-bottomnav{position:absolute;left:0;right:0;bottom:0;z-index:1450;display:flex;background:var(--s1);border-top:1px solid var(--b1);padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px))}
+.fam-navbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border:none;background:transparent;color:var(--ink3);cursor:pointer;font-size:11px;font-weight:700;padding:4px 0}
+.fam-navbtn svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-navbtn.on{color:#6e56f8}
+.fam-navbtn:active{transform:scale(.95)}
 .fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:12px;padding:14px 16px;
   background:linear-gradient(180deg,var(--s0) 55%,transparent);pointer-events:none}
 .fam-live-top>*{pointer-events:auto}
@@ -1366,7 +1397,7 @@ body.rtl .trow-content{text-align:right}
 .fam-pin.tone-ok .fam-pin-ring{border-color:#2fce6b}
 .fam-pin.tone-warn .fam-pin-ring{border-color:#f5a623}
 .fam-pin.tone-muted{opacity:.7}.fam-pin.tone-muted .fam-pin-ring{border-color:#9aa1ad}
-.fam-pin.sel .fam-pin-ring{border-width:4px;box-shadow:0 0 0 3px rgba(110,86,248,.35)}
+.fam-pin.sel .fam-pin-ring{border-width:5px}
 /* pointed tail: a rotated square whose top is tucked under the avatar so only
    a downward triangle shows — reads as a clean pin point, not a floating diamond */
 .fam-pin .fam-pin-tip{position:absolute;left:50%;top:52px;width:16px;height:16px;background:#fff;
@@ -1385,11 +1416,11 @@ body.rtl .trow-content{text-align:right}
    draggable behaviour is a progressive enhancement layered on top — if drag
    JS never runs, the panel still renders at its default (partial) height. ── */
 #fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:22px 22px 0 0;
-  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;
-  height:42vh;min-height:280px;max-height:calc(100% - 90px);
+  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:64px;
+  height:42vh;min-height:280px;max-height:calc(100% - 150px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:150px}
-#fam-sheet.detent-2{height:calc(100% - 90px)}
+#fam-sheet.detent-2{height:calc(100% - 150px)}
 #fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);margin:12px auto 6px;flex:none}
 .fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
 .fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
@@ -1625,7 +1656,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v290';
+const APP_VERSION='v291';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11610,7 +11641,17 @@ const FAM_ICON = {
   play:'<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>',
   share:'<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>',
   layers:'<svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>',
-  heart:'<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>'
+  heart:'<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>',
+  sos:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.2"></circle><line x1="12" y1="3" x2="12" y2="7"></line><line x1="12" y1="17" x2="12" y2="21"></line><line x1="3" y1="12" x2="7" y2="12"></line><line x1="17" y1="12" x2="21" y2="12"></line></svg>',
+  car:'<svg viewBox="0 0 24 24"><path d="M5 13l1.5-4.5A2 2 0 018.4 7h7.2a2 2 0 011.9 1.5L19 13"></path><path d="M4 13h16v4a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H7v1a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path><circle cx="7.5" cy="15.5" r="1"></circle><circle cx="16.5" cy="15.5" r="1"></circle></svg>',
+  shield:'<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path></svg>',
+  badge:'<svg viewBox="0 0 24 24"><polygon points="12 3 14.5 7 19 7.5 15.7 10.8 16.6 15.3 12 13.2 7.4 15.3 8.3 10.8 5 7.5 9.5 7"></polygon></svg>',
+  people:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"></circle><path d="M3 20a6 6 0 0112 0"></path><path d="M16 5.5a3 3 0 010 5.8"></path><path d="M15 20a6 6 0 016-6"></path></svg>',
+  paw:'<svg viewBox="0 0 24 24"><ellipse cx="8" cy="8.5" rx="1.6" ry="2.1"></ellipse><ellipse cx="16" cy="8.5" rx="1.6" ry="2.1"></ellipse><ellipse cx="5" cy="12.5" rx="1.5" ry="2"></ellipse><ellipse cx="19" cy="12.5" rx="1.5" ry="2"></ellipse><path d="M12 12.5c-2.8 0-4.5 2.2-4.5 4.2 0 1.6 1.4 2.3 2.6 1.9 1.2-.4 2.6-.4 3.8 0 1.2.4 2.6-.3 2.6-1.9 0-2-1.7-4.2-4.5-4.2z"></path></svg>',
+  key:'<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4"></circle><path d="M11 11l7 7"></path><path d="M16 16l2-2"></path><path d="M18 18l2-2"></path></svg>',
+  building:'<svg viewBox="0 0 24 24"><rect x="5" y="3" width="9" height="18" rx="1"></rect><path d="M14 8h5a1 1 0 011 1v11a1 1 0 01-1 1h-5"></path><line x1="8" y1="7" x2="8" y2="7"></line><line x1="11" y1="7" x2="11" y2="7"></line><line x1="8" y1="11" x2="8" y2="11"></line><line x1="11" y1="11" x2="11" y2="11"></line></svg>',
+  chevdown:'<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
+  mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="4 7 12 13 20 7"></polyline></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
@@ -11676,18 +11717,35 @@ let _famRosterSig=null;
 
 /* Header (title + honest status subtitle) for the selected member. */
 function famLiveHeaderHtml(sel){
-  const title = sel?esc(sel.name):(L==='fa'?'خانواده':'Family');
-  const sub = sel ? esc(famLiveStatusLine(sel)) : '';
-  return `<button class="fam-topbtn" data-fam="live-back">${famIcon('back')}</button>
-    <div class="fam-live-title"><b>${title}</b><span>${sub}</span></div>
-    <button class="fam-topbtn accent" data-fam="live-refresh" title="${L==='fa'?'به‌روزرسانی':'Refresh'}">${famIcon('refresh')}</button>
-    <button class="fam-topbtn" data-fam="settings" title="${L==='fa'?'مدیریت':'Manage'}">${famIcon('gear')}</button>`;
+  // Life360 Home layout: settings (left) · centered "Family ▾" dropdown · a
+  // refresh + invites/manage on the right. The circular white buttons match the
+  // reference. Badges are shown ONLY when there is real pending data.
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const famName = (DB.meta && DB.meta.family && DB.meta.family.name) || (L==='fa'?'خانواده':'Family');
+  // Invite badge only if there are REAL server-backed invites for this family.
+  let pending=0; try{ pending=(typeof famServerInvites==='function')?(famServerInvites().length||0):0; }catch(e){}
+  const inviteBadge = pending>0?`<span class="fam-hbadge">${pending}</span>`:'';
+  return `<button class="fam-hbtn" data-fam="settings" title="${L==='fa'?'تنظیمات':'Settings'}">${famIcon('gear')}</button>
+    <button class="fam-fampill" data-fam="fam-switch"><b>${esc(famName)}</b>${famIcon('chevdown')}</button>
+    <div class="fam-htop-right">
+      <button class="fam-hbtn" data-fam="live-refresh" title="${L==='fa'?'به‌روزرسانی':'Refresh'}">${famIcon('refresh')}</button>
+      <button class="fam-hbtn" data-fam="fam-invites" title="${L==='fa'?'دعوت‌نامه‌ها':'Invites'}">${famIcon('mail')}${inviteBadge}</button>
+    </div>`;
 }
 
 /* Sheet body (presence strip + selected member detail). Shared by the full
    render and the in-place live update so they never diverge. */
 function famLiveSheetBodyHtml(members, sel, myUid){
   let h='';
+  // ── Life360-style category row (People / Pets / Keys / Places). People is the
+  //    active live category; Pets/Keys are honest later-phase placeholders;
+  //    Places opens the real saved-places screen. ──
+  h+=`<div class="fam-cats">
+    <button class="fam-cat on" data-fam="cat-people">${famIcon('people')}</button>
+    <button class="fam-cat" data-fam="cat-pets">${famIcon('paw')}</button>
+    <button class="fam-cat" data-fam="cat-keys">${famIcon('key')}</button>
+    <button class="fam-cat" data-fam="cat-places">${famIcon('building')}</button>
+  </div>`;
   if(members.length>1){
     h+=`<div class="fam-presence">`;
     members.forEach(m=>{
@@ -11748,6 +11806,11 @@ function famLiveView(){
     h+=`<div class="fam-map-msg" id="fam-share-banner" style="top:auto;bottom:calc(40vh + 16px)">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
       <button class="btn" data-fam="live-share-on" style="width:auto;padding:4px 10px;margin-inline-start:6px;font-size:12px">${L==='fa'?'روشن':'Turn on'}</button></div>`;
   }
+  // ── Life360-style Check in / SOS pills, centered low on the map ──
+  h+=`<div class="fam-map-cta">
+    <button class="fam-cta" data-fam="live-checkin">${famIcon('check')}<span>${L==='fa'?'ثبت ورود':'Check in'}</span></button>
+    <button class="fam-cta fam-cta-sos" data-fam="live-sos">${famIcon('sos')}<span>SOS</span></button>
+  </div>`;
   // member sheet — ALWAYS in normal document flow (see CSS), never depends on JS positioning.
   h+=`<div id="fam-sheet"><div class="fam-sheet-grab"></div><div class="fam-sheet-body" id="fam-sheet-body">`;
   h+=famLiveSheetBodyHtml(members, sel, myUid);
@@ -11799,10 +11862,19 @@ function famLiveView(){
     });
     h+=`</div></div>`;
   }
+  // ── Life360-style bottom navigation. Location is live; the others are honest
+  //    labelled placeholders (later-phase), never faked as working screens. ──
+  h+=`<div class="fam-bottomnav">
+    <button class="fam-navbtn on" data-fam="nav-location">${famIcon('pin')}<span>${L==='fa'?'موقعیت':'Location'}</span></button>
+    <button class="fam-navbtn" data-fam="nav-driving">${famIcon('car')}<span>${L==='fa'?'رانندگی':'Driving'}</span></button>
+    <button class="fam-navbtn" data-fam="nav-safety">${famIcon('shield')}<span>${L==='fa'?'ایمنی':'Safety'}</span></button>
+    <button class="fam-navbtn" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
+  </div>`;
   h+=`</div>`; // wrap
   return h;
 }
 let _famMapTypeOpen=false;
+let _famCat='people';   // active category row selection (people is the live one)
 
 /* ── In-place live update: repaint markers + patch header/sheet WITHOUT
    rebuilding the map DOM. Falls back to a full render only when the roster
@@ -12202,7 +12274,7 @@ function famSheetInitDrag(){
   // 40vh), 2=full but NEVER covering the 90px header reserved by CSS
   // max-height. Height-based (not transform) so the sheet is ALWAYS visible
   // from its default CSS even if this JS never runs.
-  const heights=[130, Math.round(H*0.40), Math.max(200,H-90)];
+  const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
   function apply(i){
     _famSheetDetent=Math.max(0,Math.min(2,i));
     sheet.classList.remove('detent-0','detent-2');
@@ -12796,6 +12868,19 @@ function famAction(act,arg,ev){
       const navUrl=`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving`;
       window.open(navUrl,'_blank'); return; }
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
+    case 'live-sos': famView='sos'; render(); window.scrollTo(0,0); return;
+    // Bottom navigation — Location is live; others are honest later-phase screens
+    case 'nav-location': famView='live'; render(); return;
+    case 'nav-driving': toast(L==='fa'?'رانندگی در فاز بعدی فعال می‌شود':'Driving is coming in a later phase'); return;
+    case 'nav-safety': famView='sos'; render(); window.scrollTo(0,0); return;
+    case 'nav-membership': toast(L==='fa'?'عضویت در فاز بعدی فعال می‌شود':'Membership is coming in a later phase'); return;
+    // Category row — People is live; Places opens real saved places; Pets/Keys later
+    case 'cat-people': _famCat='people'; famView='live'; render(); return;
+    case 'cat-places': go('places'); return;
+    case 'cat-pets': toast(L==='fa'?'حیوانات خانگی در فاز بعدی فعال می‌شود':'Pets is coming in a later phase'); return;
+    case 'cat-keys': toast(L==='fa'?'کلیدها در فاز بعدی فعال می‌شود':'Keys is coming in a later phase'); return;
+    case 'fam-switch': go('settings'); return;
+    case 'fam-invites': go('invites'); return;
     case 'live-checkin-send':{
       if(!navigator.geolocation){ _famCheckinError=(L==='fa'?'موقعیت‌یاب در این دستگاه در دسترس نیست':'Geolocation is not available on this device'); render(); return; }
       _famCheckinPending=true; _famCheckinError=null; render();
