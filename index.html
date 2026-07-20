@@ -1344,6 +1344,20 @@ body.rtl .trow-content{text-align:right}
 /* avatar pins — Life360-style: circular photo, colored status ring, and a
    small pointed tail (not a big diamond). Sized to the reference. */
 .fam-pin{position:relative;width:64px;height:74px;cursor:pointer}
+/* Live-presence glow: a soft green/cyan halo behind the avatar that gently
+   pulses (scale + opacity) to signal a fresh, live location — Life360-style.
+   Only rendered for tone-live (a genuinely recent fix), and honours reduced-
+   motion preferences. GPU-friendly (transform/opacity only). */
+.fam-pin .fam-pin-glow{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;z-index:0;
+  background:radial-gradient(circle, rgba(47,206,107,.55) 0%, rgba(47,206,107,.28) 45%, rgba(47,206,107,0) 72%);
+  opacity:0;pointer-events:none;transform-origin:center}
+.fam-pin.tone-live .fam-pin-glow{animation:fampinglow 2.4s ease-in-out infinite}
+@keyframes fampinglow{
+  0%{opacity:.20;transform:scale(.82)}
+  50%{opacity:.75;transform:scale(1.28)}
+  100%{opacity:.20;transform:scale(.82)}
+}
+@media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-glow{animation:none;opacity:.5} }
 .fam-pin .fam-pin-av{position:absolute;top:0;left:2px;width:60px;height:60px;border-radius:50%;
   background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
   font-weight:800;color:#fff;font-size:21px;box-shadow:0 3px 10px rgba(0,0,0,.35);z-index:2}
@@ -1611,7 +1625,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v287';
+const APP_VERSION='v288';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11472,7 +11486,7 @@ const MBMMap = (function(){
       : `<div class="fam-pin-av" style="background:${meta.color||'#6e56f8'}">${(meta.initial||'?')}</div>`;
     const head = (meta.moving && meta.heading!=null)
       ? `<div class="fam-pin-head" style="transform:rotate(${Math.round(meta.heading)}deg)"></div>` : '';
-    return head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`;
+    return `<div class="fam-pin-glow"></div>`+head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`;
   }
   function makeEl(cls, html){ const d=document.createElement('div'); d.className=cls; d.innerHTML=html; return d; }
 
