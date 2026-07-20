@@ -1557,17 +1557,26 @@ body.rtl .trow-content{text-align:right}
      Migrated from Leaflet/OSM-raster to a production-grade VECTOR engine so
      Family Live can be styled close to the Life360 reference (road hierarchy,
      reduced clutter, typography, buildings, smooth GPU zoom + marker motion).
-     MapLibre GL is the open-source fork of Mapbox GL — same engine, no
-     billing/token dependency. Vector tiles are served by MapTiler; the app
-     runs immediately on MapTiler's keyless demo style and switches to the
-     production style when MAPTILER_KEY is set (single final config step).
-     All map usage is isolated behind the MBMMap wrapper. ── -->
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
-      crossorigin=""/>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"
-      crossorigin=""></script>
+     Google Maps JS API — Family live-location module.
+     Loaded DYNAMICALLY (not a static tag with an embedded key) so no
+     API key is ever hardcoded in this file. Configure GOOGLE_MAPS_API_KEY below
+     (or via localStorage 'GOOGLE_MAPS_API_KEY' at runtime) before the Family
+     module is opened. All map usage stays isolated behind the MBMMap wrapper —
+     no other module touches Google Maps directly. ── -->
+<style>#fam-map-fatal{display:none;position:absolute;inset:0;z-index:2000;background:var(--s0,#141418);color:var(--ink,#eef0f4);
+  align-items:center;justify-content:center;text-align:center;padding:28px;font-size:14px;line-height:1.6}
+#fam-map-fatal.show{display:flex;flex-direction:column;gap:10px}
+#fam-map-fatal b{display:block;font-size:16px;margin-bottom:4px}
+#fam-map-fatal button{margin-top:10px;background:#6e56f8;color:#fff;border:none;border-radius:12px;padding:12px 20px;font-weight:700;cursor:pointer}</style>
 </head>
 <body>
+<script>
+  // ── Google Maps configuration placeholder ───────────────────────────────
+  // Fill this in (or set window.localStorage.GOOGLE_MAPS_API_KEY at runtime)
+  // with a key restricted to the Maps JavaScript API. See the setup steps at
+  // the end of this delivery for exactly how to create/restrict/insert it.
+  window.GOOGLE_MAPS_API_KEY = window.GOOGLE_MAPS_API_KEY || '';
+</script>
 
 <div id="splash">
   <div class="auth-logo">M</div>
@@ -1664,7 +1673,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v294';
+const APP_VERSION='v295';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11484,147 +11493,180 @@ let _famMapProvider='auto'; // kept for backward-compat with existing callers
    member/status sheet keeps working.
    ═══════════════════════════════════════════════════════════════════════ */
 const MBMMap = (function(){
-  let _map=null, _elId=null, _styleReady=false, _tilesLoaded=false, _tileErr=false, _curType=null;
-  let _markers={}, _markerEls={}, _markerMeta={}, _markerPos={}, _animTimers={};
-  const GEO={ route:'mbm-route', cone:'mbm-cone', acc:'mbm-acc' };
-  function GL(){ return (typeof window!=='undefined')?window.maplibregl:undefined; }
-  function available(){ const g=GL(); return !!(g && g.Map); }
-  function ll(latlng){ return [latlng[1], latlng[0]]; }          // [lat,lng] → [lng,lat]
-  function mounted(elId){ return !!(_map && _elId===elId && document.getElementById(elId) && document.getElementById(elId).querySelector('.maplibregl-canvas')); }
-  function tilesLoaded(){ return _tilesLoaded; }
-  function tileError(){ return _tileErr; }
+  /* ═══════════════════════════════════════════════════════════════════════
+     GOOGLE MAPS JS API — Family live-location engine.
+     Replaces the previous MapLibre/MapTiler engine in THIS module only. Public
+     function names/signatures are UNCHANGED so every existing call site in the
+     app (famLivePaintMarkers, famLiveMount, etc.) keeps working without edits.
+     Architecture preserved: GPS → local state (locMap) → THIS module repaints
+     the marker/camera immediately → Firestore is sync-only, never the render
+     source. This module never blocks a marker update on Firestore.
+     ═══════════════════════════════════════════════════════════════════════ */
+  let _map=null, _elId=null, _loaded=false, _loadErr=null, _apiLoading=false, _apiReady=false;
+  let _markers={}, _markerMeta={}, _markerPos={}, _animTimers={};
+  let _accCircle=null, _coneOverlay=null, _routeLine=null, _arrivedInfo=null, _arrivedAnchorMarker=null;
+  let _pendingInit=null; // {elId, center} queued while the SDK is still loading
+
+  function apiKey(){
+    try{ return (window.localStorage && window.localStorage.getItem('GOOGLE_MAPS_API_KEY')) || window.GOOGLE_MAPS_API_KEY || ''; }catch(e){ return window.GOOGLE_MAPS_API_KEY || ''; }
+  }
+  function available(){ return !!(typeof window!=='undefined' && window.google && window.google.maps && window.google.maps.Map); }
+  function mounted(elId){ return !!(_map && _elId===elId && document.getElementById(elId)); }
+  function tilesLoaded(){ return _loaded; }
+  function tileError(){ return !!_loadErr; }
   function get(){ return _map; }
 
+  /* ── Fatal-error overlay: missing key / SDK load failure / permission /
+     stale-location messaging. Each is a distinct, honest message — never a
+     silent blank map. ── */
+  function showFatal(kind, extra){
+    const el=document.getElementById('fam-map-fatal'); if(!el) return;
+    const msgs={
+      'no-key':{ t:(typeof L!=='undefined'&&L==='fa')?'کلید Google Maps تنظیم نشده':'Google Maps API key not configured',
+                  d:(typeof L!=='undefined'&&L==='fa')?'GOOGLE_MAPS_API_KEY باید قبل از باز شدن این صفحه مقداردهی شود.':'GOOGLE_MAPS_API_KEY must be set before this screen loads.' },
+      'load-fail':{ t:(typeof L!=='undefined'&&L==='fa')?'بارگذاری Google Maps ناموفق بود':'Google Maps failed to load',
+                    d:(typeof L!=='undefined'&&L==='fa')?'اتصال اینترنت یا محدودیت کلید را بررسی کنید.':'Check your internet connection or the key\u2019s API restrictions.' },
+      'denied':{ t:(typeof L!=='undefined'&&L==='fa')?'اجازهٔ موقعیت رد شد':'Location permission denied',
+                 d:(typeof L!=='undefined'&&L==='fa')?'برای نمایش موقعیت زنده، دسترسی به مکان را در تنظیمات مرورگر فعال کنید.':'Enable location access in your browser settings to see live position.' }
+    };
+    const m=msgs[kind]||{t:kind,d:extra||''};
+    el.innerHTML=`<b>${m.t}</b><div>${m.d}${extra?'<br><span style="opacity:.7;font-size:12px">'+extra+'</span>':''}</div>
+      <button data-fam="live-refresh">${(typeof L!=='undefined'&&L==='fa')?'تلاش دوباره':'Try again'}</button>`;
+    el.classList.add('show');
+    try{ if(typeof bindFamily==='function') bindFamily(); }catch(e){}
+  }
+  function clearFatal(){ const el=document.getElementById('fam-map-fatal'); if(el){ el.classList.remove('show'); el.innerHTML=''; } }
+  function showStale(uid, ageTxt){
+    // Non-fatal — a small badge, not a full-screen block, since other members'
+    // markers may still be fresh even if one is stale.
+    if(typeof famNoteStale==='function'){ try{ famNoteStale(uid, ageTxt); }catch(e){} }
+  }
+
+  /* ── SDK loader: dynamic <script> injection, no key ever hardcoded in this
+     file. Loads once; queued init() calls run after it's ready. ── */
+  function loadSdk(cb){
+    if(available()){ _apiReady=true; cb(true); return; }
+    const key=apiKey();
+    if(!key){ _loadErr='no-key'; cb(false); return; }
+    if(_apiLoading){ window.__mbmMapWaiters=(window.__mbmMapWaiters||[]); window.__mbmMapWaiters.push(cb); return; }
+    _apiLoading=true;
+    window.__mbmMapWaiters=[cb];
+    const cbName='__mbmGoogleMapsReady';
+    window[cbName]=function(){
+      _apiReady=true; _apiLoading=false;
+      (window.__mbmMapWaiters||[]).forEach(w=>{ try{w(true);}catch(e){} });
+      window.__mbmMapWaiters=[];
+    };
+    const s=document.createElement('script');
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+cbName+'&loading=async';
+    s.async=true;
+    s.onerror=function(){
+      _apiLoading=false; _loadErr='load-fail';
+      (window.__mbmMapWaiters||[]).forEach(w=>{ try{w(false);}catch(e){} });
+      window.__mbmMapWaiters=[];
+    };
+    document.head.appendChild(s);
+  }
+
   function init(elId, center){
-    if(!available()) return null;
-    if(mounted(elId)){ return _map; }
+    _elId=elId;
+    clearFatal();
+    if(!apiKey()){ _loadErr='no-key'; showFatal('no-key'); return null; }
+    if(available()){ return _doInit(elId, center); }
+    // SDK not ready yet — start loading and mount as soon as it resolves.
+    _pendingInit={elId, center};
+    loadSdk((ok)=>{
+      if(!ok){ showFatal('load-fail'); return; }
+      if(_pendingInit && _pendingInit.elId===elId){ _doInit(_pendingInit.elId, _pendingInit.center); _pendingInit=null; }
+    });
+    return null; // caller sees no map yet this tick; famMapLoaded() fires once ready
+  }
+
+  function _doInit(elId, center){
+    const el=document.getElementById(elId); if(!el) return null;
+    if(_map && _elId===elId){ return _map; }
     destroy();
-    _elId=elId; _tileErr=false; _tilesLoaded=false; _styleReady=false; _curType=_famMapType||'auto';
-    const g=GL();
-    const sc=center?ll(center):[147.32,-42.88];
+    _elId=elId; _loaded=false; _loadErr=null;
     try{
-      _map=new g.Map({ container:elId, style:famStyleFor(_curType).style, center:sc, zoom:15,
-        attributionControl:true, dragRotate:false, pitchWithRotate:false, touchZoomRotate:true, maxZoom:19,
-        // no default UI; we render our own controls to match the reference.
-        renderWorldCopies:true });
-      _map.touchZoomRotate && _map.touchZoomRotate.disableRotation();
-      _map.on('load', ()=>{ _styleReady=true; _tilesLoaded=true; applyLifeStyle(); applyRasterWarmth(); ensureGeoLayers(); if(typeof famMapLoaded==='function')famMapLoaded(); });
-      _map.on('styledata', ()=>{ applyLifeStyle(); ensureGeoLayers(); });
-      // User-initiated pan turns OFF live-follow (Life360 behaviour) so the map
-      // doesn't fight the user; the crosshair re-enables it.
-      _map.on('dragstart', ()=>{ try{ if(typeof _famFollow!=='undefined' && _map._famUserDrag!==false) _famFollow=false; }catch(e){} });
-      _map.on('error', (e)=>{ /* tile/style errors: degrade, don't crash */ _tileErr=true; });
-      _map.on('data', (e)=>{ if(e && e.isSourceLoaded){ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); } });
-      // Safety: reveal even if 'load' is flaky.
-      setTimeout(()=>{ _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); }, 2500);
-      if(typeof window!=='undefined'){ window.addEventListener('online', softRefresh, {once:false}); }
-    }catch(e){ _map=null; }
+      const g=window.google.maps;
+      const sc = center ? {lat:center[0], lng:center[1]} : {lat:-42.88, lng:147.32};
+      _map=new g.Map(el, {
+        center: sc, zoom: 15, disableDefaultUI:false,
+        zoomControl:false, streetViewControl:false, mapTypeControl:false, fullscreenControl:false, rotateControl:false,
+        clickableIcons:false, gestureHandling:'greedy',
+        styles: LIFE_STYLE // Life360-like restyle, applied natively via Google Maps styling
+      });
+      g.event.addListenerOnce(_map,'idle', ()=>{ _loaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
+      _map.addListener('dragstart', ()=>{ try{ if(typeof _famFollow!=='undefined') _famFollow=false; }catch(e){} });
+      _apiReady=true;
+    }catch(e){ _map=null; _loadErr='load-fail'; showFatal('load-fail'); }
     return _map;
   }
-  function softRefresh(){ if(!_map)return; try{ _map.resize(); }catch(e){} }
 
-  /* Runtime restyle pass toward the Life360 reference. Palette sampled directly
-     from the real Life360 screenshots: warm beige land, near-white warm roads,
-     tan buildings, soft green parks, muted labels. Applied on top of the vector
-     style. No-op on raster (raster has no vector layers). */
-  const LIFE = {
-    land:'#f4f0e5', water:'#8fdaed', park:'#d2f8e1', building:'#eae7dc', buildingLine:'#e2ded1',
-    roadMajor:'#ffffff', roadMajorCase:'#e9e4d6', roadMinor:'#ffffff', roadMinorCase:'#ece8db',
-    label:'#5b5f66', labelHalo:'#ffffff'
-  };
-  function applyLifeStyle(){
-    if(!_map)return;
-    let layers; try{ layers=_map.getStyle().layers||[]; }catch(e){ return; }
-    layers.forEach(ly=>{
-      const id=(ly.id||'').toLowerCase(); const type=ly.type;
-      try{
-        if(type==='background'){ _map.setPaintProperty(ly.id,'background-color',LIFE.land); }
-        else if(type==='fill'){
-          if(/(building)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.building); _map.setPaintProperty(ly.id,'fill-opacity',0.85); if(ly.paint&&'fill-outline-color'in (ly.paint||{})){} }
-          else if(/(water|ocean|sea|river|lake|pond|bay)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.water); }
-          else if(/(wood|forest|park|grass|green|golf|pitch|garden|cemetery|recreation|scrub|meadow|nature|farmland)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.park); }
-          else if(/(sand|beach)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color','#efe6d2'); }
-          else if(/(landuse|landcover|earth|land|residential|commercial|industrial)/.test(id)){ _map.setPaintProperty(ly.id,'fill-color',LIFE.land); }
-        }
-        else if(type==='line'){
-          if(/(water|river|stream|canal)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.water); }
-          else if(/(motorway|trunk|primary|highway).*(case|outline|border)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMajorCase); }
-          else if(/(motorway|trunk|primary|highway)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMajor); }
-          else if(/.*(case|outline|border)/.test(id) && /(road|street|secondary|tertiary|residential|service|minor|path)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMinorCase); }
-          else if(/(road|street|secondary|tertiary|residential|service|minor)/.test(id)){ _map.setPaintProperty(ly.id,'line-color',LIFE.roadMinor); }
-          else if(/(rail|transit|transport)/.test(id)){ _map.setPaintProperty(ly.id,'line-color','#d9cdbb'); }
-          else if(/(boundary|admin|border)/.test(id)){ try{_map.setPaintProperty(ly.id,'line-opacity',0.25);}catch(_){} }
-        }
-        else if(type==='symbol'){
-          if(/(poi|shop|amenity|transit|station|rail|aerodrome|airport|entrance|address|housenumber|building)/.test(id)){ _map.setLayoutProperty(ly.id,'visibility','none'); } // reduce clutter like Life360
-          else { try{ _map.setPaintProperty(ly.id,'text-color',LIFE.label); _map.setPaintProperty(ly.id,'text-halo-color',LIFE.labelHalo); _map.setPaintProperty(ly.id,'text-halo-width',1.4); }catch(_){}
-            try{ if(/(road|street)/.test(id)) _map.setLayoutProperty(ly.id,'visibility','none'); }catch(_){} } // hide most road-name labels (Life360 shows few)
-        }
-      }catch(_){}
-    });
-  }
+  /* Life360-like Google Maps JSON style (same palette used by the previous
+     vector restyle): warm land, mint parks, light water, muted labels, few POIs. */
+  const LIFE_STYLE=[
+    {elementType:'geometry',stylers:[{color:'#f4f0e5'}]},
+    {elementType:'labels.text.fill',stylers:[{color:'#5b5f66'}]},
+    {elementType:'labels.text.stroke',stylers:[{color:'#ffffff'}]},
+    {featureType:'poi',stylers:[{visibility:'off'}]},
+    {featureType:'transit',stylers:[{visibility:'off'}]},
+    {featureType:'road',elementType:'geometry',stylers:[{color:'#ffffff'}]},
+    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#ece8db'}]},
+    {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#ffffff'}]},
+    {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#e9e4d6'}]},
+    {featureType:'road',elementType:'labels',stylers:[{visibility:'off'}]},
+    {featureType:'landscape',elementType:'geometry',stylers:[{color:'#f4f0e5'}]},
+    {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#d2f8e1'}]},
+    {featureType:'water',elementType:'geometry',stylers:[{color:'#8fdaed'}]},
+    {featureType:'administrative',elementType:'geometry',stylers:[{visibility:'off'}]},
+    {featureType:'building',elementType:'geometry',stylers:[{color:'#eae7dc'}]}
+  ];
 
-  function applyRasterWarmth(){
-    // Without a vector key the basemap is standard OSM/Esri raster. Give it the
-    // warm Life360-like cast via a canvas filter so it isn't cold grey. Vector
-    // styles get real per-layer colours (applyLifeStyle) and no filter.
-    const el=_elId?document.getElementById(_elId):null; if(!el)return;
-    const raster = !MAPTILER_KEY && (_curType!=='satellite');
-    if(raster) el.classList.add('fam-map-warm'); else el.classList.remove('fam-map-warm');
-  }
-  function ensureGeoLayers(){
-    if(!_map||!_styleReady)return;
-    const empty={ type:'FeatureCollection', features:[] };
+  function applyLifeStyle(){ if(_map){ try{ _map.setOptions({styles:LIFE_STYLE}); }catch(e){} } }
+  function setProvider(typeId){
+    // Google Maps map types: roadmap (Auto/Street both use it, Life360-styled),
+    // satellite (Satellite / Hybrid). No style re-fetch needed — instant switch.
+    if(!_map) return;
+    _famMapProvider=typeId; _famMapType=typeId;
     try{
-      if(!_map.getSource(GEO.acc)){ _map.addSource(GEO.acc,{type:'geojson',data:empty});
-        _map.addLayer({ id:GEO.acc, type:'fill', source:GEO.acc, paint:{ 'fill-color':['get','color'], 'fill-opacity':0.10 } });
-        _map.addLayer({ id:GEO.acc+'-l', type:'line', source:GEO.acc, paint:{ 'line-color':['get','color'], 'line-opacity':0.5, 'line-width':1 } }); }
-      if(!_map.getSource(GEO.cone)){ _map.addSource(GEO.cone,{type:'geojson',data:empty});
-        _map.addLayer({ id:GEO.cone, type:'fill', source:GEO.cone, paint:{ 'fill-color':'#8b6df8', 'fill-opacity':0.28 } }); }
-      if(!_map.getSource(GEO.route)){ _map.addSource(GEO.route,{type:'geojson',data:empty});
-        _map.addLayer({ id:GEO.route, type:'line', source:GEO.route, layout:{'line-cap':'round','line-join':'round'}, paint:{ 'line-color':'#6e56f8', 'line-width':4, 'line-opacity':0.85 } }); }
+      if(typeId==='satellite'){ _map.setMapTypeId('hybrid'); }
+      else{ _map.setMapTypeId('roadmap'); applyLifeStyle(); }
     }catch(e){}
   }
-  function setGeo(id,data){ if(_map&&_map.getSource(id)){ try{_map.getSource(id).setData(data);}catch(e){} } }
 
-  function setProvider(typeId){
-    // switch the whole vector/raster style live, without tearing the map down.
-    if(!_map)return; _famMapProvider=typeId; _famMapType=typeId; _curType=typeId; _tilesLoaded=false;
+  function setView(center,zoom){ if(_map)try{ _map.panTo({lat:center[0],lng:center[1]}); if(zoom!=null)_map.setZoom(zoom); }catch(e){} }
+  function panTo(center){ if(_map)try{ _map.panTo({lat:center[0],lng:center[1]}); }catch(e){} }
+  function fitAll(latlngs){
+    if(!_map||!available()||!latlngs||!latlngs.length) return;
     try{
-      _map.setStyle(famStyleFor(typeId).style);
-      _map.once('styledata', ()=>{ _styleReady=true; applyLifeStyle(); applyRasterWarmth(); ensureGeoLayers(); repaintAllGeo(); _tilesLoaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
-    }catch(e){ _tileErr=true; }
+      if(latlngs.length===1){ _map.panTo({lat:latlngs[0][0],lng:latlngs[0][1]}); _map.setZoom(16); return; }
+      const g=window.google.maps; const b=new g.LatLngBounds();
+      latlngs.forEach(p=>b.extend({lat:p[0],lng:p[1]}));
+      _map.fitBounds(b, 70);
+    }catch(e){}
   }
-  // remember last geo payloads so a style switch can repaint them
-  let _lastRoute=null, _lastCone=null, _lastAcc=null;
-  function repaintAllGeo(){ if(_lastRoute)setGeo(GEO.route,_lastRoute); if(_lastCone)setGeo(GEO.cone,_lastCone); if(_lastAcc)setGeo(GEO.acc,_lastAcc); }
-
-  function setView(center,zoom){ if(_map)try{ _map.easeTo({center:ll(center), zoom:(zoom==null?_map.getZoom():zoom), duration:500}); }catch(e){} }
-  function panTo(center){ if(_map)try{ _map.easeTo({center:ll(center), duration:600}); }catch(e){} }
-  function fitAll(latlngs){ const g=GL(); if(_map&&g&&latlngs&&latlngs.length){ try{
-      if(latlngs.length===1){ _map.easeTo({center:ll(latlngs[0]), zoom:16, duration:500}); }
-      else { const b=new g.LngLatBounds(); latlngs.forEach(p=>b.extend(ll(p))); _map.fitBounds(b,{padding:70, duration:500, maxZoom:17}); }
-    }catch(e){} } }
-  function invalidate(){ if(_map)try{ setTimeout(()=>{try{_map.resize();}catch(e){}},60); }catch(e){} }
+  function invalidate(){ if(_map)try{ window.google.maps.event.trigger(_map,'resize'); }catch(e){} }
 
   function hasMarker(uid){ return !!_markers[uid]; }
   function markerLatLng(uid){ const p=_markerPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
 
-  /* Smooth eased glide of an existing marker to a new position. */
+  /* Smooth eased glide of an existing marker to a new position — GPS drives
+     this on every valid callback, never waiting on Firestore. */
   function animateMarker(uid, to){
-    const mk=_markers[uid]; if(!mk)return;
+    const mk=_markers[uid]; if(!mk) return;
     if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
     const from=_markerPos[uid]||to;
     const dLat=to[0]-from[0], dLng=to[1]-from[1];
     const dist=Math.abs(dLat)+Math.abs(dLng);
-    if(dist<1e-7){ return; }
-    if(dist>0.05){ _markerPos[uid]=to; try{mk.setLngLat(ll(to));}catch(_){}; return; }
+    if(dist<1e-8){ return; }
+    if(dist>0.05){ _markerPos[uid]=to; try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){} return; }
     const steps=18; let i=0;
     _animTimers[uid]=setInterval(()=>{
       i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t;
       const cur=[from[0]+dLat*e, from[1]+dLng*e];
-      try{ mk.setLngLat(ll(cur)); }catch(_){}
-      if(i>=steps){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; _markerPos[uid]=to; try{mk.setLngLat(ll(to));}catch(_){} }
+      try{ mk.position={lat:cur[0],lng:cur[1]}; }catch(_){}
+      if(i>=steps){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; _markerPos[uid]=to; try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){} }
     },16);
     _markerPos[uid]=to;
   }
@@ -11638,27 +11680,59 @@ const MBMMap = (function(){
   }
   function makeEl(cls, html){ const d=document.createElement('div'); d.className=cls; d.innerHTML=html; return d; }
 
+  function AdvMarkerCtor(){
+    // Uses the modern AdvancedMarkerElement when the 'marker' library loaded;
+    // falls back to a lightweight OverlayView-based DOM marker otherwise —
+    // either way the SAME el.innerHTML/pinHtml approach renders identically.
+    const g=window.google.maps;
+    if(g.marker && g.marker.AdvancedMarkerElement) return 'advanced';
+    return 'overlay';
+  }
+  function makeMapMarker(uid, latlng, el){
+    const g=window.google.maps;
+    if(AdvMarkerCtor()==='advanced'){
+      const mk=new g.marker.AdvancedMarkerElement({ map:_map, position:{lat:latlng[0],lng:latlng[1]}, content:el, gmpClickable:true, zIndex:10 });
+      return mk;
+    }
+    // Fallback DOM overlay (identical visual result, works without the extra 'marker' library).
+    function Overlay(){}
+    Overlay.prototype=Object.create(g.OverlayView.prototype);
+    const ov=new Overlay();
+    ov.position={lat:latlng[0],lng:latlng[1]};
+    ov.onAdd=function(){ this.getPanes().overlayMouseTarget.appendChild(el); };
+    ov.draw=function(){ const proj=this.getProjection(); if(!proj)return; const p=proj.fromLatLngToDivPixel(new g.LatLng(this.position.lat,this.position.lng));
+      el.style.position='absolute'; el.style.left=(p.x-32)+'px'; el.style.top=(p.y-64)+'px'; };
+    ov.onRemove=function(){ if(el.parentNode) el.parentNode.removeChild(el); };
+    Object.defineProperty(ov,'position',{ get(){return this._pos;}, set(v){ this._pos=v; if(this.draw)this.draw(); } });
+    ov.position={lat:latlng[0],lng:latlng[1]};
+    ov.setMap(_map);
+    return ov;
+  }
+
   function setMarker(uid, latlng, meta, selected, tone, onClick){
-    const g=GL(); if(!_map||!g) return;
+    if(!_map) return;
     meta=meta||{};
     const cls='fam-pin'+(selected?' sel':'')+(tone?(' tone-'+tone):'');
     const prev=_markerMeta[uid]||{};
     const changed = prev.cls!==cls || prev.moving!==meta.moving || prev.heading!==meta.heading || prev.photo!==meta.photo || prev.initial!==meta.initial || prev.color!==meta.color;
     if(_markers[uid]){
-      if(changed){ const el=_markerEls[uid]; if(el){ el.className=cls; el.innerHTML=pinHtml(meta); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; } } }
-      animateMarker(uid, latlng);
+      if(changed){ const el=_markers[uid].content||_markers[uid]._el; if(el){ el.className=cls; el.innerHTML=pinHtml(meta); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; } } }
+      animateMarker(uid, latlng); // GPS moves the marker on every valid fix — no Firestore wait
     } else {
       const el=makeEl(cls, pinHtml(meta));
       if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
-      const mk=new g.Marker({element:el, anchor:'bottom'}).setLngLat(ll(latlng)).addTo(_map);
-      _markers[uid]=mk; _markerEls[uid]=el; _markerPos[uid]=latlng;
+      const mk=makeMapMarker(uid, latlng, el);
+      mk._el=el;
+      _markers[uid]=mk; _markerPos[uid]=latlng;
     }
     _markerMeta[uid]={cls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color};
   }
-  function clearMarkersExcept(uids){ Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{_markers[u].remove();}catch(e){} delete _markers[u]; delete _markerEls[u]; delete _markerMeta[u]; delete _markerPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } }); }
+  function clearMarkersExcept(uids){
+    Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
+  }
 
   function setClusterMarker(key, latlng, members, selected, onClick){
-    const g=GL(); if(!_map||!g) return;
+    if(!_map) return;
     const max=3; const shown=members.slice(0,max);
     let inner=shown.map(mm=>mm.photo
       ? `<div class="fam-cluster-av" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}')"></div>`
@@ -11666,77 +11740,75 @@ const MBMMap = (function(){
     if(members.length>max) inner+=`<div class="fam-cluster-more">+${members.length-max}</div>`;
     const html=`<div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div>`;
     const cls='fam-cluster'+(selected?' sel':'');
-    if(_markers[key]){ const el=_markerEls[key]; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
+    if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
     else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
-      _markers[key]=new g.Marker({element:el, anchor:'bottom'}).setLngLat(ll(latlng)).addTo(_map); _markerEls[key]=el; _markerPos[key]=latlng; }
+      const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _markerPos[key]=latlng; }
     _markerMeta[key]={cls};
   }
 
-  let _arrivedMk=null;
   function setArrivedBubble(latlng, text){
-    const g=GL(); if(!_map||!g) return;
+    if(!_map) return;
     clearArrivedBubble();
     if(latlng==null||!text) return;
     const pin='<svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>';
     const el=makeEl('fam-arrived', `<span class="fam-arrived-ic">${pin}</span><span class="fam-arrived-t">${text}</span><span class="fam-arrived-tip"></span>`);
-    try{ _arrivedMk=new g.Marker({element:el, anchor:'bottom', offset:[0,-46]}).setLngLat(ll(latlng)).addTo(_map); }catch(e){}
+    el.style.marginBottom='46px';
+    try{ _arrivedAnchorMarker=makeMapMarker('__arrived',latlng,el); }catch(e){}
   }
-  function clearArrivedBubble(){ if(_arrivedMk){ try{_arrivedMk.remove();}catch(e){} _arrivedMk=null; } }
+  function clearArrivedBubble(){ if(_arrivedAnchorMarker){ try{ _arrivedAnchorMarker.map=null; if(_arrivedAnchorMarker.setMap)_arrivedAnchorMarker.setMap(null); }catch(e){} _arrivedAnchorMarker=null; } }
 
-  // circle polygon builder (metres → geojson ring)
-  function circlePoly(lat,lng,meters){
-    const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI, ring=[];
-    for(let a=0;a<=360;a+=12){ const br=toR(a), dr=meters/R, la1=toR(lat), lo1=toR(lng);
-      const la2=Math.asin(Math.sin(la1)*Math.cos(dr)+Math.cos(la1)*Math.sin(dr)*Math.cos(br));
-      const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1),Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
-      ring.push([toD(lo2),toD(la2)]); }
-    return ring;
-  }
   function setAccuracy(latlng, meters, approx){
-    if(!_map)return;
-    if(meters==null||latlng==null){ _lastAcc={type:'FeatureCollection',features:[]}; setGeo(GEO.acc,_lastAcc); return; }
-    const ring=circlePoly(latlng[0],latlng[1],meters);
-    _lastAcc={ type:'FeatureCollection', features:[{ type:'Feature', properties:{ color: approx?'#f59e0b':'#6e56f8' }, geometry:{ type:'Polygon', coordinates:[ring] } }] };
-    setGeo(GEO.acc,_lastAcc);
+    if(!_map) return;
+    if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} _accCircle=null; }
+    if(meters==null||latlng==null) return;
+    try{
+      const g=window.google.maps;
+      _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
+        fillColor: approx?'#f59e0b':'#6e56f8', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#6e56f8', strokeOpacity:0.5, strokeWeight:1, clickable:false });
+    }catch(e){}
   }
   function setHeadingCone(latlng, headingDeg, speed){
-    if(!_map)return;
-    if(latlng==null || headingDeg==null || isNaN(headingDeg)){ _lastCone={type:'FeatureCollection',features:[]}; setGeo(GEO.cone,_lastCone); return; }
-    const spd=(speed!=null&&!isNaN(speed))?Math.max(0,Math.min(15,speed)):0;
-    const len=120 + spd*26, halfAngle=17;
-    const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI, lat0=latlng[0], lng0=latlng[1];
-    function dest(brg,d){ const br=toR(brg), la1=toR(lat0), lo1=toR(lng0), dr=d/R;
-      const la2=Math.asin(Math.sin(la1)*Math.cos(dr)+Math.cos(la1)*Math.sin(dr)*Math.cos(br));
-      const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1),Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
-      return [toD(lo2),toD(la2)]; }
-    const pts=[[lng0,lat0]];
-    for(let a=-halfAngle;a<=halfAngle;a+=(halfAngle*2)/10){ pts.push(dest((headingDeg+a+360)%360, len)); }
-    pts.push([lng0,lat0]);
-    _lastCone={ type:'FeatureCollection', features:[{ type:'Feature', properties:{}, geometry:{ type:'Polygon', coordinates:[pts] } }] };
-    setGeo(GEO.cone,_lastCone);
+    if(!_map) return;
+    if(_coneOverlay){ try{ _coneOverlay.setMap(null); }catch(e){} _coneOverlay=null; }
+    if(latlng==null||headingDeg==null||isNaN(headingDeg)) return;
+    try{
+      const g=window.google.maps;
+      const spd=(speed!=null&&!isNaN(speed))?Math.max(0,Math.min(15,speed)):0;
+      const len=120+spd*26, halfAngle=17;
+      const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI, lat0=latlng[0], lng0=latlng[1];
+      function dest(brg,d){ const br=toR(brg), la1=toR(lat0), lo1=toR(lng0), dr=d/R;
+        const la2=Math.asin(Math.sin(la1)*Math.cos(dr)+Math.cos(la1)*Math.sin(dr)*Math.cos(br));
+        const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1),Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
+        return {lat:toD(la2),lng:toD(lo2)}; }
+      const path=[{lat:lat0,lng:lng0}];
+      for(let a=-halfAngle;a<=halfAngle;a+=(halfAngle*2)/10){ path.push(dest((headingDeg+a+360)%360, len)); }
+      path.push({lat:lat0,lng:lng0});
+      _coneOverlay=new g.Polygon({ map:_map, paths:path, fillColor:'#8b6df8', fillOpacity:0.28, strokeWeight:0, clickable:false });
+    }catch(e){}
   }
   function drawRoute(points){
-    if(!_map)return;
-    if(!points||points.length<2){ _lastRoute={type:'FeatureCollection',features:[]}; setGeo(GEO.route,_lastRoute); return; }
-    const feats=[]; let cur=[[points[0].lng,points[0].lat]];
-    for(let i=1;i<points.length;i++){ const a=points[i-1], b=points[i]; const dt=Math.abs(Date.parse(b.at)-Date.parse(a.at));
-      if(dt>10*60*1000){ if(cur.length>1)feats.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:cur}}); cur=[]; }
-      cur.push([b.lng,b.lat]); }
-    if(cur.length>1)feats.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:cur}});
-    _lastRoute={ type:'FeatureCollection', features:feats };
-    setGeo(GEO.route,_lastRoute);
+    if(!_map) return;
+    if(_routeLine){ try{ _routeLine.setMap(null); }catch(e){} _routeLine=null; }
+    if(!points||points.length<2) return;
+    try{
+      const g=window.google.maps;
+      const path=points.map(p=>({lat:p.lat,lng:p.lng}));
+      _routeLine=new g.Polyline({ map:_map, path, strokeColor:'#6e56f8', strokeOpacity:0.85, strokeWeight:4, clickable:false });
+    }catch(e){}
   }
   function destroy(){
     Object.keys(_animTimers).forEach(k=>{try{clearInterval(_animTimers[k]);}catch(e){}}); _animTimers={};
-    Object.keys(_markers).forEach(u=>{try{_markers[u].remove();}catch(e){}});
+    Object.keys(_markers).forEach(u=>{try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){}});
     clearArrivedBubble();
-    _markers={}; _markerEls={}; _markerMeta={}; _markerPos={}; _lastRoute=null; _lastCone=null; _lastAcc=null; _styleReady=false; _tilesLoaded=false;
-    if(_map){ try{_map.remove();}catch(e){} _map=null; }
-    _elId=null;
+    if(_accCircle){ try{_accCircle.setMap(null);}catch(e){} _accCircle=null; }
+    if(_coneOverlay){ try{_coneOverlay.setMap(null);}catch(e){} _coneOverlay=null; }
+    if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
+    _markers={}; _markerMeta={}; _markerPos={}; _loaded=false;
+    _map=null; _elId=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
-           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get };
+           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale };
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -11907,6 +11979,7 @@ function famLiveView(){
 
   let h=`<div id="fam-live-wrap">`;
   h+=`<div id="fam-map"></div>`;
+  h+=`<div id="fam-map-fatal"></div>`;
   // Map loading state (never a bare grey area). Removed once tiles paint.
   h+=`<div id="fam-map-load"><div class="fam-mapspin"></div><div>${L==='fa'?'در حال بارگذاری نقشه…':'Loading map…'}</div></div>`;
   // top bar
@@ -12547,44 +12620,62 @@ function famHistMount(){
   const uid=_famHistUid||_famSelUid;
   const day=famHistDayBounds(_famHistDayOffset);
   const pts=fb.location.memberRoute(uid).filter(p=>{const t=Date.parse(p.at||'');return !isNaN(t)&&t>=day.start&&t<day.end;});
-  const g=(typeof window!=='undefined')?window.maplibregl:null;
-  if(!g||!g.Map||pts.length<2){ el.innerHTML=`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px">${L==='fa'?'نقشه در دسترس نیست':'Map unavailable'}</div>`; return; }
-  try{
-    if(el._histMap){ try{el._histMap.remove();}catch(e){} el._histMap=null; el._histCursorEl=null; }
-    const coords=pts.map(p=>[p.lng,p.lat]);
-    const m=new g.Map({ container:el, style:famStyleFor(_famMapType||'auto').style, attributionControl:false, dragRotate:false, interactive:true });
-    el._histMap=m;
-    if(_famHistCursor==null||_famHistCursor>pts.length-1)_famHistCursor=pts.length-1;
-    // draggable scrub cursor as a DOM marker
-    const cEl=document.createElement('div'); cEl.style.cssText='width:20px;height:20px;border-radius:50%;background:#6e56f8;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)';
-    let cursorMk=null;
-    m.on('load', ()=>{
-      try{ MBMMap.applyLifeStyle && null; }catch(_){}
-      // route line
-      try{
-        m.addSource('h-route',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:coords}}});
-        m.addLayer({id:'h-route',type:'line',source:'h-route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#6e56f8','line-width':4,'line-opacity':.85}});
-        m.addSource('h-ends',{type:'geojson',data:{type:'FeatureCollection',features:[
-          {type:'Feature',properties:{c:'#22c55e'},geometry:{type:'Point',coordinates:coords[0]}},
-          {type:'Feature',properties:{c:'#6e56f8'},geometry:{type:'Point',coordinates:coords[coords.length-1]}}]}});
-        m.addLayer({id:'h-ends',type:'circle',source:'h-ends',paint:{'circle-radius':6,'circle-color':['get','c'],'circle-stroke-color':'#fff','circle-stroke-width':2}});
-      }catch(_){}
-      cursorMk=new g.Marker({element:cEl}).setLngLat(coords[_famHistCursor]).addTo(m);
+  const key=(window.localStorage&&localStorage.getItem('GOOGLE_MAPS_API_KEY'))||window.GOOGLE_MAPS_API_KEY;
+  function unavailable(msg){ el.innerHTML=`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px;text-align:center;padding:0 16px">${msg}</div>`; }
+  if(pts.length<2){ unavailable(L==='fa'?'داده کافی برای مسیر نیست':'Not enough route data'); return; }
+  if(!key){ unavailable(L==='fa'?'کلید Google Maps تنظیم نشده':'Google Maps API key not configured'); return; }
+  function build(){
+    const g=window.google.maps;
+    try{
+      if(el._histMap){ try{ if(el._histCursor && el._histCursor.map!==undefined)el._histCursor.map=null; }catch(e){} el._histMap=null; el._histCursor=null; }
+      const coords=pts.map(p=>({lat:p.lat,lng:p.lng}));
+      const m=new g.Map(el, { disableDefaultUI:true, gestureHandling:'greedy' });
+      el._histMap=m;
+      if(_famHistCursor==null||_famHistCursor>pts.length-1)_famHistCursor=pts.length-1;
+      const cEl=document.createElement('div'); cEl.style.cssText='width:20px;height:20px;border-radius:50%;background:#6e56f8;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)';
+      new g.Polyline({ map:m, path:coords, strokeColor:'#6e56f8', strokeOpacity:0.85, strokeWeight:4, clickable:false });
+      new g.Circle({ map:m, center:coords[0], radius:14, fillColor:'#22c55e', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, clickable:false });
+      new g.Circle({ map:m, center:coords[coords.length-1], radius:14, fillColor:'#6e56f8', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, clickable:false });
+      let cursorMk;
+      if(g.marker && g.marker.AdvancedMarkerElement){
+        cursorMk=new g.marker.AdvancedMarkerElement({map:m, position:coords[_famHistCursor], content:cEl});
+      }else{
+        function HistOv(){} HistOv.prototype=Object.create(g.OverlayView.prototype);
+        const ov=new HistOv();
+        ov._pos=coords[_famHistCursor];
+        ov.onAdd=function(){ this.getPanes().overlayMouseTarget.appendChild(cEl); };
+        ov.draw=function(){ const proj=this.getProjection(); if(!proj)return; const p=proj.fromLatLngToDivPixel(new g.LatLng(this._pos.lat,this._pos.lng)); cEl.style.position='absolute'; cEl.style.left=(p.x-10)+'px'; cEl.style.top=(p.y-10)+'px'; };
+        ov.setPos=function(pos){ this._pos=pos; this.draw(); };
+        ov.setMap(m);
+        cursorMk=ov;
+      }
       el._histCursor=cursorMk;
-      const b=new g.LngLatBounds(); coords.forEach(c=>b.extend(c)); m.fitBounds(b,{padding:36,duration:0,maxZoom:16});
-      setTimeout(()=>{try{m.resize();}catch(e){}},80);
-    });
-    const scrub=document.getElementById('fam-hist-scrub');
-    const lbl=document.getElementById('fam-hist-cursor-lbl');
-    if(scrub && !scrub._bound){
-      scrub._bound=true;
-      const move=()=>{ const i=Math.max(0,Math.min(pts.length-1,parseInt(scrub.value,10)||0)); _famHistCursor=i;
-        try{ if(el._histCursor)el._histCursor.setLngLat(coords[i]); m.easeTo({center:coords[i],duration:250}); }catch(_){}
-        if(lbl)lbl.textContent=famAbsTime(pts[i].at); };
-      scrub.addEventListener('input',move);
-      scrub.addEventListener('change',move);
-    }
-  }catch(e){}
+      const b=new g.LatLngBounds(); coords.forEach(c=>b.extend(c)); m.fitBounds(b,36);
+      const scrub=document.getElementById('fam-hist-scrub');
+      const lbl=document.getElementById('fam-hist-cursor-lbl');
+      if(scrub && !scrub._bound){
+        scrub._bound=true;
+        const move=()=>{ const i=Math.max(0,Math.min(pts.length-1,parseInt(scrub.value,10)||0)); _famHistCursor=i;
+          try{ if(el._histCursor.setPos)el._histCursor.setPos(coords[i]); else el._histCursor.position=coords[i]; m.panTo(coords[i]); }catch(_){}
+          if(lbl)lbl.textContent=famAbsTime(pts[i].at); };
+        scrub.addEventListener('input',move);
+        scrub.addEventListener('change',move);
+      }
+    }catch(e){ unavailable(L==='fa'?'بارگذاری نقشه ناموفق بود':'Map failed to load'); }
+  }
+  if(window.google && window.google.maps && window.google.maps.Map){ build(); return; }
+  // Reuse the shared loader/waiter list the live map uses so the SDK loads once.
+  window.__mbmMapWaiters=(window.__mbmMapWaiters||[]);
+  window.__mbmMapWaiters.push(ok=>{ if(ok)build(); else unavailable(L==='fa'?'بارگذاری Google Maps ناموفق بود':'Google Maps failed to load'); });
+  if(!window.__mbmGmapsLoading){
+    window.__mbmGmapsLoading=true;
+    window.__mbmGoogleMapsReady=function(){ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(true);}catch(e){}}); window.__mbmMapWaiters=[]; };
+    const s=document.createElement('script');
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__mbmGoogleMapsReady&loading=async';
+    s.async=true;
+    s.onerror=()=>{ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(false);}catch(e){}}); window.__mbmMapWaiters=[]; };
+    document.head.appendChild(s);
+  }
 }
 /* ── Check-in from Live (genuine: real fix → writes a location sample) ── */
 let _famCheckinPending=false, _famCheckinError=null, _famCheckinWatchId=null;
@@ -13033,7 +13124,10 @@ function famAction(act,arg,ev){
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
     case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); return;
-    case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); } toast(L==='fa'?'در حال گرفتن موقعیت جدید…':'Getting a new GPS fix…'); return; }
+    case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }
+      // If the map itself failed to load (missing key / SDK error), retry mounting it too.
+      if(typeof MBMMap!=='undefined' && MBMMap.tileError && MBMMap.tileError()){ try{ MBMMap.clearFatal(); }catch(e){} if(typeof famLiveMount==='function')famLiveMount(); }
+      toast(L==='fa'?'در حال گرفتن موقعیت جدید…':'Getting a new GPS fix…'); return; }
     case 'live-maptype': _famMapTypeOpen=true; render(); return;
     case 'live-maptype-close': _famMapTypeOpen=false; render(); return;
     case 'live-maptype-set':{
