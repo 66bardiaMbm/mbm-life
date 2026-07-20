@@ -1625,7 +1625,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v288';
+const APP_VERSION='v289';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12112,7 +12112,10 @@ function famLivePaintMarkers(members, sel){
   });
   MBMMap.clearMarkersExcept(activeKeys);
   if(sel && sel.state && sel.state.lat!=null){
-    MBMMap.drawRoute(FamilyBackend.location.memberRoute(sel.uid));
+    // NOTE: the historical breadcrumb trail is intentionally NOT drawn on the
+    // live map — Life360 keeps the main map clean and shows the path only in
+    // History/Driving. We clear any existing route so the live screen matches.
+    MBMMap.drawRoute(null);
     const acc=famAccuracyInfo(sel.state.accuracy);
     MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx);
     // ── FEATURE 1: real directional heading cone. Only when the selected
@@ -12780,7 +12783,15 @@ function famAction(act,arg,ev){
     case 'live-fit':{ const fb=FamilyBackend; const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
-    case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; } window.open(`https://www.openstreetmap.org/?mlat=${st.lat}&mlon=${st.lng}#map=17/${st.lat}/${st.lng}`,'_blank'); return; }
+    case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; }
+      // Launch REAL turn-by-turn navigation (like Life360), not a static map pin.
+      // Google Maps universal directions URL opens the native Maps app in
+      // navigation mode on Android/iOS and the web app on desktop; travelmode
+      // driving. This is the closest a browser PWA can get to Life360's in-app
+      // routing (true in-app nav needs a native wrapper — platform limitation).
+      const dest=`${st.lat},${st.lng}`;
+      const navUrl=`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving`;
+      window.open(navUrl,'_blank'); return; }
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'live-checkin-send':{
       if(!navigator.geolocation){ _famCheckinError=(L==='fa'?'موقعیت‌یاب در این دستگاه در دسترس نیست':'Geolocation is not available on this device'); render(); return; }
