@@ -1673,7 +1673,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v295';
+const APP_VERSION='v297';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12486,32 +12486,53 @@ function famLiveMount(){
   const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
   const center = (sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
                : (withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:[-42.88,147.32]);
-  if(!MBMMap.available()){ famMapUnavailable(L==='fa'?'موتور نقشه در دسترس نیست':'Map engine unavailable'); }
-  else {
-    const map=MBMMap.init('fam-map', center);
-    if(!map){ famMapUnavailable(L==='fa'?'نقشه بارگذاری نشد':'Map failed to load'); }
-    else {
-      MBMMap.invalidate();
-      famLivePaintMarkers(members, sel);
-      if(MBMMap.tilesLoaded()) famMapLoaded();
-      // On entering Location, genuinely (re)start the watcher and force ONE
-      // fresh high-accuracy fix so the map reflects the device now, not a
-      // stored position. Guarded so it only kicks once per mount.
-      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-      if(fb&&fb.location){
-        try{ fb.location.refreshPermission(); }catch(e){}
-        try{ fb.location.reconcileWatch(); }catch(e){}
-        if(!_famLiveFixKicked){
-          _famLiveFixKicked=true;
-          try{ fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }catch(e){}
-        }
-      }
+  // NOTE: MBMMap.init() now owns ALL of this — missing key, async SDK load,
+  // and load failure are handled INSIDE init() (it shows its own fatal
+  // overlay with a Try again button). We must NOT pre-gate on available()
+  // here: Google Maps loads asynchronously and lazily on first init(), so
+  // available() is legitimately false on the very first mount — gating on
+  // it would block the async loader from ever starting.
+  const map=MBMMap.init('fam-map', center);
+  MBMMap.invalidate();
+  famLivePaintMarkers(members, sel);
+  if(MBMMap.tilesLoaded()) famMapLoaded();
+  // On entering Location, genuinely (re)start the watcher and force ONE
+  // fresh high-accuracy fix so the map reflects the device now, not a
+  // stored position. Guarded so it only kicks once per mount.
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(fb&&fb.location){
+    try{ fb.location.refreshPermission(); }catch(e){}
+    try{ fb.location.reconcileWatch(); }catch(e){}
+    if(!_famLiveFixKicked){
+      _famLiveFixKicked=true;
+      try{ fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }catch(e){}
     }
   }
   famSheetInitDrag();
 }
 /* Hide the map loading overlay once tiles have painted. */
-function famMapLoaded(){ const ld=document.getElementById('fam-map-load'); if(ld&&!ld.classList.contains('gone')){ ld.classList.add('gone'); setTimeout(()=>{try{ld.remove();}catch(e){}},400); } }
+/* Fires once the map is truly ready (either synchronously on a warm mount, or
+   asynchronously after the Google Maps SDK finishes loading on a cold one).
+   This is the ONLY place that must repaint everything for a mount that
+   started before the map existed — hiding the loading spinner alone is not
+   enough. */
+function famMapLoaded(){
+  const ld=document.getElementById('fam-map-load'); if(ld&&!ld.classList.contains('gone')){ ld.classList.add('gone'); setTimeout(()=>{try{ld.remove();}catch(e){}},400); }
+  if(!(screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard'))) return;
+  const members=(typeof famLiveMembers==='function')?famLiveMembers():[];
+  const sel=members.find(m=>m.uid===_famSelUid);
+  try{ MBMMap.invalidate(); }catch(e){}
+  try{ famLivePaintMarkers(members, sel); }catch(e){}
+  // Re-apply centring: follow the selected member's real fix if we have one,
+  // otherwise the first member with a fix — the SAME logic famLiveMount uses,
+  // now run again because the map didn't exist the first time it was tried.
+  try{
+    const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
+    const center=(sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
+                :(withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:null);
+    if(center) MBMMap.setView(center,15);
+  }catch(e){}
+}
 function famMapUnavailable(msg){
   famMapLoaded();
   const el=document.getElementById('fam-map'); if(!el)return;
