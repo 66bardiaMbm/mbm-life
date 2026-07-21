@@ -1752,7 +1752,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v304';
+const APP_VERSION='v305';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11657,7 +11657,7 @@ const MBMMap = (function(){
       window.__mbmMapWaiters=[];
     };
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=marker&callback='+cbName+'&loading=async';
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+cbName+'&loading=async';
     s.async=true;
     s.onerror=function(){
       _apiLoading=false; _loadErr='load-fail';
@@ -13074,7 +13074,7 @@ function famHistMount(){
     window.__mbmGmapsLoading=true;
     window.__mbmGoogleMapsReady=function(){ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(true);}catch(e){}}); window.__mbmMapWaiters=[]; };
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=marker&callback=__mbmGoogleMapsReady&loading=async';
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__mbmGoogleMapsReady&loading=async';
     s.async=true;
     s.onerror=()=>{ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(false);}catch(e){}}); window.__mbmMapWaiters=[]; };
     document.head.appendChild(s);
