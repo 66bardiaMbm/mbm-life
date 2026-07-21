@@ -1311,7 +1311,14 @@ body.rtl .trow-content{text-align:right}
 #fam-live-wrap{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
   max-width:var(--shell-w);margin:0 auto;
   width:100%;height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column;z-index:60}
-#fam-map{position:absolute;inset:0;width:100%;height:100%;background:#dfe3ea;z-index:1}
+#fam-map{position:absolute;inset:0;width:100%;height:100%;z-index:1}
+/* NOTE: no background-color here on purpose. This div is now the Google Maps
+   container — Google renders its own tile panes as children of it. A solid
+   background-color on the CONTAINER (a MapLibre-era leftover, previously used
+   as a pre-tile placeholder colour) has no purpose with Google Maps and risks
+   sitting visually over/behind tiles depending on Google's internal pane
+   stacking. #fam-map-load already covers the container while loading, so no
+   placeholder colour is needed underneath. */
 /* MapLibre GL integration: keep our custom marker DOM un-clipped and let the
    engine own positioning; tame the default attribution/logo to match our UI. */
 .maplibregl-marker{will-change:transform}
@@ -1321,7 +1328,7 @@ body.rtl .trow-content{text-align:right}
 .dark .maplibregl-ctrl-attrib{background:rgba(20,22,28,.6)}
 .dark .maplibregl-ctrl-attrib a{color:#9aa1ad}
 .maplibregl-ctrl-bottom-right{z-index:1000}
-.dark #fam-map{background:#20222b}
+/* .dark #fam-map background removed — see the light-mode rule's note above */
 /* ── Life360 Home header: circular white buttons, centered Family dropdown ── */
 .fam-hbtn{width:46px;height:46px;border-radius:50%;border:none;background:#fff;color:#3d2f8f;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.18);position:relative;flex:none}
 .dark .fam-hbtn{background:#2a2d38;color:#c9c2ff}
@@ -1673,7 +1680,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v298';
+const APP_VERSION='v299';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11502,7 +11509,7 @@ const MBMMap = (function(){
      the marker/camera immediately → Firestore is sync-only, never the render
      source. This module never blocks a marker update on Firestore.
      ═══════════════════════════════════════════════════════════════════════ */
-  let _map=null, _elId=null, _loaded=false, _loadErr=null, _apiLoading=false, _apiReady=false;
+  let _map=null, _elId=null, _mapEl=null, _loaded=false, _loadErr=null, _apiLoading=false, _apiReady=false;
   let _markers={}, _markerMeta={}, _markerPos={}, _animTimers={};
   let _accCircle=null, _coneOverlay=null, _routeLine=null, _arrivedInfo=null, _arrivedAnchorMarker=null;
   let _pendingInit=null; // {elId, center} queued while the SDK is still loading
@@ -11511,7 +11518,7 @@ const MBMMap = (function(){
     try{ return (window.localStorage && window.localStorage.getItem('GOOGLE_MAPS_API_KEY')) || window.GOOGLE_MAPS_API_KEY || ''; }catch(e){ return window.GOOGLE_MAPS_API_KEY || ''; }
   }
   function available(){ return !!(typeof window!=='undefined' && window.google && window.google.maps && window.google.maps.Map); }
-  function mounted(elId){ return !!(_map && _elId===elId && document.getElementById(elId)); }
+  function mounted(elId){ const el=document.getElementById(elId); return !!(_map && _elId===elId && el && _mapEl===el); }
   function tilesLoaded(){ return _loaded; }
   function tileError(){ return !!_loadErr; }
   function get(){ return _map; }
@@ -11526,6 +11533,10 @@ const MBMMap = (function(){
                   d:(typeof L!=='undefined'&&L==='fa')?'GOOGLE_MAPS_API_KEY باید قبل از باز شدن این صفحه مقداردهی شود.':'GOOGLE_MAPS_API_KEY must be set before this screen loads.' },
       'load-fail':{ t:(typeof L!=='undefined'&&L==='fa')?'بارگذاری Google Maps ناموفق بود':'Google Maps failed to load',
                     d:(typeof L!=='undefined'&&L==='fa')?'اتصال اینترنت یا محدودیت کلید را بررسی کنید.':'Check your internet connection or the key\u2019s API restrictions.' },
+      'auth-failed':{ t:(typeof L!=='undefined'&&L==='fa')?'کلید Google Maps رد شد':'Google Maps rejected this API key',
+                    d:(typeof L!=='undefined'&&L==='fa')?'یکی از این‌هاست: محدودیت آدرس اشتباه، Maps JavaScript API فعال نیست، Billing غیرفعال، یا کلید نامعتبر. در Google Cloud Console بررسی کنید.':'One of: wrong referrer restriction, Maps JavaScript API not enabled, billing disabled, or an invalid key. Check Google Cloud Console.' },
+      'tiles-fail':{ t:(typeof L!=='undefined'&&L==='fa')?'تایل‌های نقشه بارگذاری نشدند':'Map tiles failed to load',
+                    d:(typeof L!=='undefined'&&L==='fa')?'موتور نقشه بارگذاری شد اما هیچ تایلی نرسید — معمولاً یعنی درخواست تایل توسط محدودیت کلید یا Billing رد شده.':'The map engine loaded but no tile ever arrived — usually means tile requests were rejected by the key\u2019s restrictions or billing status.' },
       'denied':{ t:(typeof L!=='undefined'&&L==='fa')?'اجازهٔ موقعیت رد شد':'Location permission denied',
                  d:(typeof L!=='undefined'&&L==='fa')?'برای نمایش موقعیت زنده، دسترسی به مکان را در تنظیمات مرورگر فعال کنید.':'Enable location access in your browser settings to see live position.' }
     };
@@ -11536,6 +11547,13 @@ const MBMMap = (function(){
     try{ if(typeof bindFamily==='function') bindFamily(); }catch(e){}
   }
   function clearFatal(){ const el=document.getElementById('fam-map-fatal'); if(el){ el.classList.remove('show'); el.innerHTML=''; } }
+  let _tileDiagLog=[];
+  function diagTiles(msg){
+    const e={t:new Date().toISOString(), msg};
+    _tileDiagLog.push(e); if(_tileDiagLog.length>30)_tileDiagLog.shift();
+    try{ console.debug('[mbmmap]', msg); }catch(_){}
+  }
+  function tileDiagLog(){ return _tileDiagLog.slice(); }
   function showStale(uid, ageTxt){
     // Non-fatal — a small badge, not a full-screen block, since other members'
     // markers may still be fresh even if one is stale.
@@ -11557,6 +11575,15 @@ const MBMMap = (function(){
       (window.__mbmMapWaiters||[]).forEach(w=>{ try{w(true);}catch(e){} });
       window.__mbmMapWaiters=[];
     };
+    // Google's OWN dedicated callback for a REJECTED key — fires specifically
+    // for bad referrer restriction, API not enabled, billing disabled, or an
+    // invalid key. Without this, those four causes are silent on our side.
+    window.gm_authFailure=function(){
+      _apiLoading=false; _loadErr='auth-failed';
+      showFatal('auth-failed');
+      (window.__mbmMapWaiters||[]).forEach(w=>{ try{w(false);}catch(e){} });
+      window.__mbmMapWaiters=[];
+    };
     const s=document.createElement('script');
     s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+cbName+'&loading=async';
     s.async=true;
@@ -11565,6 +11592,13 @@ const MBMMap = (function(){
       (window.__mbmMapWaiters||[]).forEach(w=>{ try{w(false);}catch(e){} });
       window.__mbmMapWaiters=[];
     };
+    // SDK timeout: if neither the callback nor onerror fires within 12s (e.g.
+    // the request is silently blocked by a network policy/extension), report
+    // a load failure instead of hanging on a spinner forever.
+    setTimeout(()=>{
+      if(_apiLoading){ diagTiles('SDK load timed out after 12s with no callback or onerror'); _apiLoading=false; _loadErr='load-fail'; showFatal('load-fail');
+        (window.__mbmMapWaiters||[]).forEach(w=>{ try{w(false);}catch(e){} }); window.__mbmMapWaiters=[]; }
+    }, 12000);
     document.head.appendChild(s);
   }
 
@@ -11584,9 +11618,18 @@ const MBMMap = (function(){
 
   function _doInit(elId, center){
     const el=document.getElementById(elId); if(!el) return null;
-    if(_map && _elId===elId){ return _map; }
+    // CRITICAL: #screen's innerHTML is reassigned on every render() (member
+    // selection, opening the map-type sheet via the layer button, etc.),
+    // which DESTROYS and RECREATES every DOM node inside it — including this
+    // one — even though the id string 'fam-map' stays the same. Comparing
+    // elId (a string) was not enough: it stayed "true" across renders while
+    // the actual element was a brand-new, empty node, leaving the OLD Google
+    // Map object bound to a detached element (rendering invisibly) while the
+    // new visible container sat empty — exactly a grey/dark map with only our
+    // own markers and buttons showing. Compare the ELEMENT ITSELF instead.
+    if(_map && _elId===elId && _mapEl===el){ return _map; }
     destroy();
-    _elId=elId; _loaded=false; _loadErr=null;
+    _elId=elId; _mapEl=el; _loaded=false; _loadErr=null;
     try{
       const g=window.google.maps;
       const sc = center ? {lat:center[0], lng:center[1]} : {lat:-42.88, lng:147.32};
@@ -11596,7 +11639,20 @@ const MBMMap = (function(){
         clickableIcons:false, gestureHandling:'greedy',
         styles: LIFE_STYLE // Life360-like restyle, applied natively via Google Maps styling
       });
-      g.event.addListenerOnce(_map,'idle', ()=>{ _loaded=true; if(typeof famMapLoaded==='function')famMapLoaded(); });
+      let _tilesLoadedFired=false;
+      g.event.addListenerOnce(_map,'tilesloaded', ()=>{ _tilesLoadedFired=true; diagTiles('tilesloaded fired'); });
+      g.event.addListenerOnce(_map,'idle', ()=>{
+        _loaded=true;
+        diagTiles('idle fired, tilesloaded fired so far: '+_tilesLoadedFired);
+        // idle can fire even if tile IMAGES never actually arrived (e.g. tile
+        // requests specifically rejected while the JS SDK itself loaded fine).
+        // Give tilesloaded a short grace window before treating that as a
+        // real failure — a fast connection can still fire both back to back.
+        setTimeout(()=>{
+          if(!_tilesLoadedFired){ diagTiles('tilesloaded never fired within 4s of idle — treating as tile load failure'); _loadErr='tiles-fail'; showFatal('tiles-fail'); }
+        }, 4000);
+        if(typeof famMapLoaded==='function')famMapLoaded();
+      });
       _map.addListener('dragstart', ()=>{ try{ if(typeof _famFollow!=='undefined') _famFollow=false; }catch(e){} });
       _apiReady=true;
     }catch(e){ _map=null; _loadErr='load-fail'; showFatal('load-fail'); }
@@ -11804,11 +11860,11 @@ const MBMMap = (function(){
     if(_coneOverlay){ try{_coneOverlay.setMap(null);}catch(e){} _coneOverlay=null; }
     if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
     _markers={}; _markerMeta={}; _markerPos={}; _loaded=false;
-    _map=null; _elId=null;
+    _map=null; _elId=null; _mapEl=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
-           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale };
+           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog };
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
