@@ -1610,6 +1610,18 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-mrow .mside{text-align:end;flex:none;font-size:11px;color:var(--ink3)}
 .fam-mrow .mbatt{font-size:11px;color:var(--ink3)}
 /* ── history / place event timeline ── */
+/* Fixed full-viewport wrapper for Driving's scrollable (non-map) screens —
+   deliberately separate from #fam-live-wrap (which is tuned for the
+   map+sheet layout) so the shared .fam-bottomnav positions correctly here
+   too without risking any change to the Location screen's layout. */
+#drv-fixed-wrap{position:fixed;top:0;left:0;right:0;bottom:0;max-width:var(--shell-w);margin:0 auto;
+  width:100%;height:100dvh;overflow-y:auto;background:var(--s0);z-index:60;
+  font-family:'Fredoka',-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif}
+body.rtl #drv-fixed-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
+#drv-live-wrap{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
+  max-width:var(--shell-w);margin:0 auto;width:100%;height:100dvh;background:var(--s0);z-index:60;
+  font-family:'Fredoka',-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif}
+body.rtl #drv-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-tl{position:relative;margin:6px 0 0 6px;padding-inline-start:18px;border-inline-start:2px solid var(--b1)}
 .fam-tl-item{position:relative;padding:0 0 16px 0}
 .fam-tl-item:last-child{padding-bottom:2px}
@@ -1739,7 +1751,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v338';
+const APP_VERSION='v339';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2601,6 +2613,12 @@ function _renderInner(){
   }
   if(screen==='module' && currentModule==='family' && famView==='history' && typeof famHistMount==='function'){
     famHistMount();
+  }
+  if(screen==='module' && currentModule==='family' && famView==='drivingLive' && typeof drvLiveMount==='function'){
+    drvLiveMount();
+  }
+  if(screen==='module' && currentModule==='family' && famView==='drivingTrip' && typeof drvTripMount==='function'){
+    drvTripMount();
   }
 }
 let _resizeT=null;
@@ -12308,6 +12326,11 @@ function renderFamily(){
   if(famView==='joinInvite') return head(L==='fa'?'دعوت به خانواده':'Family Invitation','fam-back-dash')+famJoinInviteView();
   if(famView==='invites') return head(L==='fa'?'دعوت‌نامه‌ها':'Invitations')+famInvitesView();
   if(famView==='history') return head(L==='fa'?'تاریخچه روزانه':'Daily History','fam-back-live')+famHistoryView();
+  // ── Driving (Phase 2A) ──
+  if(famView==='drivingDash') return DrivingDashboard();
+  if(famView==='drivingLive') return LiveDriving();
+  if(famView==='drivingHistory') return head(L==='fa'?'تاریخچه سفرها':'Trip History','fam-back-drivingDash')+TripHistoryList();
+  if(famView==='drivingTrip') return head(L==='fa'?'جزئیات سفر':'Trip Detail','fam-back-drivingHistory')+TripDetail();
   if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-live')+famCheckinLiveView();
   // ── Later-phase features: clear placeholder, not a functional screen ──
   if(famView==='sos') return head('SOS','fam-back-dash')+famLaterView('SOS',L==='fa'?'فاز ۵ — ایمنی پیشرفته':'Phase 5 — Advanced Safety','🆘');
@@ -12333,6 +12356,461 @@ function famTile(icon,label,act,sub){ return `<button class="ul-row" data-fam="$
   <div style="width:40px;height:40px;border-radius:11px;background:#ec489922;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icon}</div>
   <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px;color:var(--ink)">${esc(label)}</div>${sub?`<div style="font-size:12px;color:var(--ink3)">${esc(sub)}</div>`:''}</div>
   <span style="color:var(--ink3);opacity:.4">›</span></button>`; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DRIVING UI — Phase 2A (Dashboard, Live Driving, Trip History, Trip Detail)
+   Built directly on FamilyDriving (the Engine — never modified from here).
+   Every value below is read from real Engine data; there are no sample
+   trips, placeholder stats, or mocked numbers. An honest empty state (via
+   the existing .hub-ph pattern) is shown whenever there is genuinely no
+   data yet, instead of inventing something to fill the space.
+
+   This is a single-file app (no bundler/component framework), so
+   "component" here means a small, named, reusable render FUNCTION that
+   returns an HTML string — the same convention every other screen in this
+   file already uses (famLiveSheetBodyHtml, famTile, etc.), not a React/Vue
+   component. Functions below are named to match the component breakdown
+   requested (DrivingDashboard, SpeedCard, DistanceCard, TripHistoryList,
+   TripCard, TripTimeline, DrivingStatsGrid, EventBadge, DriverHeader,
+   WeeklyReport) so the mapping is traceable 1:1.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Which family member's driving data is currently shown. Falls back to the
+   current user (matches how _famSelUid defaults elsewhere). */
+let _drvSelUid=null;
+let _drvHistDayOffset=0;     // 0 = today, -1 = yesterday, ... (Trip History day paging)
+let _drvActiveTripId=null;   // which trip Trip Detail is showing
+let _drvLiveTickTimer=null;  // keeps Live Driving's elapsed time/speed fresh
+
+function drvUid(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(_drvSelUid) return _drvSelUid;
+  return fb&&FB.user?FB.user.uid:null;
+}
+function drvEngine(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  return (fb&&fb.driving)?fb.driving:null;
+}
+
+/* ── DriverHeader: avatar + name + member switcher, reused across all 4 screens ── */
+function DriverHeader(uid,opts){
+  opts=opts||{};
+  const members=famLiveMembers();
+  const m=members.find(x=>x.uid===uid);
+  const name=m?m.name:(L==='fa'?'عضو':'Member');
+  const initial=esc((name||'?').trim().charAt(0).toUpperCase());
+  const photoHtml=(m&&m.photo)
+    ? `<img src="${esc(m.photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+    : `<div style="width:100%;height:100%;border-radius:50%;background:${m?m.color:'#8652FF'};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px">${initial}</div>`;
+  let h=`<div style="display:flex;align-items:center;gap:10px">`;
+  h+=`<div style="width:36px;height:36px;flex:none">${photoHtml}</div>`;
+  h+=`<div style="flex:1;min-width:0;font-weight:800;font-size:15px">${esc(name)}</div>`;
+  if(opts.showSwitcher && members.length>1){
+    h+=`<button class="btn btn-ghost" data-fam="drv-switch-member" style="width:auto;padding:6px 10px;font-size:12px">${L==='fa'?'تغییر عضو':'Switch'} ${famIcon('chevdown')}</button>`;
+  }
+  h+=`</div>`;
+  return h;
+}
+
+/* ── Member selector strip (horizontal chips) — used on the Dashboard ── */
+function DrivingMemberSelector(selUid){
+  const members=famLiveMembers();
+  if(members.length<=1) return '';
+  let h=`<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px;margin-bottom:14px">`;
+  members.forEach(m=>{
+    const on=m.uid===selUid;
+    const initial=esc((m.name||'?').trim().charAt(0).toUpperCase());
+    const avatar=m.photo
+      ? `<img src="${esc(m.photo)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`
+      : `<div style="width:28px;height:28px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px">${initial}</div>`;
+    h+=`<button data-fam="drv-sel-member" data-arg="${esc(m.uid)}" style="flex:none;display:flex;align-items:center;gap:6px;border:1px solid ${on?'var(--fam-purple,#8652FF)':'var(--b1)'};background:${on?'#8652FF18':'var(--s1)'};border-radius:20px;padding:5px 12px 5px 5px;cursor:pointer;color:var(--ink)">
+      ${avatar}<span style="font-size:13px;font-weight:700">${esc(m.name)}</span></button>`;
+  });
+  h+=`</div>`;
+  return h;
+}
+
+/* ── EventBadge: a single driving-event pill (count + trend), matches the
+   reference screenshots' "Speeding / Distracted / Hard Brake" style cards.
+   Uses the Engine's honest event type names — HighSpeedThresholdEvent is
+   labelled as a speed threshold, not asserted as legally "Speeding". ── */
+const DRV_EVENT_META={
+  HardBrakeCandidate:   { icon:'🦶', label:{fa:'ترمز شدید',en:'Hard Brake'},  color:'#F5A623' },
+  RapidAccelCandidate:  { icon:'⚡',  label:{fa:'شتاب سریع',en:'Rapid Accel'}, color:'#E056A0' },
+  HighSpeedThresholdEvent:{ icon:'🚨', label:{fa:'سرعت بالا',en:'High Speed'},  color:'#FF6B6B' }
+};
+function EventBadge(type,count){
+  const meta=DRV_EVENT_META[type]||{icon:'●',label:{fa:type,en:type},color:'#8652FF'};
+  return `<div style="display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:20px;padding:8px 14px;flex:none">
+    <span style="font-size:16px">${meta.icon}</span>
+    <span style="font-weight:800;font-size:15px">${count}</span>
+    <span style="font-size:11px;color:var(--ink3);white-space:nowrap">${esc(meta.label[L]||meta.label.en)}</span>
+  </div>`;
+}
+
+/* ── SpeedCard / DistanceCard: small stat cards, reuse the existing
+   .fam-stat-card design (already in the CSS from the Location screens). ── */
+function SpeedCard(label,value,sub){
+  return `<div class="fam-stat-card"><div class="lbl">${esc(label)}</div><div class="val">${value}</div>${sub?`<div style="font-size:11px;color:var(--ink3);margin-top:2px">${esc(sub)}</div>`:''}</div>`;
+}
+function DistanceCard(label,value,sub){ return SpeedCard(label,value,sub); } // same visual card, different semantic name per requested component list
+
+/* ── DrivingStatsGrid: the 2x2 grid of Top Speed / Distance / Trips / Time ── */
+function DrivingStatsGrid(sessions){
+  const totalTrips=sessions.length;
+  const totalDistanceM=sessions.reduce((s,x)=>s+(x.distanceM||0),0);
+  const totalDurationSec=sessions.reduce((s,x)=>s+(x.durationSec||0),0);
+  const topSpeedMps=sessions.reduce((mx,x)=>Math.max(mx,x.maxSpeedMps||0),0);
+  let h=`<div class="fam-stat-grid">`;
+  h+=SpeedCard(L==='fa'?'بیشترین سرعت':'Top Speed', topSpeedMps>0?`${drvFmtSpeedKph(topSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`:'—');
+  h+=DistanceCard(L==='fa'?'مسافت کل':'Total Distance', totalDistanceM>0?`${drvFmtDistanceKm(totalDistanceM)} <span style="font-size:13px;font-weight:600">km</span>`:'—');
+  h+=SpeedCard(L==='fa'?'تعداد سفر':'Total Trips', totalTrips);
+  h+=SpeedCard(L==='fa'?'زمان رانندگی':'Driving Time', drvFmtDuration(totalDurationSec));
+  h+=`</div>`;
+  return h;
+}
+
+/* ── WeeklyReport: event-count row (Speeding/Distracted-style cards) built
+   from REAL candidate events in range — counts only, never invented. ── */
+function WeeklyReport(uid,rangeStartISO,rangeEndISO){
+  const eng=drvEngine(); if(!eng) return '';
+  const events=eng.memberEventsInRange(uid,rangeStartISO,rangeEndISO);
+  const counts={};
+  events.forEach(e=>{ counts[e.type]=(counts[e.type]||0)+1; });
+  const types=['HighSpeedThresholdEvent','RapidAccelCandidate','HardBrakeCandidate'];
+  let h=`<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px">`;
+  types.forEach(t=>{ h+=EventBadge(t,counts[t]||0); });
+  h+=`</div>`;
+  return h;
+}
+
+let _drvWeekOffset=0;
+function drvWeekBounds(offset){
+  const now=new Date();
+  const end=new Date(now.getTime()-offset*7*86400000);
+  const start=new Date(end.getTime()-7*86400000);
+  return { startISO:start.toISOString(), endISO:end.toISOString(), label:offset===0?(L==='fa'?'این هفته':'This week'):(L==='fa'?'هفته قبل':'Last week') };
+}
+
+function DrivingDashboard(){
+  const eng=drvEngine();
+  if(!eng){
+    return `<div id="drv-fixed-wrap"><div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'گزارش رانندگی برای اعضای خانواده نمایش داده می‌شود.':'Driving reports are shown for family members.'}</div></div></div>${famBottomNavHtml()}</div>`;
+  }
+  const members=famLiveMembers();
+  const selUid=drvUid();
+  const wk=drvWeekBounds(_drvWeekOffset);
+
+  let h=`<div id="drv-fixed-wrap"><div style="padding:0 16px 90px">`;
+  h+=`<div style="display:flex;gap:8px;margin-bottom:16px;overflow-x:auto">
+    <button class="btn ${_drvWeekOffset===0?'':'btn-ghost'}" data-fam="drv-week" data-arg="0" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'این هفته':'This week'}</button>
+    <button class="btn ${_drvWeekOffset===1?'':'btn-ghost'}" data-fam="drv-week" data-arg="1" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'هفته قبل':'Last week'}</button>
+  </div>`;
+  h+=`<div style="font-size:22px;font-weight:800;margin-bottom:4px">${L==='fa'?'گزارش هفتگی رانندگی':'Weekly Driving Report'}</div>`;
+  h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:14px">${wk.label}</div>`;
+
+  if(members.length>1) h+=DrivingMemberSelector(selUid);
+
+  h+=WeeklyReport(selUid,wk.startISO,wk.endISO);
+
+  const mySessions=eng.memberSessionsInRange(selUid,wk.startISO,wk.endISO);
+  h+=`<div style="margin-top:14px">`+DrivingStatsGrid(mySessions)+`</div>`;
+
+  h+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">${L==='fa'?'اعضا':'Members'}</div>`;
+  if(!members.length){
+    h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('people')}</div><div class="hub-ph-t">${L==='fa'?'عضوی یافت نشد':'No members found'}</div></div>`;
+  } else {
+    members.forEach(m=>{
+      const sess=eng.memberSessionsInRange(m.uid,wk.startISO,wk.endISO);
+      const dist=sess.reduce((s,x)=>s+(x.distanceM||0),0);
+      const evs=eng.memberEventsInRange(m.uid,wk.startISO,wk.endISO);
+      const isLive=!!eng.activeSession(m.uid);
+      const initial=esc((m.name||'?').trim().charAt(0).toUpperCase());
+      const avatar=m.photo?`<img src="${esc(m.photo)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
+        :`<div style="width:44px;height:44px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800">${initial}</div>`;
+      h+=`<div style="width:100%;display:flex;align-items:center;gap:12px;border:1px solid var(--b1);background:var(--s1);border-radius:16px;padding:14px;margin-bottom:10px">
+        <button data-fam="drv-open-member-history" data-arg="${esc(m.uid)}" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px;flex:1;min-width:0;color:var(--ink)">
+        ${avatar}
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:800;font-size:15px">${esc(m.name)}${isLive?` <span style="font-size:10px;font-weight:800;color:#2FCE6B;background:#2FCE6B18;border-radius:8px;padding:2px 7px;vertical-align:middle">${L==='fa'?'در حال رانندگی':'DRIVING NOW'}</span>`:''}</div>
+          <div style="font-size:13px;color:var(--ink3);margin-top:2px">${sess.length?`${sess.length} ${L==='fa'?'سفر':'drives'} · ${drvFmtDistanceKm(dist)} ${L==='fa'?'کیلومتر':'kilometers'}`:(L==='fa'?'هنوز سفری نیست':'No drives yet')}</div>
+          ${evs.length?`<div style="font-size:12px;color:var(--ink3);margin-top:4px">${evs.length} ${L==='fa'?'رویداد':'events'}</div>`:''}
+        </div>
+        <span style="color:var(--ink3);opacity:.4">›</span>
+        </button>
+        ${isLive?`<button data-fam="drv-open-member" data-arg="${esc(m.uid)}" style="flex:none;background:#2FCE6B;color:#fff;border:none;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;cursor:pointer">${L==='fa'?'مشاهده زنده':'View Live'}</button>`:''}
+      </div>`;
+    });
+  }
+  h+=`</div>`;
+  h+=famBottomNavHtml();
+  h+=`</div>`;
+  return h;
+}
+
+/* ── SCREEN 2: Live Driving ───────────────────────────────────────────
+   Uber-style: big current speed, map with the trip's real route polyline,
+   address (reusing FamGeo, the same reverse-geocoder Family Live uses),
+   duration/distance ticking from the ACTIVE session only. If the selected
+   member isn't currently driving, this is stated plainly — never a fake
+   "0 km/h" readout implying a live trip that doesn't exist. */
+function LiveDriving(){
+  const eng=drvEngine();
+  const uid=drvUid();
+  if(!eng||!uid){
+    return `<div id="drv-fixed-wrap"><div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>${famBottomNavHtml()}</div>`;
+  }
+  const active=eng.activeSession(uid);
+  let h=`<div id="drv-live-wrap" style="display:flex;flex-direction:column;height:100%">`;
+  h+=`<div style="display:flex;align-items:center;gap:10px;padding:16px 16px 8px">
+    <button data-fam="drv-back-dash" style="all:unset;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--ink)">${famIcon('back')}</button>
+    <div style="flex:1;min-width:0">`+DriverHeader(uid,{showSwitcher:true})+`</div>
+    <button data-fam="drv-open-history" style="all:unset;cursor:pointer;font-size:12px;font-weight:700;color:var(--fam-purple,#8652FF);white-space:nowrap">${L==='fa'?'تاریخچه':'History'}</button>
+  </div>`;
+
+  if(!active){
+    h+=`<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:0 20px">
+      <div class="hub-ph" style="width:100%"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div>
+      <div class="hub-ph-t">${L==='fa'?'در حال حاضر رانندگی نمی‌کند':'Not currently driving'}</div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی حرکت با ماشین شروع شود، سرعت و مسیر اینجا نمایش داده می‌شود.':'Once driving starts, live speed and route will appear here.'}</div></div>
+    </div>`;
+    h+=famBottomNavHtml();
+    h+=`</div>`;
+    return h;
+  }
+
+  // Defensive fallback: sessionSamplesLive() should always have data for a
+  // genuinely active session, but if the live queue is ever momentarily
+  // empty (e.g. between ingestFix calls), fall back to the session's real
+  // average speed rather than showing a blank — still real data, just not
+  // the instantaneous reading.
+  const avgSpeedKph=drvFmtSpeedKph(active.avgSpeedMps);
+  const live=eng.sessionSamplesLive(uid,active.id);
+  const lastSample=(live&&live.length)?live[live.length-1]:null;
+  const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
+  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
+
+  h+=`<div id="drv-live-map" style="height:38vh;flex:none;position:relative;background:#dfe3ea"></div>`;
+  h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
+  h+=`<div style="text-align:center;margin-bottom:18px">
+    <div style="font-size:56px;font-weight:900;line-height:1">${curSpeedKph}</div>
+    <div style="font-size:13px;color:var(--ink3);font-weight:700;letter-spacing:.05em">km/h</div>
+  </div>`;
+  if(loc){
+    h+=`<div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:2px">${esc(loc.line1)}</div>`;
+    if(loc.line2) h+=`<div style="text-align:center;font-size:12px;color:var(--ink3);margin-bottom:16px">${esc(loc.line2)}</div>`;
+  }
+  h+=`<div class="fam-stat-grid">`;
+  h+=SpeedCard(L==='fa'?'مدت رانندگی':'Duration', drvFmtDuration(active.durationSec));
+  h+=DistanceCard(L==='fa'?'مسافت':'Distance', `${drvFmtDistanceKm(active.distanceM)} <span style="font-size:13px;font-weight:600">km</span>`);
+  h+=`</div>`;
+  if(lastSample&&lastSample.accuracyM!=null){
+    const acc=famAccuracyInfo(lastSample.accuracyM);
+    h+=`<div style="text-align:center;font-size:11px;color:var(--ink3);margin-top:12px">GPS ${acc.text||''}</div>`;
+  }
+  h+=`</div>`;
+  h+=famBottomNavHtml();
+  h+=`</div>`;
+  return h;
+}
+/* Mount the Live Driving map + a short poll timer to refresh speed/route
+   while this screen is open (mirrors famLiveMount's tick pattern). */
+function drvLiveMount(){
+  const el=document.getElementById('drv-live-map');
+  if(_drvLiveTickTimer){ clearInterval(_drvLiveTickTimer); _drvLiveTickTimer=null; }
+  if(!el) return; // not-driving state — nothing to mount
+  const eng=drvEngine(); const uid=drvUid();
+  if(!eng||!uid) return;
+  const active=eng.activeSession(uid);
+  if(!active) return;
+  const samples=eng.sessionSamplesLive(uid,active.id)||[];
+  const last=samples.length?samples[samples.length-1]:null;
+  const center=last?[last.lat,last.lng]:(active.startLat!=null?[active.startLat,active.startLng]:[-42.88,147.32]);
+  MBMMap.init('drv-live-map', center);
+  MBMMap.invalidate();
+  if(samples.length>=2) MBMMap.drawRoute(samples);
+  if(last) MBMMap.setView([last.lat,last.lng]);
+  _drvLiveTickTimer=setInterval(()=>{
+    if(!(screen==='module'&&currentModule==='family'&&famView==='drivingLive')){ clearInterval(_drvLiveTickTimer); _drvLiveTickTimer=null; return; }
+    const stillActive=eng.activeSession(uid);
+    if(!stillActive){ render(); return; } // trip ended — re-render to show the not-driving state
+    render();
+  }, 2000);
+}
+
+/* ── TripCard: one trip row in the History list — real distance/duration/
+   time, top speed if notable, tap opens Trip Detail. ── */
+function TripCard(sess){
+  const startTime=famAbsTime(sess.startedAt);
+  const endTime=sess.endedAt?famAbsTime(sess.endedAt):(L==='fa'?'در حال انجام':'In progress');
+  const topKph=drvFmtSpeedKph(sess.maxSpeedMps);
+  return `<button data-fam="drv-open-trip" data-arg="${esc(sess.id)}" style="width:100%;text-align:start;display:flex;align-items:center;gap:12px;border:1px solid var(--b1);background:var(--s1);border-radius:14px;padding:14px;margin-bottom:8px;cursor:pointer;color:var(--ink)">
+    <div style="width:40px;height:40px;border-radius:11px;background:#8652FF18;color:#8652FF;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none">${famIcon('car')}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:800;font-size:14px">${startTime} – ${endTime}</div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:2px">${drvFmtDistanceKm(sess.distanceM)} km · ${drvFmtDuration(sess.durationSec)}${sess.maxSpeedMps>0?` · ${L==='fa'?'حداکثر':'max'} ${topKph} km/h`:''}</div>
+    </div>
+    ${sess.eventCount>0?`<span style="font-size:11px;font-weight:700;color:#F5A623;background:#F5A62318;border-radius:10px;padding:3px 8px;flex:none">${sess.eventCount}</span>`:''}
+    <span style="color:var(--ink3);opacity:.4">›</span>
+  </button>`;
+}
+
+/* ── SCREEN 3: Trip History ───────────────────────────────────────────── */
+function TripHistoryList(){
+  const eng=drvEngine();
+  const uid=drvUid();
+  if(!eng||!uid){
+    return `<div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>`;
+  }
+  const sessions=eng.memberSessions(uid).slice().reverse(); // newest first
+  let h=`<div style="padding:0 16px 90px">`;
+  h+=DriverHeader(uid,{showSwitcher:true});
+  h+=`<div style="height:14px"></div>`;
+  if(!sessions.length){
+    h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'هنوز سفری ثبت نشده':'No drives yet'}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی رانندگی شروع شود، سفرها اینجا نمایش داده می‌شوند.':'Once driving starts, trips will appear here.'}</div></div>`;
+    h+=`</div>`;
+    return h;
+  }
+  // group by real day label (Today / Yesterday / date)
+  let lastLabel=null;
+  sessions.forEach(sess=>{
+    const label=drvDayLabel(sess.startedAt);
+    if(label!==lastLabel){
+      h+=`<div style="font-size:13px;font-weight:800;color:var(--ink3);margin:${lastLabel?'18px':'0'} 2px 8px">${esc(label)}</div>`;
+      lastLabel=label;
+    }
+    h+=TripCard(sess);
+  });
+  h+=`</div>`;
+  return h;
+}
+
+/* ── TripTimeline: renders the Engine's real timeline segments (start/
+   moving/stop/resume/event/end) using the SAME .fam-tl-* CSS the Location
+   history screen already uses — no new visual language invented. ── */
+const DRV_SEGMENT_META={
+  start:  { label:{fa:'شروع سفر',en:'Trip started'}, tone:'ok' },
+  moving: { label:{fa:'در حال حرکت',en:'Moving'}, tone:'info' },
+  stop:   { label:{fa:'توقف',en:'Stop'}, tone:'muted' },
+  resume: { label:{fa:'ادامه حرکت',en:'Resumed'}, tone:'info' },
+  end:    { label:{fa:'پایان سفر',en:'Trip ended'}, tone:'ok' },
+  ongoing:{ label:{fa:'در حال انجام',en:'Ongoing'}, tone:'info' }
+};
+function TripTimeline(timeline){
+  if(!timeline||!timeline.length) return '';
+  let h=`<div class="fam-tl">`;
+  timeline.forEach(seg=>{
+    if(seg.type==='event'){
+      const meta=DRV_EVENT_META[seg.eventType]||{icon:'●',label:{fa:seg.eventType,en:seg.eventType}};
+      h+=`<div class="fam-tl-item"><div class="fam-tl-dot warn"></div>
+        <div class="fam-tl-t">${meta.icon} ${esc(meta.label[L]||meta.label.en)}</div>
+        <div class="fam-tl-time">${famAbsTime(seg.at)}</div></div>`;
+    } else {
+      const meta=DRV_SEGMENT_META[seg.type]||{label:{fa:seg.type,en:seg.type},tone:''};
+      const sub=seg.durationSec?`${drvFmtDuration(seg.durationSec)}`:'';
+      h+=`<div class="fam-tl-item"><div class="fam-tl-dot ${meta.tone}"></div>
+        <div class="fam-tl-t">${esc(meta.label[L]||meta.label.en)}</div>
+        ${sub?`<div class="fam-tl-s">${sub}</div>`:''}
+        <div class="fam-tl-time">${famAbsTime(seg.at)}</div></div>`;
+    }
+  });
+  h+=`</div>`;
+  return h;
+}
+
+/* ── SCREEN 4: Trip Detail ────────────────────────────────────────────
+   deriveTimeline() is async (Engine reads from the IDB sample store for
+   an ended trip) — follows the same load/cache/render-on-resolve pattern
+   already used by famRunDiagnostics (_famDiagResults). We cache per
+   sessionId so switching between two already-loaded trips doesn't refetch. */
+let _drvTimelineCache={};   // sessionId -> timeline array (ENDED trips only — see below)
+let _drvTimelineLoading=null; // sessionId currently being fetched
+/* Cache the timeline only for ENDED trips — an active (ongoing) trip's
+   samples/events keep changing, so caching its timeline would freeze a
+   stale snapshot the moment the user opens Trip Detail. For an active
+   trip we deliberately refetch every time this is called (each render),
+   which is cheap since deriveTimeline() for a short in-progress trip
+   reads from the small in-memory live queue, not IDB/Firestore. */
+function drvLoadTimelineIfNeeded(uid,sessionId,sessStatus){
+  if(sessStatus!=='ended'){
+    // Ongoing trip: always refetch (never trust a cached copy), but avoid
+    // stacking overlapping requests for the same tick.
+    if(_drvTimelineLoading===sessionId) return;
+    const eng=drvEngine(); if(!eng) return;
+    _drvTimelineLoading=sessionId;
+    eng.deriveTimeline(uid,sessionId).then(tl=>{
+      _drvTimelineLoading=null;
+      _drvTimelineCache[sessionId]=tl; // still stored so the current render can read it, just never trusted as final
+      if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'&&_drvActiveTripId===sessionId) render();
+    }).catch(()=>{ _drvTimelineLoading=null; });
+    return;
+  }
+  if(_drvTimelineCache[sessionId]) return; // ended trip's timeline is immutable — safe to cache permanently
+  if(_drvTimelineLoading===sessionId) return;
+  const eng=drvEngine(); if(!eng) return;
+  _drvTimelineLoading=sessionId;
+  eng.deriveTimeline(uid,sessionId).then(tl=>{
+    _drvTimelineCache[sessionId]=tl;
+    _drvTimelineLoading=null;
+    if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'&&_drvActiveTripId===sessionId) render();
+  }).catch(()=>{ _drvTimelineLoading=null; });
+}
+function TripDetail(){
+  const eng=drvEngine();
+  const uid=drvUid();
+  const sessionId=_drvActiveTripId;
+  if(!eng||!uid||!sessionId){
+    return `<div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'سفری انتخاب نشده':'No trip selected'}</div></div></div>`;
+  }
+  const sess=eng.session(uid,sessionId);
+  if(!sess){
+    return `<div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'سفر یافت نشد':'Trip not found'}</div></div></div>`;
+  }
+  drvLoadTimelineIfNeeded(uid,sessionId,sess.status);
+  const timeline=_drvTimelineCache[sessionId];
+
+  let h=`<div id="drv-trip-wrap">`;
+  h+=`<div id="drv-trip-map" style="height:32vh;position:relative;background:#dfe3ea"></div>`;
+  h+=`<div style="padding:16px 20px 90px">`;
+  h+=`<div style="font-size:18px;font-weight:800;margin-bottom:2px">${famAbsTime(sess.startedAt)} – ${sess.endedAt?famAbsTime(sess.endedAt):(L==='fa'?'در حال انجام':'In progress')}</div>`;
+  h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:16px">${esc(drvDayLabel(sess.startedAt))}</div>`;
+
+  h+=`<div class="fam-stat-grid">`;
+  h+=SpeedCard(L==='fa'?'حداکثر سرعت':'Max Speed', `${drvFmtSpeedKph(sess.maxSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`);
+  h+=SpeedCard(L==='fa'?'میانگین سرعت':'Avg Speed', `${drvFmtSpeedKph(sess.avgSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`);
+  h+=DistanceCard(L==='fa'?'مسافت':'Distance', `${drvFmtDistanceKm(sess.distanceM)} <span style="font-size:13px;font-weight:600">km</span>`);
+  h+=SpeedCard(L==='fa'?'مدت':'Duration', drvFmtDuration(sess.durationSec));
+  h+=`</div>`;
+
+  h+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">${L==='fa'?'زمان‌بندی سفر':'Trip Timeline'}</div>`;
+  if(timeline===undefined){
+    h+=`<div style="text-align:center;padding:24px;color:var(--ink3);font-size:13px">${L==='fa'?'در حال بارگذاری…':'Loading…'}</div>`;
+  } else if(!timeline.length){
+    h+=`<div style="font-size:12px;color:var(--ink3)">${L==='fa'?'داده‌ای برای این سفر یافت نشد':'No timeline data found for this trip'}</div>`;
+  } else {
+    h+=TripTimeline(timeline);
+  }
+  h+=`</div></div>`;
+  return h;
+}
+/* Mount the Trip Detail route map — draws the FULL trip polyline (from the
+   sample store, same source deriveTimeline used), not just the live queue. */
+function drvTripMount(){
+  const el=document.getElementById('drv-trip-map'); if(!el) return;
+  const eng=drvEngine(); const uid=drvUid(); const sessionId=_drvActiveTripId;
+  if(!eng||!uid||!sessionId) return;
+  const sess=eng.session(uid,sessionId); if(!sess) return;
+  const center=sess.startLat!=null?[sess.startLat,sess.startLng]:[-42.88,147.32];
+  MBMMap.init('drv-trip-map', center);
+  MBMMap.invalidate();
+  eng.sessionSamples(uid,sessionId).then(samples=>{
+    if(screen!=='module'||currentModule!=='family'||famView!=='drivingTrip'||_drvActiveTripId!==sessionId) return;
+    if(samples&&samples.length>=2){
+      MBMMap.drawRoute(samples);
+      MBMMap.fitAll(samples.map(s=>[s.lat,s.lng]));
+    }
+  }).catch(()=>{});
+}
 
 function famLaterTile(icon,label,phase){ return `<button class="ul-row" data-fam="later" data-arg="${esc(label)}" style="width:100%;text-align:start;border:1px dashed var(--b2);background:transparent;border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;opacity:.72">
   <div style="width:40px;height:40px;border-radius:11px;background:var(--b1);color:var(--ink3);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icon}</div>
@@ -12962,6 +13440,37 @@ function famDurSince(iso){
   if(h>0) return L==='fa'?`${h} ساعت ${m} دقیقه`:`${h} hr ${m} min`;
   return L==='fa'?`${m} دقیقه`:`${m} min`;
 }
+/* ── Driving format helpers (Phase 2A UI) ──────────────────────────────
+   Small, pure, reusable — every Driving screen/component uses these so a
+   number never gets formatted two different ways in two different places. */
+function drvFmtDuration(totalSec){
+  if(totalSec==null||isNaN(totalSec)) return '—';
+  const s=Math.max(0,Math.round(totalSec));
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  if(h>0) return L==='fa'?`${h} ساعت ${m} دقیقه`:`${h} hr ${m} min`;
+  if(m>0) return L==='fa'?`${m} دقیقه`:`${m} min`;
+  return L==='fa'?`${s} ثانیه`:`${s} sec`;
+}
+function drvFmtDistanceKm(meters){
+  if(meters==null||isNaN(meters)) return '—';
+  return (meters/1000).toFixed(1);
+}
+function drvFmtSpeedKph(mps){
+  if(mps==null||isNaN(mps)) return '—';
+  return Math.round(mps*3.6);
+}
+/* Trip date grouping label — "Today" / "Yesterday" / weekday+date, matching
+   the vocabulary already used by famHistoryView's day navigation. */
+function drvDayLabel(iso){
+  const t=Date.parse(iso||''); if(isNaN(t)) return '';
+  const d=new Date(t);
+  const now=new Date();
+  const startOfDay=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
+  const diffDays=Math.round((startOfDay(now)-startOfDay(d))/86400000);
+  if(diffDays===0) return L==='fa'?'امروز':'Today';
+  if(diffDays===1) return L==='fa'?'دیروز':'Yesterday';
+  return d.toLocaleDateString(L==='fa'?'fa-IR':undefined,{weekday:'short',month:'short',day:'numeric'});
+}
 /* Stable per-member color: the SAME family member always gets the SAME
    color, derived deterministically from their uid (not random per render,
    not shared with everyone else). Used for their pin ring, heading cone,
@@ -13058,6 +13567,22 @@ function famLiveSheetBodyHtml(members, sel, myUid){
   return h;
 }
 
+/* ── Life360-style bottom navigation, shared by Family Live AND all 4
+   Driving screens (previously this markup lived only inside famLiveView,
+   so navigating into Driving lost the nav bar entirely — fixed here).
+   Active state reflects the REAL current famView, not a hardcoded class. */
+const FAM_DRIVING_VIEWS=['drivingDash','drivingLive','drivingHistory','drivingTrip'];
+function famBottomNavHtml(){
+  const isLocation = (famView==='live'||famView==='dashboard');
+  const isDriving = FAM_DRIVING_VIEWS.indexOf(famView)>=0;
+  const isSafety = (famView==='sos');
+  return `<div class="fam-bottomnav">
+    <button class="fam-navbtn${isLocation?' on':''}" data-fam="nav-location">${famIcon('pin')}<span>${L==='fa'?'موقعیت':'Location'}</span></button>
+    <button class="fam-navbtn${isDriving?' on':''}" data-fam="nav-driving">${famIcon('car')}<span>${L==='fa'?'رانندگی':'Driving'}</span></button>
+    <button class="fam-navbtn${isSafety?' on':''}" data-fam="nav-safety">${famIcon('shield')}<span>${L==='fa'?'ایمنی':'Safety'}</span></button>
+    <button class="fam-navbtn" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
+  </div>`;
+}
 function famLiveView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   // Not in a cloud family / offline → Live can't show members; send to management.
@@ -13156,14 +13681,10 @@ function famLiveView(){
     });
     h+=`</div></div>`;
   }
-  // ── Life360-style bottom navigation. Location is live; the others are honest
-  //    labelled placeholders (later-phase), never faked as working screens. ──
-  h+=`<div class="fam-bottomnav">
-    <button class="fam-navbtn on" data-fam="nav-location">${famIcon('pin')}<span>${L==='fa'?'موقعیت':'Location'}</span></button>
-    <button class="fam-navbtn" data-fam="nav-driving">${famIcon('car')}<span>${L==='fa'?'رانندگی':'Driving'}</span></button>
-    <button class="fam-navbtn" data-fam="nav-safety">${famIcon('shield')}<span>${L==='fa'?'ایمنی':'Safety'}</span></button>
-    <button class="fam-navbtn" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
-  </div>`;
+  // ── Life360-style bottom navigation. Location and Driving are live; the
+  //    others are honest labelled placeholders (later-phase), never faked
+  //    as working screens. ──
+  h+=famBottomNavHtml();
   h+=`</div>`; // wrap
   return h;
 }
@@ -14509,6 +15030,8 @@ function bindFamily(){
   const b3=document.getElementById('fam-back-dash'); if(b3)b3.onclick=()=>{ if(famView==='joinInvite'){ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; } go('live'); };
   const b4=document.getElementById('fam-back-live'); if(b4)b4.onclick=()=>go('live');
   const b5=document.getElementById('fam-back-settings'); if(b5)b5.onclick=()=>go('settings');
+  const b6=document.getElementById('fam-back-drivingDash'); if(b6)b6.onclick=()=>go('drivingDash');
+  const b7=document.getElementById('fam-back-drivingHistory'); if(b7)b7.onclick=()=>go('drivingHistory');
   document.querySelectorAll('[data-fam]').forEach(el=>{
     if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
     el.onclick=(ev)=>{ ev.stopPropagation(); const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
@@ -14580,11 +15103,27 @@ function famAction(act,arg,ev){
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
     case 'live-sos': famView='sos'; render(); window.scrollTo(0,0); return;
-    // Bottom navigation — Location is live; others are honest later-phase screens
+    // Bottom navigation — Location and Driving are live; others are honest later-phase screens
     case 'nav-location': famView='live'; render(); return;
-    case 'nav-driving': toast(L==='fa'?'رانندگی در فاز بعدی فعال می‌شود':'Driving is coming in a later phase'); return;
+    case 'nav-driving': _drvSelUid=null; famView='drivingDash'; render(); window.scrollTo(0,0); return;
     case 'nav-safety': famView='sos'; render(); window.scrollTo(0,0); return;
     case 'nav-membership': toast(L==='fa'?'عضویت در فاز بعدی فعال می‌شود':'Membership is coming in a later phase'); return;
+    // ── Driving (Phase 2A) ──
+    case 'drv-week': _drvWeekOffset=parseInt(arg,10)||0; render(); return;
+    case 'drv-sel-member': _drvSelUid=arg; render(); return;
+    case 'drv-open-member': _drvSelUid=arg; famView='drivingLive'; render(); window.scrollTo(0,0); return;
+    case 'drv-open-member-history': _drvSelUid=arg; famView='drivingHistory'; render(); window.scrollTo(0,0); return;
+    case 'drv-switch-member':{
+      const members=famLiveMembers();
+      const curUid=drvUid();
+      const idx=members.findIndex(m=>m.uid===curUid);
+      const next=members[(idx+1)%members.length]||members[0];
+      if(next){ _drvSelUid=next.uid; render(); }
+      return;
+    }
+    case 'drv-open-trip': _drvActiveTripId=arg; famView='drivingTrip'; render(); window.scrollTo(0,0); return;
+    case 'drv-open-history': famView='drivingHistory'; render(); window.scrollTo(0,0); return;
+    case 'drv-back-dash': famView='drivingDash'; render(); return;
     // Category row — People is live; Places opens real saved places; Pets/Keys later
     case 'cat-people': _famCat='people'; famView='live'; render(); return;
     case 'cat-places': go('places'); return;
