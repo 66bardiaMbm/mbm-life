@@ -1738,7 +1738,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v331';
+const APP_VERSION='v332';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -13540,7 +13540,11 @@ function famJoinInviteView(){
     if(_famInvitePreview!=='loading'){
       _famInvitePreview='loading';
       fb.previewInvite(code).then(p=>{ _famInvitePreview=p; if(screen==='module'&&currentModule==='family'&&famView==='joinInvite')render(); })
-        .catch(e=>{ _famInvitePreview={code,error:(e&&e.message)||'error'}; if(screen==='module'&&currentModule==='family'&&famView==='joinInvite')render(); });
+        .catch(e=>{
+          console.error('[previewInvite]', e&&e.code, e&&e.message, e);
+          _famInvitePreview={code,error:(e&&e.message)||'error',rawCode:e&&e.code};
+          if(screen==='module'&&currentModule==='family'&&famView==='joinInvite')render();
+        });
     }
     return h+`<div style="padding:30px 0;text-align:center;color:var(--ink3)">${L==='fa'?'در حال بارگذاری دعوت…':'Loading invitation…'}</div></div>`;
   }
@@ -13550,8 +13554,14 @@ function famJoinInviteView(){
       :p.error==='revoked'?(L==='fa'?'این دعوت لغو شده است.':'This invitation was revoked.')
       :p.error==='notfound'?(L==='fa'?'دعوت یافت نشد.':'Invitation not found.')
       :(L==='fa'?'خطا در بارگذاری دعوت.':'Could not load invitation.');
-    return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ef444418;color:#ef4444">⚠</div><div class="hub-ph-t">${msg}</div></div>
-      <button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:12px">${L==='fa'?'بستن':'Close'}</button></div>`;
+    // For an unrecognized error, show the real underlying cause (Firestore
+    // code/message) instead of only the generic string — this is what was
+    // missing to diagnose why some users hit a permanent dead end here.
+    const known = p.error==='expired'||p.error==='revoked'||p.error==='notfound';
+    const detail = (!known && (p.rawCode||p.error)) ? `${L==='fa'?'جزئیات فنی':'Technical detail'}: ${esc(p.rawCode||p.error)}` : '';
+    return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ef444418;color:#ef4444">⚠</div><div class="hub-ph-t">${msg}</div>${detail?`<div class="hub-ph-d" style="font-size:11px;opacity:.7">${detail}</div>`:''}</div>
+      ${!known?`<button class="btn" data-fam="join-retry" style="width:100%;margin-top:12px;background:var(--fam-purple,#8652FF);color:#fff">${L==='fa'?'تلاش دوباره':'Try again'}</button>`:''}
+      <button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'بستن':'Close'}</button></div>`;
   }
   const already=fb.isMember();
   h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1);text-align:center">
@@ -13944,6 +13954,7 @@ function famAction(act,arg,ev){
     case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!confirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch((err)=>{ console.error('[cmember-remove]',err&&err.message,err); toast(L==='fa'?'حذف عضو ناموفق بود':'Could not remove member'); }); return; }
     // ── In-app invite redemption (deep-link / manual code) ──
     case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code){ toast(L==='fa'?'دعوت یافت نشد — دوباره لینک را باز کنید':'Invitation not found — reopen the invite link'); return; } toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='live'; render(); }).catch(e=>{ const m=(e&&e.message)||''; if(m==='expired'||m==='revoked'||m==='notfound'||m==='own-invite'){ toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'این دعوت متعلق به خودتان است':'This is your own invite')); } else { console.error('[join-accept]', e&&e.rawCode, e&&e.rawMessage, e); famFriendlyError('Join with code', e); } }); return; }
+    case 'join-retry':{ _famInvitePreview=null; render(); return; }
     case 'join-cancel':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(fb)fb.clearPending(); _famInvitePreview=null; famView='live'; render(); return; }
     case 'join-manual':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'join-code-go':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const el=document.getElementById('fam-join-code'); const code=(el?el.value:'').trim().toUpperCase(); if(!code){ toast(L==='fa'?'کد را وارد کنید':'Enter a code'); return; } fb.setPending(code); _famInvitePreview=null; famView='joinInvite'; render(); window.scrollTo(0,0); return; }
