@@ -1680,7 +1680,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v301';
+const APP_VERSION='v302';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11666,16 +11666,22 @@ const MBMMap = (function(){
     {elementType:'labels.text.fill',stylers:[{color:'#5b5f66'}]},
     {elementType:'labels.text.stroke',stylers:[{color:'#ffffff'}]},
     {featureType:'poi',stylers:[{visibility:'off'}]},
+    {featureType:'poi.park',elementType:'labels',stylers:[{visibility:'off'}]},
     {featureType:'transit',stylers:[{visibility:'off'}]},
     {featureType:'road',elementType:'geometry',stylers:[{color:'#ffffff'}]},
-    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#ece8db'}]},
-    {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#ffffff'}]},
-    {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#e9e4d6'}]},
-    {featureType:'road',elementType:'labels',stylers:[{visibility:'off'}]},
+    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#cfc9b8'}]},
+    {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#ffe4a8'}]},
+    {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#e0b95f'}]},
+    {featureType:'road.arterial',elementType:'geometry',stylers:[{color:'#ffffff'}]},
+    {featureType:'road.local',elementType:'geometry',stylers:[{color:'#ffffff'}]},
+    {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#6b6f77'}]},
+    {featureType:'road.highway',elementType:'labels.text.fill',stylers:[{color:'#8a6a1f'}]},
     {featureType:'landscape',elementType:'geometry',stylers:[{color:'#f4f0e5'}]},
     {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#d2f8e1'}]},
     {featureType:'water',elementType:'geometry',stylers:[{color:'#8fdaed'}]},
+    {featureType:'water',elementType:'labels.text.fill',stylers:[{color:'#4a8fa8'}]},
     {featureType:'administrative',elementType:'geometry',stylers:[{visibility:'off'}]},
+    {featureType:'administrative.locality',elementType:'labels.text.fill',stylers:[{color:'#3d3f45'},{visibility:'on'}]},
     {featureType:'building',elementType:'geometry',stylers:[{color:'#eae7dc'}]}
   ];
 
