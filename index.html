@@ -1731,7 +1731,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v323';
+const APP_VERSION='v325';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10453,7 +10453,15 @@ const FamilyBackend = (function(){
       if((famView==='live'||famView==='dashboard') && typeof famLiveApply==='function'){
         famLiveApply();
       } else {
-        render();
+        // Never tear down the DOM via a full render() while the user has a
+        // text field focused (e.g. editing their display name in Family
+        // Settings) — routine background location updates fire every few
+        // seconds, and innerHTML-rebuilding the screen mid-keystroke closes
+        // the on-screen keyboard and drops focus. The location data is
+        // already persisted above; only the visual repaint is deferred.
+        const ae=document.activeElement;
+        const isTyping = ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.isContentEditable);
+        if(!isTyping) render();
       }
     }
   }
@@ -12038,7 +12046,7 @@ const MBMMap = (function(){
         fillColor: approx?'#f59e0b':'#8652FF', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#8652FF', strokeOpacity:0.5, strokeWeight:1, clickable:false });
     }catch(e){}
   }
-  function setHeadingCone(latlng, headingDeg, speed){
+  function setHeadingCone(latlng, headingDeg, speed, color){
     if(!_map) return;
     if(_coneOverlay){ try{ _coneOverlay.setMap(null); }catch(e){} _coneOverlay=null; }
     if(latlng==null||headingDeg==null||isNaN(headingDeg)) return;
@@ -12054,7 +12062,7 @@ const MBMMap = (function(){
       const path=[{lat:lat0,lng:lng0}];
       for(let a=-halfAngle;a<=halfAngle;a+=(halfAngle*2)/10){ path.push(dest((headingDeg+a+360)%360, len)); }
       path.push({lat:lat0,lng:lng0});
-      _coneOverlay=new g.Polygon({ map:_map, paths:path, fillColor:'#8b6df8', fillOpacity:0.28, strokeWeight:0, clickable:false });
+      _coneOverlay=new g.Polygon({ map:_map, paths:path, fillColor:color||'#8b6df8', fillOpacity:0.28, strokeWeight:0, clickable:false });
     }catch(e){}
   }
   function drawRoute(points){
@@ -12151,6 +12159,19 @@ function famDurSince(iso){
   if(h>0) return L==='fa'?`${h} ساعت ${m} دقیقه`:`${h} hr ${m} min`;
   return L==='fa'?`${m} دقیقه`:`${m} min`;
 }
+/* Stable per-member color: the SAME family member always gets the SAME
+   color, derived deterministically from their uid (not random per render,
+   not shared with everyone else). Used for their pin ring, heading cone,
+   and any other "whose dot is this" UI. Kept visually distinct from the
+   brand purple (#8652FF) so a "this member is selected" state (which uses
+   brand purple) never gets confused with "this is Bahman's color". */
+const FAM_MEMBER_PALETTE=['#2FCE6B','#FF6B6B','#4EA8DE','#F5A623','#E056A0','#22B8A8','#9B6BFF','#E8833A','#5CC8FF','#C13584'];
+function famColorForUid(uid){
+  if(!uid) return FAM_MEMBER_PALETTE[0];
+  let h=0;
+  for(let i=0;i<uid.length;i++){ h=(h*31+uid.charCodeAt(i))>>>0; }
+  return FAM_MEMBER_PALETTE[h%FAM_MEMBER_PALETTE.length];
+}
 /* Members eligible to appear on the live map: cloud members who are sharing. */
 function famLiveMembers(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -12163,7 +12184,7 @@ function famLiveMembers(){
     const consent=loc.memberConsent(uid);
     const status=loc.memberStatus(uid);
     return { uid, name:(uid===((FB.user&&FB.user.uid))?famSelfName():(m.name||'Member')),
-             role:m.role, photo:m.photo, phone:m.phone||null, color:'#8652FF',
+             role:m.role, photo:m.photo, phone:m.phone||null, color:famColorForUid(uid),
              state, consent, status, meta:loc.statusMeta(status),
              hasFix: !!(state&&state.lat!=null && (consent&&consent.enabled&&!consent.paused)) };
   });
@@ -12824,7 +12845,7 @@ function famLivePaintMarkers(members, sel){
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
          calloutL1:esc(txt.l1), calloutL2:txt.l2?esc(txt.l2):''},
         m.uid===_famSelUid, m.meta.tone,
-        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); });
+        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
     } else {
       // merged cluster bubble at the group's centroid of real fixes
       const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
@@ -12838,7 +12859,7 @@ function famLivePaintMarkers(members, sel){
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; famLiveApply(); });
+          _famSelUid=next.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
     }
   });
   MBMMap.clearMarkersExcept(activeKeys);
@@ -12852,7 +12873,7 @@ function famLivePaintMarkers(members, sel){
     // ── FEATURE 1: real directional heading cone. Only when the selected
     //    member is genuinely moving AND the device reported a real heading. ──
     if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
-      MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], sel.state.heading, sel.state.speed);
+      MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], sel.state.heading, sel.state.speed, sel.color);
     } else { MBMMap.setHeadingCone(null,null,null); }
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
@@ -12981,6 +13002,31 @@ function famUpdateCameraPadding(sheetPx){
   }catch(e){}
 }
 /* ── Draggable member sheet (collapsed / partial / full) ── */
+/* Ensure the member profile sheet is actually visible after selecting
+   someone from the map (marker/cluster tap). If the sheet is at the
+   collapsed "peek" detent, the newly-selected member's profile updates
+   underneath but stays hidden below the fold — this expands it to at
+   least the partial detent and scrolls it into view, matching Life360's
+   real behaviour where tapping a pin always brings that person's card
+   fully into view, never leaving it hidden or half-covered. */
+function famEnsureSheetVisible(){
+  try{
+    const sheet=document.getElementById('fam-sheet'); if(!sheet) return;
+    const H=window.innerHeight||780;
+    const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
+    if(_famSheetDetent<1){
+      _famSheetDetent=1;
+      sheet.classList.remove('detent-0','detent-2');
+      sheet.style.height=heights[1]+'px';
+      const wrap=document.getElementById('fam-live-wrap');
+      if(wrap) wrap.style.setProperty('--fam-sheet-h', heights[1]+'px');
+      try{ famUpdateCameraPadding(heights[1]); }catch(e){}
+      try{ MBMMap.invalidate(); }catch(e){}
+    }
+    const body=document.getElementById('fam-sheet-body');
+    if(body) body.scrollTop=0;
+  }catch(e){}
+}
 function famSheetInitDrag(){
   const sheet=document.getElementById('fam-sheet'); if(!sheet)return;
   const grab=sheet.querySelector('.fam-sheet-draghead'); if(!grab)return;
@@ -13646,7 +13692,7 @@ function famAction(act,arg,ev){
     case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
-    case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); return;
+    case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); try{ famEnsureSheetVisible(); }catch(e){} return;
     case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }
       // If the map itself failed to load (missing key / SDK error), retry mounting it too.
       if(typeof MBMMap!=='undefined' && MBMMap.tileError && MBMMap.tileError()){ try{ MBMMap.clearFatal(); }catch(e){} if(typeof famLiveMount==='function')famLiveMount(); }
