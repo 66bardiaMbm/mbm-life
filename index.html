@@ -1752,7 +1752,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v305';
+const APP_VERSION='v306';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12140,7 +12140,7 @@ function famLiveSheetBodyHtml(members, sel, myUid){
       h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
         ${av}
         <div class="nm">${esc(m.name)}</div>
-        <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famLiveStatusLine(m))}</div>
+        <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famComposeStatusText(m).l1)}</div>
       </div>`;
     });
     h+=`</div>`;
@@ -12410,35 +12410,28 @@ function famComposeStatusText(m){
   // stationary
   if(d.currentPlaceId && d.place){
     const since=d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null));
-    const firstName=(m.name||'').split(' ')[0]||m.name||'';
-    // Life360 convention: generic place labels ("Home"/"Work"/"Place") read
-    // better possessive ("Mahsa's place"); a place someone named specifically
-    // (e.g. "Grandma's House") is already personal and shouldn't be re-wrapped.
-    const genericNames=['home','work','place','school','office','خانه','محل کار','مدرسه'];
-    const isGeneric=genericNames.indexOf((d.place.name||'').trim().toLowerCase())>=0;
-    const label=isGeneric
-      ? (L==='fa'?`محل ${firstName}`:`${firstName}'s place`)
-      : d.place.name;
-    return { l1:label, l2:famSinceOrHereFor(since), since, activityType:'stationary', place:true };
+    // Show the real saved place name as-is — Life360 never wraps this in a
+    // possessive "X's place" invention; it shows exactly what the place is
+    // named, or the street address if no place is saved.
+    return { l1:d.place.name, l2:famSinceOrHereFor(since), since, activityType:'stationary', place:true };
   }
   const lines=famLocationLines(s.lat,s.lng,false);
   const since2=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null);
   // NOTE: famLocationLines already formats line1 as "Near <road>" (or a bare
   // place/suburb name) — do not prepend "Near"/"نزدیک" again here, that was
   // producing "Near Near Pirie Street".
-  return { l1:lines.line1, l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary' };
+  return { l1:lines.line1, region:lines.line2||'', l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary' };
 }
+/* Honest consent/permission fallback line — used ONLY when a member has no
+   live location to show at all (sharing off/paused, or no fix yet). This is
+   NOT a location/activity formatter — that is famComposeStatusText's job
+   exclusively. Keeping this narrow prevents it from ever becoming a second
+   status formatter again. */
 function famLiveStatusLine(m){
-  // honest header subtitle
   if(!m.consent||!m.consent.enabled) return L==='fa'?'اشتراک‌گذاری نشده':'Not sharing';
   if(m.consent.paused) return L==='fa'?'اشتراک متوقف شده':'Sharing paused';
   if(!m.state||m.state.lat==null) return L==='fa'?'موقعیت نامشخص':'Location unknown';
   const rel=famRelTime(m.state.reportedAt||m.state.capturedAt);
-  const place=famMatchSavedPlace(m.state.lat,m.state.lng);
-  if(m.status==='moving') return L==='fa'?'در حال حرکت':'Moving';
-  if(place && (m.status==='updating'||m.status==='recent'||m.status==='stopped')) return (L==='fa'?`در ${place.name}`:`At ${place.name}`);
-  if(m.status==='updating') return L==='fa'?'به‌روزرسانی همین حالا':'Updated now';
-  if(m.status==='stale') return L==='fa'?`قدیمی · ${rel}`:`Stale · ${rel}`;
   if(m.status==='offline') return L==='fa'?`آفلاین · ${rel}`:`Offline · ${rel}`;
   return (L==='fa'?'به‌روزرسانی ':'Updated ')+rel;
 }
@@ -12640,10 +12633,12 @@ function famLiveMemberDetail(m, isMe){
     const txt=famComposeStatusText(m);
     const since=txt.since;
     const line1 = esc(txt.l1);
+    const regionTxt = txt.region?esc(txt.region):'';
     const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
     h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
+        ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
@@ -12914,10 +12909,15 @@ function famSheetInitDrag(){
   // (Check in/SOS) is bound to this via bottom:calc(var(--fam-sheet-h) + 14px),
   // so it tracks the sheet on every frame — drag, detent snap, or resize —
   // instead of the old hardcoded 42vh that never matched the live sheet.
-  function syncSheetVar(px){
+  function syncSheetVar(px, updatePadding){
     const wrap=document.getElementById('fam-live-wrap');
     if(wrap) wrap.style.setProperty('--fam-sheet-h', Math.round(px)+'px');
-    try{ famUpdateCameraPadding(px); }catch(e){}
+    // Camera padding recompute calls Google Maps setOptions() internally,
+    // which is NOT free even for a no-op-ish option — calling it on every
+    // drag frame (up to 60/sec) is what made the drag gesture feel heavy
+    // and slow. Only recompute it when explicitly requested (detent apply
+    // / release), never on intermediate touchmove frames.
+    if(updatePadding){ try{ famUpdateCameraPadding(px); }catch(e){} }
   }
   function apply(i){
     _famSheetDetent=Math.max(0,Math.min(2,i));
@@ -12925,7 +12925,7 @@ function famSheetInitDrag(){
     if(_famSheetDetent===0)sheet.classList.add('detent-0');
     if(_famSheetDetent===2)sheet.classList.add('detent-2');
     sheet.style.height=heights[_famSheetDetent]+'px';
-    syncSheetVar(heights[_famSheetDetent]);
+    syncSheetVar(heights[_famSheetDetent], true);
   }
   apply(_famSheetDetent);
   // Belt-and-braces: some Android WebViews only respect touch-action set
@@ -12943,12 +12943,9 @@ function famSheetInitDrag(){
     if(e.cancelable)e.preventDefault();   // ALWAYS block native scroll during an active drag, not conditionally
     const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt));
     sheet.style.height=hgt+'px';
-    // Update the CTA position var every frame (cheap: one CSS var write) but
-    // DO NOT call MBMMap.invalidate() during drag — that triggers a Google
-    // Maps 'resize' recalculation, and firing it on every touchmove frame
-    // (up to 60/sec) is what made the whole drag gesture visibly stutter
-    // and feel stuck on real devices. Only resize the map once, on release.
-    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt); }); }
+    // Only the CSS var (cheap, 1:1 with finger movement) updates every
+    // frame — camera padding is deferred to release, see syncSheetVar above.
+    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt, false); }); }
   };
   const onUp=(e)=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); try{ MBMMap.invalidate(); }catch(err){} };
   grab.addEventListener('touchstart',onDown,{passive:false});
@@ -13128,12 +13125,11 @@ function famMembersView(){
       if(lm){ const s=lm.state||{};
         if(s.battery!=null) batt=s.battery;
         if(s.lat!=null&&lm.consent&&lm.consent.enabled&&!lm.consent.paused){
-          const since=fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null);
-          const loc=famLocationLines(s.lat,s.lng,s.moving);
-          line1=loc.line1;
-          line2=since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:(loc.line2||famLiveStatusLine(lm));
+          const txt=famComposeStatusText(lm);
+          line1=txt.l1;
+          line2=txt.l2;
         } else {
-          line1=famLiveStatusLine(lm); // e.g. "No network or phone off", "Sharing paused"
+          line1=famLiveStatusLine(lm); // e.g. "No network or phone off", "Sharing paused" — honest consent/permission states, not location text
         }
       } else { line1=famRoleLabel(m.role); }
       const photoStyle=av.photo?`background-image:url('${(''+av.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${av.color}`;
