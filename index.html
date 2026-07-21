@@ -1493,6 +1493,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
 .fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
 .fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
+.fam-pcard-add .av{border:2px dashed var(--b1)!important;background-image:none!important}
 .fam-pcard.sel{background:var(--s2)}
 .fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0 auto 4px;background-size:cover;background-position:center;
   border:2px solid var(--b1);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
@@ -1738,7 +1739,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v333';
+const APP_VERSION='v338';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10422,6 +10423,25 @@ const FamilyBackend = (function(){
     _current=null;
   }
   function detachFamily(){ if(_famUnsub){try{_famUnsub();}catch(e){} _famUnsub=null;} }
+  /* Force a fresh, one-time read of the family document — NOT reliant on
+     the real-time onSnapshot listener, which can miss updates if this
+     device was backgrounded/suspended when another member joined. This is
+     the actual fix for "a member joined but doesn't show up" — the
+     listener may simply not have delivered that update yet, and there was
+     previously no way to force a re-sync short of a full app restart. */
+  async function refreshRoster(){
+    if(!ready()||!familyId()) return false;
+    try{
+      const snap=await famRef(familyId()).get();
+      if(snap.exists){
+        _current=Object.assign({id:snap.id}, snap.data());
+        try{ FamilyLocation.startListening(); }catch(e){}
+        afterChange();
+        return true;
+      }
+    }catch(e){ console.error('[FamilyBackend.refreshRoster]', e&&e.code, e&&e.message); }
+    return false;
+  }
 
   function watchFamily(fid){
     detachFamily();
@@ -10839,10 +10859,14 @@ const FamilyBackend = (function(){
         permission:'granted', reportedAt:nowISO() };
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
       // route breadcrumb (only on meaningful movement, precise mode only)
-      if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt}); }
+      if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt,speedMps:state.speed}); }
       try{ persistDB(); }catch(e){}
       try{ evalGeofences(uid, prev, {lat,lng,capturedAt}); }catch(e){}
       try{ evalNoShows(); }catch(e){}
+      try{ FamilyDriving.ingestFix(uid, { lat, lng, capturedAt,
+             speedMps:state.speed, accuracyM:state.accuracy,
+             headingDeg:state.heading, altitudeM:(raw.altitude!=null?raw.altitude:null),
+             source:state.source }); }catch(e){ console.error('[FamilyDriving.ingestFix]',e); }
       afterChange();                                           // REPAINT marker/address NOW, before any network
       // ── Canonical Firestore write is THROTTLED for bandwidth, but the local
       //    marker above already moved. The remote write is best-effort. ──
@@ -11242,11 +11266,749 @@ const FamilyBackend = (function(){
     };
   })();
 
+  /* ═══════════════════════════════════════════════════════════════════
+     FamilyDriving — Driving Engine (data/architecture only, no UI).
+     Owns: local high-rate GPS sample queue, trip (DrivingSession)
+     state machine, derived trip metrics, and candidate driving-event
+     detection. Consumes fixes fed to it by FamilyLocation.writeMyFix
+     for THIS device's own uid only — sessions are self-reported, the
+     same way every other Location fact in this app is self-reported.
+
+     Honesty constraints this module enforces on purpose:
+       - Sampling rate is whatever watchPosition actually delivers
+         (no artificial throttle here — Firestore sync IS throttled,
+         separately, see SYNC_THROTTLE_MS below). We do not claim a
+         fixed 1-3s cadence; we record what we actually got.
+       - No background tracking claim: ingestFix is only ever called
+         while writeMyFix runs, i.e. while the app is foreground and
+         the existing Stage-2 watcher is active. A session that never
+         receives a follow-up fix for END_HYST_MS is closed as
+         'ended' on the next fix/tick — never left open forever.
+       - Events are stored as *candidates* with confidence + raw
+         inputs, never as a final safety verdict. HighSpeedThreshold
+         is NOT "Speeding" — no legal speed-limit source exists yet.
+     ═══════════════════════════════════════════════════════════════════ */
+  const FamilyDriving = (function(){
+    const SCHEMA_VERSION = 1;
+    const DRIVE_MIN_MS   = 2.8;
+    const WALK_MAX_MS    = 2.3;
+    const START_HYST_MS  = 15000;
+    const END_HYST_MS    = 90000;
+    const SYNC_THROTTLE_MS = 15000;
+    const MAX_JUMP_MS      = 55;
+    const MAX_ACCEPT_ACCURACY_M = 75;
+    const SAMPLES_PER_CHUNK = 250;      // explicit cap, per review — keeps each chunk doc small and Firestore-safe
+    const DRIFT_MIN_M       = 6;        // below this, movement between two samples is GPS drift noise, not real distance (reviewer point 1)
+    const STOP_SPEED_MPS    = 1.0;      // below this, the vehicle is considered actually stopped (not just "not driving yet") — used for trip-end and timeline
+    const STOP_HOLD_MS      = 30000;    // how long stopped-speed must hold before it counts as a Stop segment in the timeline
+    const HEADING_MIN_MPS   = 2.0;      // below this speed, GPS heading is noise and must not be trusted (reviewer point 3)
+    const SPIKE_NEIGHBOR_MPS = 15;      // a sample >this much faster than BOTH neighbors is treated as a GPS speed spike (reviewer point 4)
+
+    function queueMap(){ if(!DB.entities.famDriveQueue)DB.entities.famDriveQueue={}; return DB.entities.famDriveQueue; }
+    function sessionMap(){ if(!DB.entities.famDriveSessions)DB.entities.famDriveSessions={}; return DB.entities.famDriveSessions; }
+    function sessionsFor(uid){ const m=sessionMap()[uid]; return m?Object.values(m):[]; }
+    function sessionById(uid,id){ const m=sessionMap()[uid]; return m?m[id]:null; }
+    function saveSession(uid,sess){ const m=sessionMap()[uid]||(sessionMap()[uid]={}); sess.updatedAt=nowISO(); m[sess.id]=sess; try{persistDB();}catch(e){} }
+    function eventMapAll(){ if(!DB.entities.famDriveEvents)DB.entities.famDriveEvents={}; return DB.entities.famDriveEvents; }
+    function eventsFor(uid){ const m=eventMapAll()[uid]; return m?Object.values(m):[]; }
+    function eventsForSession(uid,sessionId){ return eventsFor(uid).filter(e=>e.sessionId===sessionId); }
+    function saveEvent(uid,ev){ const m=eventMapAll()[uid]||(eventMapAll()[uid]={}); m[ev.id]=ev; try{persistDB();}catch(e){} }
+
+    function newId(prefix){ return prefix+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+    function haversineM(a,b){ if(!a||!b)return Infinity; const R=6371000,toR=x=>x*Math.PI/180;
+      const dLat=toR(b.lat-a.lat),dLng=toR(b.lng-a.lng);
+      const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+      return 2*R*Math.asin(Math.min(1,Math.sqrt(s))); }
+
+    function classifyFix(speedMps, prevSample, curSample){
+      if(speedMps!=null && !isNaN(speedMps)){
+        if(speedMps>=DRIVE_MIN_MS) return 'driving';
+        if(speedMps>0.3 && speedMps<=WALK_MAX_MS) return 'walking';
+        if(speedMps>WALK_MAX_MS && speedMps<DRIVE_MIN_MS) return 'ambiguous';
+        return 'stationary';
+      }
+      if(prevSample && curSample){
+        const dt=(Date.parse(curSample.t)-Date.parse(prevSample.t))/1000;
+        if(dt>0){
+          const est=haversineM(prevSample,curSample)/dt;
+          if(est>=DRIVE_MIN_MS) return 'driving';
+          if(est>0.3 && est<=WALK_MAX_MS) return 'walking';
+          return 'stationary';
+        }
+      }
+      return 'stationary';
+    }
+
+    function isAcceptableForMetrics(prevSample,curSample){
+      if(curSample.accuracyM!=null && curSample.accuracyM>MAX_ACCEPT_ACCURACY_M) return false;
+      if(!prevSample) return true;
+      const dt=(Date.parse(curSample.t)-Date.parse(prevSample.t))/1000;
+      if(dt<=0) return false;
+      const distM=haversineM(prevSample,curSample);
+      const impliedMps=distM/dt;
+      if(impliedMps>MAX_JUMP_MS) return false;
+      // Drift filter: two consecutive fixes that report low/no speed AND are
+      // within DRIFT_MIN_M of each other are GPS wobble around a stationary
+      // point, not real movement. Reject the DISTANCE contribution (reviewer
+      // point 1) — the sample itself is still kept in the raw queue.
+      const bothSlow=(prevSample.speedMps==null||prevSample.speedMps<STOP_SPEED_MPS)
+                    &&(curSample.speedMps==null||curSample.speedMps<STOP_SPEED_MPS);
+      if(bothSlow && distM<DRIFT_MIN_M) return false;
+      return true;
+    }
+
+    function sessionDoc(fid,sessionId){ return famRef(fid).collection('drivingSessions').doc(sessionId); }
+    function sampleChunkDoc(fid,sessionId,chunkIdx){ return sessionDoc(fid,sessionId).collection('samples').doc('chunk_'+chunkIdx); }
+    function eventFsDoc(fid,eventId){ return famRef(fid).collection('drivingEvents').doc(eventId); }
+
+    async function pushSessionRemote(sess){
+      if(!ready()||!isMember())return;
+      await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(()=>{});
+    }
+    async function pushEventRemote(ev){
+      if(!ready()||!isMember())return;
+      await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}).catch(()=>{});
+    }
+    async function flushSamplesRemote(uid){
+      if(!ready()||!isMember())return;
+      const q=queueMap()[uid]; if(!q||!q.sessionId||!q.samples.length)return;
+      const fid=familyId();
+      const from=q.lastFlushIdx||0;
+      const unsynced=q.samples.slice(from);
+      if(!unsynced.length)return;
+      let i=from;
+      while(i<q.samples.length){
+        const chunkIdx=Math.floor(i/SAMPLES_PER_CHUNK);
+        const chunkStart=chunkIdx*SAMPLES_PER_CHUNK;
+        const chunkEnd=Math.min(chunkStart+SAMPLES_PER_CHUNK,q.samples.length);
+        const chunkPts=q.samples.slice(chunkStart,chunkEnd);
+        await sampleChunkDoc(fid,q.sessionId,chunkIdx).set({
+          sessionId:q.sessionId, chunkIndex:chunkIdx, points:chunkPts, updatedAt:nowISO()
+        },{merge:true}).catch(()=>{});
+        i=chunkEnd;
+      }
+      q.lastFlushIdx=q.samples.length;
+      try{persistDB();}catch(e){}
+    }
+
+    /* A speed reading is treated as a GPS spike (reviewer point 4) if it is
+       far higher than BOTH its immediate neighbors — a real acceleration
+       shows up as a gradual climb across several samples, a spike is a
+       single outlier surrounded by normal values on both sides. The first
+       and last sample of a session have only one neighbor, so they're
+       checked against that single neighbor instead of being auto-rejected. */
+    function isSpeedSpike(all,i){
+      const cur=all[i]; if(cur.speedMps==null) return false;
+      const prev=all[i-1], next=all[i+1];
+      const prevOk=prev&&prev.speedMps!=null;
+      const nextOk=next&&next.speedMps!=null;
+      if(prevOk&&nextOk){
+        return (cur.speedMps-prev.speedMps>SPIKE_NEIGHBOR_MPS) && (cur.speedMps-next.speedMps>SPIKE_NEIGHBOR_MPS);
+      }
+      if(prevOk) return cur.speedMps-prev.speedMps>SPIKE_NEIGHBOR_MPS;
+      if(nextOk) return cur.speedMps-next.speedMps>SPIKE_NEIGHBOR_MPS;
+      return false;
+    }
+
+    /* Pure function: samples in, metrics fields out. No dependency on
+       where the samples came from (live queue, IDB store, or Firestore) —
+       this is what both the sync (active trip) and async (ended trip
+       re-derivation) paths below share, so the two can never quietly
+       drift into different formulas. */
+    function computeMetricsFromSamples(all){
+      let distanceM=0, movingDurationSec=0, maxSpeedMps=0;
+      let prevAccepted=null;
+      for(let i=0;i<all.length;i++){
+        const cur=all[i];
+        if(cur.speedMps!=null && !isNaN(cur.speedMps) && cur.speedMps>=0 && !isSpeedSpike(all,i)){
+          maxSpeedMps=Math.max(maxSpeedMps,cur.speedMps);
+        }
+        if(prevAccepted && isAcceptableForMetrics(prevAccepted,cur)){
+          const d=haversineM(prevAccepted,cur);
+          const dt=(Date.parse(cur.t)-Date.parse(prevAccepted.t))/1000;
+          distanceM+=d;
+          if(dt>0 && (d/dt)>0.3) movingDurationSec+=dt;
+        }
+        if(cur.accuracyM==null || cur.accuracyM<=MAX_ACCEPT_ACCURACY_M) prevAccepted=cur;
+      }
+      return {
+        distanceM:Math.round(distanceM),
+        movingDurationSec:Math.round(movingDurationSec),
+        maxSpeedMps:Math.round(maxSpeedMps*100)/100,
+        avgSpeedMps:movingDurationSec>0?Math.round((distanceM/movingDurationSec)*100)/100:0,
+        sampleCount:all.length,
+        endLat:all.length?all[all.length-1].lat:undefined,
+        endLng:all.length?all[all.length-1].lng:undefined
+      };
+    }
+
+    /* Synchronous — used mid-ingestion on the ACTIVE trip only, where
+       samples are still in the in-memory queue. Must stay sync: called on
+       every accepted GPS fix while driving. */
+    function recomputeMetrics(uid,sess){
+      const q=queueMap()[uid];
+      const all=(q&&q.sessionId===sess.id)?q.samples:[];
+      const m=computeMetricsFromSamples(all);
+      Object.assign(sess,m);
+      sess.eventCount=eventsForSession(uid,sess.id).length;
+      return sess;
+    }
+
+    /* Async — re-derive an ENDED trip's metrics from its sample store
+       (IndexedDB or Firestore chunks). Not on the hot path; used for
+       admin/debug re-derivation or if a future format change needs old
+       trips recomputed. Never called automatically. */
+    async function recomputeMetricsAsync(uid,sessionId){
+      const sess=sessionById(uid,sessionId);
+      if(!sess) return null;
+      let all=await readSamplesStore(sessionId);
+      if(!all) all=await sessionSamplesRemote(uid,sessionId);
+      if(!all||!all.length) return sess;
+      const m=computeMetricsFromSamples(all);
+      Object.assign(sess,m);
+      sess.eventCount=eventsForSession(uid,sess.id).length;
+      saveSession(uid,sess);
+      try{ pushSessionRemote(sess); }catch(e){}
+      return sess;
+    }
+
+    const HARD_BRAKE_MPS2   = -3.5;
+    const RAPID_ACCEL_MPS2  = 3.0;
+    const HIGH_SPEED_THRESHOLD_MPS = 33.3; // ~120 km/h flat threshold — NOT a road speed limit
+    function detectEvents(uid,sessionId,prev,cur){
+      if(!prev||!cur) return [];
+      if(prev.speedMps==null||cur.speedMps==null||isNaN(prev.speedMps)||isNaN(cur.speedMps)) return [];
+      const dt=(Date.parse(cur.t)-Date.parse(prev.t))/1000;
+      if(dt<=0||dt>30) return [];
+      const deltaMps2=(cur.speedMps-prev.speedMps)/dt;
+      const out=[];
+      const base={ sessionId, memberUid:uid, at:cur.t, sampleSeq:cur.seq,
+        lat:cur.lat, lng:cur.lng, prevSpeedMps:prev.speedMps, currSpeedMps:cur.speedMps,
+        deltaTimeS:Math.round(dt*100)/100 };
+      const conf=dt<=3?0.7:(dt<=8?0.45:0.25);
+      if(deltaMps2<=HARD_BRAKE_MPS2){
+        out.push(Object.assign({id:newId('drev'),type:'HardBrakeCandidate',method:'speed_delta',
+          thresholdUsed:HARD_BRAKE_MPS2, confidence:conf, createdAt:nowISO()},base));
+      }
+      if(deltaMps2>=RAPID_ACCEL_MPS2){
+        out.push(Object.assign({id:newId('drev'),type:'RapidAccelCandidate',method:'speed_delta',
+          thresholdUsed:RAPID_ACCEL_MPS2, confidence:conf, createdAt:nowISO()},base));
+      }
+      if(cur.speedMps>=HIGH_SPEED_THRESHOLD_MPS){
+        out.push(Object.assign({id:newId('drev'),type:'HighSpeedThresholdEvent',method:'flat_threshold',
+          thresholdUsed:HIGH_SPEED_THRESHOLD_MPS, confidence:0.9, createdAt:nowISO()},base));
+      }
+      return out;
+    }
+
+    function startSession(uid,sample){
+      const sess={ id:newId('trip'), memberId:uid, familyId:familyId(),
+        startedAt:sample.t, endedAt:null, status:'active',
+        startLat:sample.lat, startLng:sample.lng, endLat:sample.lat, endLng:sample.lng,
+        distanceM:0, durationSec:0, movingDurationSec:0,
+        avgSpeedMps:0, maxSpeedMps:0, sampleCount:1, eventCount:0,
+        schemaVersion:SCHEMA_VERSION, createdAt:nowISO(), updatedAt:nowISO() };
+      saveSession(uid,sess);
+      try{ pushSessionRemote(sess); }catch(e){}
+      return sess;
+    }
+    const SAMPLE_IDB_PREFIX = 'drivingSamples:';
+    function sampleIdbKey(sessionId){ return SAMPLE_IDB_PREFIX+sessionId; }
+    /* Write an ended trip's raw samples to IndexedDB (NOT into DB.entities —
+       reviewer's storage-separation point: session summaries must stay
+       light so hundreds of trips don't bloat the single DB blob that gets
+       re-serialized on every persistDB() call). Falls back to keeping the
+       samples in DB.entities.famDriveSamplesFallback ONLY if IndexedDB is
+       genuinely unavailable (old browser / private mode) — never silently
+       lose a trip's samples, but IDB is the intended, honest path. */
+    async function writeSamplesStore(sessionId,samples){
+      if(idbReady && _idbHandle){
+        try{ await idbSet(sampleIdbKey(sessionId),samples); return true; }catch(e){ console.error('[FamilyDriving] idbSet samples failed',e); }
+      }
+      try{
+        if(!DB.entities.famDriveSamplesFallback)DB.entities.famDriveSamplesFallback={};
+        DB.entities.famDriveSamplesFallback[sessionId]=samples;
+        persistDB();
+        return true;
+      }catch(e){ console.error('[FamilyDriving] fallback sample store failed',e); return false; }
+    }
+    async function readSamplesStore(sessionId){
+      if(idbReady && _idbHandle){
+        try{ const v=await idbGet(sampleIdbKey(sessionId)); if(Array.isArray(v)) return v; }catch(e){}
+      }
+      const fb=DB.entities.famDriveSamplesFallback;
+      if(fb && Array.isArray(fb[sessionId])) return fb[sessionId];
+      return null;
+    }
+    async function deleteSamplesStore(sessionId){
+      if(idbReady && _idbHandle){ try{ await idbDelete(sampleIdbKey(sessionId)); }catch(e){} }
+      const fb=DB.entities.famDriveSamplesFallback;
+      if(fb && fb[sessionId]){ delete fb[sessionId]; try{persistDB();}catch(e){} }
+    }
+
+    function endSession(uid,sess,endSample){
+      sess.status='ended';
+      sess.endedAt=endSample?endSample.t:nowISO();
+      sess.durationSec=Math.max(0,Math.round((Date.parse(sess.endedAt)-Date.parse(sess.startedAt))/1000));
+      recomputeMetrics(uid,sess);
+      const q=queueMap()[uid];
+      // Move raw samples OUT of the session summary and into the dedicated
+      // sample store (IndexedDB, see writeSamplesStore) — the session
+      // object keeps only a pointer (sampleStoreKey), not the array itself.
+      // This is the reviewer's storage-separation fix: hundreds of trips'
+      // worth of raw GPS samples must never live inside DB.entities, which
+      // gets fully re-serialized on every persistDB() call.
+      if(q&&q.sessionId===sess.id){
+        const samplesToStore=q.samples.slice();
+        sess.sampleStoreKey=sess.id; // deterministic: sampleIdbKey(sess.sampleStoreKey) is where to read it back
+        writeSamplesStore(sess.id,samplesToStore).catch(()=>{});
+      }
+      saveSession(uid,sess);
+      try{ pushSessionRemote(sess); flushSamplesRemote(uid); }catch(e){}
+      if(q&&q.sessionId===sess.id){ q.sessionId=null; q.samples=[]; q.lastFlushIdx=0; try{persistDB();}catch(e){} }
+    }
+
+    /* Reviewer point 2: a trip is only genuinely stopped when BOTH the
+       current speed is near zero AND the vehicle hasn't net-displaced over
+       a short recent window. This distinguishes "stopped at a red light /
+       in traffic / at a level crossing" (speed near zero, will resume the
+       same trip) from "actually parked" (also speed near zero, but that's
+       the correct state to end on once END_HYST_MS confirms it holds).
+       The END_HYST_MS timer (already 90s — a deliberately generous window
+       chosen for exactly this reason) does the "don't fragment the trip"
+       job; this function's job is only to decide whether the *current*
+       instant qualifies as stopped at all. */
+    function isGenuinelyStopped(sessionSamples,curSample){
+      if(curSample.speedMps!=null && !isNaN(curSample.speedMps) && curSample.speedMps>=STOP_SPEED_MPS) return false;
+      // Walk backwards from the END of sessionSamples collecting the
+      // CONTIGUOUS trailing run of low-speed samples — stop as soon as we
+      // hit a moving sample or exceed the 20s lookback. This deliberately
+      // does NOT reach past an earlier, separate low-speed episode (e.g. an
+      // earlier red-light stop) that had intervening real movement — mixing
+      // those would compare positions from two different stops and produce
+      // a meaningless "net displacement" (this was a real bug caught by
+      // the timeline test: an old stop's sample and a new stop's sample
+      // are genuinely far apart, which isn't drift, it's two different
+      // places the vehicle stopped at).
+      const cutoff=Date.parse(curSample.t)-20000;
+      const run=[];
+      for(let i=sessionSamples.length-1;i>=0;i--){
+        const s=sessionSamples[i];
+        const ts=Date.parse(s.t);
+        if(isNaN(ts)||ts<cutoff) break;
+        if(!(s.speedMps==null || s.speedMps<STOP_SPEED_MPS)) break; // hit a moving sample — stop the run here
+        run.unshift(s);
+      }
+      if(run.length<2) return true; // not enough contiguous low-speed history yet — trust the instantaneous speed reading
+      const netM=haversineM(run[0],run[run.length-1]);
+      return netM<DRIFT_MIN_M*2; // small net displacement within the SAME stop episode ⇒ genuinely stationary, not creeping
+    }
+
+    function ingestFix(uid, raw){
+      if(!uid||raw.lat==null||raw.lng==null) return;
+      const t=raw.capturedAt||nowISO();
+      const rawSpeed=(raw.speedMps!=null&&!isNaN(raw.speedMps))?raw.speedMps:null;
+      // Heading is only meaningful when the device is actually moving fast
+      // enough for GPS to derive a real bearing — near zero speed it's noise
+      // (reviewer point 3). Store null rather than a misleading value; this
+      // also protects any future corner-detection from false triggers.
+      const validHeading=(rawSpeed!=null&&rawSpeed>=HEADING_MIN_MPS&&raw.headingDeg!=null&&!isNaN(raw.headingDeg));
+      const sample={ lat:raw.lat, lng:raw.lng, t, seq:0,
+        speedMps:rawSpeed,
+        accuracyM:raw.accuracyM!=null?raw.accuracyM:null,
+        headingDeg:validHeading?raw.headingDeg:null,
+        altitudeM:raw.altitudeM!=null?raw.altitudeM:null,
+        source:raw.source||'gps' };
+
+      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0});
+      const prevSample=q.samples.length?q.samples[q.samples.length-1]:null;
+      sample.seq=prevSample?prevSample.seq+1:0;
+
+      const rawType=classifyFix(sample.speedMps,prevSample,sample);
+      const nowMs=Date.now();
+
+      if(!q.sessionId){
+        if(rawType==='driving'){
+          if(!q.candidate||q.candidate.type!=='driving'){ q.candidate={type:'driving',since:nowMs}; }
+          else if(nowMs-q.candidate.since>=START_HYST_MS){
+            q.samples=[sample]; q.lastFlushIdx=0;
+            const sess=startSession(uid,sample);
+            q.sessionId=sess.id; q.candidate=null;
+          }
+        } else {
+          q.candidate=null;
+        }
+        try{persistDB();}catch(e){}
+        return;
+      }
+
+      q.samples.push(sample);
+      const sess=sessionById(uid,q.sessionId);
+      if(!sess){ q.sessionId=null; q.samples=[]; try{persistDB();}catch(e){} return; }
+
+      try{
+        const evs=detectEvents(uid,sess.id,prevSample,sample);
+        evs.forEach(ev=>{ saveEvent(uid,ev); try{pushEventRemote(ev);}catch(e){} });
+      }catch(e){ console.error('[FamilyDriving.detectEvents]',e); }
+
+      recomputeMetrics(uid,sess);
+      sess.durationSec=Math.max(0,Math.round((Date.parse(t)-Date.parse(sess.startedAt))/1000));
+      saveSession(uid,sess);
+
+      // ── Trip-end condition (reviewer point 2) ──
+      // activityType alone ('walking'/'ambiguous' at a red light, in traffic,
+      // or crossing train tracks) must NOT be enough to start closing a trip.
+      // A trip only ends when the vehicle is genuinely stopped: recent speed
+      // is at/near zero AND net displacement over the same window is small
+      // (i.e. not slow-rolling forward, not GPS drift pretending to be
+      // movement). We look at actual samples in the current session's tail,
+      // not just the single latest classification.
+      const stopped=isGenuinelyStopped(q.samples,sample);
+      if(stopped){
+        if(!q.candidate||q.candidate.type!=='end'){ q.candidate={type:'end',since:nowMs}; }
+        else if(nowMs-q.candidate.since>=END_HYST_MS){
+          endSession(uid,sess,sample);
+        }
+      } else {
+        q.candidate=null;
+      }
+
+      const lastSync=sess._lastSyncAt||0;
+      if(nowMs-lastSync>=SYNC_THROTTLE_MS){
+        sess._lastSyncAt=nowMs;
+        try{ pushSessionRemote(sess); flushSamplesRemote(uid); }catch(e){}
+      }
+      try{persistDB();}catch(e){}
+    }
+
+    function recoverOnStart(uid){
+      uid=uid||myUid(); if(!uid) return;
+      const q=queueMap()[uid];
+      if(!q||!q.sessionId) return;
+      const sess=sessionById(uid,q.sessionId);
+      if(!sess||sess.status!=='active'){ q.sessionId=null; return; }
+      const lastSample=q.samples.length?q.samples[q.samples.length-1]:null;
+      const lastAt=lastSample?Date.parse(lastSample.t):Date.parse(sess.startedAt);
+      if(isNaN(lastAt)) return;
+      if(Date.now()-lastAt>=END_HYST_MS){
+        endSession(uid,sess,lastSample);
+      }
+    }
+
+    function manualStart(uid){
+      uid=uid||myUid(); if(!uid) return null;
+      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0});
+      if(q.sessionId) return sessionById(uid,q.sessionId);
+      const st=memberState(uid);
+      if(!st||st.lat==null) return null;
+      const sample={ lat:st.lat, lng:st.lng, t:nowISO(), seq:0,
+        speedMps:st.speed!=null?st.speed:null, accuracyM:st.accuracy!=null?st.accuracy:null,
+        headingDeg:st.heading!=null?st.heading:null, altitudeM:null, source:'manual' };
+      q.samples=[sample]; q.lastFlushIdx=0;
+      const sess=startSession(uid,sample);
+      q.sessionId=sess.id; q.candidate=null;
+      try{persistDB();}catch(e){}
+      return sess;
+    }
+    function manualStop(uid){
+      uid=uid||myUid(); if(!uid) return null;
+      const q=queueMap()[uid]; if(!q||!q.sessionId) return null;
+      const sess=sessionById(uid,q.sessionId); if(!sess) return null;
+      const lastSample=q.samples.length?q.samples[q.samples.length-1]:null;
+      endSession(uid,sess,lastSample);
+      return sess;
+    }
+
+    function memberSessions(uid){ return sessionsFor(uid).sort((a,b)=>(a.startedAt||'').localeCompare(b.startedAt||'')); }
+    function session(uid,sessionId){ return sessionById(uid,sessionId); }
+    function activeSession(uid){ const q=queueMap()[uid]; return (q&&q.sessionId)?sessionById(uid,q.sessionId):null; }
+    /* Live/active trip: samples are in the in-memory queue — this stays a
+       CHEAP SYNC lookup since the live driving screen will poll this often.
+       Returns null (not []) if the requested session isn't the active one,
+       so callers can tell "not active" apart from "active but empty". */
+    function sessionSamplesLive(uid,sessionId){
+      const q=queueMap()[uid];
+      if(q&&q.sessionId===sessionId) return q.samples.slice();
+      return null;
+    }
+    /* Ended trip (or any trip not in the live queue): read from the
+       dedicated sample store (IndexedDB, falling back to Firestore chunks).
+       Async because IndexedDB reads are inherently async — callers building
+       Trip Detail/Timeline screens are already async-friendly (data fetch
+       before render), so this doesn't block the live-driving hot path. */
+    async function sessionSamples(uid,sessionId){
+      const live=sessionSamplesLive(uid,sessionId);
+      if(live!==null) return live;
+      const stored=await readSamplesStore(sessionId);
+      if(stored) return stored;
+      return await sessionSamplesRemote(uid,sessionId);
+    }
+    async function sessionSamplesRemote(uid,sessionId){
+      if(!ready()) return [];
+      const fid=familyId(); if(!fid) return [];
+      try{
+        const qs=await sessionDoc(fid,sessionId).collection('samples').orderBy('chunkIndex').get();
+        let out=[];
+        qs.forEach(d=>{ const data=d.data(); if(Array.isArray(data.points)) out=out.concat(data.points); });
+        return out;
+      }catch(e){ return []; }
+    }
+    function sessionEvents(uid,sessionId){ return eventsForSession(uid,sessionId).sort((a,b)=>(a.at||'').localeCompare(b.at||'')); }
+
+    /* Trip Timeline (the gap the review flagged as most important). Builds a
+       flat, chronological list of segments/points from the raw samples
+       (live queue OR sample store, see sessionSamples above) + candidate
+       events, structured for a Life360-style Start → Moving → Stop →
+       Event → ... → Destination view. Computed on demand — never stored
+       redundantly, stays correct if events or samples are re-derived later.
+       Async because it may need to read the IDB/Firestore sample store for
+       a finished trip. */
+    async function deriveTimeline(uid,sessionId){
+      const samples=await sessionSamples(uid,sessionId);
+      const sess=sessionById(uid,sessionId);
+      if(!samples.length||!sess) return [];
+      const events=sessionEvents(uid,sessionId);
+      const timeline=[];
+      timeline.push({ type:'start', at:sess.startedAt, lat:sess.startLat, lng:sess.startLng });
+
+      // Walk samples, collapsing consecutive "genuinely stopped" samples
+      // into a single Stop segment (with duration), and interleaving
+      // event markers at their correct chronological position.
+      let stopStart=null, stopSamples=[];
+      let evIdx=0;
+      function flushStop(endSample,isTrailing){
+        if(stopStart!=null && stopSamples.length){
+          const durSec=Math.round((Date.parse(endSample.t)-Date.parse(stopStart.t))/1000);
+          if(durSec>=STOP_HOLD_MS/1000){
+            timeline.push({ type:'stop', at:stopStart.t, endAt:endSample.t, durationSec:durSec,
+              lat:stopStart.lat, lng:stopStart.lng });
+            // System event: movement resumed after a recognized Stop segment
+            // (reviewer request — Start/Stop/Resume/End as first-class
+            // timeline entries, not just a flat list of driving events).
+            // Skip this for the TRAILING stop — that one IS the trip's
+            // actual end (the vehicle stayed stopped, it never resumed);
+            // emitting 'resume' immediately before 'end' at the same
+            // timestamp would be misleading (found via test output review).
+            if(!isTrailing){
+              timeline.push({ type:'resume', at:endSample.t, lat:endSample.lat, lng:endSample.lng });
+            }
+          }
+        }
+        stopStart=null; stopSamples=[];
+      }
+      let emittedFirstMoving=false;
+      for(let i=0;i<samples.length;i++){
+        const s=samples[i];
+        // Emit any events that occurred at/before this sample's time, in order.
+        while(evIdx<events.length && Date.parse(events[evIdx].at)<=Date.parse(s.t)){
+          const ev=events[evIdx];
+          timeline.push({ type:'event', eventType:ev.type, at:ev.at, lat:ev.lat, lng:ev.lng,
+            confidence:ev.confidence, sampleSeq:ev.sampleSeq });
+          evIdx++;
+        }
+        const stopped=isGenuinelyStopped(samples.slice(0,i+1),s);
+        if(stopped){
+          if(stopStart==null) stopStart=s;
+          stopSamples.push(s);
+        } else {
+          flushStop(s,false);
+          // System event: the FIRST confirmed-moving sample after trip
+          // start gets its own 'moving' marker, distinct from any later
+          // 'resume' markers (which specifically follow a recognized Stop).
+          if(!emittedFirstMoving){
+            timeline.push({ type:'moving', at:s.t, lat:s.lat, lng:s.lng });
+            emittedFirstMoving=true;
+          }
+        }
+      }
+      flushStop(samples[samples.length-1],true);
+      // Any remaining events after the last sample (rare — sync race).
+      while(evIdx<events.length){
+        const ev=events[evIdx];
+        timeline.push({ type:'event', eventType:ev.type, at:ev.at, lat:ev.lat, lng:ev.lng,
+          confidence:ev.confidence, sampleSeq:ev.sampleSeq });
+        evIdx++;
+      }
+      timeline.push({ type: sess.status==='ended'?'end':'ongoing',
+        at:sess.endedAt||samples[samples.length-1].t, lat:sess.endLat, lng:sess.endLng });
+      timeline.sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
+      return timeline;
+    }
+    function memberEventsInRange(uid,startISO,endISO){
+      const s=Date.parse(startISO||''), e=Date.parse(endISO||'');
+      return eventsFor(uid).filter(ev=>{ const t=Date.parse(ev.at||''); return !isNaN(t)&&(isNaN(s)||t>=s)&&(isNaN(e)||t<=e); });
+    }
+    function memberSessionsInRange(uid,startISO,endISO){
+      const s=Date.parse(startISO||''), e=Date.parse(endISO||'');
+      return memberSessions(uid).filter(sess=>{ const t=Date.parse(sess.startedAt||''); return !isNaN(t)&&(isNaN(s)||t>=s)&&(isNaN(e)||t<=e); });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       Replay Engine — no UI, per reviewer's request. Drives a virtual
+       "playhead" through one trip's samples over wall-clock time, at an
+       adjustable speed multiplier, so any future screen (Trip Playback,
+       Animated Route, Weekly Review, Driver Report) can subscribe to the
+       same interpolated position/speed/heading stream instead of each
+       reimplementing its own timer + interpolation logic.
+
+       Usage (once a UI exists):
+         const stop = FamilyDriving.replay.onUpdate(frame => { ...draw... });
+         await FamilyDriving.replay.load(uid, sessionId);
+         FamilyDriving.replay.play();
+         FamilyDriving.replay.speed(2);
+         FamilyDriving.replay.seek(0.5);   // jump to 50% through the trip
+         FamilyDriving.replay.pause();
+         stop(); // unsubscribe
+
+       Deliberately single-session-at-a-time (matches how a person actually
+       reviews one trip) — loading a new session implicitly stops the
+       previous one's playback. Ticks on setInterval at a fixed cadence
+       (not GPS sample rate — real samples are irregular; a steady replay
+       clock is interpolated between the two nearest real samples so
+       playback speed always feels consistent regardless of how sparse the
+       original GPS fixes were). ═══════════════════════════════════════════ */
+    const FamilyDrivingReplay = (function(){
+      const TICK_MS = 200; // replay clock resolution — smooth enough for a moving dot on a map
+      let _uid=null, _sessionId=null, _samples=[], _timeline=[];
+      let _totalMs=0, _elapsedMs=0, _speedMult=1, _playing=false, _timer=null;
+      let _listeners=[];
+
+      function emit(){
+        const frame=currentFrame();
+        _listeners.forEach(fn=>{ try{ fn(frame); }catch(e){ console.error('[FamilyDriving.replay listener]',e); } });
+      }
+      function interpAt(elapsedMs){
+        if(!_samples.length) return null;
+        const targetT=Date.parse(_samples[0].t)+elapsedMs;
+        if(targetT<=Date.parse(_samples[0].t)) return sampleToFrame(_samples[0],0);
+        const last=_samples[_samples.length-1];
+        if(targetT>=Date.parse(last.t)) return sampleToFrame(last,1);
+        for(let i=0;i<_samples.length-1;i++){
+          const a=_samples[i], b=_samples[i+1];
+          const ta=Date.parse(a.t), tb=Date.parse(b.t);
+          if(targetT>=ta && targetT<=tb){
+            const frac=(tb>ta)?(targetT-ta)/(tb-ta):0;
+            return {
+              lat:a.lat+(b.lat-a.lat)*frac, lng:a.lng+(b.lng-a.lng)*frac,
+              speedMps:(a.speedMps!=null&&b.speedMps!=null)?a.speedMps+(b.speedMps-a.speedMps)*frac:(a.speedMps!=null?a.speedMps:b.speedMps),
+              headingDeg:(frac<0.5?a.headingDeg:b.headingDeg), // heading doesn't interpolate meaningfully — snap to nearer sample
+              at:new Date(targetT).toISOString(),
+              progress:_totalMs>0?Math.min(1,Math.max(0,elapsedMs/_totalMs)):0,
+              sampleIndex:i
+            };
+          }
+        }
+        return sampleToFrame(last,1);
+      }
+      function sampleToFrame(s,progress){
+        return { lat:s.lat, lng:s.lng, speedMps:s.speedMps, headingDeg:s.headingDeg, at:s.t, progress, sampleIndex:_samples.indexOf(s) };
+      }
+      // Priority used only to break ties when two+ segments share the exact
+      // same timestamp (e.g. a trip whose very first recorded sample is
+      // simultaneously 'start' and the confirming 'moving' sample) — higher
+      // number wins. Without this, array order after sort() decided the
+      // winner arbitrarily, which surfaced as 'moving' being reported as
+      // the active segment at literal playhead 0 instead of 'start'.
+      const SEGMENT_TIE_PRIORITY = { start:3, stop:3, end:3, resume:2, moving:1, event:0 };
+      function currentFrame(){
+        const frame=interpAt(_elapsedMs)||{lat:null,lng:null,speedMps:null,headingDeg:null,at:null,progress:0,sampleIndex:-1};
+        // Attach any timeline segments (stop/event/moving/resume/end) whose
+        // `at` falls at-or-before the current playhead time, so a UI can
+        // show "currently in a Stop" / "HardBrake just happened" state.
+        const nowT=frame.at?Date.parse(frame.at):-Infinity;
+        const passedSegments=_timeline.filter(seg=>Date.parse(seg.at)<=nowT);
+        let activeSegment=null;
+        if(passedSegments.length){
+          const lastT=Date.parse(passedSegments[passedSegments.length-1].at);
+          // Among segments at the SAME latest timestamp, pick by priority
+          // rather than array order.
+          const atLastT=passedSegments.filter(s=>Date.parse(s.at)===lastT);
+          activeSegment=atLastT.reduce((best,s)=>{
+            const p=SEGMENT_TIE_PRIORITY[s.type]!=null?SEGMENT_TIE_PRIORITY[s.type]:0;
+            const bp=best?(SEGMENT_TIE_PRIORITY[best.type]!=null?SEGMENT_TIE_PRIORITY[best.type]:0):-1;
+            return p>=bp?s:best;
+          },null);
+        }
+        return Object.assign({}, frame, {
+          sessionId:_sessionId, playing:_playing, speedMult:_speedMult,
+          totalMs:_totalMs, elapsedMs:_elapsedMs, activeSegment
+        });
+      }
+      function tick(){
+        if(!_playing) return;
+        _elapsedMs=Math.min(_totalMs,_elapsedMs+TICK_MS*_speedMult);
+        emit();
+        if(_elapsedMs>=_totalMs){ pause(); }
+      }
+
+      /* Load a trip for replay. Uses the SAME sample source as
+         deriveTimeline (live queue → IDB store → Firestore), so replay of
+         an in-progress trip and a finished one both work uniformly. */
+      async function load(uid,sessionId){
+        pause();
+        _uid=uid; _sessionId=sessionId; _elapsedMs=0; _speedMult=1;
+        _samples=await sessionSamples(uid,sessionId);
+        _timeline=await deriveTimeline(uid,sessionId);
+        _totalMs=_samples.length>=2
+          ? Date.parse(_samples[_samples.length-1].t)-Date.parse(_samples[0].t)
+          : 0;
+        emit();
+        return currentFrame();
+      }
+      function play(){
+        if(!_samples.length) return;
+        if(_elapsedMs>=_totalMs) _elapsedMs=0; // replay from start if it had finished
+        _playing=true;
+        if(_timer)clearInterval(_timer);
+        _timer=setInterval(tick,TICK_MS);
+        emit();
+      }
+      function pause(){
+        _playing=false;
+        if(_timer){ clearInterval(_timer); _timer=null; }
+        emit();
+      }
+      function seek(fraction){
+        fraction=Math.min(1,Math.max(0,fraction));
+        _elapsedMs=_totalMs*fraction;
+        emit();
+      }
+      function speed(multiplier){
+        _speedMult=Math.max(0.1,Math.min(16,multiplier||1)); // sane bounds — 0.1x to 16x
+        emit();
+      }
+      function onUpdate(fn){
+        if(typeof fn!=='function') return ()=>{};
+        _listeners.push(fn);
+        return ()=>{ _listeners=_listeners.filter(f=>f!==fn); };
+      }
+      function unload(){
+        pause();
+        _uid=null; _sessionId=null; _samples=[]; _timeline=[]; _totalMs=0; _elapsedMs=0; _listeners=[];
+      }
+
+      return { load, play, pause, seek, speed, onUpdate, unload, currentFrame };
+    })();
+
+    return {
+      ingestFix, recoverOnStart,
+      manualStart, manualStop,
+      memberSessions, session, activeSession, sessionSamples, sessionSamplesLive, sessionSamplesRemote,
+      sessionEvents, memberEventsInRange, memberSessionsInRange, deriveTimeline,
+      recomputeMetricsAsync,
+      replay: FamilyDrivingReplay,
+      consts:{ DRIVE_MIN_MS, WALK_MAX_MS, START_HYST_MS, END_HYST_MS, SYNC_THROTTLE_MS,
+               MAX_JUMP_MS, MAX_ACCEPT_ACCURACY_M, HARD_BRAKE_MPS2, RAPID_ACCEL_MPS2,
+               HIGH_SPEED_THRESHOLD_MPS, SCHEMA_VERSION, SAMPLES_PER_CHUNK,
+               DRIFT_MIN_M, STOP_SPEED_MPS, STOP_HOLD_MS, HEADING_MIN_MPS, SPIKE_NEIGHBOR_MPS }
+    };
+  })();
+
   return { start, stop, ready, current, familyId, isMember, myServerRole, getState,
            createFamily, createInvite, revokeInvite, redeemInvite, previewInvite,
            leaveFamily, removeMember, setRole, renameFamily, updateSelfProfile,
-           setPending, pendingCode, clearPending,
-           location:FamilyLocation };
+           setPending, pendingCode, clearPending, refreshRoster,
+           location:FamilyLocation, driving:FamilyDriving };
 })();
 
 
@@ -12269,6 +13031,10 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     <button class="fam-cat" data-fam="cat-keys">${famIcon('key')}</button>
     <button class="fam-cat" data-fam="cat-places">${famIcon('building')}</button>
   </div>`;
+  const addPersonCard=`<div class="fam-pcard fam-pcard-add" data-fam="add-person-open">
+    <div class="av" style="background:var(--s2);display:flex;align-items:center;justify-content:center;color:var(--fam-purple,#8652FF);font-size:20px;font-weight:800">+</div>
+    <div class="nm">${L==='fa'?'افزودن فرد':'Add a person'}</div>
+  </div>`;
   if(members.length>1){
     h+=`<div class="fam-presence">`;
     members.forEach(m=>{
@@ -12280,12 +13046,13 @@ function famLiveSheetBodyHtml(members, sel, myUid){
         <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famComposeStatusText(m).l1)}</div>
       </div>`;
     });
+    h+=addPersonCard;
     h+=`</div>`;
   } else if(members.length===1){
-    // No persistent instructional banner here — Life360 goes straight to
-    // showing your own card. An invite prompt still belongs somewhere
-    // (the invite/switch flow), just not eating vertical space above the
-    // member's actual name/location every time the sheet opens.
+    // Life360 always keeps a real "Add a person" entry point visible next
+    // to your own card, not buried in Settings — joining/inviting should
+    // never require leaving the app or hunting through menus.
+    h+=`<div class="fam-presence">${addPersonCard}</div>`;
   }
   if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
   return h;
@@ -13778,6 +14545,11 @@ function famAction(act,arg,ev){
     case 'live-back': famExitToHub(); return;
     case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); try{ famEnsureSheetVisible(); }catch(e){} return;
     case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }
+      // Force a real re-fetch of the family roster too — the real-time
+      // listener can miss updates (e.g. a new member joined while this
+      // device was backgrounded), and there was previously no way to
+      // recover short of a full app restart.
+      if(fb&&fb.refreshRoster){ fb.refreshRoster().then(()=>{ if(typeof famLiveApply==='function')famLiveApply(); }); }
       // If the map itself failed to load (missing key / SDK error), retry mounting it too.
       if(typeof MBMMap!=='undefined' && MBMMap.tileError && MBMMap.tileError()){ try{ MBMMap.clearFatal(); }catch(e){} if(typeof famLiveMount==='function')famLiveMount(); }
       toast(L==='fa'?'در حال گرفتن موقعیت جدید…':'Getting a new GPS fix…'); return; }
@@ -13904,6 +14676,7 @@ function famAction(act,arg,ev){
     case 'members': go('members'); return;
     case 'places': go('places'); return;
     case 'invites': go('invites'); return;
+    case 'add-person-open': go('invites'); return;
     case 'checkin': if(!famCan('checkIn')){ toast(L==='fa'?'دسترسی کافی نیست':'Not permitted'); return;} go('checkin'); return;
     case 'sos': if(!famCan('triggerSOS')){ toast(L==='fa'?'دسترسی کافی نیست':'Not permitted'); return;} go('sos'); return;
     case 'timeline': go('timeline'); return;
@@ -16249,7 +17022,7 @@ function startListeners(){
   const u2=sync('lists','lists');
   const u3=sync('appts','appts');
   _syncUnsubs=[u1,u2,u3];
-  try{ if(typeof FamilyBackend!=='undefined')FamilyBackend.start(); }catch(e){}
+  try{ if(typeof FamilyBackend!=='undefined'){ FamilyBackend.start(); if(FamilyBackend.driving&&FamilyBackend.driving.recoverOnStart)FamilyBackend.driving.recoverOnStart(); } }catch(e){}
 }
 
 function stopListeners(){
