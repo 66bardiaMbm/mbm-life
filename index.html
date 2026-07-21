@@ -1731,7 +1731,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v318';
+const APP_VERSION='v320';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11812,24 +11812,36 @@ const MBMMap = (function(){
     }catch(e){}
   }
 
-  function setView(center,zoom){ if(_map)try{ _map.panTo({lat:center[0],lng:center[1]}); if(zoom!=null)_map.setZoom(zoom); }catch(e){} }
-  function panTo(center){ if(_map)try{ _map.panTo({lat:center[0],lng:center[1]}); }catch(e){} }
+  let _pad={top:0,right:0,bottom:0,left:0};
+  function setView(center,zoom){ if(_map)try{ _panToWithPadding(center); if(zoom!=null)_map.setZoom(zoom); }catch(e){} }
+  function panTo(center){ if(_map)try{ _panToWithPadding(center); }catch(e){} }
   // Keeps the selected member visible under the header, right-side controls,
-  // and the Check-in/SOS + sheet stack. Google Maps padding shifts the visual
-  // center, NOT the marker's real geo position — the pointer/callout math
-  // below (screen-anchor) already accounts for this via CSS, so padding here
-  // is purely for panTo/fitAll framing.
+  // and the Check-in/SOS + sheet stack. google.maps.Map.setOptions() does
+  // NOT support a "padding" MapOptions property — that only exists as a
+  // parameter to fitBounds()/panToBounds(), so the previous implementation
+  // silently did nothing, which is why pins could land behind the buttons.
+  // This stores the real padding values and panTo/setView apply them as a
+  // genuine pixel offset via panBy after centering.
   function setPadding(pad){
-    if(!_map) return;
-    try{ _map.setOptions({ padding: { top:pad.top||0, right:pad.right||0, bottom:pad.bottom||0, left:pad.left||0 } }); }catch(e){}
+    _pad={top:pad.top||0, right:pad.right||0, bottom:pad.bottom||0, left:pad.left||0};
+  }
+  function _panToWithPadding(center){
+    _map.panTo({lat:center[0],lng:center[1]});
+    // Shift the map so the point sits in the middle of the AREA NOT covered
+    // by top/bottom padding, not the middle of the whole div. Positive Y
+    // pans the map content down (moves the visual center up), which is what
+    // we want when bottom padding (sheet + buttons) eats screen space.
+    const dy = (_pad.bottom - _pad.top) / 2;
+    const dx = (_pad.left - _pad.right) / 2;
+    if(dy || dx){ try{ _map.panBy(-dx, -dy); }catch(e){} }
   }
   function fitAll(latlngs){
     if(!_map||!available()||!latlngs||!latlngs.length) return;
     try{
-      if(latlngs.length===1){ _map.panTo({lat:latlngs[0][0],lng:latlngs[0][1]}); _map.setZoom(16); return; }
+      if(latlngs.length===1){ _panToWithPadding(latlngs[0]); _map.setZoom(16); return; }
       const g=window.google.maps; const b=new g.LatLngBounds();
       latlngs.forEach(p=>b.extend({lat:p[0],lng:p[1]}));
-      _map.fitBounds(b, 70);
+      _map.fitBounds(b, {top:_pad.top||70, right:_pad.right||70, bottom:_pad.bottom||70, left:_pad.left||70});
     }catch(e){}
   }
   function invalidate(){ if(_map)try{ window.google.maps.event.trigger(_map,'resize'); }catch(e){} }
@@ -12454,20 +12466,20 @@ function famComposeStatusText(m){
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
     return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
   }
-  // stationary
-  if(d.currentPlaceId && d.place && (d.place.name||'').trim() && !d.place._legacyDefaultName){
-    const since=d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null));
-    // Show the real saved place name as-is — Life360 never wraps this in a
-    // possessive "X's place" invention; it shows exactly what the place is
-    // named, or the street address if no place is saved.
-    return { l1:d.place.name, l2:famSinceOrHereFor(since), since, activityType:'stationary', place:true };
-  }
+  // stationary — ALWAYS show the real geocoded address, never a saved
+  // place's name/label. The user has repeatedly and explicitly rejected
+  // any "<Name>'s place" or similar place-label text appearing anywhere —
+  // only the real street address and the real arrival time are shown.
+  // We still track whether this is genuinely inside a saved place (for the
+  // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
+  // never surfaced in l1/l2/region.
   const lines=famLocationLines(s.lat,s.lng,false);
-  const since2=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null);
-  // NOTE: famLocationLines already formats line1 as "Near <road>" (or a bare
-  // place/suburb name) — do not prepend "Near"/"نزدیک" again here, that was
+  const since2=d.currentPlaceId?(d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null)))
+                                :((fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null));
+  // NOTE: famLocationLines already formats line1 as "Near <road>" (or the
+  // real address) — do not prepend "Near"/"نزدیک" again here, that was
   // producing "Near Near Pirie Street".
-  return { l1:lines.line1, region:lines.line2||'', l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary' };
+  return { l1:lines.line1, region:lines.line2||'', l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary', place:!!d.currentPlaceId };
 }
 /* Honest consent/permission fallback line — used ONLY when a member has no
    live location to show at all (sharing off/paused, or no fix yet). This is
@@ -12580,8 +12592,8 @@ function afterGeoResolved(){
    ~11m cell (that would spam Nominatim); we show the last cached address if any,
    else a neutral placeholder, and let it resolve once they settle. */
 function famLocationLines(lat,lng,moving){
-  const place=famMatchSavedPlace(lat,lng);
-  if(place) return { line1: place.name, line2:'', source:'place' };
+  // No saved-place-name shortcut here — always resolve to the real geocoded
+  // address. A saved place's name is never shown as the location label.
   const cached=FamGeo.get(lat,lng);
   if(cached) return { line1:cached.line1, line2:cached.line2, source:'geo' };
   if(moving) return { line1:(L==='fa'?'در حال حرکت':'On the move'), line2:'', source:'moving' };
@@ -12597,8 +12609,7 @@ function famLocationLines(lat,lng,moving){
    cached yet, so the caller can fall back to something honest instead of
    composing "Driving near On the move". */
 function famBareRoadName(lat,lng){
-  const place=famMatchSavedPlace(lat,lng);
-  if(place) return place.name;
+  // No saved-place-name shortcut — always the real road name.
   const cached=FamGeo.get(lat,lng);
   if(cached){
     // cached.line1 may itself be prefixed ("Near <road>") by the geocoder's
@@ -13490,6 +13501,13 @@ function famSettingsView(){
   if(famSettingsTab==='family'){
     // Hidden dev-mode gesture target (5 quick taps). Looks like a plain label.
     h+=`<div data-fam="dev-tap" style="font-size:11px;color:var(--ink3);margin:0 2px 10px;cursor:default;user-select:none">${L==='fa'?'فضای خانواده':'Family space'}</div>`;
+    // Your own display name — the ONLY place this could previously be set
+    // was the one-time profile gate shown before first family setup, with
+    // no way back to it afterward. This makes it a real, always-reachable
+    // setting, reusing the same profile-save action.
+    h+=`<label class="fl">${L==='fa'?'نام نمایشی شما':'Your display name'}</label>
+      <input class="finput" id="fam-profile-name" value="${esc((DB.meta.displayName||'').trim())}" placeholder="${L==='fa'?'نام و نام خانوادگی':'Your full name'}">
+      <button class="btn" data-fam="profile-save" style="width:100%;margin-top:8px">${L==='fa'?'ذخیره نام':'Save name'}</button>`;
     if(inCloud){
       const st=fb.getState();
       const canRename=st.role==='owner'||st.role==='admin';
@@ -13584,7 +13602,7 @@ function famAction(act,arg,ev){
       if(typeof pushProfile==='function')pushProfile();
       try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember())FamilyBackend.updateSelfProfile(); }catch(e){}
       saveDB(); toast(L==='fa'?'پروفایل ذخیره شد':'Profile saved');
-      famView='live'; render(); window.scrollTo(0,0);
+      if(famView!=='settings'){ famView='live'; } render(); window.scrollTo(0,0);
       return;
     }
     case 'diag-run': famRunDiagnostics(); return;
