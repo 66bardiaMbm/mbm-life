@@ -1728,7 +1728,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v314';
+const APP_VERSION='v315';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12671,10 +12671,18 @@ function famLiveMemberDetail(m, isMe){
   }
   // Address / place + Save Place card (reference layout for the selected member)
   const showLoc = m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null;
+  if(typeof window!=='undefined' && window.__famDebugLoc){
+    console.log('[fam-loc-debug] member=', m.uid, 'showLoc=', showLoc,
+      'consent.enabled=', m.consent&&m.consent.enabled, 'consent.paused=', m.consent&&m.consent.paused,
+      's.lat=', s.lat, 's.lng=', s.lng);
+  }
   if(showLoc){
     // SAME composer the map callout uses — sheet and callout can never
     // show contradictory place/activity text or a different "Since" time.
     const txt=famComposeStatusText(m);
+    if(typeof window!=='undefined' && window.__famDebugLoc){
+      console.log('[fam-loc-debug] famComposeStatusText output:', JSON.stringify(txt));
+    }
     const since=txt.since;
     // Guaranteed non-empty: famComposeStatusText always returns a real l1
     // string in every branch, but this is a hard structural backstop so the
@@ -12683,7 +12691,10 @@ function famLiveMemberDetail(m, isMe){
     const line1 = esc(txt.l1 && txt.l1.trim() ? txt.l1 : (L==='fa'?'موقعیت زنده':'Live location'));
     const regionTxt = txt.region?esc(txt.region):'';
     const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
-    h+=`<div class="fam-loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
+    if(typeof window!=='undefined' && window.__famDebugLoc){
+      console.log('[fam-loc-debug] rendering line1=', line1, 'regionTxt=', regionTxt, 'sinceTxt=', sinceTxt);
+    }
+    h+=`<div class="fam-loc-block" data-fam-debug="loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
@@ -12694,6 +12705,8 @@ function famLiveMemberDetail(m, isMe){
         <span>${L==='fa'?'ذخیره مکان':'Save Place'}</span>
       </button>
     </div>`;
+  } else if(typeof window!=='undefined' && window.__famDebugLoc){
+    console.log('[fam-loc-debug] address block SKIPPED — showLoc was false');
   }
   // Approximate-location note when the real fix is poor (honest, not a raw ±value)
   if(showLoc&&acc.approx){
@@ -12704,7 +12717,7 @@ function famLiveMemberDetail(m, isMe){
     const txt2=famComposeStatusText(m);
     const since = txt2.since;
     h+=`<div class="fam-stat-grid">`;
-    if(since && txt2.activityType==='stationary') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div></div>`;
+    if(since && txt2.activityType==='stationary' && txt2.place) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div></div>`;
     if(txt2.activityType==='driving') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال رانندگی':'Driving'}</div></div>`;
     else if(txt2.activityType==='walking') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال پیاده‌روی':'Walking'}</div></div>`;
     h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
