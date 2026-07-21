@@ -1427,9 +1427,9 @@ body.rtl .trow-content{text-align:right}
    JS never runs, the panel still renders at its default (partial) height. ── */
 #fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:22px 22px 0 0;
   box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:64px;
-  height:42vh;min-height:280px;max-height:calc(100% - 150px);
+  height:42vh;max-height:calc(100% - 150px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
-#fam-sheet.detent-0{height:150px}
+#fam-sheet.detent-0{height:130px}
 #fam-sheet.detent-2{height:calc(100% - 150px)}
 #fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);margin:12px auto 6px;flex:none}
 .fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
@@ -1680,7 +1680,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v299';
+const APP_VERSION='v301';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12549,6 +12549,15 @@ function famLiveMount(){
   // available() is legitimately false on the very first mount — gating on
   // it would block the async loader from ever starting.
   const map=MBMMap.init('fam-map', center);
+  // BUGFIX: MBMMap.init() rebuilds the underlying Google Map from scratch
+  // whenever #screen's re-render swaps out the DOM container (every render()
+  // call, including the one right after tapping a map-type option). A fresh
+  // Map always starts as plain 'roadmap' — the earlier setProvider('satellite')
+  // call had been applied to the OLD, now-discarded map instance, so the
+  // chosen type silently reverted the moment the container got recreated,
+  // which looked like the satellite/street tile fading back to the default
+  // map right after tapping it. Re-apply the remembered type on every mount.
+  try{ MBMMap.setProvider(_famMapType); }catch(e){}
   MBMMap.invalidate();
   famLivePaintMarkers(members, sel);
   if(MBMMap.tilesLoaded()) famMapLoaded();
@@ -12626,7 +12635,9 @@ function famSheetInitDrag(){
   apply(_famSheetDetent);
   let startY=0, startH=heights[_famSheetDetent], dragging=false;
   const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; };
-  const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt)); sheet.style.height=hgt+'px'; if(e.cancelable)e.preventDefault(); };
+  let _dragRaf=null;
+  const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt)); sheet.style.height=hgt+'px'; if(e.cancelable)e.preventDefault();
+    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; try{ MBMMap.invalidate(); }catch(err){} }); } };
   const onUp=()=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); MBMMap.invalidate(); };
   grab.addEventListener('touchstart',onDown,{passive:true}); grab.addEventListener('touchmove',onMove,{passive:false}); grab.addEventListener('touchend',onUp);
   grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
