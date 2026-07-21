@@ -1738,7 +1738,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v332';
+const APP_VERSION='v333';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10652,8 +10652,16 @@ const FamilyBackend = (function(){
     if(!snap.exists) throw new Error('notfound');
     const inv=snap.data()||{};
     const st = (inv.status==='pending' && inv.expiresAt && Date.parse(inv.expiresAt)<Date.now()) ? 'expired' : inv.status;
+    // Best-effort only: a brand-new invitee is NOT YET a member of the
+    // target family, so families/{familyId}'s own security rule (which
+    // correctly requires membership to read) will deny this — that denial
+    // must never fail the whole preview. This was the actual confirmed
+    // cause of "permission-denied" on the invite screen: the invite doc
+    // itself reads fine (allowed for any signed-in user), but this second
+    // read to fetch a nice family display name was throwing and killing
+    // the entire preview before it could even show the Join button.
     let famName=null;
-    if(inv.familyId){ const f=await famRef(inv.familyId).get(); if(f.exists){ famName=(f.data()||{}).name||null; } }
+    try{ const f=await famRef(inv.familyId).get(); if(f.exists){ famName=(f.data()||{}).name||null; } }catch(e){ /* expected for a non-member; fall back to no name */ }
     return { code, familyId:inv.familyId, role:inv.role||'adult', status:st,
              createdByName:inv.createdByName||null, familyName:famName, expiresAt:inv.expiresAt };
   }
