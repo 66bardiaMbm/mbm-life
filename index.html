@@ -1731,7 +1731,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v320';
+const APP_VERSION='v321';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1747,7 +1747,18 @@ const KEY='mbmlife_platform_v1';
    Back state is reset so reopening the WebAPK starts fresh. */
 (function backButtonBootstrap(){
   window.addEventListener('popstate', onPop);
-  var reconcile=function(){ try{ reconcileGuards(); }catch(e){} };
+  var reconcile=function(ev){
+    // Skip when typing in a text field — pushState() (which reconcileGuards
+    // can trigger) blurs/dismisses the on-screen keyboard on many Android
+    // WebViews if called while an input has focus. Keydown here is meant to
+    // catch keyboard-driven navigation (Enter/Escape opening or closing a
+    // view), not ordinary typing, which never needs a new back-button guard.
+    if(ev && ev.target){
+      const tag=ev.target.tagName;
+      if(tag==='INPUT' || tag==='TEXTAREA' || ev.target.isContentEditable) return;
+    }
+    try{ reconcileGuards(); }catch(e){}
+  };
   // Reconcile before the tap's handler (pre) and just after it (post, still
   // inside the gesture's activation window) so a newly opened view gets a guard.
   window.addEventListener('pointerdown', reconcile, true);
@@ -12440,9 +12451,7 @@ function nowISOSafe(){ try{ return new Date().toISOString(); }catch(e){ return n
    marker callout and the sheet body can never disagree. */
 function famSinceOrHereFor(since){
   if(!since) return '';
-  const ms=Date.now()-Date.parse(since);
-  if(ms<5*60*1000) return `${L==='fa'?'از':'Since'} ${famAbsTime(since)}`;
-  return `${L==='fa'?'اینجا از':'Here for'} ${famDurSince(since)}`;
+  return `${L==='fa'?'از':'Since'} ${famAbsTime(since)}`;
 }
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
@@ -12648,7 +12657,7 @@ function famLiveMemberDetail(m, isMe){
   // Name row: big bold name + green status dot on the left, battery pill on the right
   const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
     ? `<div class="fam-batt-pill"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
-  h+=`<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-fam="live-center-sel">
+  h+=`<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-fam="live-sel-open" data-arg="${m.uid}">
     <div style="flex:1;min-width:0;display:flex;align-items:center;gap:12px">
       <div style="font-weight:800;font-size:32px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
       <span class="fam-dot ${m.meta.tone}" style="width:12px;height:12px;margin:0;flex:none"></span>
@@ -12729,9 +12738,7 @@ function famLiveMemberDetail(m, isMe){
   // secondary detail grid — only genuinely-known facts, each card omitted if unknown
   if(showLoc){
     const txt2=famComposeStatusText(m);
-    const since = txt2.since;
     h+=`<div class="fam-stat-grid">`;
-    if(since && txt2.activityType==='stationary' && txt2.place) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div></div>`;
     if(txt2.activityType==='driving') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال رانندگی':'Driving'}</div></div>`;
     else if(txt2.activityType==='walking') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال پیاده‌روی':'Walking'}</div></div>`;
     h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
