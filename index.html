@@ -1728,7 +1728,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v312';
+const APP_VERSION='v314';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2114,44 +2114,53 @@ function ensureShopStoreDedup(){
   saveDB();
 }
 
-/* ── One-time migration: neutralize auto-generated "X's place" names ──
+/* ── One-time migration: flag legacy auto-generated "X's place" names ──
    An earlier version of the "Save Place" flow pre-filled new places with
-   "<Member's first name>'s place" / "محل <نام عضو>" as a DEFAULT name,
+   "<Member's first name>'s place" / "محل <نام عضو>" as a DEFAULT name
    before the user had a chance to type their own. That fabricated string
-   then got saved as real place data and has been showing up ever since —
-   correctly, from the app's point of view, since it's just displaying the
-   saved name — but it was never a real, deliberately-chosen place name.
-   This migration finds any saved place whose name STILL EXACTLY matches
-   that old generated pattern (for ANY family member, current or since
-   removed) and clears it back to an empty name, so the place shows the
-   real "Near <address>" line instead until the user names it themselves.
-   A real place a user happened to type with that exact wording is
-   statistically negligible, so this is safe to run unconditionally once. */
+   could then get saved as real place data if the user tapped Save without
+   noticing/changing it.
+   IMPORTANT: there is no stored metadata (no autoNamed flag, no
+   createdByVersion) that distinguishes "user left the pre-filled default"
+   from "user deliberately typed this exact same wording themselves" — both
+   produce byte-identical saved names. Because that distinction is not
+   provable from the data we have, this migration is NON-DESTRUCTIVE:
+   it never erases or overwrites p.name. It only sets a review flag
+   (p._legacyDefaultName) on matching records. Display logic (below) uses
+   that flag to prefer showing the real address instead of the possibly-
+   fabricated name, and the Places screen surfaces a rename prompt — but
+   the original stored name is always intact and recoverable, and a user
+   who genuinely wants to keep that exact name can simply re-save the
+   place (which clears the flag, since a deliberate re-save is real
+   evidence of intent that we don't have for the untouched legacy record). */
 function ensurePlaceholderPlaceNamesCleared(){
   if(DB.meta.placeholderPlaceNameFixV1)return;
-  DB.meta.placeholderPlaceNameFixV1=true;
+  // Timing guarantee lives at the CALL SITE (famLiveMembers), which only
+  // reaches this line after fb.ready()&&fb.isMember() — i.e. auth resolved
+  // and family/place data is genuinely loaded. famPlacesMap() itself always
+  // returns an object (never null), so no local "not loaded yet" check is
+  // meaningful here; the call site is the actual guard.
   try{
-    const places=(typeof famPlacesMap==='function')?famPlacesMap():null;
-    if(places){
-      // Build the set of "possessive place" names that could have been
-      // auto-generated for any member this family has ever had, in both
-      // supported languages, so a member later removed doesn't leave an
-      // unmatched placeholder behind.
-      const namesInPlay=new Set();
-      try{
-        const st=(typeof FamilyBackend!=='undefined'&&FamilyBackend.getState)?FamilyBackend.getState():null;
-        const members=st&&st.members?Object.values(st.members):[];
-        members.forEach(m=>{ if(m&&m.name){ namesInPlay.add(m.name+'’s place'); namesInPlay.add(m.name+"'s place"); namesInPlay.add('محل '+m.name); } });
-      }catch(e){}
-      let changed=false;
-      Object.values(places).forEach(p=>{
-        if(p && typeof p.name==='string' && namesInPlay.has(p.name.trim())){
-          p.name='';
-          changed=true;
-        }
-      });
-      if(changed) saveDB();
-    }
+    const places=famPlacesMap();
+    const namesInPlay=new Set();
+    try{
+      const st=(typeof FamilyBackend!=='undefined'&&FamilyBackend.getState)?FamilyBackend.getState():null;
+      const members=st&&st.members?Object.values(st.members):[];
+      members.forEach(m=>{ if(m&&m.name){ namesInPlay.add(m.name+'’s place'); namesInPlay.add(m.name+"'s place"); namesInPlay.add('محل '+m.name); } });
+    }catch(e){}
+    let touched=false;
+    Object.values(places).forEach(p=>{
+      if(p && typeof p.name==='string' && namesInPlay.has(p.name.trim()) && !p._legacyDefaultName){
+        p._legacyDefaultName=true;  // review flag only — p.name is never modified
+        touched=true;
+      }
+    });
+    // Only persist the "migration ran" guard once we've actually processed
+    // real place data (not an empty/not-yet-loaded map), and only after the
+    // flag writes themselves are saved.
+    if(touched) saveDB();
+    DB.meta.placeholderPlaceNameFixV1=true;
+    saveDB();
   }catch(e){}
 }
 
@@ -12443,7 +12452,7 @@ function famComposeStatusText(m){
     return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
   }
   // stationary
-  if(d.currentPlaceId && d.place && (d.place.name||'').trim()){
+  if(d.currentPlaceId && d.place && (d.place.name||'').trim() && !d.place._legacyDefaultName){
     const since=d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null));
     // Show the real saved place name as-is — Life360 never wraps this in a
     // possessive "X's place" invention; it shows exactly what the place is
@@ -12667,10 +12676,14 @@ function famLiveMemberDetail(m, isMe){
     // show contradictory place/activity text or a different "Since" time.
     const txt=famComposeStatusText(m);
     const since=txt.since;
-    const line1 = esc(txt.l1);
+    // Guaranteed non-empty: famComposeStatusText always returns a real l1
+    // string in every branch, but this is a hard structural backstop so the
+    // address/place block can NEVER render blank even if that invariant is
+    // ever broken by a future edit.
+    const line1 = esc(txt.l1 && txt.l1.trim() ? txt.l1 : (L==='fa'?'موقعیت زنده':'Live location'));
     const regionTxt = txt.region?esc(txt.region):'';
     const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
-    h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px">
+    h+=`<div class="fam-loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
@@ -13245,9 +13258,10 @@ function famPlacesView(){
     // who is genuinely inside this place's real radius right now
     const inside=members.filter(m=>m.state&&m.state.lat!=null&&m.consent&&m.consent.enabled&&!m.consent.paused&&famHaversineM(m.state.lat,m.state.lng,p.lat,p.lon)<=(p.radius||150));
     const alertsOn=(p.alerts&&(p.alerts.enter||p.alerts.exit));
+    const needsReview=!!p._legacyDefaultName;
     h+=`<div class="ul-row" data-fam="place-detail" data-arg="${p.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
     <div style="width:40px;height:40px;border-radius:11px;background:#ec489918;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:18px">${meta[2]}</div>
-    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(p.name)}</div><div style="font-size:12px;color:var(--ink3)">${(L==='fa'?meta[1].fa:meta[1].en)} · ${p.radius||150}m${alertsOn?' · '+(L==='fa'?'هشدار روشن':'alerts on'):''}${inside.length?' · '+(L==='fa'?`${inside.length} نفر اینجا`:`${inside.length} here`):''}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(p.name)}${needsReview?` <span style="font-weight:600;font-size:11px;color:#f5a623;background:#f5a62318;padding:2px 7px;border-radius:8px;margin-inline-start:4px">${L==='fa'?'نیاز به نام‌گذاری':'needs a name'}</span>`:''}</div><div style="font-size:12px;color:var(--ink3)">${(L==='fa'?meta[1].fa:meta[1].en)} · ${p.radius||150}m${alertsOn?' · '+(L==='fa'?'هشدار روشن':'alerts on'):''}${inside.length?' · '+(L==='fa'?`${inside.length} نفر اینجا`:`${inside.length} here`):''}</div></div>
     <span style="color:var(--ink3);opacity:.4">›</span></div>`; });
   h+=`</div>`; return h;
 }
@@ -13291,6 +13305,9 @@ function famPlaceEditView(){
   const isNew=!famActivePlaceId; if(isNew&&!_famPlaceDraft)_famPlaceDraft={type:'home',name:'',radius:150,alerts:{enter:true,exit:true},quietHours:{enabled:false,start:'22:00',end:'07:00'}}; const p=isNew?_famPlaceDraft:(famPlacesMap()[famActivePlaceId]||{});
   let h=`<div style="padding:0 16px 90px">`;
   h+=`<label class="fl">${L==='fa'?'نوع':'Type'}</label><div class="pay-chips" style="flex-wrap:wrap">${FAM_PLACE_TYPES.map(t=>`<button class="pay-chip${(p.type||'home')===t[0]?' on':''}" data-fam="place-type" data-arg="${t[0]}">${t[2]} ${L==='fa'?t[1].fa:t[1].en}</button>`).join('')}</div>`;
+  if(!isNew && p._legacyDefaultName){
+    h+=`<div style="margin-top:12px;padding:12px;border-radius:12px;background:#f5a62318;border:1px solid #f5a62340;font-size:12.5px;color:var(--ink2)">${L==='fa'?'این نام هنگام ذخیره‌سازی به‌طور خودکار پیشنهاد شده بود. لطفاً بررسی کنید و در صورت نیاز آن را تغییر دهید — با ذخیره دوباره، این یادآوری حذف می‌شود.':'This name was auto-suggested when the place was first saved. Please review it and change it if needed — saving again will clear this reminder.'}</div>`;
+  }
   h+=`<label class="fl" style="margin-top:10px">${L==='fa'?'نام':'Name'}</label><input class="finput" id="fam-p-name" value="${esc(p.name||'')}" placeholder="${L==='fa'?'خانه':'Home'}">`;
   h+=`<div style="display:flex;gap:8px;margin-top:10px"><div style="flex:1"><label class="fl">${L==='fa'?'عرض':'Latitude'}</label><input class="finput" id="fam-p-lat" inputmode="decimal" value="${p.lat!=null?p.lat:''}"></div><div style="flex:1"><label class="fl">${L==='fa'?'طول':'Longitude'}</label><input class="finput" id="fam-p-lon" inputmode="decimal" value="${p.lon!=null?p.lon:''}"></div></div>`;
   h+=`<button class="btn btn-ghost" data-fam="place-usehere" style="width:100%;margin-top:8px">📍 ${L==='fa'?'استفاده از موقعیت این دستگاه':'Use this device location'}</button>`;
@@ -13707,6 +13724,7 @@ function famAction(act,arg,ev){
       const type=src.type||'home'; const alerts=src.alerts||{enter:true,exit:true}; const quietOn=!!(src.quietHours&&src.quietHours.enabled);
       let p; if(famActivePlaceId){ p=P[famActivePlaceId]; } else { const id=uid(); p=P[id]={id,createdAt:now()}; famActivePlaceId=id; famLog('place_added',{name:nm.trim()}); }
       p.type=type; p.name=nm.trim(); p.lat=lat; p.lon=lon; p.radius=rad; p.alerts={enter:!!alerts.enter,exit:!!alerts.exit}; p.quietHours={enabled:quietOn,start:qs,end:qe}; p.updatedAt=now(); p._cloudSeeded=true;
+      if(p._legacyDefaultName) delete p._legacyDefaultName;
       _famPlaceDraft=null; saveDB(); toast(L==='fa'?'مکان ذخیره شد':'Place saved'); go('places');
       try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.location.syncPlace(p).catch(()=>{ toast(L==='fa'?'ذخیره در ابر ناموفق بود (محلی ذخیره شد)':'Cloud sync failed (saved locally)'); }); } }catch(e){}
       return; }
