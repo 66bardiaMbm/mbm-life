@@ -1346,7 +1346,7 @@ body.rtl .trow-content{text-align:right}
 .fam-cat.on{background:#6e56f8;color:#fff}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
-.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
+.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 64px + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
 .fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cta-sos{color:#e0447a}
@@ -1728,7 +1728,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v310';
+const APP_VERSION='v311';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12876,7 +12876,8 @@ function famUpdateCameraPadding(sheetPx){
     const RIGHT_CONTROLS_W=64; // recenter/person/fullscreen/layers column
     const CTA_H=56;         // Check in / SOS row height
     const CTA_GAP=14;
-    const bottom = (sheetPx||0) + CTA_GAP + CTA_H + 10;
+    const SHEET_BOTTOM_MARGIN=64; // #fam-sheet's own margin-bottom, reserved for the bottom nav — must be included or the sheet's true top edge is undercounted
+    const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
     if(typeof MBMMap!=='undefined' && MBMMap.setPadding){
       MBMMap.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
     }
