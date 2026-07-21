@@ -1416,6 +1416,23 @@ body.rtl .trow-content{text-align:right}
   100%{opacity:.20;transform:scale(.82)}
 }
 @media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-glow{animation:none;opacity:.5} }
+/* Live-location PULSE ring — the actual outward "sonar ping" Life360 shows
+   on a genuinely live fix: a ring that expands from the avatar's own edge
+   out to ~2x its size while fading to nothing, then repeats. Distinct from
+   fam-pin-glow above (a static-ish soft under-halo) — this is the moving
+   signal that communicates "actively live" at a glance. Anchored on the
+   marker's real position, not the photo, so it reads as coming from the
+   location itself rather than just decorating the avatar. */
+.fam-pin .fam-pin-pulse{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;z-index:0;
+  border:2.5px solid #2fce6b;opacity:0;pointer-events:none;transform-origin:center;box-sizing:border-box}
+.fam-pin.tone-live .fam-pin-pulse{animation:fampinpulsering 2.4s cubic-bezier(.2,.7,.3,1) infinite}
+.fam-pin.tone-ok .fam-pin-pulse{animation:fampinpulsering 2.4s cubic-bezier(.2,.7,.3,1) infinite;border-color:#2fce6b}
+@keyframes fampinpulsering{
+  0%{opacity:.55;transform:scale(1)}
+  70%{opacity:0;transform:scale(2.1)}
+  100%{opacity:0;transform:scale(2.1)}
+}
+@media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-pulse, .fam-pin.tone-ok .fam-pin-pulse{animation:none;opacity:0} }
 /* Required layer order (bottom → top): callout bg (separate block above,
    z-index 0, own stacking context) → purple pointer tail → avatar photo →
    green live ring → activity badge → battery badge. */
@@ -1446,6 +1463,12 @@ body.rtl .trow-content{text-align:right}
 .fam-pin-activity svg{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2.4}
 .fam-pin-activity.tone-offline{background:#9aa1ad}
 .fam-pin-activity.tone-paused{background:#f5a623}
+/* Motion badges (driving/walking) get their own gentle pulse — distinct from
+   the live-location ring — so the badge itself reads as "in motion" at a
+   glance, matching the reference's animated car/walking icon. */
+.fam-pin-activity.tone-motion{animation:fambadgepulse 1.6s ease-in-out infinite}
+@keyframes fambadgepulse{0%{transform:scale(1)}50%{transform:scale(1.14)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){ .fam-pin-activity.tone-motion{animation:none} }
 /* Battery badge — bottom-left, small pill like the reference screenshots.
    Highest z-index: always drawn on top per the required layer order. */
 .fam-pin-batt{position:absolute;left:-4px;bottom:2px;display:flex;align-items:center;gap:2px;
@@ -1472,7 +1495,15 @@ body.rtl .trow-content{text-align:right}
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
 #fam-sheet.detent-2{height:calc(100% - 150px)}
-#fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);margin:12px auto 6px;flex:none}
+#fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);margin:0 auto;flex:none;
+  touch-action:none;cursor:grab;
+  /* Real hit-area is much bigger than the visible bar (Life360-style easy
+     grab): padding extends the touch target without changing the pill's
+     visual size, and the extra vertical padding is why we drop the old
+     12px/6px margins above/below in favor of this box. */
+  padding:14px 40px 16px;box-sizing:content-box;background-clip:content-box;
+  -webkit-user-select:none;user-select:none}
+#fam-sheet .fam-sheet-grab:active{cursor:grabbing}
 .fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
 .fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
 .fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
@@ -1721,7 +1752,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v303';
+const APP_VERSION='v304';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11626,7 +11657,7 @@ const MBMMap = (function(){
       window.__mbmMapWaiters=[];
     };
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+cbName+'&loading=async';
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=marker&callback='+cbName+'&loading=async';
     s.async=true;
     s.onerror=function(){
       _apiLoading=false; _loadErr='load-fail';
@@ -11803,7 +11834,8 @@ const MBMMap = (function(){
     // simply stationary away from a saved place (matches Life360 behaviour).
     let activityBadge='';
     if(meta.activityType && meta.activityType!=='stationary'){
-      const tone = (meta.activityType==='offline')?' tone-offline':(meta.activityType==='paused')?' tone-paused':'';
+      const tone = (meta.activityType==='offline')?' tone-offline':(meta.activityType==='paused')?' tone-paused'
+        :(meta.activityType==='driving'||meta.activityType==='walking')?' tone-motion':'';
       const icon=famActivityIcon(meta.activityType);
       if(icon) activityBadge=`<div class="fam-pin-activity${tone}"><svg viewBox="0 0 24 24">${icon}</svg></div>`;
     }
@@ -11823,7 +11855,7 @@ const MBMMap = (function(){
         (meta.calloutL2?`<div class="l2">${meta.calloutL2}</div>`:'')+
         `<div class="fam-callout-tip"></div></div>`;
     }
-    const pin=`<div class="fam-pin-glow"></div>`+head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`+activityBadge+battBadge;
+    const pin=`<div class="fam-pin-glow"></div><div class="fam-pin-pulse"></div>`+head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`+activityBadge+battBadge;
     return callout+`<div class="fam-pin">${pin}</div>`;
   }
   function makeEl(cls, html){ const d=document.createElement('div'); d.className=cls; d.innerHTML=html; return d; }
@@ -12347,6 +12379,12 @@ function nowISOSafe(){ try{ return new Date().toISOString(); }catch(e){ return n
 /* Build the exact callout/sheet text (L1/L2 + machine "since" ISO) from the
    derived activity/place state. THE ONLY place this text is composed, so the
    marker callout and the sheet body can never disagree. */
+function famSinceOrHereFor(since){
+  if(!since) return '';
+  const ms=Date.now()-Date.parse(since);
+  if(ms<5*60*1000) return `${L==='fa'?'از':'Since'} ${famAbsTime(since)}`;
+  return `${L==='fa'?'اینجا از':'Here for'} ${famDurSince(since)}`;
+}
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -12358,25 +12396,37 @@ function famComposeStatusText(m){
   }
   const s=m.state||{};
   if(d.activityType==='driving'){
-    const lines=famLocationLines(s.lat,s.lng,true);
+    const road=famBareRoadName(s.lat,s.lng);
     const since=d.activityStartedAt;
-    return { l1:(L==='fa'?`در حال رانندگی نزدیک ${lines.line1}`:`Driving near ${lines.line1}`),
-             l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'driving' };
+    const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
+    return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'driving' };
   }
   if(d.activityType==='walking'){
-    const lines=famLocationLines(s.lat,s.lng,true);
+    const road=famBareRoadName(s.lat,s.lng);
     const since=d.activityStartedAt;
-    return { l1:(L==='fa'?`در حال پیاده‌روی نزدیک ${lines.line1}`:`Walking near ${lines.line1}`),
-             l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
+    const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
+    return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
   }
   // stationary
   if(d.currentPlaceId && d.place){
     const since=d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null));
-    return { l1:(L==='fa'?`${d.place.name}`:`${d.place.name}`), l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'stationary', place:true };
+    const firstName=(m.name||'').split(' ')[0]||m.name||'';
+    // Life360 convention: generic place labels ("Home"/"Work"/"Place") read
+    // better possessive ("Mahsa's place"); a place someone named specifically
+    // (e.g. "Grandma's House") is already personal and shouldn't be re-wrapped.
+    const genericNames=['home','work','place','school','office','خانه','محل کار','مدرسه'];
+    const isGeneric=genericNames.indexOf((d.place.name||'').trim().toLowerCase())>=0;
+    const label=isGeneric
+      ? (L==='fa'?`محل ${firstName}`:`${firstName}'s place`)
+      : d.place.name;
+    return { l1:label, l2:famSinceOrHereFor(since), since, activityType:'stationary', place:true };
   }
   const lines=famLocationLines(s.lat,s.lng,false);
-  const since=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null);
-  return { l1:(L==='fa'?`نزدیک ${lines.line1}`:`Near ${lines.line1}`), l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'stationary' };
+  const since2=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null);
+  // NOTE: famLocationLines already formats line1 as "Near <road>" (or a bare
+  // place/suburb name) — do not prepend "Near"/"نزدیک" again here, that was
+  // producing "Near Near Pirie Street".
+  return { l1:lines.line1, l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary' };
 }
 function famLiveStatusLine(m){
   // honest header subtitle
@@ -12499,6 +12549,26 @@ function famLocationLines(lat,lng,moving){
   if(g) return { line1:g.line1, line2:g.line2, source:'geo' };
   return { line1:(L==='fa'?'موقعیت زنده':'Live location'), line2:'', source:'pending' };
 }
+/* Bare road/place name for composing INTO a template like "Driving near X" or
+   "Walking near X" — unlike famLocationLines(), this NEVER prepends its own
+   "Near"/"نزدیک" (famLocationLines does that for the standalone sheet case)
+   and NEVER substitutes a fake road name like "On the move" while moving —
+   it always requests/returns the real cached road name, or null if none is
+   cached yet, so the caller can fall back to something honest instead of
+   composing "Driving near On the move". */
+function famBareRoadName(lat,lng){
+  const place=famMatchSavedPlace(lat,lng);
+  if(place) return place.name;
+  const cached=FamGeo.get(lat,lng);
+  if(cached){
+    // cached.line1 may itself be prefixed ("Near <road>") by the geocoder's
+    // own no-house-number case — strip that prefix since we're building our
+    // own "Driving/Walking near X" template around it.
+    return cached.line1.replace(/^(Near |نزدیک )/,'');
+  }
+  FamGeo.request(lat,lng); // kick off a lookup for next time; don't block on it
+  return null;
+}
 
 function famMatchSavedPlace(lat,lng){
   if(lat==null||lng==null)return null;
@@ -12569,7 +12639,7 @@ function famLiveMemberDetail(m, isMe){
     // show contradictory place/activity text or a different "Since" time.
     const txt=famComposeStatusText(m);
     const since=txt.since;
-    const line1 = txt.l1;
+    const line1 = esc(txt.l1);
     const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
     h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px">
       <div style="flex:1;min-width:0">
@@ -12858,13 +12928,33 @@ function famSheetInitDrag(){
     syncSheetVar(heights[_famSheetDetent]);
   }
   apply(_famSheetDetent);
+  // Belt-and-braces: some Android WebViews only respect touch-action set
+  // directly on the element's inline style (CSS class alone can lose to a
+  // parent's touch-action under some WebView versions), and this is exactly
+  // what let the browser's native scroll gesture "steal" the touch before
+  // our touchmove handler could preventDefault() — the actual cause of the
+  // sheet feeling stuck/unresponsive instead of dragging smoothly.
+  grab.style.touchAction='none';
   let startY=0, startH=heights[_famSheetDetent], dragging=false;
-  const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; };
+  const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; if(e.cancelable)e.preventDefault(); };
   let _dragRaf=null;
-  const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt)); sheet.style.height=hgt+'px'; if(e.cancelable)e.preventDefault();
-    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt); try{ MBMMap.invalidate(); }catch(err){} }); } };
-  const onUp=()=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); MBMMap.invalidate(); };
-  grab.addEventListener('touchstart',onDown,{passive:true}); grab.addEventListener('touchmove',onMove,{passive:false}); grab.addEventListener('touchend',onUp);
+  const onMove=e=>{
+    if(!dragging)return;
+    if(e.cancelable)e.preventDefault();   // ALWAYS block native scroll during an active drag, not conditionally
+    const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt));
+    sheet.style.height=hgt+'px';
+    // Update the CTA position var every frame (cheap: one CSS var write) but
+    // DO NOT call MBMMap.invalidate() during drag — that triggers a Google
+    // Maps 'resize' recalculation, and firing it on every touchmove frame
+    // (up to 60/sec) is what made the whole drag gesture visibly stutter
+    // and feel stuck on real devices. Only resize the map once, on release.
+    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt); }); }
+  };
+  const onUp=(e)=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); try{ MBMMap.invalidate(); }catch(err){} };
+  grab.addEventListener('touchstart',onDown,{passive:false});
+  grab.addEventListener('touchmove',onMove,{passive:false});
+  grab.addEventListener('touchend',onUp,{passive:true});
+  grab.addEventListener('touchcancel',onUp,{passive:true});
   grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
 }
 /* ── Daily History — real captured route + real arrival/departure/check-in
@@ -12984,7 +13074,7 @@ function famHistMount(){
     window.__mbmGmapsLoading=true;
     window.__mbmGoogleMapsReady=function(){ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(true);}catch(e){}}); window.__mbmMapWaiters=[]; };
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__mbmGoogleMapsReady&loading=async';
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=marker&callback=__mbmGoogleMapsReady&loading=async';
     s.async=true;
     s.onerror=()=>{ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(false);}catch(e){}}); window.__mbmMapWaiters=[]; };
     document.head.appendChild(s);
