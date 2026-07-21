@@ -1331,26 +1331,23 @@ body.rtl .trow-content{text-align:right}
 /* .dark #fam-map background removed — see the light-mode rule's note above */
 /* ── Life360 Home header: circular white buttons, centered Family dropdown ── */
 .fam-hbtn{width:46px;height:46px;border-radius:50%;border:none;background:#fff;color:#3d2f8f;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.18);position:relative;flex:none}
-.dark .fam-hbtn{background:#2a2d38;color:#c9c2ff}
 .fam-hbtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-hbtn:active{transform:scale(.93)}
 .fam-htop-right{display:flex;gap:10px;flex:none}
-.fam-fampill{flex:1;max-width:230px;margin:0 auto;height:46px;border-radius:23px;border:none;background:#fff;color:var(--ink);
+.fam-fampill{flex:1;max-width:230px;margin:0 auto;height:46px;border-radius:23px;border:none;background:#fff;color:#2a2d38;
   display:flex;align-items:center;justify-content:center;gap:6px;font-weight:800;font-size:17px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.18)}
-.dark .fam-fampill{background:#2a2d38}
 .fam-fampill svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.5}
 .fam-fampill:active{transform:scale(.98)}
 .fam-hbadge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#ff4d4f;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--s0)}
 /* ── Category row (People / Pets / Keys / Places) in the sheet ── */
-.fam-cats{display:flex;gap:10px;padding:4px 0 14px}
+.fam-cats{display:flex;gap:10px;padding:4px 0 18px}
 .fam-cat{flex:1;height:44px;border-radius:22px;border:none;background:var(--s2);color:#6e56f8;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .fam-cat svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cat.on{background:#6e56f8;color:#fff}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
-.fam-map-cta{position:absolute;left:0;right:0;z-index:1150;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
+.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
 .fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
-.dark .fam-map-cta .fam-cta{background:#2a2d38;color:#c9c2ff}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cta-sos{color:#e0447a}
 .fam-cta:active{transform:scale(.96)}
@@ -1369,16 +1366,8 @@ body.rtl .trow-content{text-align:right}
 .fam-live-ctrls{position:absolute;right:14px;z-index:1150;display:flex;flex-direction:column;gap:12px}
 /* Reference-matched control buttons: larger dark rounded squares with soft
    shadow, like the Life360 map controls. */
-.fam-mapbtn{width:50px;height:50px;border-radius:50%;border:none;background:var(--s1);color:var(--ink);
+.fam-mapbtn{width:50px;height:50px;border-radius:50%;border:none;background:#fff;color:#4a4d57;
   display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
-.dark .fam-mapbtn{background:#2a2d38;color:#eef0f4}
-/* top-bar buttons: plain transparent icon buttons (reference has no filled
-   circle on back/refresh); the refresh uses the purple accent. */
-.fam-topbtn{width:44px;height:44px;border:none;background:transparent;color:var(--ink);
-  display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:12px}
-.fam-topbtn.accent{color:var(--brand,#6e56f8)}
-.fam-topbtn:active{background:var(--s2)}
-.fam-topbtn svg{width:24px;height:24px}
 .fam-mapbtn:active{transform:scale(.94)}
 .fam-mapbtn.on{background:#6e56f8;color:#fff}
 .fam-mapbtn svg{width:22px;height:22px}
@@ -1481,7 +1470,7 @@ body.rtl .trow-content{text-align:right}
    bottom of the flex column, never dependent on JS to be visible. The
    draggable behaviour is a progressive enhancement layered on top — if drag
    JS never runs, the panel still renders at its default (partial) height. ── */
-#fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:22px 22px 0 0;
+#fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:28px 28px 0 0;
   box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:64px;
   height:42vh;max-height:calc(100% - 150px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
@@ -1739,7 +1728,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v307';
+const APP_VERSION='v310';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10810,8 +10799,22 @@ const FamilyBackend = (function(){
        event (or their stay-start if no arrival event exists). Never app-open time. */
     function hereSince(uid){
       const evs=memberEvents(uid);
-      for(let i=evs.length-1;i>=0;i--){ if(evs[i].type==='arrival')return evs[i].at; if(evs[i].type==='departure')return null; }
-      const st=memberState(uid); return st?st.stayStart:null;
+      const st=memberState(uid);
+      for(let i=evs.length-1;i>=0;i--){
+        if(evs[i].type==='arrival') return evs[i].at;
+        if(evs[i].type==='departure'){
+          // A departure event only means "no since" if the member's CURRENT
+          // stay actually began before or at that departure — i.e. they
+          // haven't moved since leaving the place. If stayStart is newer
+          // than the departure, they've since arrived somewhere new (a
+          // non-saved-place location included) and that real arrival time
+          // must win — a stale departure from an unrelated earlier place
+          // must never suppress the current, unrelated location's Since.
+          if(st && st.stayStart && Date.parse(st.stayStart) > Date.parse(evs[i].at)) return st.stayStart;
+          return null;
+        }
+      }
+      return st?st.stayStart:null;
     }
 
     /* ── No-Show alerts (real): "notify me if <member> is NOT at <place> by
@@ -12132,7 +12135,10 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     });
     h+=`</div>`;
   } else if(members.length===1){
-    h+=`<div style="font-size:14px;color:var(--ink3);padding:6px 2px 14px;border-bottom:1px solid var(--b1);margin-bottom:6px">${L==='fa'?'شما تنها عضو خانواده هستید — با دعوت دیگران، آن‌ها اینجا ظاهر می‌شوند.':'You’re the only family member — invite others to see them here.'}</div>`;
+    // No persistent instructional banner here — Life360 goes straight to
+    // showing your own card. An invite prompt still belongs somewhere
+    // (the invite/switch flow), just not eating vertical space above the
+    // member's actual name/location every time the sheet opens.
   }
   if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
   return h;
