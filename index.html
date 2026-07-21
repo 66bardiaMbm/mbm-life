@@ -1504,6 +1504,16 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-dot.live{background:#2fce6b}.fam-dot.ok{background:#2fce6b}.fam-dot.warn{background:#f5a623}.fam-dot.muted{background:#9aa1ad}
 .fam-actionbar{display:flex;gap:10px;margin-top:16px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
 .fam-actionbar::-webkit-scrollbar{display:none}
+/* Driving event carousel (WeeklyReport) — same hidden-scrollbar convention
+   as every other horizontal row in this file, but with its own class since
+   the padding/snap values differ. Logical padding-inline-end (NOT a
+   physical padding-right) so the "peek" edge is always the direction
+   content overflows toward, correctly flipping in RTL instead of padding
+   the wrong side when the layout mirrors. */
+.drv-event-carousel{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scrollbar-width:none;padding:2px 0 6px;padding-inline-end:24px}
+.drv-event-carousel::-webkit-scrollbar{display:none}
+.drv-event-card{flex:0 0 118px;scroll-snap-align:start}
+.fam-actionbar::-webkit-scrollbar{display:none}
 .fam-actionbar .btn{flex:none;min-width:auto;padding:13px 18px;font-size:14px;border-radius:22px;background:var(--s1);
   border:1px solid var(--b1);box-shadow:0 2px 8px rgba(0,0,0,.06);white-space:nowrap;font-weight:700}
 .dark .fam-actionbar .btn{background:#2a2d38;border-color:transparent}
@@ -1751,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v339';
+const APP_VERSION='v344';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2619,6 +2629,9 @@ function _renderInner(){
   }
   if(screen==='module' && currentModule==='family' && famView==='drivingTrip' && typeof drvTripMount==='function'){
     drvTripMount();
+  }
+  if(screen==='module' && currentModule==='family' && famView==='drivingHistory' && typeof drvHistMount==='function'){
+    drvHistMount();
   }
 }
 let _resizeT=null;
@@ -11384,8 +11397,10 @@ const FamilyBackend = (function(){
       await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(()=>{});
     }
     async function pushEventRemote(ev){
-      if(!ready()||!isMember())return;
-      await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}).catch(()=>{});
+      if(!ready()||!isMember())return false;
+      let ok=true;
+      await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}).catch(()=>{ ok=false; });
+      return ok;
     }
     async function flushSamplesRemote(uid){
       if(!ready()||!isMember())return;
@@ -11394,18 +11409,30 @@ const FamilyBackend = (function(){
       const from=q.lastFlushIdx||0;
       const unsynced=q.samples.slice(from);
       if(!unsynced.length)return;
+      // Track how far we actually got — a network drop mid-flush must NOT
+      // silently advance lastFlushIdx past chunks that failed to write.
+      // Previously every chunk write was .catch(()=>{})'d and lastFlushIdx
+      // was unconditionally set to the end regardless of success, which
+      // meant a network outage during a drive would permanently lose those
+      // samples from the REMOTE (Firestore) copy — the local IDB copy is
+      // unaffected (written separately when the trip ends), but the synced
+      // copy used for cross-device viewing would have a silent gap.
       let i=from;
+      let lastSuccessfulEnd=from;
       while(i<q.samples.length){
         const chunkIdx=Math.floor(i/SAMPLES_PER_CHUNK);
         const chunkStart=chunkIdx*SAMPLES_PER_CHUNK;
         const chunkEnd=Math.min(chunkStart+SAMPLES_PER_CHUNK,q.samples.length);
         const chunkPts=q.samples.slice(chunkStart,chunkEnd);
+        let ok=true;
         await sampleChunkDoc(fid,q.sessionId,chunkIdx).set({
           sessionId:q.sessionId, chunkIndex:chunkIdx, points:chunkPts, updatedAt:nowISO()
-        },{merge:true}).catch(()=>{});
+        },{merge:true}).catch(()=>{ ok=false; });
+        if(!ok) break; // stop here — don't attempt later chunks out of order, retry from this point next cycle
+        lastSuccessfulEnd=chunkEnd;
         i=chunkEnd;
       }
-      q.lastFlushIdx=q.samples.length;
+      q.lastFlushIdx=lastSuccessfulEnd; // only advance past what actually synced
       try{persistDB();}catch(e){}
     }
 
@@ -11644,6 +11671,18 @@ const FamilyBackend = (function(){
 
       const rawType=classifyFix(sample.speedMps,prevSample,sample);
       const nowMs=Date.now();
+      // Diagnostic-only logging (console, no UI cost) for the trip-start
+      // decision path — this is the exact chain a "why didn't my drive get
+      // recorded" question needs: was speed even reported by the device,
+      // was it classified as driving, did the candidate reach the
+      // hysteresis threshold. Safe to leave in permanently — negligible
+      // cost, and it's the only way to diagnose this remotely.
+      if(!q.sessionId){
+        if(sample.speedMps==null){
+          console.debug('[FamilyDriving] fix with NO speed reported by device — classifyFix falling back to distance/time estimate',{uid,lat:sample.lat,lng:sample.lng,accuracyM:sample.accuracyM});
+        }
+        console.debug('[FamilyDriving] pre-trip fix',{uid,rawType,speedMps:sample.speedMps,candidateType:q.candidate&&q.candidate.type,candidateAgeMs:q.candidate?nowMs-q.candidate.since:null});
+      }
 
       if(!q.sessionId){
         if(rawType==='driving'){
@@ -11652,6 +11691,7 @@ const FamilyBackend = (function(){
             q.samples=[sample]; q.lastFlushIdx=0;
             const sess=startSession(uid,sample);
             q.sessionId=sess.id; q.candidate=null;
+            console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
           }
         } else {
           q.candidate=null;
@@ -11666,7 +11706,11 @@ const FamilyBackend = (function(){
 
       try{
         const evs=detectEvents(uid,sess.id,prevSample,sample);
-        evs.forEach(ev=>{ saveEvent(uid,ev); try{pushEventRemote(ev);}catch(e){} });
+        evs.forEach(ev=>{
+          ev._synced=false; // tracked locally so a failed push can be retried, not silently lost
+          saveEvent(uid,ev);
+          pushEventRemote(ev).then(ok=>{ if(ok){ ev._synced=true; saveEvent(uid,ev); } }).catch(()=>{});
+        });
       }catch(e){ console.error('[FamilyDriving.detectEvents]',e); }
 
       recomputeMetrics(uid,sess);
@@ -11694,7 +11738,16 @@ const FamilyBackend = (function(){
       const lastSync=sess._lastSyncAt||0;
       if(nowMs-lastSync>=SYNC_THROTTLE_MS){
         sess._lastSyncAt=nowMs;
-        try{ pushSessionRemote(sess); flushSamplesRemote(uid); }catch(e){}
+        try{
+          pushSessionRemote(sess);
+          flushSamplesRemote(uid);
+          // Retry any events from this session that failed to push earlier
+          // (e.g. during a network outage) — these are cheap, independent
+          // document writes, safe to retry as many times as needed.
+          eventsForSession(uid,sess.id).filter(ev=>ev._synced===false).forEach(ev=>{
+            pushEventRemote(ev).then(ok=>{ if(ok){ ev._synced=true; saveEvent(uid,ev); } }).catch(()=>{});
+          });
+        }catch(e){}
       }
       try{persistDB();}catch(e){}
     }
@@ -12381,6 +12434,7 @@ let _drvSelUid=null;
 let _drvHistDayOffset=0;     // 0 = today, -1 = yesterday, ... (Trip History day paging)
 let _drvActiveTripId=null;   // which trip Trip Detail is showing
 let _drvLiveTickTimer=null;  // keeps Live Driving's elapsed time/speed fresh
+let _drvHistTickTimer=null;  // keeps an in-progress trip's row fresh on the History list
 
 function drvUid(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -12441,10 +12495,14 @@ const DRV_EVENT_META={
 };
 function EventBadge(type,count){
   const meta=DRV_EVENT_META[type]||{icon:'●',label:{fa:type,en:type},color:'#8652FF'};
-  return `<div style="display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:20px;padding:8px 14px;flex:none">
-    <span style="font-size:16px">${meta.icon}</span>
-    <span style="font-weight:800;font-size:15px">${count}</span>
-    <span style="font-size:11px;color:var(--ink3);white-space:nowrap">${esc(meta.label[L]||meta.label.en)}</span>
+  // Fixed width card, hidden-scrollbar carousel (see .drv-event-carousel),
+  // logical padding for RTL. Label uses white-space:nowrap + text-overflow
+  // ellipsis rather than allowing wrap — a wrapped label would break the
+  // card's fixed height and make the row look uneven card-to-card.
+  return `<div class="drv-event-card" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:var(--s2);border-radius:16px;padding:12px 14px;overflow:hidden">
+    <span style="font-size:20px">${meta.icon}</span>
+    <span style="font-weight:800;font-size:20px;line-height:1">${count}</span>
+    <span style="font-size:11px;color:var(--ink3);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(meta.label[L]||meta.label.en)}</span>
   </div>`;
 }
 
@@ -12455,30 +12513,38 @@ function SpeedCard(label,value,sub){
 }
 function DistanceCard(label,value,sub){ return SpeedCard(label,value,sub); } // same visual card, different semantic name per requested component list
 
-/* ── DrivingStatsGrid: the 2x2 grid of Top Speed / Distance / Trips / Time ── */
+/* ── DrivingStatsGrid: the 2x2 grid of Top Speed / Distance / Trips / Time.
+   Values are shown consistently: if there are genuinely zero trips in
+   range, EVERY card reads as a real zero/dash pair for that unit (never a
+   mix of "—" on some cards and "0" on others for the same empty state —
+   that inconsistency was confusing since both mean the same thing here). ── */
 function DrivingStatsGrid(sessions){
   const totalTrips=sessions.length;
   const totalDistanceM=sessions.reduce((s,x)=>s+(x.distanceM||0),0);
   const totalDurationSec=sessions.reduce((s,x)=>s+(x.durationSec||0),0);
   const topSpeedMps=sessions.reduce((mx,x)=>Math.max(mx,x.maxSpeedMps||0),0);
+  const noData=totalTrips===0;
   let h=`<div class="fam-stat-grid">`;
-  h+=SpeedCard(L==='fa'?'بیشترین سرعت':'Top Speed', topSpeedMps>0?`${drvFmtSpeedKph(topSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`:'—');
-  h+=DistanceCard(L==='fa'?'مسافت کل':'Total Distance', totalDistanceM>0?`${drvFmtDistanceKm(totalDistanceM)} <span style="font-size:13px;font-weight:600">km</span>`:'—');
-  h+=SpeedCard(L==='fa'?'تعداد سفر':'Total Trips', totalTrips);
-  h+=SpeedCard(L==='fa'?'زمان رانندگی':'Driving Time', drvFmtDuration(totalDurationSec));
+  h+=SpeedCard(L==='fa'?'بیشترین سرعت':'Top Speed', noData?'—':`${drvFmtSpeedKph(topSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`);
+  h+=DistanceCard(L==='fa'?'مسافت کل':'Total Distance', noData?'—':`${drvFmtDistanceKm(totalDistanceM)} <span style="font-size:13px;font-weight:600">km</span>`);
+  h+=SpeedCard(L==='fa'?'تعداد سفر':'Total Trips', noData?'—':totalTrips);
+  h+=SpeedCard(L==='fa'?'زمان رانندگی':'Driving Time', noData?'—':drvFmtDuration(totalDurationSec));
   h+=`</div>`;
   return h;
 }
 
-/* ── WeeklyReport: event-count row (Speeding/Distracted-style cards) built
-   from REAL candidate events in range — counts only, never invented. ── */
+/* ── WeeklyReport: event-count carousel (Speeding/Distracted-style cards)
+   built from REAL candidate events in range — counts only, never invented.
+   Uses a proper horizontal carousel: fixed card width + left/right edge
+   padding so the "more cards to the right" affordance is visible rather
+   than the last card looking flush-cropped at the container boundary. ── */
 function WeeklyReport(uid,rangeStartISO,rangeEndISO){
   const eng=drvEngine(); if(!eng) return '';
   const events=eng.memberEventsInRange(uid,rangeStartISO,rangeEndISO);
   const counts={};
   events.forEach(e=>{ counts[e.type]=(counts[e.type]||0)+1; });
   const types=['HighSpeedThresholdEvent','RapidAccelCandidate','HardBrakeCandidate'];
-  let h=`<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px">`;
+  let h=`<div class="drv-event-carousel">`;
   types.forEach(t=>{ h+=EventBadge(t,counts[t]||0); });
   h+=`</div>`;
   return h;
@@ -12489,7 +12555,14 @@ function drvWeekBounds(offset){
   const now=new Date();
   const end=new Date(now.getTime()-offset*7*86400000);
   const start=new Date(end.getTime()-7*86400000);
-  return { startISO:start.toISOString(), endISO:end.toISOString(), label:offset===0?(L==='fa'?'این هفته':'This week'):(L==='fa'?'هفته قبل':'Last week') };
+  // Show the real date range, not just an echo of the toggle button text —
+  // this is both more informative and makes it unambiguous (to the person,
+  // and to anyone verifying) that changing the toggle changed real
+  // underlying data, not just a label.
+  const fmt=d=>d.toLocaleDateString(L==='fa'?'fa-IR':undefined,{month:'short',day:'numeric'});
+  const rangeLabel=`${fmt(start)} – ${fmt(end)}`;
+  const prefix=offset===0?(L==='fa'?'این هفته':'This week'):(L==='fa'?'هفته قبل':'Last week');
+  return { startISO:start.toISOString(), endISO:end.toISOString(), label:`${prefix} · ${rangeLabel}` };
 }
 
 function DrivingDashboard(){
@@ -12511,10 +12584,19 @@ function DrivingDashboard(){
 
   if(members.length>1) h+=DrivingMemberSelector(selUid);
 
-  h+=WeeklyReport(selUid,wk.startISO,wk.endISO);
-
-  const mySessions=eng.memberSessionsInRange(selUid,wk.startISO,wk.endISO);
-  h+=`<div style="margin-top:14px">`+DrivingStatsGrid(mySessions)+`</div>`;
+  const allTimeSessions=eng.memberSessions(selUid);
+  if(!allTimeSessions.length){
+    // Real empty state: this member has NEVER driven (all-time, not just
+    // this week) — showing a Weekly Report full of zero-badges here would
+    // look broken/unfinished rather than honestly empty.
+    h+=`<div class="hub-ph" style="margin-top:8px"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc;font-size:28px">${famIcon('car')}</div>
+      <div class="hub-ph-t">${L==='fa'?'هنوز سفری ثبت نشده':'No drives recorded yet'}</div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی رانندگی شروع شود، سفرها اینجا نمایش داده می‌شوند.':'Start driving and your trips will appear here.'}</div></div>`;
+  } else {
+    h+=WeeklyReport(selUid,wk.startISO,wk.endISO);
+    const mySessions=eng.memberSessionsInRange(selUid,wk.startISO,wk.endISO);
+    h+=`<div style="margin-top:14px">`+DrivingStatsGrid(mySessions)+`</div>`;
+  }
 
   h+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">${L==='fa'?'اعضا':'Members'}</div>`;
   if(!members.length){
@@ -12525,6 +12607,14 @@ function DrivingDashboard(){
       const dist=sess.reduce((s,x)=>s+(x.distanceM||0),0);
       const evs=eng.memberEventsInRange(m.uid,wk.startISO,wk.endISO);
       const isLive=!!eng.activeSession(m.uid);
+      // Last drive: real, ALL-TIME (not bounded to the selected week) so the
+      // member card stays informative even when "This week" has no trips
+      // but the person drove yesterday, last week, etc.
+      const allSessions=eng.memberSessions(m.uid);
+      const lastEnded=allSessions.slice().reverse().find(s=>s.status==='ended');
+      const lastDriveLabel=lastEnded
+        ? (L==='fa'?`آخرین رانندگی: ${esc(drvDayLabel(lastEnded.startedAt))} ${famAbsTime(lastEnded.startedAt)}`:`Last drive: ${esc(drvDayLabel(lastEnded.startedAt))} ${famAbsTime(lastEnded.startedAt)}`)
+        : (L==='fa'?'هنوز رانندگی ثبت نشده':'No drives recorded yet');
       const initial=esc((m.name||'?').trim().charAt(0).toUpperCase());
       const avatar=m.photo?`<img src="${esc(m.photo)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
         :`<div style="width:44px;height:44px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800">${initial}</div>`;
@@ -12533,8 +12623,9 @@ function DrivingDashboard(){
         ${avatar}
         <div style="flex:1;min-width:0">
           <div style="font-weight:800;font-size:15px">${esc(m.name)}${isLive?` <span style="font-size:10px;font-weight:800;color:#2FCE6B;background:#2FCE6B18;border-radius:8px;padding:2px 7px;vertical-align:middle">${L==='fa'?'در حال رانندگی':'DRIVING NOW'}</span>`:''}</div>
-          <div style="font-size:13px;color:var(--ink3);margin-top:2px">${sess.length?`${sess.length} ${L==='fa'?'سفر':'drives'} · ${drvFmtDistanceKm(dist)} ${L==='fa'?'کیلومتر':'kilometers'}`:(L==='fa'?'هنوز سفری نیست':'No drives yet')}</div>
-          ${evs.length?`<div style="font-size:12px;color:var(--ink3);margin-top:4px">${evs.length} ${L==='fa'?'رویداد':'events'}</div>`:''}
+          <div style="font-size:13px;color:var(--ink3);margin-top:2px">${sess.length?`${sess.length} ${L==='fa'?'سفر این هفته':'drives this week'} · ${drvFmtDistanceKm(dist)} ${L==='fa'?'کیلومتر':'km'}`:(L==='fa'?'بدون سفر در این هفته':'No drives this week')}</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:3px">${lastDriveLabel}</div>
+          ${evs.length?`<div style="font-size:12px;color:var(--ink3);margin-top:4px">${evs.length} ${L==='fa'?'رویداد این هفته':'events this week'}</div>`:''}
         </div>
         <span style="color:var(--ink3);opacity:.4">›</span>
         </button>
@@ -12554,44 +12645,15 @@ function DrivingDashboard(){
    duration/distance ticking from the ACTIVE session only. If the selected
    member isn't currently driving, this is stated plainly — never a fake
    "0 km/h" readout implying a live trip that doesn't exist. */
-function LiveDriving(){
-  const eng=drvEngine();
-  const uid=drvUid();
-  if(!eng||!uid){
-    return `<div id="drv-fixed-wrap"><div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>${famBottomNavHtml()}</div>`;
-  }
-  const active=eng.activeSession(uid);
-  let h=`<div id="drv-live-wrap" style="display:flex;flex-direction:column;height:100%">`;
-  h+=`<div style="display:flex;align-items:center;gap:10px;padding:16px 16px 8px">
-    <button data-fam="drv-back-dash" style="all:unset;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--ink)">${famIcon('back')}</button>
-    <div style="flex:1;min-width:0">`+DriverHeader(uid,{showSwitcher:true})+`</div>
-    <button data-fam="drv-open-history" style="all:unset;cursor:pointer;font-size:12px;font-weight:700;color:var(--fam-purple,#8652FF);white-space:nowrap">${L==='fa'?'تاریخچه':'History'}</button>
+/* Inner content of the "driving" state — factored out so BOTH the initial
+   render (LiveDriving) and the live in-place patch (drvLiveApply, called
+   every 2s) generate this from the exact same code, never two copies that
+   could drift apart. */
+function drvLiveBodyHtml(active,curSpeedKph,loc,lastSample){
+  let h=`<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px">
+    <span style="width:8px;height:8px;border-radius:50%;background:#2FCE6B;flex:none"></span>
+    <span style="font-size:12px;font-weight:800;color:#2FCE6B;letter-spacing:.04em">${L==='fa'?'در حال رانندگی':'DRIVING'}</span>
   </div>`;
-
-  if(!active){
-    h+=`<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:0 20px">
-      <div class="hub-ph" style="width:100%"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div>
-      <div class="hub-ph-t">${L==='fa'?'در حال حاضر رانندگی نمی‌کند':'Not currently driving'}</div>
-      <div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی حرکت با ماشین شروع شود، سرعت و مسیر اینجا نمایش داده می‌شود.':'Once driving starts, live speed and route will appear here.'}</div></div>
-    </div>`;
-    h+=famBottomNavHtml();
-    h+=`</div>`;
-    return h;
-  }
-
-  // Defensive fallback: sessionSamplesLive() should always have data for a
-  // genuinely active session, but if the live queue is ever momentarily
-  // empty (e.g. between ingestFix calls), fall back to the session's real
-  // average speed rather than showing a blank — still real data, just not
-  // the instantaneous reading.
-  const avgSpeedKph=drvFmtSpeedKph(active.avgSpeedMps);
-  const live=eng.sessionSamplesLive(uid,active.id);
-  const lastSample=(live&&live.length)?live[live.length-1]:null;
-  const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
-  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
-
-  h+=`<div id="drv-live-map" style="height:38vh;flex:none;position:relative;background:#dfe3ea"></div>`;
-  h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
   h+=`<div style="text-align:center;margin-bottom:18px">
     <div style="font-size:56px;font-weight:900;line-height:1">${curSpeedKph}</div>
     <div style="font-size:13px;color:var(--ink3);font-weight:700;letter-spacing:.05em">km/h</div>
@@ -12608,47 +12670,200 @@ function LiveDriving(){
     const acc=famAccuracyInfo(lastSample.accuracyM);
     h+=`<div style="text-align:center;font-size:11px;color:var(--ink3);margin-top:12px">GPS ${acc.text||''}</div>`;
   }
-  h+=`</div>`;
+  return h;
+}
+function LiveDriving(){
+  const eng=drvEngine();
+  const uid=drvUid();
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(!eng||!uid||!fb){
+    return `<div id="drv-fixed-wrap"><div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>${famBottomNavHtml()}</div>`;
+  }
+  const active=eng.activeSession(uid);
+  let h=`<div id="drv-live-wrap" style="display:flex;flex-direction:column;height:100%">`;
+  h+=`<div style="display:flex;align-items:center;gap:10px;padding:16px 16px 8px">
+    <button data-fam="drv-back-dash" style="all:unset;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--ink)">${famIcon('back')}</button>
+    <div style="flex:1;min-width:0">`+DriverHeader(uid,{showSwitcher:true})+`</div>
+    <button data-fam="drv-open-history" style="all:unset;cursor:pointer;font-size:12px;font-weight:700;color:var(--fam-purple,#8652FF);white-space:nowrap">${L==='fa'?'تاریخچه':'History'}</button>
+  </div>`;
+
+  if(active){
+    // ── STATE 1: Driving (active session) ──────────────────────────────
+    // Defensive fallback: sessionSamplesLive() should always have data for
+    // a genuinely active session, but if the live queue is ever
+    // momentarily empty (e.g. between ingestFix calls), fall back to the
+    // session's real average speed rather than showing a blank.
+    const avgSpeedKph=drvFmtSpeedKph(active.avgSpeedMps);
+    const live=eng.sessionSamplesLive(uid,active.id);
+    const lastSample=(live&&live.length)?live[live.length-1]:null;
+    const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
+    const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
+
+    h+=`<div id="drv-live-map" style="height:38vh;flex:none;position:relative;background:#dfe3ea"></div>`;
+    h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
+    h+=`<div id="drv-live-body">`+drvLiveBodyHtml(active,curSpeedKph,loc,lastSample)+`</div>`;
+    h+=`</div>`;
+    h+=famBottomNavHtml();
+    h+=`</div>`;
+    return h;
+  }
+
+  // No active session — distinguish STATE 2 (online, healthy location, just
+  // not driving) from STATE 3 (GPS/location genuinely unavailable) using
+  // the SAME real status the Location screen already relies on (never a
+  // fabricated distinction). 'moving','updating','recent','stopped' all
+  // mean the location pipeline is healthy — the member simply isn't
+  // driving right now. 'denied','unavailable','offline','stale','paused'
+  // mean we honestly don't have a trustworthy live signal for them.
+  const memberState=fb.location.memberState(uid);
+  const memberConsent=fb.location.memberConsent(uid);
+  const status=fb.location.deriveStatus(memberState,memberConsent);
+  const healthyStatuses=['moving','updating','recent','stopped'];
+  const isHealthy=healthyStatuses.indexOf(status)>=0;
+
+  if(isHealthy){
+    // ── STATE 2: Online but not driving ──────────────────────────────
+    const loc=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
+    const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
+    h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
+      <div style="width:64px;height:64px;border-radius:50%;background:#6e56f822;display:flex;align-items:center;justify-content:center;font-size:28px">${famIcon('car')}</div>
+      <div style="text-align:center">
+        <div style="font-size:17px;font-weight:800">${L==='fa'?'در حال حاضر رانندگی نمی‌کند':'Not currently driving'}</div>
+        ${loc?`<div style="font-size:13px;color:var(--ink3);margin-top:6px">${esc(loc.line1)}${loc.line2?', '+esc(loc.line2):''}</div>`:''}
+        ${lastUpdateLabel?`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'آخرین به‌روزرسانی':'Last updated'}: ${lastUpdateLabel}</div>`:''}
+      </div>
+      <div style="font-size:12px;color:var(--ink3);text-align:center;max-width:280px">${L==='fa'?'وقتی حرکت با ماشین شروع شود، سرعت و مسیر اینجا نمایش داده می‌شود.':'Once driving starts, live speed and route will appear here.'}</div>
+    </div>`;
+  } else {
+    // ── STATE 3: GPS/location unavailable ────────────────────────────
+    const meta=fb.location.statusMeta(status);
+    const lastKnown=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
+    const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
+    h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
+      <div style="width:64px;height:64px;border-radius:50%;background:#F5A62322;display:flex;align-items:center;justify-content:center;font-size:28px">📡</div>
+      <div style="text-align:center">
+        <div style="font-size:17px;font-weight:800">${esc(meta[L]||meta.en)}</div>
+        ${lastKnown?`<div style="font-size:13px;color:var(--ink3);margin-top:6px">${L==='fa'?'آخرین موقعیت شناخته‌شده':'Last known location'}: ${esc(lastKnown.line1)}</div>`:''}
+        ${lastUpdateLabel?`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'آخرین به‌روزرسانی':'Last updated'}: ${lastUpdateLabel}</div>`:(L==='fa'?'<div style="font-size:11px;color:var(--ink3);margin-top:4px">هیچ موقعیتی هنوز دریافت نشده</div>':'<div style="font-size:11px;color:var(--ink3);margin-top:4px">No location received yet</div>')}
+      </div>
+    </div>`;
+  }
   h+=famBottomNavHtml();
   h+=`</div>`;
   return h;
 }
 /* Mount the Live Driving map + a short poll timer to refresh speed/route
    while this screen is open (mirrors famLiveMount's tick pattern). */
+let _drvLiveMapSessionId=null; // which session's map is CURRENTLY mounted — used to decide init() vs setView()-only
 function drvLiveMount(){
-  const el=document.getElementById('drv-live-map');
   if(_drvLiveTickTimer){ clearInterval(_drvLiveTickTimer); _drvLiveTickTimer=null; }
-  if(!el) return; // not-driving state — nothing to mount
   const eng=drvEngine(); const uid=drvUid();
-  if(!eng||!uid) return;
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(!eng||!uid||!fb) return;
   const active=eng.activeSession(uid);
-  if(!active) return;
-  const samples=eng.sessionSamplesLive(uid,active.id)||[];
-  const last=samples.length?samples[samples.length-1]:null;
-  const center=last?[last.lat,last.lng]:(active.startLat!=null?[active.startLat,active.startLng]:[-42.88,147.32]);
-  MBMMap.init('drv-live-map', center);
-  MBMMap.invalidate();
-  if(samples.length>=2) MBMMap.drawRoute(samples);
-  if(last) MBMMap.setView([last.lat,last.lng]);
+  const el=document.getElementById('drv-live-map');
+  if(active && el){
+    const samples=eng.sessionSamplesLive(uid,active.id)||[];
+    const last=samples.length?samples[samples.length-1]:null;
+    const center=last?[last.lat,last.lng]:(active.startLat!=null?[active.startLat,active.startLng]:[-42.88,147.32]);
+    // Only call init() the FIRST time this session's map is mounted (a
+    // fresh navigation onto this screen, or a brand new session starting).
+    // Repeated init() calls on every tick were the actual bug: MBMMap's
+    // _doInit tears down and rebuilds the Google Map whenever the DOM
+    // element reference changes, and since the old code called render()
+    // every 2s (replacing #screen's innerHTML), the container element WAS
+    // a new node every tick — so the map was being destroyed and rebuilt
+    // from scratch every 2 seconds, which is what looked like "map doesn't
+    // move" and "content jumps/profile goes under the panel" (the whole
+    // screen was being regenerated, not just the map).
+    if(_drvLiveMapSessionId!==active.id){
+      MBMMap.init('drv-live-map', center);
+      MBMMap.invalidate();
+      _drvLiveMapSessionId=active.id;
+    }
+    if(samples.length>=2) MBMMap.drawRoute(samples);
+    if(last) MBMMap.setView([last.lat,last.lng]);
+  } else {
+    _drvLiveMapSessionId=null; // no active session — next time one starts, mount fresh
+    // Seed the health-status baseline NOW (at mount time) so drvLiveApply's
+    // first tick compares against the actual current status, not a stale
+    // null that would falsely look like a change and force an extra render.
+    const memberState=fb.location.memberState(uid);
+    const memberConsent=fb.location.memberConsent(uid);
+    const status=fb.location.deriveStatus(memberState,memberConsent);
+    _drvLiveWasHealthy=['moving','updating','recent','stopped'].indexOf(status)>=0;
+  }
+  // The poll timer must run REGARDLESS of whether a session is currently
+  // active, so it can detect the not-driving → driving transition (and
+  // vice versa) — but it now calls drvLiveApply() (an in-place patch),
+  // NEVER the full render(), while remaining on this exact same state.
+  // render() is only used for a genuine STATE change (active session
+  // appearing/disappearing, or the health status changing) — see
+  // drvLiveApply below for exactly when it falls back to a full render.
   _drvLiveTickTimer=setInterval(()=>{
     if(!(screen==='module'&&currentModule==='family'&&famView==='drivingLive')){ clearInterval(_drvLiveTickTimer); _drvLiveTickTimer=null; return; }
-    const stillActive=eng.activeSession(uid);
-    if(!stillActive){ render(); return; } // trip ended — re-render to show the not-driving state
-    render();
+    drvLiveApply();
   }, 2000);
 }
+/* In-place patch for the Live Driving screen — called every tick instead
+   of render(). Only touches the specific DOM nodes that actually change
+   (speed, address, stat grid, map marker/route), and falls back to a full
+   render() ONLY when the screen's overall STATE has changed (driving
+   started/ended, or the online/offline status flipped) since those cases
+   genuinely need different markup, not just updated numbers. */
+function drvLiveApply(){
+  const eng=drvEngine(); const uid=drvUid();
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(!eng||!uid||!fb){ render(); return; }
+  const active=eng.activeSession(uid);
+  const bodyEl=document.getElementById('drv-live-body');
+  const wasDriving=_drvLiveMapSessionId!=null;
+  const isDrivingNow=!!active;
+  if(wasDriving!==isDrivingNow){ render(); return; } // state actually changed — full render needed
+  if(!active){
+    // Not driving — the "online vs unavailable" state could still have
+    // flipped (e.g. GPS permission changed); that's infrequent enough and
+    // visually distinct enough that a full render is fine here, it just
+    // needs to happen when the STATUS category changes, not every tick.
+    const memberState=fb.location.memberState(uid);
+    const memberConsent=fb.location.memberConsent(uid);
+    const status=fb.location.deriveStatus(memberState,memberConsent);
+    const healthyStatuses=['moving','updating','recent','stopped'];
+    const isHealthy=healthyStatuses.indexOf(status)>=0;
+    if(isHealthy!==_drvLiveWasHealthy){ _drvLiveWasHealthy=isHealthy; render(); return; }
+    return; // same not-driving state — nothing to patch (no live numbers shown here)
+  }
+  // Driving: patch the live pieces in place.
+  const avgSpeedKph=drvFmtSpeedKph(active.avgSpeedMps);
+  const live=eng.sessionSamplesLive(uid,active.id);
+  const lastSample=(live&&live.length)?live[live.length-1]:null;
+  const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
+  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
+  if(bodyEl) bodyEl.innerHTML=drvLiveBodyHtml(active,curSpeedKph,loc,lastSample);
+  if(typeof bindFamily==='function') bindFamily(); // rebind any data-fam handlers inside the freshly-written node
+  // Map: update marker/route WITHOUT re-initializing (see drvLiveMount).
+  const samples=live||[];
+  const last=samples.length?samples[samples.length-1]:null;
+  if(samples.length>=2) MBMMap.drawRoute(samples);
+  if(last) MBMMap.setView([last.lat,last.lng]);
+}
+let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
 
 /* ── TripCard: one trip row in the History list — real distance/duration/
    time, top speed if notable, tap opens Trip Detail. ── */
 function TripCard(sess){
+  const isActive=sess.status==='active';
   const startTime=famAbsTime(sess.startedAt);
   const endTime=sess.endedAt?famAbsTime(sess.endedAt):(L==='fa'?'در حال انجام':'In progress');
   const topKph=drvFmtSpeedKph(sess.maxSpeedMps);
-  return `<button data-fam="drv-open-trip" data-arg="${esc(sess.id)}" style="width:100%;text-align:start;display:flex;align-items:center;gap:12px;border:1px solid var(--b1);background:var(--s1);border-radius:14px;padding:14px;margin-bottom:8px;cursor:pointer;color:var(--ink)">
-    <div style="width:40px;height:40px;border-radius:11px;background:#8652FF18;color:#8652FF;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none">${famIcon('car')}</div>
+  return `<button data-fam="drv-open-trip" data-arg="${esc(sess.id)}" style="width:100%;text-align:start;display:flex;align-items:center;gap:12px;border:1px solid ${isActive?'#2FCE6B55':'var(--b1)'};background:var(--s1);border-radius:14px;padding:14px;margin-bottom:8px;cursor:pointer;color:var(--ink)">
+    <div style="width:40px;height:40px;border-radius:11px;background:${isActive?'#2FCE6B18':'#8652FF18'};color:${isActive?'#2FCE6B':'#8652FF'};display:flex;align-items:center;justify-content:center;font-size:18px;flex:none">${famIcon('car')}</div>
     <div style="flex:1;min-width:0">
-      <div style="font-weight:800;font-size:14px">${startTime} – ${endTime}</div>
-      <div style="font-size:12px;color:var(--ink3);margin-top:2px">${drvFmtDistanceKm(sess.distanceM)} km · ${drvFmtDuration(sess.durationSec)}${sess.maxSpeedMps>0?` · ${L==='fa'?'حداکثر':'max'} ${topKph} km/h`:''}</div>
+      <div style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
+        ${isActive?`<span style="width:7px;height:7px;border-radius:50%;background:#2FCE6B;flex:none"></span>`:''}
+        <span style="overflow:hidden;text-overflow:ellipsis">${startTime} – ${endTime}</span>
+      </div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${drvFmtDistanceKm(sess.distanceM)} km · ${drvFmtDuration(sess.durationSec)}${sess.maxSpeedMps>0?` · ${L==='fa'?'حداکثر':'max'} ${topKph} km/h`:''}</div>
     </div>
     ${sess.eventCount>0?`<span style="font-size:11px;font-weight:700;color:#F5A623;background:#F5A62318;border-radius:10px;padding:3px 8px;flex:none">${sess.eventCount}</span>`:''}
     <span style="color:var(--ink3);opacity:.4">›</span>
@@ -12683,6 +12898,23 @@ function TripHistoryList(){
   });
   h+=`</div>`;
   return h;
+}
+/* An in-progress trip's row (distance/duration/"In progress" label) would
+   otherwise freeze at whatever it was when this screen rendered — this
+   screen has no other refresh mechanism. Poll ONLY while a genuinely
+   active session exists in the list; a history of only completed trips
+   never needs a timer at all (found by applying the same live-refresh
+   scrutiny used for Live Driving to this screen too). */
+function drvHistMount(){
+  if(_drvHistTickTimer){ clearInterval(_drvHistTickTimer); _drvHistTickTimer=null; }
+  const eng=drvEngine(); const uid=drvUid();
+  if(!eng||!uid) return;
+  const hasActive=eng.memberSessions(uid).some(s=>s.status==='active');
+  if(!hasActive) return; // nothing changing — no timer needed
+  _drvHistTickTimer=setInterval(()=>{
+    if(!(screen==='module'&&currentModule==='family'&&famView==='drivingHistory')){ clearInterval(_drvHistTickTimer); _drvHistTickTimer=null; return; }
+    render();
+  }, 3000);
 }
 
 /* ── TripTimeline: renders the Engine's real timeline segments (start/
