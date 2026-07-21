@@ -1728,7 +1728,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v311';
+const APP_VERSION='v312';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2112,6 +2112,47 @@ function ensureShopStoreDedup(){
   if(DB.meta.shopStoreDedupV1)return;
   DB.meta.shopStoreDedupV1=true;
   saveDB();
+}
+
+/* ── One-time migration: neutralize auto-generated "X's place" names ──
+   An earlier version of the "Save Place" flow pre-filled new places with
+   "<Member's first name>'s place" / "محل <نام عضو>" as a DEFAULT name,
+   before the user had a chance to type their own. That fabricated string
+   then got saved as real place data and has been showing up ever since —
+   correctly, from the app's point of view, since it's just displaying the
+   saved name — but it was never a real, deliberately-chosen place name.
+   This migration finds any saved place whose name STILL EXACTLY matches
+   that old generated pattern (for ANY family member, current or since
+   removed) and clears it back to an empty name, so the place shows the
+   real "Near <address>" line instead until the user names it themselves.
+   A real place a user happened to type with that exact wording is
+   statistically negligible, so this is safe to run unconditionally once. */
+function ensurePlaceholderPlaceNamesCleared(){
+  if(DB.meta.placeholderPlaceNameFixV1)return;
+  DB.meta.placeholderPlaceNameFixV1=true;
+  try{
+    const places=(typeof famPlacesMap==='function')?famPlacesMap():null;
+    if(places){
+      // Build the set of "possessive place" names that could have been
+      // auto-generated for any member this family has ever had, in both
+      // supported languages, so a member later removed doesn't leave an
+      // unmatched placeholder behind.
+      const namesInPlay=new Set();
+      try{
+        const st=(typeof FamilyBackend!=='undefined'&&FamilyBackend.getState)?FamilyBackend.getState():null;
+        const members=st&&st.members?Object.values(st.members):[];
+        members.forEach(m=>{ if(m&&m.name){ namesInPlay.add(m.name+'’s place'); namesInPlay.add(m.name+"'s place"); namesInPlay.add('محل '+m.name); } });
+      }catch(e){}
+      let changed=false;
+      Object.values(places).forEach(p=>{
+        if(p && typeof p.name==='string' && namesInPlay.has(p.name.trim())){
+          p.name='';
+          changed=true;
+        }
+      });
+      if(changed) saveDB();
+    }
+  }catch(e){}
 }
 
 /* ── Helpers ── */
@@ -12071,6 +12112,7 @@ function famDurSince(iso){
 function famLiveMembers(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(!fb||!fb.ready()||!fb.isMember())return [];
+  try{ if(typeof ensurePlaceholderPlaceNamesCleared==='function') ensurePlaceholderPlaceNamesCleared(); }catch(e){}
   const st=fb.getState(); const loc=fb.location;
   return Object.keys(st.members||{}).map(uid=>{
     const m=st.members[uid]||{};
@@ -12401,7 +12443,7 @@ function famComposeStatusText(m){
     return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
   }
   // stationary
-  if(d.currentPlaceId && d.place){
+  if(d.currentPlaceId && d.place && (d.place.name||'').trim()){
     const since=d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null));
     // Show the real saved place name as-is — Life360 never wraps this in a
     // possessive "X's place" invention; it shows exactly what the place is
