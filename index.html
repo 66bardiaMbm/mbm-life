@@ -1348,7 +1348,7 @@ body.rtl .trow-content{text-align:right}
 .fam-cat.on{background:#6e56f8;color:#fff}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
-.fam-map-cta{position:absolute;left:0;right:0;z-index:1150;display:flex;gap:14px;justify-content:center;bottom:calc(42vh + 14px);pointer-events:none}
+.fam-map-cta{position:absolute;left:0;right:0;z-index:1150;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
 .fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
 .dark .fam-map-cta .fam-cta{background:#2a2d38;color:#c9c2ff}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
@@ -1383,8 +1383,25 @@ body.rtl .trow-content{text-align:right}
 .fam-mapbtn.on{background:#6e56f8;color:#fff}
 .fam-mapbtn svg{width:22px;height:22px}
 /* avatar pins — Life360-style: circular photo, colored status ring, and a
-   small pointed tail (not a big diamond). Sized to the reference. */
-.fam-pin{position:relative;width:64px;height:74px;cursor:pointer}
+   small pointed tail (not a big diamond). Sized to the reference. Layout is
+   a single positioned stack (not a separate map marker) so the callout can
+   never visually detach from its avatar: pin-wrap holds the callout ABOVE
+   the pin, both anchored to the same lat/lng point via one marker element. */
+.fam-pin-wrap{position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer}
+/* Live callout: real Life360-style "<Name/place>" + "Since HH:MM" card that
+   sits directly above the avatar and points down at it. Rendered as part of
+   the SAME marker element as the avatar (never a second independent marker),
+   so it can never drift apart from the avatar it belongs to. */
+.fam-callout{position:relative;background:#fff;border-radius:14px;padding:7px 13px 8px;margin-bottom:8px;
+  box-shadow:0 3px 12px rgba(0,0,0,.28);white-space:nowrap;max-width:220px;text-align:center;z-index:0}
+.dark .fam-callout{background:#23232e}
+.fam-callout .l1{font-size:12.5px;font-weight:800;color:#1a1a24;line-height:1.25;overflow:hidden;text-overflow:ellipsis}
+.dark .fam-callout .l1{color:#eef0f4}
+.fam-callout .l2{font-size:11px;color:#8a8f9a;line-height:1.2;margin-top:1px}
+.fam-callout-tip{position:absolute;left:50%;bottom:-5px;width:11px;height:11px;background:#fff;
+  transform:translateX(-50%) rotate(45deg);z-index:0}
+.dark .fam-callout-tip{background:#23232e}
+.fam-pin{position:relative;width:64px;height:66px;cursor:pointer}
 /* Live-presence glow: a soft green/cyan halo behind the avatar that gently
    pulses (scale + opacity) to signal a fresh, live location — Life360-style.
    Only rendered for tone-live (a genuinely recent fix), and honours reduced-
@@ -1399,23 +1416,47 @@ body.rtl .trow-content{text-align:right}
   100%{opacity:.20;transform:scale(.82)}
 }
 @media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-glow{animation:none;opacity:.5} }
+/* Required layer order (bottom → top): callout bg (separate block above,
+   z-index 0, own stacking context) → purple pointer tail → avatar photo →
+   green live ring → activity badge → battery badge. */
 .fam-pin .fam-pin-av{position:absolute;top:0;left:2px;width:60px;height:60px;border-radius:50%;
   background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
   font-weight:800;color:#fff;font-size:21px;box-shadow:0 3px 10px rgba(0,0,0,.35);z-index:2}
-.fam-pin .fam-pin-ring{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;border:4px solid #2fce6b;z-index:1;box-sizing:border-box}
+.fam-pin .fam-pin-ring{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;border:4px solid #2fce6b;z-index:3;box-sizing:border-box;pointer-events:none}
 .fam-pin.tone-live .fam-pin-ring{border-color:#2fce6b}
 .fam-pin.tone-ok .fam-pin-ring{border-color:#2fce6b}
 .fam-pin.tone-warn .fam-pin-ring{border-color:#f5a623}
 .fam-pin.tone-muted{opacity:.7}.fam-pin.tone-muted .fam-pin-ring{border-color:#9aa1ad}
 .fam-pin.sel .fam-pin-ring{border-width:5px}
 /* pointed tail: a rotated square whose top is tucked under the avatar so only
-   a downward triangle shows — reads as a clean pin point, not a floating diamond */
-.fam-pin .fam-pin-tip{position:absolute;left:50%;top:52px;width:16px;height:16px;background:#fff;
+   a downward triangle shows — reads as a clean pin point, not a floating diamond.
+   This IS the "purple location pointer" — purple when selected, status-tone otherwise. */
+.fam-pin .fam-pin-tip{position:absolute;left:50%;top:52px;width:16px;height:16px;background:#6e56f8;
   transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 4px rgba(0,0,0,.18);z-index:1;border-radius:2px}
 .fam-pin.tone-live .fam-pin-tip,.fam-pin.tone-ok .fam-pin-tip{background:#2fce6b}
 .fam-pin.tone-warn .fam-pin-tip{background:#f5a623}
 .fam-pin.tone-muted .fam-pin-tip{background:#9aa1ad}
 .fam-pin.sel .fam-pin-tip{background:#6e56f8}
+/* Activity badge — top-right of avatar. Above the ring (z-index 4) so it
+   never hides under it, but below the battery badge per spec order. */
+.fam-pin-activity{position:absolute;top:-6px;right:-6px;width:26px;height:26px;border-radius:50%;
+  background:#6e56f8;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.3);
+  border:2px solid #fff;z-index:4}
+.dark .fam-pin-activity{border-color:#1b1c22}
+.fam-pin-activity svg{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2.4}
+.fam-pin-activity.tone-offline{background:#9aa1ad}
+.fam-pin-activity.tone-paused{background:#f5a623}
+/* Battery badge — bottom-left, small pill like the reference screenshots.
+   Highest z-index: always drawn on top per the required layer order. */
+.fam-pin-batt{position:absolute;left:-4px;bottom:2px;display:flex;align-items:center;gap:2px;
+  background:rgba(20,20,28,.88);border-radius:8px;padding:1px 5px 1px 3px;z-index:5;pointer-events:none}
+.fam-pin-batt .ic{width:13px;height:7px;border:1.4px solid #fff;border-radius:2px;position:relative;display:flex;align-items:center;padding:1px}
+.fam-pin-batt .ic:after{content:'';position:absolute;right:-3px;top:1.5px;width:1.6px;height:3px;background:#fff;border-radius:0 1px 1px 0}
+.fam-pin-batt .ic i{display:block;height:100%;border-radius:1px}
+.fam-pin-batt.lvl-high .ic i{background:#2fce6b}
+.fam-pin-batt.lvl-mid .ic i{background:#f5a623}
+.fam-pin-batt.lvl-low .ic i{background:#e5484d}
+.fam-pin-batt .txt{font-size:9px;font-weight:700;color:#fff}
 @keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(47,206,107,.5)}70%{box-shadow:0 0 0 12px rgba(47,206,107,0)}100%{box-shadow:0 0 0 0 rgba(47,206,107,0)}}
 @keyframes famspin{to{transform:rotate(360deg)}}
 .fam-pin-tip{position:absolute;left:50%;bottom:8px;width:12px;height:12px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
@@ -1680,7 +1721,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v302';
+const APP_VERSION='v303';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11699,6 +11740,15 @@ const MBMMap = (function(){
 
   function setView(center,zoom){ if(_map)try{ _map.panTo({lat:center[0],lng:center[1]}); if(zoom!=null)_map.setZoom(zoom); }catch(e){} }
   function panTo(center){ if(_map)try{ _map.panTo({lat:center[0],lng:center[1]}); }catch(e){} }
+  // Keeps the selected member visible under the header, right-side controls,
+  // and the Check-in/SOS + sheet stack. Google Maps padding shifts the visual
+  // center, NOT the marker's real geo position — the pointer/callout math
+  // below (screen-anchor) already accounts for this via CSS, so padding here
+  // is purely for panTo/fitAll framing.
+  function setPadding(pad){
+    if(!_map) return;
+    try{ _map.setOptions({ padding: { top:pad.top||0, right:pad.right||0, bottom:pad.bottom||0, left:pad.left||0 } }); }catch(e){}
+  }
   function fitAll(latlngs){
     if(!_map||!available()||!latlngs||!latlngs.length) return;
     try{
@@ -11732,13 +11782,49 @@ const MBMMap = (function(){
     },16);
     _markerPos[uid]=to;
   }
+  function famActivityIcon(kind){
+    const I={
+      driving:'<path d="M5 17h14M5 17a2 2 0 104 0M15 17a2 2 0 104 0M5 17l1.5-5.5A2 2 0 018.4 10h7.2a2 2 0 011.9 1.5L19 17M7 13h10"/>',
+      walking:'<circle cx="13" cy="4" r="2"/><path d="M13 6l-2 4 3 2-1 6M11 10l-4 2 1 6M9 12l-3 1"/>',
+      place:'<path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+      offline:'<path d="M1 1l22 22M16.7 16.7A10 10 0 003 12M8.5 8.5a10 10 0 0111.9 3.2M12 20h.01"/>',
+      paused:'<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>'
+    };
+    return I[kind]||'';
+  }
+  function famBattLevel(pct){ if(pct==null)return null; if(pct<=20)return 'low'; if(pct<=50)return 'mid'; return 'high'; }
   function pinHtml(meta){
     const av = meta.photo
       ? `<div class="fam-pin-av" style="background-image:url('${(''+meta.photo).replace(/'/g,'')}')"></div>`
       : `<div class="fam-pin-av" style="background:${meta.color||'#6e56f8'}">${(meta.initial||'?')}</div>`;
     const head = (meta.moving && meta.heading!=null)
       ? `<div class="fam-pin-head" style="transform:rotate(${Math.round(meta.heading)}deg)"></div>` : '';
-    return `<div class="fam-pin-glow"></div>`+head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`;
+    // Activity badge: driving/walking/place/offline/paused, or none while
+    // simply stationary away from a saved place (matches Life360 behaviour).
+    let activityBadge='';
+    if(meta.activityType && meta.activityType!=='stationary'){
+      const tone = (meta.activityType==='offline')?' tone-offline':(meta.activityType==='paused')?' tone-paused':'';
+      const icon=famActivityIcon(meta.activityType);
+      if(icon) activityBadge=`<div class="fam-pin-activity${tone}"><svg viewBox="0 0 24 24">${icon}</svg></div>`;
+    }
+    // Battery badge: only rendered when we have a real reported value —
+    // never fabricated. Colour reflects the live percentage.
+    let battBadge='';
+    if(meta.battery!=null){
+      const lvl=famBattLevel(meta.battery);
+      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="ic"><i style="width:${Math.max(8,Math.round(meta.battery))}%"></i></span><span class="txt">${Math.round(meta.battery)}%</span></div>`;
+    }
+    // Callout: same element as the avatar/pin, so it can never visually
+    // detach — this replaces the old separate __arrived map marker that
+    // produced the disconnected white bubble seen in earlier builds.
+    let callout='';
+    if(meta.calloutL1){
+      callout=`<div class="fam-callout"><div class="l1">${meta.calloutL1}</div>`+
+        (meta.calloutL2?`<div class="l2">${meta.calloutL2}</div>`:'')+
+        `<div class="fam-callout-tip"></div></div>`;
+    }
+    const pin=`<div class="fam-pin-glow"></div>`+head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`+activityBadge+battBadge;
+    return callout+`<div class="fam-pin">${pin}</div>`;
   }
   function makeEl(cls, html){ const d=document.createElement('div'); d.className=cls; d.innerHTML=html; return d; }
 
@@ -11763,7 +11849,12 @@ const MBMMap = (function(){
     ov.position={lat:latlng[0],lng:latlng[1]};
     ov.onAdd=function(){ this.getPanes().overlayMouseTarget.appendChild(el); };
     ov.draw=function(){ const proj=this.getProjection(); if(!proj)return; const p=proj.fromLatLngToDivPixel(new g.LatLng(this.position.lat,this.position.lng));
-      el.style.position='absolute'; el.style.left=(p.x-32)+'px'; el.style.top=(p.y-64)+'px'; };
+      // Anchor the BOTTOM of the element (the pin's tip) at the geo point,
+      // not a fixed offset from the top — the wrapper's height varies with
+      // whether a callout is currently shown, so a fixed top-offset would
+      // shift the avatar off its real coordinate whenever the callout
+      // appears/disappears.
+      el.style.position='absolute'; el.style.left=(p.x-32)+'px'; el.style.top=(p.y-el.offsetHeight+8)+'px'; };
     ov.onRemove=function(){ if(el.parentNode) el.parentNode.removeChild(el); };
     Object.defineProperty(ov,'position',{ get(){return this._pos;}, set(v){ this._pos=v; if(this.draw)this.draw(); } });
     ov.position={lat:latlng[0],lng:latlng[1]};
@@ -11774,20 +11865,32 @@ const MBMMap = (function(){
   function setMarker(uid, latlng, meta, selected, tone, onClick){
     if(!_map) return;
     meta=meta||{};
-    const cls='fam-pin'+(selected?' sel':'')+(tone?(' tone-'+tone):'');
+    // Selection/tone classes live on the OUTER wrapper's inner .fam-pin div,
+    // set via a wrapperCls we apply after innerHTML — pinHtml always returns
+    // callout+pin as one unit rooted at fam-pin-wrap.
+    const pinCls='fam-pin'+(selected?' sel':'')+(tone?(' tone-'+tone):'');
     const prev=_markerMeta[uid]||{};
-    const changed = prev.cls!==cls || prev.moving!==meta.moving || prev.heading!==meta.heading || prev.photo!==meta.photo || prev.initial!==meta.initial || prev.color!==meta.color;
+    const changed = prev.pinCls!==pinCls || prev.moving!==meta.moving || prev.heading!==meta.heading
+      || prev.photo!==meta.photo || prev.initial!==meta.initial || prev.color!==meta.color
+      || prev.activityType!==meta.activityType || prev.battery!==meta.battery
+      || prev.calloutL1!==meta.calloutL1 || prev.calloutL2!==meta.calloutL2;
+    function applyHtml(el){
+      el.innerHTML=pinHtml(meta);
+      const inner=el.querySelector('.fam-pin'); if(inner) inner.className=pinCls;
+      if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
+    }
     if(_markers[uid]){
-      if(changed){ const el=_markers[uid].content||_markers[uid]._el; if(el){ el.className=cls; el.innerHTML=pinHtml(meta); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; } } }
+      if(changed){ const el=_markers[uid].content||_markers[uid]._el; if(el){ applyHtml(el); } }
       animateMarker(uid, latlng); // GPS moves the marker on every valid fix — no Firestore wait
     } else {
-      const el=makeEl(cls, pinHtml(meta));
-      if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
+      const el=document.createElement('div'); el.className='fam-pin-wrap';
+      applyHtml(el);
       const mk=makeMapMarker(uid, latlng, el);
       mk._el=el;
       _markers[uid]=mk; _markerPos[uid]=latlng;
     }
-    _markerMeta[uid]={cls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color};
+    _markerMeta[uid]={pinCls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color,
+      activityType:meta.activityType,battery:meta.battery,calloutL1:meta.calloutL1,calloutL2:meta.calloutL2};
   }
   function clearMarkersExcept(uids){
     Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
@@ -11870,7 +11973,7 @@ const MBMMap = (function(){
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
-           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog };
+           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding };
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -12163,6 +12266,118 @@ function famLiveApply(){
   if(typeof famSheetInitDrag==='function') famSheetInitDrag();
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   SHARED ACTIVITY/PLACE STATE — single source of truth for BOTH the map
+   callout and the bottom sheet, so they can never show contradictory text.
+   Explicit fields (never derived from lastUpdated):
+     activityType      'driving'|'walking'|'stationary'|'offline'|'paused'
+     activityStartedAt ISO time the CURRENT activityType began
+     currentPlaceId     saved place id if inside one, else null
+     placeEnteredAt     ISO time of entry into currentPlaceId (or null)
+     lastMovementAt     ISO time of the last fix classified as moving
+   Hysteresis: a candidate activityType must persist across
+   HYST_MIN_SAMPLES consecutive fixes (or HYST_MIN_MS of elapsed time)
+   before we commit to it, so a single noisy GPS speed reading can't flip
+   the badge between walking/driving/stationary. ═══════════════════════ */
+const _famActivityCache={}; // uid -> {activityType, activityStartedAt, currentPlaceId, placeEnteredAt, lastMovementAt, _candidate, _candidateSince}
+const FAM_WALK_MAX_MS=2.3;   // m/s — ~8.3 km/h ceiling for "walking"
+const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving" (small gap vs walk ceiling = hysteresis band)
+const FAM_HYST_MS=15000;     // candidate activity must hold for 15s before committing
+
+function famClassifyRawActivity(m){
+  if(!m.consent||!m.consent.enabled) return 'offline';
+  if(m.consent.paused) return 'paused';
+  if(!m.state||m.state.lat==null) return 'offline';
+  if(m.status==='offline') return 'offline';
+  const s=m.state;
+  const speed=(s.speed!=null && !isNaN(s.speed))?s.speed:null;
+  if(speed!=null){
+    if(speed>=FAM_DRIVE_MIN_MS) return 'driving';
+    if(speed>0.3 && speed<=FAM_WALK_MAX_MS) return 'walking';
+    if(speed>FAM_WALK_MAX_MS && speed<FAM_DRIVE_MIN_MS){
+      // ambiguous band between walk/drive thresholds — fall back to the
+      // coarse moving flag so we still commit to SOMETHING sane rather than
+      // stationary while genuinely in transit.
+      return s.moving?'driving':'walking';
+    }
+    return 'stationary';
+  }
+  // No speed reported by the device: fall back to the existing distance-based
+  // moving flag — still real GPS-derived signal, just coarser.
+  return s.moving?'driving':'stationary';
+}
+
+/* Derive (and update, with hysteresis + debounce) the full activity/place
+   state for one member. MUST be the only place that decides activityType —
+   both the marker callout and the sheet read from this cache. */
+function famDeriveMemberDisplay(m){
+  const uid=m.uid;
+  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0});
+  const nowMs=Date.now();
+  const raw=famClassifyRawActivity(m);
+  if(raw==='driving'||raw==='walking') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
+  // offline/paused are never debounced — these are honest device/consent
+  // facts, not noisy motion signals, so they apply immediately.
+  if(raw==='offline'||raw==='paused'){
+    if(c.activityType!==raw){ c.activityType=raw; c.activityStartedAt=new Date(nowMs).toISOString(); }
+    c._candidate=null; c._candidateSince=0;
+  } else if(raw!==c.activityType){
+    if(c._candidate!==raw){ c._candidate=raw; c._candidateSince=nowMs; }
+    else if(nowMs-c._candidateSince>=FAM_HYST_MS){
+      c.activityType=raw; c.activityStartedAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
+      c._candidate=null; c._candidateSince=0;
+    }
+  } else {
+    c._candidate=null; c._candidateSince=0;
+  }
+  // Saved-place tracking (independent of activity type): entering/leaving a
+  // real family-saved geofence, using the member's real fix.
+  const place=(m.state&&m.state.lat!=null)?famMatchSavedPlace(m.state.lat,m.state.lng):null;
+  const placeId=place?place.id:null;
+  if(placeId!==c.currentPlaceId){
+    c.currentPlaceId=placeId;
+    c.placeEnteredAt=placeId?( (typeof FamilyBackend!=='undefined'&&FamilyBackend.location.hereSince)?FamilyBackend.location.hereSince(uid):(m.state&&m.state.stayStart) ):null;
+  }
+  return { activityType:c.activityType, activityStartedAt:c.activityStartedAt,
+           currentPlaceId:c.currentPlaceId, placeEnteredAt:c.placeEnteredAt,
+           lastMovementAt:c.lastMovementAt, place };
+}
+function nowISOSafe(){ try{ return new Date().toISOString(); }catch(e){ return null; } }
+
+/* Build the exact callout/sheet text (L1/L2 + machine "since" ISO) from the
+   derived activity/place state. THE ONLY place this text is composed, so the
+   marker callout and the sheet body can never disagree. */
+function famComposeStatusText(m){
+  const d=famDeriveMemberDisplay(m);
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(d.activityType==='offline'){
+    return { l1:(L==='fa'?'آفلاین':'Offline'), l2:'', since:null, activityType:'offline' };
+  }
+  if(d.activityType==='paused'){
+    return { l1:(L==='fa'?'اشتراک متوقف شده':'Sharing paused'), l2:'', since:null, activityType:'paused' };
+  }
+  const s=m.state||{};
+  if(d.activityType==='driving'){
+    const lines=famLocationLines(s.lat,s.lng,true);
+    const since=d.activityStartedAt;
+    return { l1:(L==='fa'?`در حال رانندگی نزدیک ${lines.line1}`:`Driving near ${lines.line1}`),
+             l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'driving' };
+  }
+  if(d.activityType==='walking'){
+    const lines=famLocationLines(s.lat,s.lng,true);
+    const since=d.activityStartedAt;
+    return { l1:(L==='fa'?`در حال پیاده‌روی نزدیک ${lines.line1}`:`Walking near ${lines.line1}`),
+             l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
+  }
+  // stationary
+  if(d.currentPlaceId && d.place){
+    const since=d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null));
+    return { l1:(L==='fa'?`${d.place.name}`:`${d.place.name}`), l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'stationary', place:true };
+  }
+  const lines=famLocationLines(s.lat,s.lng,false);
+  const since=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null);
+  return { l1:(L==='fa'?`نزدیک ${lines.line1}`:`Near ${lines.line1}`), l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'stationary' };
+}
 function famLiveStatusLine(m){
   // honest header subtitle
   if(!m.consent||!m.consent.enabled) return L==='fa'?'اشتراک‌گذاری نشده':'Not sharing';
@@ -12350,14 +12565,15 @@ function famLiveMemberDetail(m, isMe){
   // Address / place + Save Place card (reference layout for the selected member)
   const showLoc = m.consent&&m.consent.enabled&&!m.consent.paused&&s.lat!=null;
   if(showLoc){
-    const since = fb&&fb.location?fb.location.hereSince(m.uid):(s.stayStart||null);
-    const loc = famLocationLines(s.lat, s.lng, s.moving);
-    const line1 = esc(loc.line1);
-    const sinceTxt = since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`;
+    // SAME composer the map callout uses — sheet and callout can never
+    // show contradictory place/activity text or a different "Since" time.
+    const txt=famComposeStatusText(m);
+    const since=txt.since;
+    const line1 = txt.l1;
+    const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
     h+=`<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
-        ${loc.line2?`<div style="font-size:15px;color:var(--ink3);margin-top:5px">${esc(loc.line2)}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
@@ -12372,10 +12588,12 @@ function famLiveMemberDetail(m, isMe){
   }
   // secondary detail grid — only genuinely-known facts, each card omitted if unknown
   if(showLoc){
-    const since = fb&&fb.location?fb.location.hereSince(m.uid):(s.stayStart||null);
+    const txt2=famComposeStatusText(m);
+    const since = txt2.since;
     h+=`<div class="fam-stat-grid">`;
-    if(since&&!s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div></div>`;
-    if(s.moving) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال حرکت':'Moving'}</div></div>`;
+    if(since && txt2.activityType==='stationary') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'مدت حضور':'Here for'}</div><div class="val">${famDurSince(since)}</div></div>`;
+    if(txt2.activityType==='driving') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال رانندگی':'Driving'}</div></div>`;
+    else if(txt2.activityType==='walking') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال پیاده‌روی':'Walking'}</div></div>`;
     h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
     if(acc.level==='good') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">${esc(acc.text)}</div></div>`;
     if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">${s.battery}%</div></div>`;
@@ -12445,8 +12663,11 @@ function famLivePaintMarkers(members, sel){
   groups.forEach(g=>{
     if(g.members.length===1){
       const m=g.members[0]; const key=m.uid; activeKeys.push(key);
+      const txt=famComposeStatusText(m);
       MBMMap.setMarker(key,[m.state.lat,m.state.lng],
-        {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading},
+        {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
+         activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
+         calloutL1:esc(txt.l1), calloutL2:txt.l2?esc(txt.l2):''},
         m.uid===_famSelUid, m.meta.tone,
         ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); });
     } else {
@@ -12478,11 +12699,8 @@ function famLivePaintMarkers(members, sel){
     if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
       MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], sel.state.heading, sel.state.speed);
     } else { MBMMap.setHeadingCone(null,null,null); }
-    // ── FEATURE 3: "arrived X ago" bubble from the selected member's most
-    //    recent REAL arrival event (only if they are still at that place). ──
-    famPaintArrivedBubble(sel);
   } else {
-    MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null); MBMMap.clearArrivedBubble();
+    MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
   if(sel&&sel.state&&sel.state.lat!=null && _famLastCentredUid!==sel.uid){
     MBMMap.panTo([sel.state.lat,sel.state.lng]);
@@ -12495,35 +12713,6 @@ function famLivePaintMarkers(members, sel){
     if(mine&&mine.state&&mine.state.lat!=null){ try{ MBMMap.panTo([mine.state.lat,mine.state.lng]); }catch(e){} }
   }
 }
-/* Show the "<name> arrived <rel> ago" bubble above the selected member when
-   their latest real event is an arrival they haven't since departed from. */
-function famPaintArrivedBubble(sel){
-  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  if(!fb||!fb.location||!sel||!sel.state||sel.state.lat==null){ MBMMap.clearArrivedBubble(); return; }
-  if(sel.state.moving){ MBMMap.clearArrivedBubble(); return; }   // only show while stationary
-  // Single source of truth for "how long have they been here": the real
-  // stay-timer (stayStart), the SAME value the sheet's "Since HH:MM" line uses.
-  // This is never a page-open time or a raw GPS-callback timestamp.
-  const since = fb.location.hereSince ? fb.location.hereSince(sel.uid) : (sel.state.stayStart||null);
-  if(!since){ MBMMap.clearArrivedBubble(); return; }
-  const nm=esc((sel.name||'').split(' ')[0]||sel.name||'');
-  const stayMs = Date.now()-Date.parse(since);
-  let txt;
-  if(stayMs < 5*60*1000){
-    // Just settled here (< 5 min) — Life360 shows the "arrived" moment first.
-    const rel=famRelTime(since);
-    txt=(L==='fa')?`<span class="fam-arrived-2l"><b>${nm}</b> رسید<small>${rel}</small></span>`
-                  :`<span class="fam-arrived-2l"><b>${nm} arrived</b><small>${rel}</small></span>`;
-  } else {
-    // Been here a while — switch to the real elapsed duration, like the
-    // reference ("Here for 11 hrs, 48 mins"), computed live from stayStart.
-    const dur=famDurSince(since);
-    txt=(L==='fa')?`<span class="fam-arrived-2l"><b>${L==='fa'?'اینجا از':'Here for'}</b><small>${dur}</small></span>`
-                  :`<span class="fam-arrived-2l"><b>Here for</b><small>${dur}</small></span>`;
-  }
-  MBMMap.setArrivedBubble([sel.state.lat,sel.state.lng], txt);
-}
-
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
    already-mounted map (no destroy/re-init on routine refresh). ── */
 let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
@@ -12536,10 +12725,13 @@ function famLiveMount(){
   if(_famDurTickTimer)clearInterval(_famDurTickTimer);
   _famDurTickTimer=setInterval(()=>{
     if(!(famView==='live'||famView==='dashboard')){ clearInterval(_famDurTickTimer); _famDurTickTimer=null; return; }
-    const sel=famLiveMembers().find(m=>m.uid===_famSelUid);
-    if(sel) famPaintArrivedBubble(sel);
+    const allMembers=famLiveMembers();
+    const sel=allMembers.find(m=>m.uid===_famSelUid);
+    // Repaint markers so every callout's "Since HH:MM"/"Here for" text stays
+    // live even with no new GPS fix — same composeStatusText the sheet uses.
+    try{ famLivePaintMarkers(allMembers, sel); }catch(e){}
     const body=document.getElementById('fam-sheet-body');
-    if(body){ const my=FB.user&&FB.user.uid; body.innerHTML=famLiveSheetBodyHtml(famLiveMembers(), sel, my); if(typeof bindFamily==='function')bindFamily(); }
+    if(body){ const my=FB.user&&FB.user.uid; body.innerHTML=famLiveSheetBodyHtml(allMembers, sel, my); if(typeof bindFamily==='function')bindFamily(); }
   }, 30000);
   // Restore the user's remembered map type (Life360 remembers the choice).
   if(DB.meta && DB.meta.famMapType && FAM_MAP_TYPES.some(t=>t.id===DB.meta.famMapType)){ _famMapType=DB.meta.famMapType; _famMapProvider=DB.meta.famMapType; }
@@ -12616,6 +12808,22 @@ function famMapTileError(){
   d.textContent=(L==='fa'?'نقشه به‌صورت آفلاین کامل در دسترس نیست':'Map unavailable offline');
   wrap.appendChild(d);
 }
+/* ── Dynamic camera padding: keeps the selected member's marker inside the
+   visible map area accounting for header, right-side control column, the
+   Check-in/SOS row (which itself tracks the sheet), and the sheet's current
+   height. Recomputed on every sheet height change (drag + detent snap). ── */
+function famUpdateCameraPadding(sheetPx){
+  try{
+    const HEADER_H=96;      // header row + safe area
+    const RIGHT_CONTROLS_W=64; // recenter/person/fullscreen/layers column
+    const CTA_H=56;         // Check in / SOS row height
+    const CTA_GAP=14;
+    const bottom = (sheetPx||0) + CTA_GAP + CTA_H + 10;
+    if(typeof MBMMap!=='undefined' && MBMMap.setPadding){
+      MBMMap.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
+    }
+  }catch(e){}
+}
 /* ── Draggable member sheet (collapsed / partial / full) ── */
 function famSheetInitDrag(){
   const sheet=document.getElementById('fam-sheet'); if(!sheet)return;
@@ -12631,19 +12839,30 @@ function famSheetInitDrag(){
   // max-height. Height-based (not transform) so the sheet is ALWAYS visible
   // from its default CSS even if this JS never runs.
   const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
+  // Single source of truth the buttons + camera padding both read: writes the
+  // CURRENT real sheet height (px) as a CSS var on the map wrapper. .fam-map-cta
+  // (Check in/SOS) is bound to this via bottom:calc(var(--fam-sheet-h) + 14px),
+  // so it tracks the sheet on every frame — drag, detent snap, or resize —
+  // instead of the old hardcoded 42vh that never matched the live sheet.
+  function syncSheetVar(px){
+    const wrap=document.getElementById('fam-live-wrap');
+    if(wrap) wrap.style.setProperty('--fam-sheet-h', Math.round(px)+'px');
+    try{ famUpdateCameraPadding(px); }catch(e){}
+  }
   function apply(i){
     _famSheetDetent=Math.max(0,Math.min(2,i));
     sheet.classList.remove('detent-0','detent-2');
     if(_famSheetDetent===0)sheet.classList.add('detent-0');
     if(_famSheetDetent===2)sheet.classList.add('detent-2');
     sheet.style.height=heights[_famSheetDetent]+'px';
+    syncSheetVar(heights[_famSheetDetent]);
   }
   apply(_famSheetDetent);
   let startY=0, startH=heights[_famSheetDetent], dragging=false;
   const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; };
   let _dragRaf=null;
   const onMove=e=>{ if(!dragging)return; const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt)); sheet.style.height=hgt+'px'; if(e.cancelable)e.preventDefault();
-    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; try{ MBMMap.invalidate(); }catch(err){} }); } };
+    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt); try{ MBMMap.invalidate(); }catch(err){} }); } };
   const onUp=()=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); MBMMap.invalidate(); };
   grab.addEventListener('touchstart',onDown,{passive:true}); grab.addEventListener('touchmove',onMove,{passive:false}); grab.addEventListener('touchend',onUp);
   grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
