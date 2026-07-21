@@ -1731,7 +1731,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v321';
+const APP_VERSION='v323';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1747,16 +1747,21 @@ const KEY='mbmlife_platform_v1';
    Back state is reset so reopening the WebAPK starts fresh. */
 (function backButtonBootstrap(){
   window.addEventListener('popstate', onPop);
+  var isTypingTarget=function(el){
+    if(!el) return false;
+    const tag=el.tagName;
+    return tag==='INPUT' || tag==='TEXTAREA' || el.isContentEditable;
+  };
   var reconcile=function(ev){
-    // Skip when typing in a text field — pushState() (which reconcileGuards
-    // can trigger) blurs/dismisses the on-screen keyboard on many Android
-    // WebViews if called while an input has focus. Keydown here is meant to
-    // catch keyboard-driven navigation (Enter/Escape opening or closing a
-    // view), not ordinary typing, which never needs a new back-button guard.
-    if(ev && ev.target){
-      const tag=ev.target.tagName;
-      if(tag==='INPUT' || tag==='TEXTAREA' || ev.target.isContentEditable) return;
-    }
+    // Skip when typing in (or tapping into) a text field — pushState()
+    // (which reconcileGuards can trigger) blurs/dismisses the on-screen
+    // keyboard on many Android WebViews if called while an input has or is
+    // about to have focus. Two checks: the raw event target (reliable on
+    // pointerdown, which fires before focus actually transfers) and
+    // document.activeElement (reliable for keydown, since Android IME/soft
+    // keyboards don't always dispatch keydown with the input as target).
+    if(isTypingTarget(ev&&ev.target)) return;
+    if(isTypingTarget(document.activeElement)) return;
     try{ reconcileGuards(); }catch(e){}
   };
   // Reconcile before the tap's handler (pre) and just after it (post, still
@@ -10622,7 +10627,8 @@ const FamilyBackend = (function(){
   /* ── Keep my membership name/photo in sync with my profile (FR-17) ── */
   async function updateSelfProfile(){
     if(!ready()||!isMember())return;
-    const patch={}; patch['members.'+myUid()+'.name']=selfName(); patch['members.'+myUid()+'.photo']=selfPhoto()||null;
+    const famPhoto=DB.meta.famPhoto||null;
+    const patch={}; patch['members.'+myUid()+'.name']=selfName(); patch['members.'+myUid()+'.photo']=famPhoto;
     patch['updatedAt']=new Date().toISOString();
     await famRef(familyId()).update(patch).catch(()=>{});
   }
@@ -11211,7 +11217,7 @@ function famInit(){
     shared:FAM_SHARE_MODULES.reduce((o,[k])=>{ o[k]={enabled:false, minRole:'adult'}; return o; },{}),
     sos:{ countdownSec:10, contactIds:[], emergencyContacts:[] }
   };
-  famMembersMap()[ownerId]={ id:ownerId, name:(DB.meta.displayName||'Me'), relationship:(L==='fa'?'خودم':'Me'), role:'owner', avatarId:(DB.meta.avatar||null), color:'#ec4899', self:true, createdAt:t, updatedAt:t };
+  famMembersMap()[ownerId]={ id:ownerId, name:(DB.meta.displayName||'Me'), relationship:(L==='fa'?'خودم':'Me'), role:'owner', avatarId:(DB.meta.famAvatar||null), color:'#ec4899', self:true, createdAt:t, updatedAt:t };
 }
 /* Has the user EXPLICITLY confirmed their profile (name), rather than the
    app silently inheriting whatever Google Auth returned? DB.meta.profileConfirmed
@@ -11332,7 +11338,8 @@ function famShowDiag(op, err){
    without the user explicitly confirming/editing it here first. */
 function famProfileGateView(){
   const nameVal = (DB.meta.displayName||'').trim();
-  const photo = DB.meta.photoURL || DB.meta.photo || null;
+  const av=AVATARS.find(a=>a.id===DB.meta.famAvatar);
+  const photo = DB.meta.famPhoto || null;
   const initials = nameVal ? nameVal.slice(0,1).toUpperCase() : '?';
   let h=`<div style="padding:24px 20px 90px;max-width:420px;margin:0 auto">`;
   h+=`<div style="text-align:center;margin-bottom:22px">
@@ -11341,7 +11348,7 @@ function famProfileGateView(){
   </div>`;
   h+=`<div style="display:flex;justify-content:center;margin-bottom:18px">
     <button data-fam="profile-photo" style="border:none;background:none;padding:0;cursor:pointer;position:relative">
-      <div style="width:88px;height:88px;border-radius:50%;background:${photo?`url(${esc(photo)})`:'#6e56f8'};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:30px;border:3px solid var(--b1)">${photo?'':esc(initials)}</div>
+      <div style="width:88px;height:88px;border-radius:50%;background:${photo?`url(${esc(photo)})`:(av?av.bg:'#6e56f8')};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:30px;border:3px solid var(--b1)">${photo?'':(av?av.emoji:esc(initials))}</div>
       <span style="position:absolute;right:-2px;bottom:-2px;width:28px;height:28px;border-radius:50%;background:var(--brand,#6e56f8);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:13px">✏️</span>
     </button>
   </div>`;
@@ -11349,6 +11356,7 @@ function famProfileGateView(){
   h+=`<label class="fl">${L==='fa'?'نام نمایشی':'Display name'}</label>
     <input class="finput" id="fam-profile-name" value="${esc(nameVal)}" placeholder="${L==='fa'?'نام و نام خانوادگی':'Your full name'}">`;
   h+=`<button class="btn" data-fam="profile-save" style="width:100%;margin-top:18px;background:#6e56f8;color:#fff">${L==='fa'?'ذخیره و ادامه':'Save and continue'}</button>`;
+  h+=`<input type="file" id="fam-photo-file" accept="image/*" style="display:none">`;
   h+=`</div>`;
   return h;
 }
@@ -13508,10 +13516,25 @@ function famSettingsView(){
   if(famSettingsTab==='family'){
     // Hidden dev-mode gesture target (5 quick taps). Looks like a plain label.
     h+=`<div data-fam="dev-tap" style="font-size:11px;color:var(--ink3);margin:0 2px 10px;cursor:default;user-select:none">${L==='fa'?'فضای خانواده':'Family space'}</div>`;
-    // Your own display name — the ONLY place this could previously be set
-    // was the one-time profile gate shown before first family setup, with
-    // no way back to it afterward. This makes it a real, always-reachable
-    // setting, reusing the same profile-save action.
+    // Your own display photo/name — the ONLY place these could previously
+    // be set was the one-time profile gate shown before first family setup,
+    // with no way back to it afterward. This makes both real, always-
+    // reachable settings. The photo is INDEPENDENT of the app-wide account
+    // photo — Family has always had its own picture, never silently pulled
+    // from another module or the sign-in account.
+    {
+      const av=AVATARS.find(a=>a.id===DB.meta.famAvatar);
+      const famPhoto=DB.meta.famPhoto||null;
+      const nameVal=(DB.meta.displayName||'').trim();
+      const initials=nameVal?nameVal.slice(0,1).toUpperCase():'?';
+      h+=`<div style="display:flex;justify-content:center;margin-bottom:14px">
+        <button data-fam="profile-photo" style="border:none;background:none;padding:0;cursor:pointer;position:relative">
+          <div style="width:76px;height:76px;border-radius:50%;background:${famPhoto?`url(${esc(famPhoto)})`:(av?av.bg:'#8652FF')};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:26px;border:3px solid var(--b1)">${famPhoto?'':(av?av.emoji:esc(initials))}</div>
+          <span style="position:absolute;right:-2px;bottom:-2px;width:24px;height:24px;border-radius:50%;background:var(--fam-purple,#8652FF);border:3px solid var(--s0);display:flex;align-items:center;justify-content:center;font-size:11px">✏️</span>
+        </button>
+      </div>`;
+      h+=`<input type="file" id="fam-photo-file" accept="image/*" style="display:none">`;
+    }
     h+=`<label class="fl">${L==='fa'?'نام نمایشی شما':'Your display name'}</label>
       <input class="finput" id="fam-profile-name" value="${esc((DB.meta.displayName||'').trim())}" placeholder="${L==='fa'?'نام و نام خانوادگی':'Your full name'}">
       <button class="btn" data-fam="profile-save" style="width:100%;margin-top:8px">${L==='fa'?'ذخیره نام':'Save name'}</button>`;
@@ -13588,6 +13611,13 @@ function bindFamily(){
   });
   // tel/sms anchors: log the action was opened (never claim delivered)
   document.querySelectorAll('a[data-fam="sos-log"]').forEach(a=>a.addEventListener('click',()=>{ famLog('sos_action',{action:a.dataset.arg}); saveDB(); }));
+  // Family-only photo upload — independent of the app-wide acct-file input.
+  const famPhotoFile=document.getElementById('fam-photo-file');
+  if(famPhotoFile)famPhotoFile.onchange=e=>{
+    const f=e.target.files&&e.target.files[0];
+    if(f)setFamPhotoFromFile(f);
+    e.target.value='';
+  };
   // live-bind toggle time box for quiet hours
   const qt=document.getElementById('fam-p-quiet-times');
   if(qt){/* visibility handled on save/re-render */}
@@ -13600,7 +13630,7 @@ function famAction(act,arg,ev){
     case 'settings': go('settings'); return;
     case 'diag-open': if(!famDevMode()){ famDevTap(); return; } famView='diag'; _famDiagResults=null; render(); window.scrollTo(0,0); return;
     case 'dev-tap': famDevTap(); return;
-    case 'profile-photo':{ if(typeof openPhotoSheet==='function')openPhotoSheet(); return; }
+    case 'profile-photo':{ if(typeof openFamPhotoSheet==='function')openFamPhotoSheet(); return; }
     case 'profile-save':{
       const el=document.getElementById('fam-profile-name');
       const nm=(el?el.value:'').trim();
@@ -16357,6 +16387,62 @@ function setPhotoFromFile(file){
   });
 }
 function famSyncSelfToCloud(){ try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.updateSelfProfile(); } }catch(e){} }
+/* ── Family-only profile photo — INDEPENDENT of the app-wide profile photo.
+   Family has its own picture people see on the live map / member list; it
+   must never be silently pulled from the account/auth photo or from photos
+   set in other modules. Stored separately as DB.meta.famPhoto/famAvatar. ── */
+function setFamPhotoFromFile(file){
+  if(!file)return;
+  compressImage(file,dataUrl=>{
+    if(!dataUrl){toast(L==='fa'?'خطا در پردازش عکس':'Could not process image');return;}
+    DB.meta.famPhoto=dataUrl;
+    DB.meta.famAvatar=null;
+    saveDB();
+    famSyncSelfToCloud();
+    closeSheet();
+    render();
+  });
+}
+function setFamAvatar(id){
+  DB.meta.famAvatar=id;
+  DB.meta.famPhoto=null;
+  saveDB();
+  famSyncSelfToCloud();
+  closeSheet();
+  render();
+}
+function removeFamProfilePhoto(){
+  DB.meta.famPhoto=null;
+  DB.meta.famAvatar=null;
+  saveDB();
+  famSyncSelfToCloud();
+  closeSheet();
+  render();
+}
+function openFamPhotoSheet(){
+  const hasCustom=!!(DB.meta.famPhoto||DB.meta.famAvatar);
+  const avGrid=AVATARS.map(a=>
+    `<div data-famav="${a.id}" style="width:56px;height:56px;border-radius:50%;background:${a.bg};display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;border:2px solid ${DB.meta.famAvatar===a.id?'var(--brand)':'transparent'}">${a.emoji}</div>`
+  ).join('');
+  openSheet(`
+    <div style="padding:8px 16px 4px;font-size:17px;font-weight:800">${tr('changePhoto')}</div>
+    <div style="padding:8px 14px">
+      <button class="sheet-cancel" id="fpp-upload" style="margin:0 0 8px;border-radius:var(--r)">📷 ${tr('uploadPhoto')}</button>
+    </div>
+    <div style="padding:4px 16px 6px;font-size:13px;color:var(--ink3)">${tr('chooseAvatar')}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;padding:6px 16px 14px">${avGrid}</div>
+    ${hasCustom?`<div style="padding:0 14px"><button class="sheet-cancel" id="fpp-remove" style="margin:0 0 8px;border-radius:var(--r);color:var(--danger)">🗑 ${tr('removePhoto')}</button></div>`:''}
+    <button class="sheet-cancel">${tr('cancel')}</button>`);
+  document.querySelectorAll('.sheet-cancel').forEach(b=>{if(!b.id)b.onclick=()=>closeSheet();});
+  const up=document.getElementById('fpp-upload');
+  if(up)up.onclick=()=>{
+    const inp=document.getElementById('fam-photo-file');
+    if(inp)inp.click();
+  };
+  const rm=document.getElementById('fpp-remove');
+  if(rm)rm.onclick=()=>removeFamProfilePhoto();
+  document.querySelectorAll('[data-famav]').forEach(el=>el.onclick=()=>setFamAvatar(el.dataset.famav));
+}
 function setAvatar(id){
   DB.meta.avatar=id;
   DB.meta.photo=null;
