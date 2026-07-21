@@ -1738,7 +1738,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v329';
+const APP_VERSION='v331';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10743,16 +10743,42 @@ const FamilyBackend = (function(){
       //  - Same place (moved < MOVE_MIN_M since the previous fix): KEEP the
       //    existing stayStart — this is what makes "Here for 11 hrs" survive
       //    every GPS callback instead of resetting on jitter or refresh.
-      //  - Genuinely relocated (moved >= MOVE_MIN_M): this fix becomes the new
-      //    arrival point → stayStart resets to now. moving=true only flags the
-      //    single fix where the jump was detected; the NEXT fix (once distance
-      //    drops back under threshold) settles into the new stayStart already.
+      //  - Apparent relocation (moved >= MOVE_MIN_M from the previous fix):
+      //    do NOT commit immediately. A single noisy/multipath GPS fix
+      //    (common indoors or in dense areas) can register a false 40m+
+      //    jump that snaps back on the very next fix — committing on one
+      //    outlier fix was silently resetting the real "Since" time to a
+      //    wrong moment. Instead, require the NEXT fix to ALSO be far from
+      //    the ORIGINAL (pre-jump) position before treating it as a real
+      //    relocation. A lone outlier that returns to the original spot is
+      //    discarded as noise and stayStart is preserved.
       if(!prev || prev.lat==null){
         return { moving:false, stayStart: fix.capturedAt };
       }
       const d = haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
       if(d >= MOVE_MIN_M){
-        return { moving:true, stayStart: fix.capturedAt };   // genuinely relocated
+        // Was the PREVIOUS fix itself already a pending/unconfirmed jump
+        // from the same original spot? If so, and this fix confirms it
+        // (still far from that original spot), commit the relocation now.
+        if(prev._pendingJumpFrom){
+          const pendingAgeMs = Date.parse(fix.capturedAt) - Date.parse(prev.capturedAt||fix.capturedAt);
+          if(pendingAgeMs>0 && pendingAgeMs<=120000){
+            const dFromOriginal = haversine({lat:prev._pendingJumpFrom.lat,lng:prev._pendingJumpFrom.lng},{lat:fix.lat,lng:fix.lng});
+            if(dFromOriginal >= MOVE_MIN_M){
+              return { moving:true, stayStart: fix.capturedAt }; // confirmed real relocation
+            }
+            // Snapped back near the original spot — the jump was noise.
+            return { moving:false, stayStart: prev._pendingJumpFrom.stayStart || prev.stayStart || fix.capturedAt };
+          }
+          // Confirmation window expired (long gap since the pending fix) —
+          // fall through to treat this as a fresh single-fix jump instead
+          // of comparing against a now-stale reference point.
+        }
+        // First fix showing the jump — mark it pending, do NOT reset
+        // stayStart yet. Real relocations get confirmed on the next fix
+        // within a few seconds; a stationary person's noise fix won't.
+        return { moving:false, stayStart: prev.stayStart || prev.capturedAt || fix.capturedAt,
+                 _pendingJumpFrom:{lat:prev.lat,lng:prev.lng,stayStart:prev.stayStart||prev.capturedAt} };
       }
       // Still within the same spot — never touch stayStart on ordinary fixes.
       return { moving:false, stayStart: prev.stayStart || prev.capturedAt || fix.capturedAt };
@@ -10800,7 +10826,7 @@ const FamilyBackend = (function(){
         accuracy:(c.precise===false?null:(raw.accuracy!=null?raw.accuracy:null)),
         capturedAt, source:raw.source||'gps',
         heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
-        moving:mv.moving, stayStart:mv.stayStart,
+        moving:mv.moving, stayStart:mv.stayStart, _pendingJumpFrom:mv._pendingJumpFrom||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO() };
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
@@ -11855,13 +11881,19 @@ const MBMMap = (function(){
   }
   function _panToWithPadding(center){
     _map.panTo({lat:center[0],lng:center[1]});
-    // Shift the map so the point sits in the middle of the AREA NOT covered
-    // by top/bottom padding, not the middle of the whole div. Positive Y
-    // pans the map content down (moves the visual center up), which is what
-    // we want when bottom padding (sheet + buttons) eats screen space.
+    // panBy(x,y) moves the map's CENTER in pixel space (confirmed against
+    // Google's own docs: positive y moves the center south/down). Moving
+    // the center DOWN makes the point that was just centered (our marker)
+    // appear HIGHER on screen — which is what we want when bottom padding
+    // (sheet + Check-in/SOS) is eating screen space and the marker needs to
+    // clear it. The previous version negated this (panBy(-dx,-dy)), which
+    // did the opposite: moved the center up, pushing the marker DOWN on
+    // screen — directly toward the sheet it was supposed to avoid. That
+    // sign error was the actual, exact cause of the marker landing behind
+    // the sheet no matter how the padding values themselves were tuned.
     const dy = (_pad.bottom - _pad.top) / 2;
-    const dx = (_pad.left - _pad.right) / 2;
-    if(dy || dx){ try{ _map.panBy(-dx, -dy); }catch(e){} }
+    const dx = (_pad.right - _pad.left) / 2;
+    if(dy || dx){ try{ _map.panBy(dx, dy); }catch(e){} }
   }
   function fitAll(latlngs){
     if(!_map||!available()||!latlngs||!latlngs.length) return;
