@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&family=Noto+Naskh+Arabic&family=Lalezar&family=Space+Mono&family=Noto+Kufi+Arabic&family=Aref+Ruqaa&family=Markazi+Text&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&family=Noto+Naskh+Arabic&family=Lalezar&family=Space+Mono&family=Noto+Kufi+Arabic&family=Aref+Ruqaa&family=Markazi+Text&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -1310,7 +1310,10 @@ body.rtl .trow-content{text-align:right}
 /* ═══ Family Live (Phase 2) — redesigned: map as backdrop, persistent info panel ═══ */
 #fam-live-wrap{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
   max-width:var(--shell-w);margin:0 auto;
-  width:100%;height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column;z-index:60}
+  width:100%;height:100dvh;overflow:hidden;background:var(--s0);display:flex;flex-direction:column;z-index:60;
+  font-family:'Fredoka',-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  --fam-purple:#8652FF; --fam-purple2:#6f3ce0}
+body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 #fam-map{position:absolute;inset:0;width:100%;height:100%;z-index:1}
 /* NOTE: no background-color here on purpose. This div is now the Google Maps
    container — Google renders its own tile panes as children of it. A solid
@@ -1341,9 +1344,9 @@ body.rtl .trow-content{text-align:right}
 .fam-hbadge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#ff4d4f;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--s0)}
 /* ── Category row (People / Pets / Keys / Places) in the sheet ── */
 .fam-cats{display:flex;gap:10px;padding:4px 0 18px}
-.fam-cat{flex:1;height:44px;border-radius:22px;border:none;background:var(--s2);color:#6e56f8;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.fam-cat{flex:1;height:44px;border-radius:22px;border:none;background:var(--s2);color:var(--fam-purple,#8652FF);display:flex;align-items:center;justify-content:center;cursor:pointer}
 .fam-cat svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
-.fam-cat.on{background:#6e56f8;color:#fff}
+.fam-cat.on{background:var(--fam-purple,#8652FF);color:#fff}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
 .fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 64px + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
@@ -1355,7 +1358,7 @@ body.rtl .trow-content{text-align:right}
 .fam-bottomnav{position:absolute;left:0;right:0;bottom:0;z-index:1450;display:flex;background:var(--s1);border-top:1px solid var(--b1);padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px))}
 .fam-navbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border:none;background:transparent;color:var(--ink3);cursor:pointer;font-size:11px;font-weight:700;padding:4px 0}
 .fam-navbtn svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
-.fam-navbtn.on{color:#6e56f8}
+.fam-navbtn.on{color:var(--fam-purple,#8652FF)}
 .fam-navbtn:active{transform:scale(.95)}
 .fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:12px;padding:14px 16px;
   background:linear-gradient(180deg,var(--s0) 55%,transparent);pointer-events:none}
@@ -1369,7 +1372,7 @@ body.rtl .trow-content{text-align:right}
 .fam-mapbtn{width:50px;height:50px;border-radius:50%;border:none;background:#fff;color:#4a4d57;
   display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
 .fam-mapbtn:active{transform:scale(.94)}
-.fam-mapbtn.on{background:#6e56f8;color:#fff}
+.fam-mapbtn.on{background:var(--fam-purple,#8652FF);color:#fff}
 .fam-mapbtn svg{width:22px;height:22px}
 /* avatar pins — Life360-style TRUE teardrop: a single rotated-square shape
    (border-radius trick) forms the pin body AND its pointed tip in one piece,
@@ -1423,11 +1426,11 @@ body.rtl .trow-content{text-align:right}
    matching "the purple location pointer" requirement. */
 .fam-pin .fam-pin-body{position:absolute;top:0;left:0;width:56px;height:56px;
   border-radius:50% 50% 50% 4px;transform:rotate(-45deg);transform-origin:center;
-  background:#6e56f8;box-shadow:0 4px 10px rgba(0,0,0,.3);z-index:1}
+  background:var(--fam-purple,#8652FF);box-shadow:0 4px 10px rgba(0,0,0,.3);z-index:1}
 .fam-pin.tone-live .fam-pin-body,.fam-pin.tone-ok .fam-pin-body{background:#2fce6b}
 .fam-pin.tone-warn .fam-pin-body{background:#f5a623}
 .fam-pin.tone-muted .fam-pin-body{background:#9aa1ad}
-.fam-pin.sel .fam-pin-body{background:#6e56f8}
+.fam-pin.sel .fam-pin-body{background:var(--fam-purple,#8652FF)}
 .fam-pin.tone-muted{opacity:.75}
 /* Avatar photo: perfectly circular, inset with a white ring gap from the
    teardrop body so the colored edge reads clearly around the photo. */
@@ -1441,7 +1444,7 @@ body.rtl .trow-content{text-align:right}
 .fam-pin .fam-pin-tip{display:none}
 /* Activity badge — top-right of avatar, sitting on the teardrop's shoulder. */
 .fam-pin-activity{position:absolute;top:-4px;right:-4px;width:24px;height:24px;border-radius:50%;
-  background:#6e56f8;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.3);
+  background:var(--fam-purple,#8652FF);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.3);
   border:2.5px solid #fff;z-index:4}
 .dark .fam-pin-activity{border-color:#1b1c22}
 .fam-pin-activity svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2.4}
@@ -1486,7 +1489,7 @@ body.rtl .trow-content{text-align:right}
 .fam-pcard.sel{background:var(--s2)}
 .fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0 auto 4px;background-size:cover;background-position:center;
   border:2px solid var(--b1);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
-.fam-pcard.sel .av{border-color:#6e56f8}
+.fam-pcard.sel .av{border-color:var(--fam-purple,#8652FF)}
 .fam-pcard .nm{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 .fam-pcard .st{font-size:10px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fam-dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-inline-end:6px}
@@ -1562,17 +1565,17 @@ body.rtl .trow-content{text-align:right}
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
 .fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
 .fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:40px;padding:6px}
-.fam-cluster.sel .fam-cluster-row{outline:3px solid #6e56f8}
+.fam-cluster.sel .fam-cluster-row{outline:3px solid var(--fam-purple,#8652FF)}
 .fam-cluster-av{width:52px;height:52px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;
   background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:18px;overflow:hidden}
 .fam-cluster-av:first-child{margin-inline-start:0}
-.fam-cluster-more{width:46px;height:46px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;background:#6e56f8;color:#fff;
+.fam-cluster-more{width:46px;height:46px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;background:var(--fam-purple,#8652FF);color:#fff;
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
 .fam-cluster-tip{position:absolute;left:50%;bottom:-8px;width:16px;height:16px;background:#fff;transform:translateX(-50%) rotate(45deg)}
 /* ── "arrived X ago" map bubble above a pin/cluster (Life360-style) ── */
 .fam-arrived{position:relative;background:#fff;border-radius:16px;padding:8px 14px 8px 12px;
   display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;pointer-events:none}
-.fam-arrived .fam-arrived-ic{color:#6e56f8;display:flex}
+.fam-arrived .fam-arrived-ic{color:var(--fam-purple,#8652FF);display:flex}
 .fam-arrived .fam-arrived-ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-arrived .fam-arrived-t{font-size:12.5px;color:var(--ink2)}
 .fam-arrived .fam-arrived-t b{color:var(--ink);font-weight:800}
@@ -1589,9 +1592,9 @@ body.rtl .trow-content{text-align:right}
 .fam-maptype{flex:1;text-align:center;cursor:pointer}
 .fam-maptype .thumb{height:92px;border-radius:16px;border:2px solid var(--b1);background-size:cover;background-position:center;overflow:hidden;background-color:#e7e2d6}
 .fam-maptype .thumb.warm{filter:brightness(1.07) saturate(.86) sepia(.10) hue-rotate(-4deg) contrast(.94)}
-.fam-maptype.on .thumb{border-color:#6e56f8}
+.fam-maptype.on .thumb{border-color:var(--fam-purple,#8652FF)}
 .fam-maptype .lbl{font-size:14px;font-weight:800;margin-top:8px;color:var(--ink2)}
-.fam-maptype.on .lbl{color:#6e56f8}
+.fam-maptype.on .lbl{color:var(--fam-purple,#8652FF)}
 .fam-maptype.disabled{opacity:.4;pointer-events:none}
 .fam-mrow .mmeta{flex:1;min-width:0}
 .fam-mrow .mmeta .mn{font-weight:800;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1622,7 +1625,7 @@ body.rtl .trow-content{text-align:right}
   align-items:center;justify-content:center;text-align:center;padding:28px;font-size:14px;line-height:1.6}
 #fam-map-fatal.show{display:flex;flex-direction:column;gap:10px}
 #fam-map-fatal b{display:block;font-size:16px;margin-bottom:4px}
-#fam-map-fatal button{margin-top:10px;background:#6e56f8;color:#fff;border:none;border-radius:12px;padding:12px 20px;font-weight:700;cursor:pointer}</style>
+#fam-map-fatal button{margin-top:10px;background:var(--fam-purple,#8652FF);color:#fff;border:none;border-radius:12px;padding:12px 20px;font-weight:700;cursor:pointer}</style>
 </head>
 <body>
 <script>
@@ -1728,7 +1731,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v317';
+const APP_VERSION='v318';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12001,7 +12004,7 @@ const MBMMap = (function(){
     try{
       const g=window.google.maps;
       _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
-        fillColor: approx?'#f59e0b':'#6e56f8', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#6e56f8', strokeOpacity:0.5, strokeWeight:1, clickable:false });
+        fillColor: approx?'#f59e0b':'#8652FF', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#8652FF', strokeOpacity:0.5, strokeWeight:1, clickable:false });
     }catch(e){}
   }
   function setHeadingCone(latlng, headingDeg, speed){
@@ -12030,7 +12033,7 @@ const MBMMap = (function(){
     try{
       const g=window.google.maps;
       const path=points.map(p=>({lat:p.lat,lng:p.lng}));
-      _routeLine=new g.Polyline({ map:_map, path, strokeColor:'#6e56f8', strokeOpacity:0.85, strokeWeight:4, clickable:false });
+      _routeLine=new g.Polyline({ map:_map, path, strokeColor:'#8652FF', strokeOpacity:0.85, strokeWeight:4, clickable:false });
     }catch(e){}
   }
   function destroy(){
@@ -12129,7 +12132,7 @@ function famLiveMembers(){
     const consent=loc.memberConsent(uid);
     const status=loc.memberStatus(uid);
     return { uid, name:(uid===((FB.user&&FB.user.uid))?famSelfName():(m.name||'Member')),
-             role:m.role, photo:m.photo, phone:m.phone||null, color:'#6e56f8',
+             role:m.role, photo:m.photo, phone:m.phone||null, color:'#8652FF',
              state, consent, status, meta:loc.statusMeta(status),
              hasFix: !!(state&&state.lat!=null && (consent&&consent.enabled&&!consent.paused)) };
   });
@@ -13095,9 +13098,9 @@ function famHistMount(){
       el._histMap=m;
       if(_famHistCursor==null||_famHistCursor>pts.length-1)_famHistCursor=pts.length-1;
       const cEl=document.createElement('div'); cEl.style.cssText='width:20px;height:20px;border-radius:50%;background:#6e56f8;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)';
-      new g.Polyline({ map:m, path:coords, strokeColor:'#6e56f8', strokeOpacity:0.85, strokeWeight:4, clickable:false });
+      new g.Polyline({ map:m, path:coords, strokeColor:'#8652FF', strokeOpacity:0.85, strokeWeight:4, clickable:false });
       new g.Circle({ map:m, center:coords[0], radius:14, fillColor:'#22c55e', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, clickable:false });
-      new g.Circle({ map:m, center:coords[coords.length-1], radius:14, fillColor:'#6e56f8', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, clickable:false });
+      new g.Circle({ map:m, center:coords[coords.length-1], radius:14, fillColor:'#8652FF', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, clickable:false });
       let cursorMk;
       if(g.marker && g.marker.AdvancedMarkerElement){
         cursorMk=new g.marker.AdvancedMarkerElement({map:m, position:coords[_famHistCursor], content:cEl});
@@ -13180,7 +13183,7 @@ function famMembersView(){
     rows.forEach(m=>{
       const isMe=m.uid===myUid;
       const lm=liveByUid[m.uid];
-      const av={color:m.color||'#6e56f8',name:m.name||'?',photo:m.photo||null};
+      const av={color:m.color||'#8652FF',name:m.name||'?',photo:m.photo||null};
       const canManage=(st.role==='owner'||st.role==='admin')&&!isMe&&m.uid!==st.ownerUid;
       // Location lines + battery, from real state only (never fabricated).
       let line1='', line2='', batt=null;
@@ -13248,7 +13251,7 @@ function famNoShowView(){
     h+=`<div class="ul-row" data-fam="noshow-place" data-arg="${p.id}" style="display:flex;align-items:center;gap:12px;padding:11px 4px;border-top:1px solid var(--b1);cursor:pointer">
       <div style="width:36px;height:36px;border-radius:10px;background:#ec489918;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:16px">${meta[2]}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">${esc(p.name)}</div></div>
-      <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${dr.placeId===p.id?'#6e56f8':'var(--b2)'};display:flex;align-items:center;justify-content:center">${dr.placeId===p.id?'<div style=\"width:11px;height:11px;border-radius:50%;background:#6e56f8\"></div>':''}</div>
+      <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${dr.placeId===p.id?'#8652FF':'var(--b2)'};display:flex;align-items:center;justify-content:center">${dr.placeId===p.id?'<div style=\"width:11px;height:11px;border-radius:50%;background:#8652FF\"></div>':''}</div>
     </div>`; });
   // time picker
   h+=`<div style="font-size:12px;font-weight:800;color:var(--ink2);margin:18px 2px 8px">${L==='fa'?'زمان (امروز)':'Time (today)'}</div>`;
@@ -13345,7 +13348,7 @@ function famCloudMemberEditView(){
   const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid];
   if(!m)return `<div style="padding:20px;color:var(--ink3)">${L==='fa'?'عضو یافت نشد':'Member not found'}</div>`;
   const isOwnerMe=st.role==='owner';
-  const av={color:m.color||'#6e56f8',name:m.name||'?',avatarId:null};
+  const av={color:m.color||'#8652FF',name:m.name||'?',avatarId:null};
   let h=`<div style="padding:0 16px 90px">`;
   h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(av,72)}</div>`;
   h+=`<div style="text-align:center;font-weight:800;font-size:18px">${esc(m.name||'Member')}</div>`;
