@@ -1728,7 +1728,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v315';
+const APP_VERSION='v317';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12634,7 +12634,7 @@ function famLiveMemberDetail(m, isMe){
   // Name row: big bold name + green status dot on the left, battery pill on the right
   const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
     ? `<div class="fam-batt-pill"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
-  h+=`<div style="display:flex;align-items:center;gap:10px">
+  h+=`<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-fam="live-center-sel">
     <div style="flex:1;min-width:0;display:flex;align-items:center;gap:12px">
       <div style="font-weight:800;font-size:32px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
       <span class="fam-dot ${m.meta.tone}" style="width:12px;height:12px;margin:0;flex:none"></span>
@@ -13196,14 +13196,14 @@ function famMembersView(){
       } else { line1=famRoleLabel(m.role); }
       const photoStyle=av.photo?`background-image:url('${(''+av.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${av.color}`;
       const battBadge = batt!=null ? `<span class="fam-mrow-batt"><span class="fam-mrow-batt-ic" style="--lvl:${Math.max(8,Math.min(100,batt))}%"></span>${batt}%</span>` : '';
-      h+=`<div class="fam-mrow" ${canManage?`data-fam="cmember-open" data-arg="${m.uid}"`:`data-fam="live-sel-open" data-arg="${m.uid}"`}>
+      h+=`<div class="fam-mrow" data-fam="live-sel-open" data-arg="${m.uid}">
         <div class="fam-mrow-av" style="${photoStyle}">${av.photo?'':esc((av.name).slice(0,1).toUpperCase())}${battBadge}</div>
         <div class="mmeta">
           <div class="mn">${esc(m.name||'Member')}${isMe?` <span style="font-size:12px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
           ${line1?`<div class="ms">${esc(line1)}</div>`:''}
           ${line2?`<div class="ms">${esc(line2)}</div>`:''}
         </div>
-        <button class="fam-mrow-fav${(DB.meta.famFavorites&&DB.meta.famFavorites[m.uid])?' on':''}" data-fam="fav-toggle" data-arg="${m.uid}" title="${L==='fa'?'علاقه‌مندی':'Favorite'}">${famIcon('heart')}</button>
+        ${canManage?`<button class="fam-mrow-fav" data-fam="cmember-open" data-arg="${m.uid}" title="${L==='fa'?'مدیریت نقش':'Manage role'}">${famIcon('gear')}</button>`:`<button class="fam-mrow-fav${(DB.meta.famFavorites&&DB.meta.famFavorites[m.uid])?' on':''}" data-fam="fav-toggle" data-arg="${m.uid}" title="${L==='fa'?'علاقه‌مندی':'Favorite'}">${famIcon('heart')}</button>`}
       </div>`;
     });
     if(famCan('sendInvites')) h+=`<button class="btn" data-fam="invites" style="width:100%;margin-top:14px">✉ ${L==='fa'?'دعوت عضو جدید':'Invite a member'}</button>`;
