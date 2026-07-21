@@ -1382,97 +1382,89 @@ body.rtl .trow-content{text-align:right}
 .fam-mapbtn:active{transform:scale(.94)}
 .fam-mapbtn.on{background:#6e56f8;color:#fff}
 .fam-mapbtn svg{width:22px;height:22px}
-/* avatar pins — Life360-style: circular photo, colored status ring, and a
-   small pointed tail (not a big diamond). Sized to the reference. Layout is
-   a single positioned stack (not a separate map marker) so the callout can
-   never visually detach from its avatar: pin-wrap holds the callout ABOVE
-   the pin, both anchored to the same lat/lng point via one marker element. */
+/* avatar pins — Life360-style TRUE teardrop: a single rotated-square shape
+   (border-radius trick) forms the pin body AND its pointed tip in one piece,
+   with the circular avatar photo inset at the top. This replaces the earlier
+   "disconnected floating tip" approach, which read as a separate diamond
+   rather than a real teardrop pin like the reference. */
 .fam-pin-wrap{position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer}
-/* Live callout: real Life360-style "<Name/place>" + "Since HH:MM" card that
-   sits directly above the avatar and points down at it. Rendered as part of
-   the SAME marker element as the avatar (never a second independent marker),
-   so it can never drift apart from the avatar it belongs to. */
-.fam-callout{position:relative;background:#fff;border-radius:14px;padding:7px 13px 8px;margin-bottom:8px;
-  box-shadow:0 3px 12px rgba(0,0,0,.28);white-space:nowrap;max-width:220px;text-align:center;z-index:0}
-.dark .fam-callout{background:#23232e}
-.fam-callout .l1{font-size:12.5px;font-weight:800;color:#1a1a24;line-height:1.25;overflow:hidden;text-overflow:ellipsis}
-.dark .fam-callout .l1{color:#eef0f4}
-.fam-callout .l2{font-size:11px;color:#8a8f9a;line-height:1.2;margin-top:1px}
-.fam-callout-tip{position:absolute;left:50%;bottom:-5px;width:11px;height:11px;background:#fff;
-  transform:translateX(-50%) rotate(45deg);z-index:0}
-.dark .fam-callout-tip{background:#23232e}
-.fam-pin{position:relative;width:64px;height:66px;cursor:pointer}
-/* Live-presence glow: a soft green/cyan halo behind the avatar that gently
-   pulses (scale + opacity) to signal a fresh, live location — Life360-style.
-   Only rendered for tone-live (a genuinely recent fix), and honours reduced-
-   motion preferences. GPU-friendly (transform/opacity only). */
-.fam-pin .fam-pin-glow{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;z-index:0;
-  background:radial-gradient(circle, rgba(47,206,107,.55) 0%, rgba(47,206,107,.28) 45%, rgba(47,206,107,0) 72%);
+/* Live callout: Life360-style rounded white card, title + "Since/Here for"
+   subtitle, sitting directly above the pin with a matching pointed tail.
+   Part of the SAME marker element as the avatar/pin (never a separate
+   overlay), so it can never visually drift apart from what it describes. */
+.fam-callout{position:relative;background:#fff;border-radius:16px;padding:9px 16px 10px;margin-bottom:10px;
+  box-shadow:0 4px 16px rgba(0,0,0,.24);white-space:nowrap;max-width:240px;text-align:center;z-index:0}
+.dark .fam-callout{background:#262733}
+.fam-callout .l1{font-size:13.5px;font-weight:800;color:#1a1a24;line-height:1.28;overflow:hidden;text-overflow:ellipsis}
+.dark .fam-callout .l1{color:#f2f3f7}
+.fam-callout .l2{font-size:12px;font-weight:600;color:#9297a3;line-height:1.25;margin-top:2px}
+.fam-callout-tip{position:absolute;left:50%;bottom:-6px;width:13px;height:13px;background:#fff;
+  transform:translateX(-50%) rotate(45deg);z-index:0;border-radius:0 0 3px 0}
+.dark .fam-callout-tip{background:#262733}
+.fam-pin{position:relative;width:60px;height:74px;cursor:pointer}
+/* Soft ambient glow behind a genuinely live fix — subtle, not the main signal. */
+.fam-pin .fam-pin-glow{position:absolute;top:-2px;left:0;width:60px;height:60px;border-radius:50%;z-index:0;
+  background:radial-gradient(circle, rgba(47,206,107,.5) 0%, rgba(47,206,107,.24) 45%, rgba(47,206,107,0) 72%);
   opacity:0;pointer-events:none;transform-origin:center}
 .fam-pin.tone-live .fam-pin-glow{animation:fampinglow 2.4s ease-in-out infinite}
 @keyframes fampinglow{
-  0%{opacity:.20;transform:scale(.82)}
-  50%{opacity:.75;transform:scale(1.28)}
-  100%{opacity:.20;transform:scale(.82)}
+  0%{opacity:.18;transform:scale(.85)}
+  50%{opacity:.65;transform:scale(1.25)}
+  100%{opacity:.18;transform:scale(.85)}
 }
-@media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-glow{animation:none;opacity:.5} }
-/* Live-location PULSE ring — the actual outward "sonar ping" Life360 shows
-   on a genuinely live fix: a ring that expands from the avatar's own edge
-   out to ~2x its size while fading to nothing, then repeats. Distinct from
-   fam-pin-glow above (a static-ish soft under-halo) — this is the moving
-   signal that communicates "actively live" at a glance. Anchored on the
-   marker's real position, not the photo, so it reads as coming from the
-   location itself rather than just decorating the avatar. */
-.fam-pin .fam-pin-pulse{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;z-index:0;
-  border:2.5px solid #2fce6b;opacity:0;pointer-events:none;transform-origin:center;box-sizing:border-box}
-.fam-pin.tone-live .fam-pin-pulse{animation:fampinpulsering 2.4s cubic-bezier(.2,.7,.3,1) infinite}
-.fam-pin.tone-ok .fam-pin-pulse{animation:fampinpulsering 2.4s cubic-bezier(.2,.7,.3,1) infinite;border-color:#2fce6b}
+@media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-glow{animation:none;opacity:.4} }
+/* Live-location PULSE ring — the outward "sonar ping": expands from the
+   avatar's own edge out to ~2x its size while fading, then repeats. This is
+   the primary "actively live" signal — clearly visible, not subtle. */
+.fam-pin .fam-pin-pulse{position:absolute;top:-2px;left:0;width:60px;height:60px;border-radius:50%;z-index:0;
+  border:3px solid #2fce6b;opacity:0;pointer-events:none;transform-origin:center;box-sizing:border-box}
+.fam-pin.tone-live .fam-pin-pulse{animation:fampinpulsering 2.2s cubic-bezier(.2,.7,.3,1) infinite}
+.fam-pin.tone-ok .fam-pin-pulse{animation:fampinpulsering 2.2s cubic-bezier(.2,.7,.3,1) infinite;border-color:#2fce6b}
 @keyframes fampinpulsering{
-  0%{opacity:.55;transform:scale(1)}
-  70%{opacity:0;transform:scale(2.1)}
-  100%{opacity:0;transform:scale(2.1)}
+  0%{opacity:.6;transform:scale(1)}
+  70%{opacity:0;transform:scale(2.2)}
+  100%{opacity:0;transform:scale(2.2)}
 }
 @media (prefers-reduced-motion: reduce){ .fam-pin.tone-live .fam-pin-pulse, .fam-pin.tone-ok .fam-pin-pulse{animation:none;opacity:0} }
-/* Required layer order (bottom → top): callout bg (separate block above,
-   z-index 0, own stacking context) → purple pointer tail → avatar photo →
-   green live ring → activity badge → battery badge. */
-.fam-pin .fam-pin-av{position:absolute;top:0;left:2px;width:60px;height:60px;border-radius:50%;
+/* TRUE TEARDROP BODY: a rotated square, rounded on 3 corners and square on
+   the bottom-right, which after a 45deg rotation reads as a circle-with-a-
+   point-at-bottom — the actual Life360 pin silhouette. Sits BEHIND the
+   avatar photo (z-index 1) so the photo appears "inset" into the teardrop,
+   exactly like the reference. Color follows status tone / purple-selected,
+   matching "the purple location pointer" requirement. */
+.fam-pin .fam-pin-body{position:absolute;top:0;left:0;width:56px;height:56px;
+  border-radius:50% 50% 50% 4px;transform:rotate(-45deg);transform-origin:center;
+  background:#6e56f8;box-shadow:0 4px 10px rgba(0,0,0,.3);z-index:1}
+.fam-pin.tone-live .fam-pin-body,.fam-pin.tone-ok .fam-pin-body{background:#2fce6b}
+.fam-pin.tone-warn .fam-pin-body{background:#f5a623}
+.fam-pin.tone-muted .fam-pin-body{background:#9aa1ad}
+.fam-pin.sel .fam-pin-body{background:#6e56f8}
+.fam-pin.tone-muted{opacity:.75}
+/* Avatar photo: perfectly circular, inset with a white ring gap from the
+   teardrop body so the colored edge reads clearly around the photo. */
+.fam-pin .fam-pin-av{position:absolute;top:3px;left:3px;width:50px;height:50px;border-radius:50%;
   background-size:cover;background-position:center;overflow:hidden;display:flex;align-items:center;justify-content:center;
-  font-weight:800;color:#fff;font-size:21px;box-shadow:0 3px 10px rgba(0,0,0,.35);z-index:2}
-.fam-pin .fam-pin-ring{position:absolute;top:-3px;left:-1px;width:66px;height:66px;border-radius:50%;border:4px solid #2fce6b;z-index:3;box-sizing:border-box;pointer-events:none}
-.fam-pin.tone-live .fam-pin-ring{border-color:#2fce6b}
-.fam-pin.tone-ok .fam-pin-ring{border-color:#2fce6b}
-.fam-pin.tone-warn .fam-pin-ring{border-color:#f5a623}
-.fam-pin.tone-muted{opacity:.7}.fam-pin.tone-muted .fam-pin-ring{border-color:#9aa1ad}
-.fam-pin.sel .fam-pin-ring{border-width:5px}
-/* pointed tail: a rotated square whose top is tucked under the avatar so only
-   a downward triangle shows — reads as a clean pin point, not a floating diamond.
-   This IS the "purple location pointer" — purple when selected, status-tone otherwise. */
-.fam-pin .fam-pin-tip{position:absolute;left:50%;top:52px;width:16px;height:16px;background:#6e56f8;
-  transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 4px rgba(0,0,0,.18);z-index:1;border-radius:2px}
-.fam-pin.tone-live .fam-pin-tip,.fam-pin.tone-ok .fam-pin-tip{background:#2fce6b}
-.fam-pin.tone-warn .fam-pin-tip{background:#f5a623}
-.fam-pin.tone-muted .fam-pin-tip{background:#9aa1ad}
-.fam-pin.sel .fam-pin-tip{background:#6e56f8}
-/* Activity badge — top-right of avatar. Above the ring (z-index 4) so it
-   never hides under it, but below the battery badge per spec order. */
-.fam-pin-activity{position:absolute;top:-6px;right:-6px;width:26px;height:26px;border-radius:50%;
+  font-weight:800;color:#fff;font-size:19px;border:2.5px solid #fff;box-sizing:border-box;z-index:3}
+.dark .fam-pin .fam-pin-av{border-color:#1b1c22}
+/* fam-pin-ring/tip kept as no-op aliases for any stray reference — the
+   teardrop body + avatar border now carry the full visual role they used to. */
+.fam-pin .fam-pin-ring{display:none}
+.fam-pin .fam-pin-tip{display:none}
+/* Activity badge — top-right of avatar, sitting on the teardrop's shoulder. */
+.fam-pin-activity{position:absolute;top:-4px;right:-4px;width:24px;height:24px;border-radius:50%;
   background:#6e56f8;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.3);
-  border:2px solid #fff;z-index:4}
+  border:2.5px solid #fff;z-index:4}
 .dark .fam-pin-activity{border-color:#1b1c22}
-.fam-pin-activity svg{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2.4}
+.fam-pin-activity svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2.4}
 .fam-pin-activity.tone-offline{background:#9aa1ad}
 .fam-pin-activity.tone-paused{background:#f5a623}
-/* Motion badges (driving/walking) get their own gentle pulse — distinct from
-   the live-location ring — so the badge itself reads as "in motion" at a
-   glance, matching the reference's animated car/walking icon. */
 .fam-pin-activity.tone-motion{animation:fambadgepulse 1.6s ease-in-out infinite}
 @keyframes fambadgepulse{0%{transform:scale(1)}50%{transform:scale(1.14)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion: reduce){ .fam-pin-activity.tone-motion{animation:none} }
-/* Battery badge — bottom-left, small pill like the reference screenshots.
-   Highest z-index: always drawn on top per the required layer order. */
-.fam-pin-batt{position:absolute;left:-4px;bottom:2px;display:flex;align-items:center;gap:2px;
-  background:rgba(20,20,28,.88);border-radius:8px;padding:1px 5px 1px 3px;z-index:5;pointer-events:none}
+/* Battery badge — small pill tucked at the bottom-left of the avatar,
+   matching the reference's compact battery indicator on the pin itself. */
+.fam-pin-batt{position:absolute;left:-2px;bottom:14px;display:flex;align-items:center;gap:2px;
+  background:rgba(20,20,28,.9);border-radius:8px;padding:2px 5px 2px 3px;z-index:5;pointer-events:none}
 .fam-pin-batt .ic{width:13px;height:7px;border:1.4px solid #fff;border-radius:2px;position:relative;display:flex;align-items:center;padding:1px}
 .fam-pin-batt .ic:after{content:'';position:absolute;right:-3px;top:1.5px;width:1.6px;height:3px;background:#fff;border-radius:0 1px 1px 0}
 .fam-pin-batt .ic i{display:block;height:100%;border-radius:1px}
@@ -1495,15 +1487,10 @@ body.rtl .trow-content{text-align:right}
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
 #fam-sheet.detent-2{height:calc(100% - 150px)}
-#fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);margin:0 auto;flex:none;
-  touch-action:none;cursor:grab;
-  /* Real hit-area is much bigger than the visible bar (Life360-style easy
-     grab): padding extends the touch target without changing the pill's
-     visual size, and the extra vertical padding is why we drop the old
-     12px/6px margins above/below in favor of this box. */
-  padding:14px 40px 16px;box-sizing:content-box;background-clip:content-box;
-  -webkit-user-select:none;user-select:none}
-#fam-sheet .fam-sheet-grab:active{cursor:grabbing}
+#fam-sheet .fam-sheet-draghead{width:100%;height:34px;display:flex;align-items:center;justify-content:center;
+  flex:none;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
+#fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
+#fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);pointer-events:none}
 .fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
 .fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
 .fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
@@ -1752,7 +1739,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v306';
+const APP_VERSION='v307';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11855,7 +11842,7 @@ const MBMMap = (function(){
         (meta.calloutL2?`<div class="l2">${meta.calloutL2}</div>`:'')+
         `<div class="fam-callout-tip"></div></div>`;
     }
-    const pin=`<div class="fam-pin-glow"></div><div class="fam-pin-pulse"></div>`+head+av+`<div class="fam-pin-ring"></div><div class="fam-pin-tip"></div>`+activityBadge+battBadge;
+    const pin=`<div class="fam-pin-glow"></div><div class="fam-pin-pulse"></div><div class="fam-pin-body"></div>`+head+av+activityBadge+battBadge;
     return callout+`<div class="fam-pin">${pin}</div>`;
   }
   function makeEl(cls, html){ const d=document.createElement('div'); d.className=cls; d.innerHTML=html; return d; }
@@ -11886,7 +11873,7 @@ const MBMMap = (function(){
       // whether a callout is currently shown, so a fixed top-offset would
       // shift the avatar off its real coordinate whenever the callout
       // appears/disappears.
-      el.style.position='absolute'; el.style.left=(p.x-32)+'px'; el.style.top=(p.y-el.offsetHeight+8)+'px'; };
+      el.style.position='absolute'; el.style.left=(p.x-30)+'px'; el.style.top=(p.y-el.offsetHeight)+'px'; };
     ov.onRemove=function(){ if(el.parentNode) el.parentNode.removeChild(el); };
     Object.defineProperty(ov,'position',{ get(){return this._pos;}, set(v){ this._pos=v; if(this.draw)this.draw(); } });
     ov.position={lat:latlng[0],lng:latlng[1]};
@@ -12199,7 +12186,7 @@ function famLiveView(){
     <button class="fam-cta fam-cta-sos" data-fam="live-sos">${famIcon('sos')}<span>SOS</span></button>
   </div>`;
   // member sheet — ALWAYS in normal document flow (see CSS), never depends on JS positioning.
-  h+=`<div id="fam-sheet"><div class="fam-sheet-grab"></div><div class="fam-sheet-body" id="fam-sheet-body">`;
+  h+=`<div id="fam-sheet"><div class="fam-sheet-draghead"><div class="fam-sheet-grab"></div></div><div class="fam-sheet-body" id="fam-sheet-body">`;
   h+=famLiveSheetBodyHtml(members, sel, myUid);
   h+=`</div></div>`; // sheet-body, sheet
   // ── FEATURE 6: Map Type sheet (Auto / Street / Satellite). Only genuinely
@@ -12397,13 +12384,13 @@ function famComposeStatusText(m){
   const s=m.state||{};
   if(d.activityType==='driving'){
     const road=famBareRoadName(s.lat,s.lng);
-    const since=d.activityStartedAt;
+    const since=d.activityStartedAt||s.reportedAt||s.capturedAt||null;
     const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
     return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'driving' };
   }
   if(d.activityType==='walking'){
     const road=famBareRoadName(s.lat,s.lng);
-    const since=d.activityStartedAt;
+    const since=d.activityStartedAt||s.reportedAt||s.capturedAt||null;
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
     return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
   }
@@ -12892,7 +12879,7 @@ function famUpdateCameraPadding(sheetPx){
 /* ── Draggable member sheet (collapsed / partial / full) ── */
 function famSheetInitDrag(){
   const sheet=document.getElementById('fam-sheet'); if(!sheet)return;
-  const grab=sheet.querySelector('.fam-sheet-grab'); if(!grab)return;
+  const grab=sheet.querySelector('.fam-sheet-draghead'); if(!grab)return;
   // Idempotent: famLiveApply() can re-run this on every snapshot. Bind the
   // grab/window listeners at most once per sheet element so we never leak
   // duplicate mousemove/mouseup handlers on the window.
@@ -13612,7 +13599,7 @@ function famAction(act,arg,ev){
       if(!mem||!mem.state||mem.state.lat==null){ toast(L==='fa'?'موقعیتی برای ذخیره نیست':'No location to save'); return; }
       // Prefill a new Place draft from this member's REAL current fix — never
       // a fabricated coordinate. Reuses the existing Places save flow.
-      _famPlaceDraft={ type:'other', name:(L==='fa'?'مکان '+mem.name:mem.name+'’s place'),
+      _famPlaceDraft={ type:'other', name:'',
         lat:mem.state.lat, lon:mem.state.lng, radius:150,
         alerts:{enter:true,exit:true}, quietHours:{enabled:false,start:'22:00',end:'07:00'} };
       famActivePlaceId=null; famView='placeEdit'; render(); window.scrollTo(0,0);
