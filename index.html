@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v352';
+const APP_VERSION='v354';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12623,39 +12623,48 @@ const DRV_EVENT_META={
   RapidAccelCandidate:  { icon:'⚡',  label:{fa:'شتاب سریع',en:'Rapid Accel'}, color:'#E056A0' },
   HighSpeedThresholdEvent:{ icon:'🚨', label:{fa:'سرعت بالا',en:'High Speed'},  color:'#FF6B6B' }
 };
-function EventBadge(type,count){
+function EventBadge(type,count,trend){
   const meta=DRV_EVENT_META[type]||{icon:'●',label:{fa:type,en:type},color:'#8652FF'};
-  // Fixed width card, hidden-scrollbar carousel (see .drv-event-carousel),
-  // logical padding for RTL. Label uses white-space:nowrap + text-overflow
-  // ellipsis rather than allowing wrap — a wrapped label would break the
-  // card's fixed height and make the row look uneven card-to-card.
+  // trend: 'up' | 'down' | 'flat' | undefined — arrow matches the reference
+  // design's event pills (↘ when improving/decreasing, → when unchanged).
+  let trendIcon='';
+  if(trend==='down') trendIcon=`<span style="color:#2FCE6B;font-size:13px">↘</span>`;
+  else if(trend==='up') trendIcon=`<span style="color:#E0447A;font-size:13px">↗</span>`;
+  else if(trend==='flat') trendIcon=`<span style="color:var(--ink3);font-size:13px">→</span>`;
   return `<div class="drv-event-card" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:var(--s2);border-radius:16px;padding:12px 14px;overflow:hidden">
     <span style="font-size:20px">${meta.icon}</span>
-    <span style="font-weight:800;font-size:20px;line-height:1">${count}</span>
+    <div style="display:flex;align-items:center;gap:5px"><span style="font-weight:800;font-size:20px;line-height:1">${count}</span>${trendIcon}</div>
     <span style="font-size:11px;color:var(--ink3);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(meta.label[L]||meta.label.en)}</span>
   </div>`;
 }
 
 /* ── SpeedCard / DistanceCard: small stat cards, reuse the existing
-   .fam-stat-card design (already in the CSS from the Location screens). ── */
-function SpeedCard(label,value,sub){
-  return `<div class="fam-stat-card"><div class="lbl">${esc(label)}</div><div class="val">${value}</div>${sub?`<div style="font-size:11px;color:var(--ink3);margin-top:2px">${esc(sub)}</div>`:''}</div>`;
+   .fam-stat-card design (already in the CSS from the Location screens).
+   Optional avatarUrl/avatarInitial/avatarColor render a small circular
+   photo inline (matches the reference design's Top Speed card, which
+   shows the driver who achieved it). ── */
+function SpeedCard(label,value,sub,avatar){
+  const avHtml=avatar?`<div style="width:22px;height:22px;border-radius:50%;overflow:hidden;flex:none;margin-bottom:6px">${avatar.url?`<img src="${esc(avatar.url)}" style="width:100%;height:100%;object-fit:cover">`:`<div style="width:100%;height:100%;background:${avatar.color||'#8652FF'};display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:800">${esc(avatar.initial||'?')}</div>`}</div>`:'';
+  return `<div class="fam-stat-card">${avHtml}<div class="lbl">${esc(label)}</div><div class="val">${value}</div>${sub?`<div style="font-size:11px;color:var(--ink3);margin-top:2px">${esc(sub)}</div>`:''}</div>`;
 }
-function DistanceCard(label,value,sub){ return SpeedCard(label,value,sub); } // same visual card, different semantic name per requested component list
+function DistanceCard(label,value,sub,avatar){ return SpeedCard(label,value,sub,avatar); } // same visual card, different semantic name per requested component list
 
 /* ── DrivingStatsGrid: the 2x2 grid of Top Speed / Distance / Trips / Time.
    Values are shown consistently: if there are genuinely zero trips in
    range, EVERY card reads as a real zero/dash pair for that unit (never a
    mix of "—" on some cards and "0" on others for the same empty state —
-   that inconsistency was confusing since both mean the same thing here). ── */
-function DrivingStatsGrid(sessions){
+   that inconsistency was confusing since both mean the same thing here).
+   driverAvatar (optional): {url,initial,color} for the member these
+   sessions belong to — shown on the Top Speed card, matching the
+   reference design's driver-photo treatment. ── */
+function DrivingStatsGrid(sessions,driverAvatar){
   const totalTrips=sessions.length;
   const totalDistanceM=sessions.reduce((s,x)=>s+(x.distanceM||0),0);
   const totalDurationSec=sessions.reduce((s,x)=>s+(x.durationSec||0),0);
   const topSpeedMps=sessions.reduce((mx,x)=>Math.max(mx,x.maxSpeedMps||0),0);
   const noData=totalTrips===0;
   let h=`<div class="fam-stat-grid">`;
-  h+=SpeedCard(L==='fa'?'بیشترین سرعت':'Top Speed', noData?'—':`${drvFmtSpeedKph(topSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`);
+  h+=SpeedCard(L==='fa'?'بیشترین سرعت':'Top Speed', noData?'—':`${drvFmtSpeedKph(topSpeedMps)} <span style="font-size:13px;font-weight:600">km/h</span>`, null, noData?null:driverAvatar);
   h+=DistanceCard(L==='fa'?'مسافت کل':'Total Distance', noData?'—':`${drvFmtDistanceKm(totalDistanceM)} <span style="font-size:13px;font-weight:600">km</span>`);
   h+=SpeedCard(L==='fa'?'تعداد سفر':'Total Trips', noData?'—':totalTrips);
   h+=SpeedCard(L==='fa'?'زمان رانندگی':'Driving Time', noData?'—':drvFmtDuration(totalDurationSec));
@@ -12673,9 +12682,25 @@ function WeeklyReport(uid,rangeStartISO,rangeEndISO){
   const events=eng.memberEventsInRange(uid,rangeStartISO,rangeEndISO);
   const counts={};
   events.forEach(e=>{ counts[e.type]=(counts[e.type]||0)+1; });
+  // Real trend: compare against the immediately PRIOR period of the same
+  // length (e.g. if rangeStart/End cover this week, the prior period is
+  // the week before that) — matches the reference design's trend arrows,
+  // computed from actual event counts, never decorative or randomized.
+  const rangeMs=Date.parse(rangeEndISO)-Date.parse(rangeStartISO);
+  const priorStartISO=new Date(Date.parse(rangeStartISO)-rangeMs).toISOString();
+  const priorEndISO=rangeStartISO;
+  const priorEvents=eng.memberEventsInRange(uid,priorStartISO,priorEndISO);
+  const priorCounts={};
+  priorEvents.forEach(e=>{ priorCounts[e.type]=(priorCounts[e.type]||0)+1; });
+  function trendFor(type){
+    const cur=counts[type]||0, prior=priorCounts[type]||0;
+    if(cur<prior) return 'down';
+    if(cur>prior) return 'up';
+    return 'flat';
+  }
   const types=['HighSpeedThresholdEvent','RapidAccelCandidate','HardBrakeCandidate'];
   let h=`<div class="drv-event-carousel">`;
-  types.forEach(t=>{ h+=EventBadge(t,counts[t]||0); });
+  types.forEach(t=>{ h+=EventBadge(t,counts[t]||0,trendFor(t)); });
   h+=`</div>`;
   return h;
 }
@@ -12804,17 +12829,23 @@ function DrivingDashboard(){
   if(members.length>1) h+=DrivingMemberSelector(selUid);
 
   const allTimeSessions=eng.memberSessions(selUid);
+  const selMember=members.find(mm=>mm.uid===selUid);
+  const driverAvatar=selMember?{url:selMember.photo,initial:(selMember.name||'?').trim().charAt(0).toUpperCase(),color:selMember.color}:null;
+  // Always show the event badges and stats grid — even at zero, matching
+  // the reference design exactly (it shows "0 →" rather than hiding the
+  // whole section). Previously this entire block was replaced by an empty
+  // state for a member with zero all-time trips, which made the icons
+  // vanish completely instead of honestly showing zeros — that was wrong;
+  // fixed here.
+  h+=WeeklyReport(selUid,wk.startISO,wk.endISO);
+  const mySessions=eng.memberSessionsInRange(selUid,wk.startISO,wk.endISO);
+  h+=`<div style="margin-top:14px">`+DrivingStatsGrid(mySessions,driverAvatar)+`</div>`;
   if(!allTimeSessions.length){
-    // Real empty state: this member has NEVER driven (all-time, not just
-    // this week) — showing a Weekly Report full of zero-badges here would
-    // look broken/unfinished rather than honestly empty.
-    h+=`<div class="hub-ph" style="margin-top:8px"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc;font-size:28px">${famIcon('car')}</div>
+    // Real empty state supplements the (honestly zeroed) report above —
+    // it does not replace it.
+    h+=`<div class="hub-ph" style="margin-top:16px"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc;font-size:28px">${famIcon('car')}</div>
       <div class="hub-ph-t">${L==='fa'?'هنوز سفری ثبت نشده':'No drives recorded yet'}</div>
       <div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی رانندگی شروع شود، سفرها اینجا نمایش داده می‌شوند.':'Start driving and your trips will appear here.'}</div></div>`;
-  } else {
-    h+=WeeklyReport(selUid,wk.startISO,wk.endISO);
-    const mySessions=eng.memberSessionsInRange(selUid,wk.startISO,wk.endISO);
-    h+=`<div style="margin-top:14px">`+DrivingStatsGrid(mySessions)+`</div>`;
   }
 
   h+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">${L==='fa'?'اعضا':'Members'}</div>`;
