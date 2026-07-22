@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v359';
+const APP_VERSION='v360';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11410,6 +11410,8 @@ const FamilyBackend = (function(){
     const STOP_HOLD_MS      = 30000;    // how long stopped-speed must hold before it counts as a Stop segment in the timeline
     const HEADING_MIN_MPS   = 2.0;      // below this speed, GPS heading is noise and must not be trusted (reviewer point 3)
     const SPIKE_NEIGHBOR_MPS = 15;      // a sample >this much faster than BOTH neighbors is treated as a GPS speed spike (reviewer point 4)
+    const PRE_WINDOW_MS = 25000;        // rolling pre-session window for cumulative displacement + movement-consistency
+    const PRE_WINDOW_DRIVE_M = 130;     // >=130m real displacement within PRE_WINDOW_MS ⇒ driving, independent of coords.speed
 
     // ── Debug overlay counters (real, not simulated) ──
     let _ingestFixCallCount=0;
@@ -11432,6 +11434,54 @@ const FamilyBackend = (function(){
       const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
       return 2*R*Math.asin(Math.min(1,Math.sqrt(s))); }
 
+    function classifyFixWindow(curSample,prevSample,window){
+      // Fast path: trust a real, valid coords.speed reading immediately —
+      // no need to wait for a window when the device tells us directly.
+      const speedMps=curSample.speedMps;
+      if(speedMps!=null && !isNaN(speedMps)){
+        if(speedMps>=DRIVE_MIN_MS) return 'driving';
+        if(speedMps>0.3 && speedMps<=WALK_MAX_MS) return 'walking';
+        if(speedMps>WALK_MAX_MS && speedMps<DRIVE_MIN_MS) return 'ambiguous';
+        // speedMps < 0.3: device says essentially stationary. Still check
+        // the window below before committing to 'stationary' — a device
+        // can report near-zero speed on some fixes while genuinely moving
+        // (GPS speed itself is noisy), so cumulative displacement is the
+        // tie-breaker of record.
+      }
+      // PRIMARY signal for pre-session fixes: cumulative real displacement
+      // across the rolling window (movement consistency over time), not a
+      // single two-fix comparison. This is what makes driving detection
+      // work on devices that never report coords.speed at all, and makes
+      // it more resistant to any single noisy/dropped fix than comparing
+      // only the last two points.
+      if(window && window.length>=2){
+        const first=window[0], last=window[window.length-1];
+        const dt=(Date.parse(last.t)-Date.parse(first.t))/1000;
+        if(dt>0){
+          let cum=0;
+          for(let i=1;i<window.length;i++) cum+=haversineM(window[i-1],window[i]);
+          if(cum>=PRE_WINDOW_DRIVE_M) return 'driving';
+          const avgMps=cum/dt;
+          if(avgMps>0.3 && avgMps<=WALK_MAX_MS) return 'walking';
+        }
+      }
+      // Fallback: simple two-fix comparison (used when no window is
+      // available yet, or for the active-session hot path).
+      if(prevSample && curSample){
+        const dt=(Date.parse(curSample.t)-Date.parse(prevSample.t))/1000;
+        if(dt>0){
+          const est=haversineM(prevSample,curSample)/dt;
+          if(est>=DRIVE_MIN_MS) return 'driving';
+          if(est>0.3 && est<=WALK_MAX_MS) return 'walking';
+          return 'stationary';
+        }
+      }
+      if(speedMps!=null && !isNaN(speedMps)) return 'stationary'; // device explicitly said ~0 and no window/pair confirmed otherwise
+      return 'stationary';
+    }
+    /* Legacy two-fix classifier, still used by the active-session hot path
+       (real accepted samples already being tracked, no need for the
+       pre-session rolling window there). */
     function classifyFix(speedMps, prevSample, curSample){
       if(speedMps!=null && !isNaN(speedMps)){
         if(speedMps>=DRIVE_MIN_MS) return 'driving';
@@ -11749,22 +11799,25 @@ const FamilyBackend = (function(){
         altitudeM:raw.altitudeM!=null?raw.altitudeM:null,
         source:raw.source||'gps' };
 
-      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0,preLastFix:null});
-      // CRITICAL FIX: before a session exists, q.samples is intentionally
-      // empty (samples only start accumulating once a trip is confirmed —
-      // see below). But classifyFix's distance/time FALLBACK (for devices
-      // that report coords.speed as null, which is common on Android/some
-      // browsers) needs a PREVIOUS sample to compute an implied speed from.
-      // Previously prevSample was always null before a session started,
-      // so a device that never reports speed could NEVER accumulate a
-      // driving candidate and could NEVER start a trip — a real, serious
-      // bug caught by testing this exact scenario. Fix: track a minimal
-      // one-fix pre-session buffer (q.preLastFix), separate from q.samples
-      // (which still correctly starts empty until a trip is confirmed).
+      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0,preLastFix:null,preFixWindow:[]});
+      // Rolling pre-session window (last ~25s of fixes) for cumulative
+      // displacement + elapsed-time + movement-consistency classification.
+      // This is the PRIMARY signal — coords.speed is used as a fast-path
+      // shortcut when the device reports it, but many Android devices
+      // report null/unreliable speed, so real trip detection must not
+      // depend on it. A single two-fix comparison could false-positive on
+      // one noisy jump or miss a real trip if one fix drops; a multi-fix
+      // window is required for genuine "movement consistency".
+      if(!q.preFixWindow) q.preFixWindow=[];
       const prevSample=q.sessionId?(q.samples.length?q.samples[q.samples.length-1]:null):q.preLastFix;
       sample.seq=prevSample?prevSample.seq+1:0;
+      if(!q.sessionId){
+        q.preFixWindow.push(sample);
+        const cutoffT=Date.parse(sample.t)-PRE_WINDOW_MS;
+        while(q.preFixWindow.length && Date.parse(q.preFixWindow[0].t)<cutoffT) q.preFixWindow.shift();
+      }
 
-      const rawType=classifyFix(sample.speedMps,prevSample,sample);
+      const rawType=classifyFixWindow(sample,prevSample,q.sessionId?null:q.preFixWindow);
       const nowMs=Date.now();
       // Diagnostic-only logging (console, no UI cost) for the trip-start
       // decision path — this is the exact chain a "why didn't my drive get
@@ -14346,8 +14399,8 @@ function famClassifyRawActivity(m){
 /* Derive (and update, with hysteresis + debounce) the full activity/place
    state for one member. MUST be the only place that decides activityType —
    both the marker callout and the sheet read from this cache. */
-const FAM_CUM_WINDOW_MS=20000;   // rolling window for cumulative-distance driving detection
-const FAM_CUM_DRIVE_M=110;       // >=110m covered within the window ⇒ driving (≈20km/h avg over 20s; comfortably above walking pace)
+const FAM_CUM_WINDOW_MS=25000;   // rolling window for cumulative-distance driving detection — MUST match the Engine's PRE_WINDOW_MS
+const FAM_CUM_DRIVE_M=130;       // >=130m covered within the window ⇒ driving — MUST match the Engine's PRE_WINDOW_DRIVE_M
 function famCumulativeIsDriving(c,m){
   const s=m.state; if(!s||s.lat==null) return false;
   const t=Date.parse(s.reportedAt||s.capturedAt||'')||Date.now();
@@ -14446,24 +14499,34 @@ function famComposeStatusText(m){
   if(d.activityType==='driving'){
     const road=famBareRoadName(s.lat,s.lng);
     const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
-    // "Driving · X km" using the REAL active trip distance from the Engine
-    // (the same session that will be saved to the Dashboard), not a
-    // recomputed or estimated figure. Falls back to live speed only for
-    // the brief window before the Engine has confirmed/started the
-    // session (matches the Engine's own hysteresis) so the line is never
-    // blank while the person is clearly moving.
-    const fbEng=(fb&&fb.driving)?fb.driving:null;
-    const activeSess=fbEng?fbEng.activeSession(m.uid):null;
-    let l2;
-    if(activeSess && activeSess.distanceM!=null){
-      const km=(activeSess.distanceM/1000);
-      const kmTxt=km<10?km.toFixed(1):Math.round(km).toString();
-      l2=`${famIcon('car')} ${L==='fa'?'در حال رانندگی':'Driving'} · ${kmTxt} km`;
+    // Live speed: priority 1 = real coords.speed when valid; priority 2 =
+    // calculated from real GPS distance/elapsed time between the last two
+    // accepted fixes. Never hard-coded, never frozen — if genuinely
+    // unavailable (no prior fix yet to compute from), the speed line is
+    // left blank rather than showing a stale/fake value.
+    let speedKph=null;
+    if(s.speed!=null && !isNaN(s.speed)){
+      speedKph=drvFmtSpeedKph(s.speed);
     } else {
-      const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
-      l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+      const fbEng2=(fb&&fb.driving)?fb.driving:null;
+      const activeSess2=fbEng2?fbEng2.activeSession(m.uid):null;
+      if(activeSess2 && s.lat!=null){
+        const live=fbEng2.sessionSamplesLive(m.uid,activeSess2.id);
+        const prevFix=(live&&live.length>=2)?live[live.length-2]:null;
+        const lastFix=(live&&live.length)?live[live.length-1]:null;
+        if(prevFix && lastFix){
+          const dtS=(Date.parse(lastFix.t)-Date.parse(prevFix.t))/1000;
+          if(dtS>0){
+            const distM=famHaversineM(prevFix.lat,prevFix.lng,lastFix.lat,lastFix.lng);
+            speedKph=drvFmtSpeedKph(distM/dtS);
+          }
+        }
+      }
     }
-    return { l1, l2, since:null, activityType:'driving' };
+    const cachedGeo=FamGeo.get(s.lat,s.lng);
+    const region=cachedGeo?cachedGeo.line2:'';
+    const l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    return { l1, l2, region, since:null, activityType:'driving' };
   }
   if(d.activityType==='walking'){
     const road=famBareRoadName(s.lat,s.lng);
@@ -14535,7 +14598,8 @@ const FamGeo = (function(){
   // DIFFERENT cells and trigger a fresh Nominatim lookup each time, which
   // can legitimately return a different nearby road name — that's what was
   // making the address flip-flop every few seconds while stationary.
-  function key(lat,lng){ return lat.toFixed(3)+','+lng.toFixed(3); }
+  const GEO_SCHEMA='v2'; // bumped: locality precedence fix invalidates all pre-fix cached entries
+  function key(lat,lng){ return GEO_SCHEMA+':'+lat.toFixed(3)+','+lng.toFixed(3); }
   function haversineM(lat1,lng1,lat2,lng2){
     const R=6371000,toR=x=>x*Math.PI/180;
     const dLat=toR(lat2-lat1),dLng=toR(lng2-lng1);
@@ -14567,7 +14631,15 @@ const FamGeo = (function(){
     a=a||{};
     const road = a.road || a.pedestrian || a.footway || a.residential || a.path || a.cycleway || a.street;
     const num  = a.house_number;
-    const suburb = a.suburb || a.neighbourhood || a.quarter || a.city_district || a.town || a.village || a.hamlet || a.city || a.municipality;
+    // Locality precedence FIX: the most SPECIFIC locality field must win.
+    // Nominatim's addressdetails often includes BOTH a specific suburb/town
+    // (e.g. "Brighton") AND a broader city field for the metro area (e.g.
+    // "Hobart") on the same result — the old order checked a.city before
+    // a.town/a.village, so an outer-suburb address could show the wrong,
+    // broader locality name. suburb/neighbourhood/town/village/hamlet are
+    // always more specific than city/municipality and must be tried first.
+    const suburb = a.suburb || a.neighbourhood || a.quarter || a.town || a.village || a.hamlet
+                   || a.city_district || a.municipality || a.city;
     const region = a.state_code || a.state || a.region || a.province;
     const suburbLine = [suburb, region].filter(Boolean).join(', ');
     let line1, full;
