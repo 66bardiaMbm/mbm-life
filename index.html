@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v346';
+const APP_VERSION='v347';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11092,6 +11092,8 @@ const FamilyBackend = (function(){
     let _lastWriteAt=0;             // (legacy) throttle guard
     let _lastRemoteWriteAt=0;       // throttle for the Firestore write only
     let _lastCallbackAt=0;          // time of the last real watch callback
+    let _watchCallbackCount=0;      // total watchPosition callbacks received this session (debug overlay)
+    let _lastRawSpeed=undefined;    // exact coords.speed from the last callback, BEFORE any classification (debug overlay — undefined until first callback, distinct from null which is a real device value)
     const WRITE_THROTTLE_MS=15000;  // at most one canonical write / 15s (battery §17)
     let _battery=null;              // cached BatteryManager
     let _permissionState=null;      // 'granted'|'denied'|'prompt'|null
@@ -11138,6 +11140,8 @@ const FamilyBackend = (function(){
       const prev=memberState(myUid());
       const moved=(prev&&prev.lat!=null)?Math.round(haversine({lat:prev.lat,lng:prev.lng},{lat:cr.latitude,lng:cr.longitude})):null;
       _lastCallbackAt=Date.now();
+      _watchCallbackCount++;
+      _lastRawSpeed=(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null; // exact device value, debug overlay only
       diag('fix',{lat:+cr.latitude.toFixed(6),lng:+cr.longitude.toFixed(6),acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,movedM:moved,ts:pos.timestamp});
       setLocState('active');
       // Update the LOCAL marker on EVERY valid callback (no throttle here). The
@@ -11293,10 +11297,24 @@ const FamilyBackend = (function(){
       stopWatch();
     }
 
+    function locationDebugInfo(){
+      return {
+        watchId:_watchId,
+        watchCallbackCount:_watchCallbackCount,
+        lastCallbackAt:_lastCallbackAt?new Date(_lastCallbackAt).toISOString():null,
+        callbackAgeMs:_lastCallbackAt?Date.now()-_lastCallbackAt:null,
+        lastRawSpeed:_lastRawSpeed, // undefined until first callback; null is a real device value meaning "not reported"
+        locState:_locState,
+        permissionState:_permissionState,
+        shouldWatch:shouldWatch()
+      };
+    }
+
     return {
       // read
       memberState, memberStatus, memberConsent, memberRoute, myConsent,
       deriveStatus, statusMeta, permissionState, batteryPct,
+      locationDebugInfo,
       // write
       setConsent, writeMyFix, writeCheckin, flushRoute,
       // places (real Firestore sync)
@@ -11352,6 +11370,11 @@ const FamilyBackend = (function(){
     const STOP_HOLD_MS      = 30000;    // how long stopped-speed must hold before it counts as a Stop segment in the timeline
     const HEADING_MIN_MPS   = 2.0;      // below this speed, GPS heading is noise and must not be trusted (reviewer point 3)
     const SPIKE_NEIGHBOR_MPS = 15;      // a sample >this much faster than BOTH neighbors is treated as a GPS speed spike (reviewer point 4)
+
+    // ── Debug overlay counters (real, not simulated) ──
+    let _ingestFixCallCount=0;
+    let _lastIngestFixAt=null;
+    let _lastSyncAtDebug=null; // set whenever pushSessionRemote actually succeeds
 
     function queueMap(){ if(!DB.entities.famDriveQueue)DB.entities.famDriveQueue={}; return DB.entities.famDriveQueue; }
     function sessionMap(){ if(!DB.entities.famDriveSessions)DB.entities.famDriveSessions={}; return DB.entities.famDriveSessions; }
@@ -11412,7 +11435,9 @@ const FamilyBackend = (function(){
 
     async function pushSessionRemote(sess){
       if(!ready()||!isMember())return;
-      await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(()=>{});
+      let ok=true;
+      await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(()=>{ ok=false; });
+      if(ok) _lastSyncAtDebug=nowISO();
     }
     async function pushEventRemote(ev){
       if(!ready()||!isMember())return false;
@@ -11668,6 +11693,7 @@ const FamilyBackend = (function(){
     }
 
     function ingestFix(uid, raw){
+      _ingestFixCallCount++; _lastIngestFixAt=nowISO();
       if(!uid||raw.lat==null||raw.lng==null) return;
       const t=raw.capturedAt||nowISO();
       const rawSpeed=(raw.speedMps!=null&&!isNaN(raw.speedMps))?raw.speedMps:null;
@@ -12091,12 +12117,29 @@ const FamilyBackend = (function(){
       return { load, play, pause, seek, speed, onUpdate, unload, currentFrame };
     })();
 
+    function engineDebugInfo(uid){
+      const q=queueMap()[uid]||null;
+      const active=uid?activeSession(uid):null;
+      return {
+        ingestFixCallCount:_ingestFixCallCount,
+        lastIngestFixAt:_lastIngestFixAt,
+        lastSyncAt:_lastSyncAtDebug,
+        queueSessionId:q?q.sessionId:null,
+        queueSampleCount:q?q.samples.length:0,
+        queueCandidate:q?q.candidate:null,
+        activeSessionId:active?active.id:null,
+        activeSessionSampleCount:active?active.sampleCount:null,
+        activeSessionDistanceM:active?active.distanceM:null,
+        activeSessionDurationSec:active?active.durationSec:null
+      };
+    }
+
     return {
       ingestFix, recoverOnStart,
       manualStart, manualStop,
       memberSessions, session, activeSession, sessionSamples, sessionSamplesLive, sessionSamplesRemote,
       sessionEvents, memberEventsInRange, memberSessionsInRange, deriveTimeline,
-      recomputeMetricsAsync,
+      recomputeMetricsAsync, engineDebugInfo,
       replay: FamilyDrivingReplay,
       consts:{ DRIVE_MIN_MS, WALK_MAX_MS, START_HYST_MS, END_HYST_MS, SYNC_THROTTLE_MS,
                MAX_JUMP_MS, MAX_ACCEPT_ACCURACY_M, HARD_BRAKE_MPS2, RAPID_ACCEL_MPS2,
@@ -12197,10 +12240,21 @@ function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const
    settings title) — never surfaced in the normal UI. */
 function famDevMode(){ return !!(DB.meta && DB.meta._devMode); }
 let _famTitleTaps=0, _famTitleTapT=0;
+let _drvDebugTaps=0, _drvDebugTapT=0, _drvDebugOverlayOn=false;
 function famDevTap(){
   const t=Date.now(); if(t-_famTitleTapT>600)_famTitleTaps=0; _famTitleTapT=t; _famTitleTaps++;
   if(_famTitleTaps>=5){ _famTitleTaps=0; DB.meta._devMode=!DB.meta._devMode; try{saveDB();}catch(e){}
     toast(DB.meta._devMode?(L==='fa'?'حالت توسعه‌دهنده روشن شد':'Developer mode ON'):(L==='fa'?'حالت توسعه‌دهنده خاموش شد':'Developer mode OFF')); render(); }
+}
+/* Debug overlay for the Driving pipeline (watch callback -> ingestFix ->
+   session), per review request. 5 taps on the Weekly Driving Report title
+   toggles it. Every value shown is read live from FamilyLocation/
+   FamilyDriving's actual internal state — nothing here is simulated or
+   placeholder. Meant to stay available while Driving is still being
+   verified on real devices; can be hidden behind a permanent flag later. */
+function drvDebugTap(){
+  const t=Date.now(); if(t-_drvDebugTapT>600)_drvDebugTaps=0; _drvDebugTapT=t; _drvDebugTaps++;
+  if(_drvDebugTaps>=5){ _drvDebugTaps=0; _drvDebugOverlayOn=!_drvDebugOverlayOn; render(); }
 }
 /* Friendly, non-technical failure message for normal users. The raw Firestore
    detail (code/message/uid/project) is only shown when dev mode is on. */
@@ -12595,6 +12649,45 @@ function drvWeekBounds(offset){
   return { startISO:start.toISOString(), endISO:end.toISOString(), label:`${prefix} · ${rangeLabel}` };
 }
 
+/* Debug overlay content — every line reads a real, live value from
+   FamilyLocation.locationDebugInfo() / FamilyDriving.engineDebugInfo().
+   No placeholder or simulated numbers. Monospace, high information
+   density on purpose — this is a diagnostic tool, not polished UI. */
+function drvDebugOverlayHtml(uid){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const eng=drvEngine();
+  if(!fb||!eng) return '';
+  const loc=fb.location.locationDebugInfo?fb.location.locationDebugInfo():{};
+  const dbg=eng.engineDebugInfo(uid);
+  const row=(label,val)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.08)"><span style="opacity:.65">${esc(label)}</span><span style="font-weight:700;text-align:end">${esc(val==null?'—':String(val))}</span></div>`;
+  let h=`<div style="position:fixed;left:8px;right:8px;bottom:78px;z-index:2000;background:#0b0d12ee;color:#e8ecf3;border-radius:14px;padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;max-height:60vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.5)">`;
+  h+=`<div style="font-weight:800;font-size:12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+    <span>🐛 DRIVING DEBUG</span>
+    <button data-fam="drv-debug-tap" style="all:unset;cursor:pointer;opacity:.7;font-size:11px">✕ close</button>
+  </div>`;
+  h+=`<div style="font-weight:700;opacity:.5;margin:6px 0 2px">GPS / WATCHER</div>`;
+  h+=row('watchId', loc.watchId);
+  h+=row('callbacks received', loc.watchCallbackCount);
+  h+=row('last callback at', loc.lastCallbackAt?famAbsTime(loc.lastCallbackAt):null);
+  h+=row('callback age', loc.callbackAgeMs!=null?`${Math.round(loc.callbackAgeMs/1000)}s ago`:null);
+  h+=row('raw coords.speed', loc.lastRawSpeed===undefined?'(no callback yet)':(loc.lastRawSpeed===null?'null (device did not report it)':`${loc.lastRawSpeed.toFixed(2)} m/s`));
+  h+=row('locState()', loc.locState);
+  h+=row('permissionState()', loc.permissionState);
+  h+=row('shouldWatch()', loc.shouldWatch);
+  h+=`<div style="font-weight:700;opacity:.5;margin:10px 0 2px">ENGINE / SESSION</div>`;
+  h+=row('ingestFix() calls', dbg.ingestFixCallCount);
+  h+=row('last ingestFix at', dbg.lastIngestFixAt?famAbsTime(dbg.lastIngestFixAt):null);
+  h+=row('queue.sessionId', dbg.queueSessionId);
+  h+=row('queue sample count', dbg.queueSampleCount);
+  h+=row('pre-trip candidate', dbg.queueCandidate?`${dbg.queueCandidate.type} (${Math.round((Date.now()-dbg.queueCandidate.since)/1000)}s)`:'none');
+  h+=row('active session id', dbg.activeSessionId);
+  h+=row('active session samples', dbg.activeSessionSampleCount);
+  h+=row('active distance (m)', dbg.activeSessionDistanceM);
+  h+=row('active duration (s)', dbg.activeSessionDurationSec);
+  h+=row('last Firestore sync', dbg.lastSyncAt?famAbsTime(dbg.lastSyncAt):'(never synced yet)');
+  h+=`</div>`;
+  return h;
+}
 function DrivingDashboard(){
   const eng=drvEngine();
   if(!eng){
@@ -12609,7 +12702,7 @@ function DrivingDashboard(){
     <button class="btn ${_drvWeekOffset===0?'':'btn-ghost'}" data-fam="drv-week" data-arg="0" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'این هفته':'This week'}</button>
     <button class="btn ${_drvWeekOffset===1?'':'btn-ghost'}" data-fam="drv-week" data-arg="1" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'هفته قبل':'Last week'}</button>
   </div>`;
-  h+=`<div style="font-size:22px;font-weight:800;margin-bottom:4px">${L==='fa'?'گزارش هفتگی رانندگی':'Weekly Driving Report'}</div>`;
+  h+=`<div data-fam="drv-debug-tap" style="font-size:22px;font-weight:800;margin-bottom:4px;user-select:none">${L==='fa'?'گزارش هفتگی رانندگی':'Weekly Driving Report'}</div>`;
   h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:14px">${wk.label}</div>`;
 
   if(members.length>1) h+=DrivingMemberSelector(selUid);
@@ -12664,6 +12757,7 @@ function DrivingDashboard(){
     });
   }
   h+=`</div>`;
+  if(_drvDebugOverlayOn) h+=drvDebugOverlayHtml(selUid);
   h+=famBottomNavHtml();
   h+=`</div>`;
   return h;
@@ -12751,6 +12845,7 @@ function LiveDriving(){
     h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
     h+=`<div id="drv-live-body">`+drvLiveBodyHtml(active,curSpeedKph,loc,lastSample)+`</div>`;
     h+=`</div>`;
+    h+=`<div id="drv-debug-overlay-wrap">`+(_drvDebugOverlayOn?drvDebugOverlayHtml(uid):'')+`</div>`;
     h+=famBottomNavHtml();
     h+=`</div>`;
     return h;
@@ -12833,6 +12928,7 @@ function LiveDriving(){
       </div>
     </div>`;
   }
+  h+=`<div id="drv-debug-overlay-wrap">`+(_drvDebugOverlayOn?drvDebugOverlayHtml(uid):'')+`</div>`;
   h+=famBottomNavHtml();
   h+=`</div>`;
   return h;
@@ -12932,7 +13028,17 @@ function drvLiveApply(){
   const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
   const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
   if(bodyEl) bodyEl.innerHTML=drvLiveBodyHtml(active,curSpeedKph,loc,lastSample);
-  if(typeof bindFamily==='function') bindFamily(); // rebind any data-fam handlers inside the freshly-written node
+  // Debug overlay: patch in place too, so it shows real-time pipeline data
+  // during an actual drive (watch callback count, ingestFix count, sample
+  // count all ticking up live) rather than a stale snapshot from mount time.
+  // Done BEFORE the single bindFamily() call below so its close button
+  // (data-fam="drv-debug-tap") gets bound in the same pass — binding it
+  // AFTER would leave it unresponsive until the next full render.
+  if(_drvDebugOverlayOn){
+    const dbgEl=document.getElementById('drv-debug-overlay-wrap');
+    if(dbgEl) dbgEl.innerHTML=drvDebugOverlayHtml(uid);
+  }
+  if(typeof bindFamily==='function') bindFamily(); // rebind any data-fam handlers inside the freshly-written nodes (body + overlay)
   // Map: update marker/route WITHOUT re-initializing (see drvLiveMount).
   const samples=live||[];
   const last=samples.length?samples[samples.length-1]:null;
@@ -15434,6 +15540,7 @@ function famAction(act,arg,ev){
     case 'nav-membership': toast(L==='fa'?'عضویت در فاز بعدی فعال می‌شود':'Membership is coming in a later phase'); return;
     // ── Driving (Phase 2A) ──
     case 'drv-week': _drvWeekOffset=parseInt(arg,10)||0; render(); return;
+    case 'drv-debug-tap': drvDebugTap(); return;
     case 'drv-sel-member': _drvSelUid=arg; render(); return;
     case 'drv-open-member': _drvSelUid=arg; famView='drivingLive'; render(); window.scrollTo(0,0); return;
     case 'drv-open-member-history': _drvSelUid=arg; famView='drivingHistory'; render(); window.scrollTo(0,0); return;
