@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v354';
+const APP_VERSION='v355';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11294,6 +11294,23 @@ const FamilyBackend = (function(){
             const lt=localSt&&localSt.reportedAt?Date.parse(localSt.reportedAt):0;
             const it=incoming.reportedAt?Date.parse(incoming.reportedAt):0;
             if(lt>it) return;   // my local fix is newer — ignore stale echo
+            // CRITICAL FIX (found via deep trace of a repeatedly-reported
+            // "Since" freeze): reportedAt and stayStart are independent
+            // fields. The Firestore write is throttled to once per
+            // WRITE_THROTTLE_MS, so the write that happens to land during
+            // that window can carry a stayStart from BEFORE a relocation
+            // was confirmed locally (the pending-jump window), even though
+            // its reportedAt is legitimately "newer" than what was last
+            // synced. Applying that incoming doc wholesale would silently
+            // roll the correctly-updated LOCAL stayStart backward in time.
+            // Since stayStart only ever moves forward for a genuine
+            // relocation (never backward — see classifyMovement), this is
+            // always safe to enforce: never let it regress for own-uid.
+            if(localSt&&localSt.stayStart&&incoming.stayStart){
+              if(Date.parse(incoming.stayStart)<Date.parse(localSt.stayStart)){
+                incoming.stayStart=localSt.stayStart;
+              }
+            }
           }
           locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
         } },()=>{});
