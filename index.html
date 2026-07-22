@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v347';
+const APP_VERSION='v348';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12253,7 +12253,7 @@ function famDevTap(){
    placeholder. Meant to stay available while Driving is still being
    verified on real devices; can be hidden behind a permanent flag later. */
 function drvDebugTap(){
-  const t=Date.now(); if(t-_drvDebugTapT>600)_drvDebugTaps=0; _drvDebugTapT=t; _drvDebugTaps++;
+  const t=Date.now(); if(t-_drvDebugTapT>1000)_drvDebugTaps=0; _drvDebugTapT=t; _drvDebugTaps++;
   if(_drvDebugTaps>=5){ _drvDebugTaps=0; _drvDebugOverlayOn=!_drvDebugOverlayOn; render(); }
 }
 /* Friendly, non-technical failure message for normal users. The raw Firestore
@@ -12688,6 +12688,50 @@ function drvDebugOverlayHtml(uid){
   h+=`</div>`;
   return h;
 }
+/* Always-visible (no tap/gesture required) diagnostic strip at the top of
+   the Driving Dashboard. This replaces relying on the 5-tap debug overlay
+   as the ONLY way to see pipeline state — if that gesture has any
+   real-device quirk (timing, touch event handling), the person would see
+   nothing and have no way to tell the app apart from "broken" vs "just
+   needs you to drive". This strip needs zero interaction and shows the
+   single most useful fact: is GPS actually flowing right now, yes or no,
+   in plain language, with the real numbers backing it up. */
+function drvAlwaysVisibleStatusHtml(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  if(!fb||!fb.location) return '';
+  const loc=fb.location.locationDebugInfo?fb.location.locationDebugInfo():null;
+  if(!loc) return '';
+  const c=fb.location.myConsent?fb.location.myConsent():null;
+  const consentOn=c&&c.enabled&&!c.paused;
+  const watcherRunning=loc.watchId!=null;
+  const hasRecentCallback=loc.callbackAgeMs!=null&&loc.callbackAgeMs<30000;
+
+  let statusText, statusColor, detail;
+  if(!consentOn){
+    statusText=L==='fa'?'اشتراک موقعیت خاموش است':'Location sharing is OFF';
+    statusColor='#e0447a';
+    detail=L==='fa'?'برای ثبت رانندگی باید اشتراک موقعیت روشن باشد.':'Location sharing must be on for driving to be recorded.';
+  } else if(!watcherRunning){
+    statusText=L==='fa'?'GPS شروع نشده':'GPS has not started';
+    statusColor='#e0447a';
+    detail=L==='fa'?`permission: ${loc.permissionState||'?'}`:`permission: ${loc.permissionState||'?'}`;
+  } else if(!hasRecentCallback){
+    statusText=L==='fa'?'GPS فعال ولی بدون داده‌ی تازه':'GPS active but no recent data';
+    statusColor='#f5a623';
+    detail=loc.lastCallbackAt?`${L==='fa'?'آخرین':'last'}: ${famRelTime(loc.lastCallbackAt)}`:(L==='fa'?'هنوز هیچ داده‌ای دریافت نشده':'no data received yet');
+  } else {
+    statusText=L==='fa'?'GPS فعال و در حال دریافت':'GPS active and receiving data';
+    statusColor='#2fce6b';
+    detail=`${loc.watchCallbackCount||0} ${L==='fa'?'دریافتی':'callbacks'} · raw speed: ${loc.lastRawSpeed===undefined?'—':(loc.lastRawSpeed===null?'null':loc.lastRawSpeed.toFixed(1)+' m/s')}`;
+  }
+  return `<div style="display:flex;align-items:center;gap:10px;background:${statusColor}14;border:1px solid ${statusColor}44;border-radius:12px;padding:10px 14px;margin-bottom:14px">
+    <span style="width:9px;height:9px;border-radius:50%;background:${statusColor};flex:none"></span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:800;color:${statusColor}">${esc(statusText)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:1px">${esc(detail)}</div>
+    </div>
+  </div>`;
+}
 function DrivingDashboard(){
   const eng=drvEngine();
   if(!eng){
@@ -12698,6 +12742,7 @@ function DrivingDashboard(){
   const wk=drvWeekBounds(_drvWeekOffset);
 
   let h=`<div id="drv-fixed-wrap"><div style="padding:0 16px 90px">`;
+  h+=drvAlwaysVisibleStatusHtml();
   h+=`<div style="display:flex;gap:8px;margin-bottom:16px;overflow-x:auto">
     <button class="btn ${_drvWeekOffset===0?'':'btn-ghost'}" data-fam="drv-week" data-arg="0" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'این هفته':'This week'}</button>
     <button class="btn ${_drvWeekOffset===1?'':'btn-ghost'}" data-fam="drv-week" data-arg="1" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'هفته قبل':'Last week'}</button>
@@ -12823,7 +12868,8 @@ function LiveDriving(){
   }
   const active=eng.activeSession(uid);
   let h=`<div id="drv-live-wrap" style="display:flex;flex-direction:column;height:100%">`;
-  h+=`<div style="display:flex;align-items:center;gap:10px;padding:16px 16px 8px">
+  h+=`<div style="padding:8px 16px 0"><div id="drv-status-strip">`+drvAlwaysVisibleStatusHtml()+`</div></div>`;
+  h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 16px 8px">
     <button data-fam="drv-back-dash" style="all:unset;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--ink)">${famIcon('back')}</button>
     <div style="flex:1;min-width:0">`+DriverHeader(uid,{showSwitcher:true})+`</div>
     <button data-fam="drv-open-history" style="all:unset;cursor:pointer;font-size:12px;font-weight:700;color:var(--fam-purple,#8652FF);white-space:nowrap">${L==='fa'?'تاریخچه':'History'}</button>
@@ -13006,6 +13052,8 @@ function drvLiveApply(){
   if(!eng||!uid||!fb){ render(); return; }
   const active=eng.activeSession(uid);
   const bodyEl=document.getElementById('drv-live-body');
+  const stripEl=document.getElementById('drv-status-strip');
+  if(stripEl) stripEl.innerHTML=drvAlwaysVisibleStatusHtml(); // refresh every tick, regardless of driving state
   const wasDriving=_drvLiveMapSessionId!=null;
   const isDrivingNow=!!active;
   if(wasDriving!==isDrivingNow){ render(); return; } // state actually changed — full render needed
