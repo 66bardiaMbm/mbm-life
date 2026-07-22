@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v344';
+const APP_VERSION='v346';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2617,6 +2617,24 @@ function _renderInner(){
   else if(screen==='profile')el.innerHTML=renderProfile();
   bindScreen();
   updateFab();
+  // Ensure the GPS watcher is running whenever ANY Family screen is active
+  // — not just Live Driving specifically. Previously the watcher only
+  // started from famLiveMount (the Location screen) or, after a later fix,
+  // also from drvLiveMount (Live Driving only) — but a person entering
+  // Family and landing on the Driving Dashboard (via the bottom nav's
+  // "Driving" tab, which does NOT pass through famView='live' first) would
+  // still have no watcher running. This is the correct scope per review:
+  // the watcher belongs to the module lifecycle, not to any one screen's
+  // mount function. Cheap to call repeatedly — reconcileWatch() only
+  // actually starts/stops based on shouldWatch()'s real conditions
+  // (consent, visibility, permission), so calling it on every Family
+  // render is a no-op when nothing changed.
+  if(screen==='module' && currentModule==='family'){
+    try{
+      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+      if(fb&&fb.location){ fb.location.reconcileWatch(); }
+    }catch(e){}
+  }
   // Mount the map after the Family Live DOM exists.
   if(screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard') && typeof famLiveMount==='function'){
     famLiveMount();
@@ -11665,8 +11683,19 @@ const FamilyBackend = (function(){
         altitudeM:raw.altitudeM!=null?raw.altitudeM:null,
         source:raw.source||'gps' };
 
-      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0});
-      const prevSample=q.samples.length?q.samples[q.samples.length-1]:null;
+      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0,preLastFix:null});
+      // CRITICAL FIX: before a session exists, q.samples is intentionally
+      // empty (samples only start accumulating once a trip is confirmed —
+      // see below). But classifyFix's distance/time FALLBACK (for devices
+      // that report coords.speed as null, which is common on Android/some
+      // browsers) needs a PREVIOUS sample to compute an implied speed from.
+      // Previously prevSample was always null before a session started,
+      // so a device that never reports speed could NEVER accumulate a
+      // driving candidate and could NEVER start a trip — a real, serious
+      // bug caught by testing this exact scenario. Fix: track a minimal
+      // one-fix pre-session buffer (q.preLastFix), separate from q.samples
+      // (which still correctly starts empty until a trip is confirmed).
+      const prevSample=q.sessionId?(q.samples.length?q.samples[q.samples.length-1]:null):q.preLastFix;
       sample.seq=prevSample?prevSample.seq+1:0;
 
       const rawType=classifyFix(sample.speedMps,prevSample,sample);
@@ -11679,7 +11708,7 @@ const FamilyBackend = (function(){
       // cost, and it's the only way to diagnose this remotely.
       if(!q.sessionId){
         if(sample.speedMps==null){
-          console.debug('[FamilyDriving] fix with NO speed reported by device — classifyFix falling back to distance/time estimate',{uid,lat:sample.lat,lng:sample.lng,accuracyM:sample.accuracyM});
+          console.debug('[FamilyDriving] fix with NO speed reported by device — classifyFix falling back to distance/time estimate',{uid,lat:sample.lat,lng:sample.lng,accuracyM:sample.accuracyM,hadPrevFix:!!prevSample});
         }
         console.debug('[FamilyDriving] pre-trip fix',{uid,rawType,speedMps:sample.speedMps,candidateType:q.candidate&&q.candidate.type,candidateAgeMs:q.candidate?nowMs-q.candidate.since:null});
       }
@@ -11690,12 +11719,13 @@ const FamilyBackend = (function(){
           else if(nowMs-q.candidate.since>=START_HYST_MS){
             q.samples=[sample]; q.lastFlushIdx=0;
             const sess=startSession(uid,sample);
-            q.sessionId=sess.id; q.candidate=null;
+            q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
             console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
           }
         } else {
           q.candidate=null;
         }
+        q.preLastFix=sample; // remember this fix so the NEXT fix's fallback classifier has something to compare against
         try{persistDB();}catch(e){}
         return;
       }
@@ -12672,6 +12702,24 @@ function drvLiveBodyHtml(active,curSpeedKph,loc,lastSample){
   }
   return h;
 }
+/* Single source of truth for "is this member's location healthy right now
+   (STATE 2) or not (STATE 3)" — used by BOTH LiveDriving's initial render
+   and drvLiveApply's poll-tick patch. Having this logic in two places was
+   exactly how the "Live location active + Offline simultaneously"
+   contradiction happened: one path used locState(), another used
+   deriveStatus(), and they could disagree. Now there is only one
+   implementation; both callers get identical answers by construction. */
+function drvLocationHealth(fb,uid){
+  const isSelf=(uid===myUid());
+  if(isSelf && fb.location.locState){
+    const selfLocState=fb.location.locState();
+    return { isHealthy:['active','obtaining','requesting'].indexOf(selfLocState)>=0, isSelf, selfLocState };
+  }
+  const memberState=fb.location.memberState(uid);
+  const memberConsent=fb.location.memberConsent(uid);
+  const status=fb.location.deriveStatus(memberState,memberConsent);
+  return { isHealthy:['moving','updating','recent','stopped'].indexOf(status)>=0, isSelf, status };
+}
 function LiveDriving(){
   const eng=drvEngine();
   const uid=drvUid();
@@ -12709,17 +12757,33 @@ function LiveDriving(){
   }
 
   // No active session — distinguish STATE 2 (online, healthy location, just
-  // not driving) from STATE 3 (GPS/location genuinely unavailable) using
-  // the SAME real status the Location screen already relies on (never a
-  // fabricated distinction). 'moving','updating','recent','stopped' all
-  // mean the location pipeline is healthy — the member simply isn't
-  // driving right now. 'denied','unavailable','offline','stale','paused'
-  // mean we honestly don't have a trustworthy live signal for them.
+  // not driving) from STATE 3 (GPS/location genuinely unavailable).
+  //
+  // Bug found via review: deriveStatus() depends on memberConsent(uid),
+  // which is read from a Firestore-synced map (consentMap()) that can lag
+  // behind the local device's ACTUAL watcher state — e.g. right after app
+  // launch, before the consent listener's first snapshot arrives,
+  // memberConsent() falls back to {enabled:false}, making deriveStatus()
+  // report 'unavailable' even while the local GPS watcher is genuinely
+  // active and receiving fresh fixes. This is exactly the contradiction
+  // seen live: "Live location active · updated now" (locState(), the
+  // TRULY local signal) shown alongside "Offline" (deriveStatus(), the
+  // Firestore-dependent one) for the SAME person at the SAME moment.
+  //
+  // Fix: for the local user's OWN uid, prefer locState() — it has no
+  // Firestore dependency at all, it's driven directly by watchPosition
+  // callbacks on THIS device. For other family members, locState() is not
+  // applicable (it only describes this device's own watcher), so
+  // deriveStatus() remains the correct and only signal there. The two
+  // systems use DIFFERENT vocabularies with different meanings (locState:
+  // active/obtaining/requesting/stale/denied/disabled/unavailable/idle vs
+  // deriveStatus: moving/updating/recent/stopped/stale/offline/paused/
+  // denied/unavailable) — they must never be force-mapped through the same
+  // statusMeta() lookup, so State 3 below renders its OWN label for the
+  // isSelf+locState case rather than reusing statusMeta().
   const memberState=fb.location.memberState(uid);
-  const memberConsent=fb.location.memberConsent(uid);
-  const status=fb.location.deriveStatus(memberState,memberConsent);
-  const healthyStatuses=['moving','updating','recent','stopped'];
-  const isHealthy=healthyStatuses.indexOf(status)>=0;
+  const health=drvLocationHealth(fb,uid);
+  const isHealthy=health.isHealthy, isSelf=health.isSelf, selfLocState=health.selfLocState;
 
   if(isHealthy){
     // ── STATE 2: Online but not driving ──────────────────────────────
@@ -12736,13 +12800,34 @@ function LiveDriving(){
     </div>`;
   } else {
     // ── STATE 3: GPS/location unavailable ────────────────────────────
-    const meta=fb.location.statusMeta(status);
+    // isSelf uses its OWN direct label (locState() vocabulary) — never
+    // passed through statusMeta(), which only understands deriveStatus()'s
+    // vocabulary and would misrepresent a locState() value with the wrong
+    // meaning/wording (this was exactly the broken half-edit found on
+    // review — fixed here by giving each vocabulary its own rendering).
+    let label;
+    if(isSelf && selfLocState){
+      const selfMap={
+        denied:{en:'Location permission denied',fa:'اجازهٔ موقعیت رد شد'},
+        disabled:{en:'GPS/location disabled',fa:'GPS/موقعیت خاموش است'},
+        unavailable:{en:'Location unavailable',fa:'موقعیت در دسترس نیست'},
+        stale:{en:'Location stale',fa:'موقعیت قدیمی'},
+        idle:{en:'Location idle',fa:'موقعیت آماده به کار نیست'}
+      };
+      const m=selfMap[selfLocState]||selfMap.unavailable;
+      label=L==='fa'?m.fa:m.en;
+    } else {
+      const memberConsent=fb.location.memberConsent(uid);
+      const status=fb.location.deriveStatus(memberState,memberConsent);
+      const meta=fb.location.statusMeta(status);
+      label=meta[L]||meta.en;
+    }
     const lastKnown=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
     const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
     h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
       <div style="width:64px;height:64px;border-radius:50%;background:#F5A62322;display:flex;align-items:center;justify-content:center;font-size:28px">📡</div>
       <div style="text-align:center">
-        <div style="font-size:17px;font-weight:800">${esc(meta[L]||meta.en)}</div>
+        <div style="font-size:17px;font-weight:800">${esc(label)}</div>
         ${lastKnown?`<div style="font-size:13px;color:var(--ink3);margin-top:6px">${L==='fa'?'آخرین موقعیت شناخته‌شده':'Last known location'}: ${esc(lastKnown.line1)}</div>`:''}
         ${lastUpdateLabel?`<div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'آخرین به‌روزرسانی':'Last updated'}: ${lastUpdateLabel}</div>`:(L==='fa'?'<div style="font-size:11px;color:var(--ink3);margin-top:4px">هیچ موقعیتی هنوز دریافت نشده</div>':'<div style="font-size:11px;color:var(--ink3);margin-top:4px">No location received yet</div>')}
       </div>
@@ -12760,6 +12845,16 @@ function drvLiveMount(){
   const eng=drvEngine(); const uid=drvUid();
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(!eng||!uid||!fb) return;
+  // CRITICAL: the GPS watcher previously only started from the Location
+  // screen's own mount function (famLiveMount) — Driving never started it.
+  // If a person opened the app straight into the Driving tab (or navigated
+  // here without ever visiting Location), GPS was never actively watched,
+  // so the Engine had zero fixes to work with: no speed, no route, no
+  // distance, and a session could never start. This was not a rendering
+  // bug — the underlying data genuinely didn't exist. Fixed by doing
+  // exactly what famLiveMount does: reconcile/refresh the watcher here too.
+  try{ fb.location.refreshPermission(); }catch(e){}
+  try{ fb.location.reconcileWatch(); }catch(e){}
   const active=eng.activeSession(uid);
   const el=document.getElementById('drv-live-map');
   if(active && el){
@@ -12788,10 +12883,8 @@ function drvLiveMount(){
     // Seed the health-status baseline NOW (at mount time) so drvLiveApply's
     // first tick compares against the actual current status, not a stale
     // null that would falsely look like a change and force an extra render.
-    const memberState=fb.location.memberState(uid);
-    const memberConsent=fb.location.memberConsent(uid);
-    const status=fb.location.deriveStatus(memberState,memberConsent);
-    _drvLiveWasHealthy=['moving','updating','recent','stopped'].indexOf(status)>=0;
+    // Uses the SAME shared drvLocationHealth as LiveDriving/drvLiveApply.
+    _drvLiveWasHealthy=drvLocationHealth(fb,uid).isHealthy;
   }
   // The poll timer must run REGARDLESS of whether a session is currently
   // active, so it can detect the not-driving → driving transition (and
@@ -12825,12 +12918,11 @@ function drvLiveApply(){
     // flipped (e.g. GPS permission changed); that's infrequent enough and
     // visually distinct enough that a full render is fine here, it just
     // needs to happen when the STATUS category changes, not every tick.
-    const memberState=fb.location.memberState(uid);
-    const memberConsent=fb.location.memberConsent(uid);
-    const status=fb.location.deriveStatus(memberState,memberConsent);
-    const healthyStatuses=['moving','updating','recent','stopped'];
-    const isHealthy=healthyStatuses.indexOf(status)>=0;
-    if(isHealthy!==_drvLiveWasHealthy){ _drvLiveWasHealthy=isHealthy; render(); return; }
+    // Uses the SAME shared health-check as LiveDriving's initial render
+    // (drvLocationHealth) — using a different/duplicated check here was
+    // exactly how the two systems could disagree in the first place.
+    const health=drvLocationHealth(fb,uid);
+    if(health.isHealthy!==_drvLiveWasHealthy){ _drvLiveWasHealthy=health.isHealthy; render(); return; }
     return; // same not-driving state — nothing to patch (no live numbers shown here)
   }
   // Driving: patch the live pieces in place.
