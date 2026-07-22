@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v355';
+const APP_VERSION='v359';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12315,7 +12315,6 @@ function famDevTap(){
    placeholder. Meant to stay available while Driving is still being
    verified on real devices; can be hidden behind a permanent flag later. */
 function drvDebugTap(){
-  if(!famDevMode()) return; // debug overlay is developer-only — see drvAlwaysVisibleStatusHtml's note
   const t=Date.now(); if(t-_drvDebugTapT>1000)_drvDebugTaps=0; _drvDebugTapT=t; _drvDebugTaps++;
   if(_drvDebugTaps>=5){ _drvDebugTaps=0; _drvDebugOverlayOn=!_drvDebugOverlayOn; render(); }
 }
@@ -14347,11 +14346,31 @@ function famClassifyRawActivity(m){
 /* Derive (and update, with hysteresis + debounce) the full activity/place
    state for one member. MUST be the only place that decides activityType —
    both the marker callout and the sheet read from this cache. */
+const FAM_CUM_WINDOW_MS=20000;   // rolling window for cumulative-distance driving detection
+const FAM_CUM_DRIVE_M=110;       // >=110m covered within the window ⇒ driving (≈20km/h avg over 20s; comfortably above walking pace)
+function famCumulativeIsDriving(c,m){
+  const s=m.state; if(!s||s.lat==null) return false;
+  const t=Date.parse(s.reportedAt||s.capturedAt||'')||Date.now();
+  if(!c._cumHist) c._cumHist=[];
+  const hist=c._cumHist;
+  hist.push({lat:s.lat,lng:s.lng,t});
+  while(hist.length && t-hist[0].t>FAM_CUM_WINDOW_MS) hist.shift();
+  if(hist.length<2) return false;
+  let dist=0;
+  for(let i=1;i<hist.length;i++) dist+=famHaversineM(hist[i-1].lat,hist[i-1].lng,hist[i].lat,hist[i].lng);
+  return dist>=FAM_CUM_DRIVE_M;
+}
 function famDeriveMemberDisplay(m){
   const uid=m.uid;
-  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0});
+  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0,_cumHist:[]});
   const nowMs=Date.now();
-  const raw=famClassifyRawActivity(m);
+  let raw=famClassifyRawActivity(m);
+  // Cumulative-movement override: even when instantaneous speed says
+  // "stationary" or is unavailable, real distance covered over the last
+  // 20 seconds is an independent, more reliable signal that the person is
+  // actually driving — fixes the case where coords.speed is null/unreliable
+  // but the GPS fix positions themselves clearly show a car moving.
+  if(raw!=='offline' && raw!=='paused' && famCumulativeIsDriving(c,m)) raw='driving';
   if(raw==='driving'||raw==='walking') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
   // offline/paused are never debounced — these are honest device/consent
   // facts, not noisy motion signals, so they apply immediately.
@@ -14426,15 +14445,35 @@ function famComposeStatusText(m){
   const s=m.state||{};
   if(d.activityType==='driving'){
     const road=famBareRoadName(s.lat,s.lng);
-    const since=d.activityStartedAt||s.reportedAt||s.capturedAt||null;
     const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
-    return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'driving' };
+    // "Driving · X km" using the REAL active trip distance from the Engine
+    // (the same session that will be saved to the Dashboard), not a
+    // recomputed or estimated figure. Falls back to live speed only for
+    // the brief window before the Engine has confirmed/started the
+    // session (matches the Engine's own hysteresis) so the line is never
+    // blank while the person is clearly moving.
+    const fbEng=(fb&&fb.driving)?fb.driving:null;
+    const activeSess=fbEng?fbEng.activeSession(m.uid):null;
+    let l2;
+    if(activeSess && activeSess.distanceM!=null){
+      const km=(activeSess.distanceM/1000);
+      const kmTxt=km<10?km.toFixed(1):Math.round(km).toString();
+      l2=`${famIcon('car')} ${L==='fa'?'در حال رانندگی':'Driving'} · ${kmTxt} km`;
+    } else {
+      const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
+      l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    }
+    return { l1, l2, since:null, activityType:'driving' };
   }
   if(d.activityType==='walking'){
     const road=famBareRoadName(s.lat,s.lng);
-    const since=d.activityStartedAt||s.reportedAt||s.capturedAt||null;
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
-    return { l1, l2:since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:'', since, activityType:'walking' };
+    // Same reasoning as driving above — live speed while moving, not a
+    // "Since" timestamp (matches the reference app's 9th screenshot:
+    // "Walking near Menin Drive" shows "0 km/h", not a start time).
+    const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
+    const l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    return { l1, l2, since:null, activityType:'walking', speedKph };
   }
   // stationary — ALWAYS show the real geocoded address, never a saved
   // place's name/label. The user has repeatedly and explicitly rejected
@@ -14708,15 +14747,12 @@ function famLiveMemberDetail(m, isMe){
     const line1 = esc(txt.l1 && txt.l1.trim() ? txt.l1 : (L==='fa'?'موقعیت زنده':'Live location'));
     const regionTxt = txt.region?esc(txt.region):'';
     const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
-    if(typeof window!=='undefined' && window.__famDebugLoc){
-      console.log('[fam-loc-debug] rendering line1=', line1, 'regionTxt=', regionTxt, 'sinceTxt=', sinceTxt);
-    }
     h+=`<div class="fam-loc-block" data-fam-debug="loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
-        ${famDevMode()?famSinceDiagLineHtml(m,txt,since):''}
+        ${(famDevMode()||_drvDebugOverlayOn)?famSinceDiagLineHtml(m,txt,since):''}
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
         <span class="fam-saveplace-ic">${famIcon('pin')}<span class="fam-saveplace-plus">+</span></span>
