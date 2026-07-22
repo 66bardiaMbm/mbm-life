@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v348';
+const APP_VERSION='v352';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10827,33 +10827,55 @@ const FamilyBackend = (function(){
       //    outlier fix was silently resetting the real "Since" time to a
       //    wrong moment. Instead, require the NEXT fix to ALSO be far from
       //    the ORIGINAL (pre-jump) position before treating it as a real
-      //    relocation. A lone outlier that returns to the original spot is
-      //    discarded as noise and stayStart is preserved.
+      //    relocation — REGARDLESS of whether that confirming fix is ALSO
+      //    far from the immediately-preceding fix (see bugfix note below).
       if(!prev || prev.lat==null){
         return { moving:false, stayStart: fix.capturedAt };
       }
       const d = haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
-      if(d >= MOVE_MIN_M){
-        // Was the PREVIOUS fix itself already a pending/unconfirmed jump
-        // from the same original spot? If so, and this fix confirms it
-        // (still far from that original spot), commit the relocation now.
-        if(prev._pendingJumpFrom){
-          const pendingAgeMs = Date.parse(fix.capturedAt) - Date.parse(prev.capturedAt||fix.capturedAt);
-          if(pendingAgeMs>0 && pendingAgeMs<=120000){
-            const dFromOriginal = haversine({lat:prev._pendingJumpFrom.lat,lng:prev._pendingJumpFrom.lng},{lat:fix.lat,lng:fix.lng});
-            if(dFromOriginal >= MOVE_MIN_M){
-              return { moving:true, stayStart: fix.capturedAt }; // confirmed real relocation
-            }
-            // Snapped back near the original spot — the jump was noise.
-            return { moving:false, stayStart: prev._pendingJumpFrom.stayStart || prev.stayStart || fix.capturedAt };
+      // BUGFIX (repeatedly reported "Since" freezes forever): confirming a
+      // pending jump previously required BOTH (a) this fix be >=MOVE_MIN_M
+      // from the immediately-preceding fix AND (b) >=MOVE_MIN_M from the
+      // original pre-jump point. But the overwhelmingly common real case is
+      // "drove somewhere and parked" — the person is NOT moving anymore by
+      // the time the confirming fix arrives, so (a) is false even though
+      // they genuinely did relocate. This check must ONLY be about (b):
+      // are they still far from where they used to be, not are they
+      // currently in motion. Checked FIRST, before the d>=MOVE_MIN_M gate,
+      // so a stationary-at-the-new-place confirming fix isn't skipped.
+      if(prev._pendingJumpFrom){
+        const pendingAgeMs = Date.parse(fix.capturedAt) - Date.parse(prev.capturedAt||fix.capturedAt);
+        const dFromOriginal = haversine({lat:prev._pendingJumpFrom.lat,lng:prev._pendingJumpFrom.lng},{lat:fix.lat,lng:fix.lng});
+        if(pendingAgeMs>0 && pendingAgeMs<=120000){
+          if(dFromOriginal >= MOVE_MIN_M){
+            // Confirmed real relocation — whether still moving or already
+            // stopped at the new spot, they are genuinely no longer at the
+            // original place, so the new stayStart starts now.
+            return { moving: d>=MOVE_MIN_M, stayStart: fix.capturedAt };
           }
-          // Confirmation window expired (long gap since the pending fix) —
-          // fall through to treat this as a fresh single-fix jump instead
-          // of comparing against a now-stale reference point.
+          // Snapped back near the original spot — the jump was noise.
+          return { moving:false, stayStart: prev._pendingJumpFrom.stayStart || prev.stayStart || fix.capturedAt };
         }
+        // BUGFIX: confirmation window expired (e.g. app was closed and
+        // reopened much later) — this must NOT silently fall through to
+        // comparing against `prev` (the stale, still-unconfirmed mid-jump
+        // position), because if the new fix happens to be close to THAT
+        // (not the true original position), the outer d>=MOVE_MIN_M gate
+        // below would also fail, leaving stayStart stuck on the old
+        // pre-jump value with no pending-jump tracking re-established at
+        // all — a permanent freeze. Instead, resolve directly against the
+        // TRUE original position (_pendingJumpFrom), same question as
+        // above, just without the time constraint.
+        if(dFromOriginal >= MOVE_MIN_M){
+          return { moving: d>=MOVE_MIN_M, stayStart: fix.capturedAt };
+        }
+        return { moving:false, stayStart: prev._pendingJumpFrom.stayStart || prev.stayStart || fix.capturedAt };
+      }
+      if(d >= MOVE_MIN_M){
         // First fix showing the jump — mark it pending, do NOT reset
         // stayStart yet. Real relocations get confirmed on the next fix
-        // within a few seconds; a stationary person's noise fix won't.
+        // within a few seconds (per the check above, regardless of
+        // whether that confirming fix is itself still moving).
         return { moving:false, stayStart: prev.stayStart || prev.capturedAt || fix.capturedAt,
                  _pendingJumpFrom:{lat:prev.lat,lng:prev.lng,stayStart:prev.stayStart||prev.capturedAt} };
       }
@@ -11360,6 +11382,7 @@ const FamilyBackend = (function(){
     const DRIVE_MIN_MS   = 2.8;
     const WALK_MAX_MS    = 2.3;
     const START_HYST_MS  = 15000;
+    const CANDIDATE_TOLERANCE_MS = 8000; // brief non-driving blips (GPS noise, a stop-light dip) within this window don't reset the start-candidate timer
     const END_HYST_MS    = 90000;
     const SYNC_THROTTLE_MS = 15000;
     const MAX_JUMP_MS      = 55;
@@ -11741,15 +11764,37 @@ const FamilyBackend = (function(){
 
       if(!q.sessionId){
         if(rawType==='driving'){
-          if(!q.candidate||q.candidate.type!=='driving'){ q.candidate={type:'driving',since:nowMs}; }
-          else if(nowMs-q.candidate.since>=START_HYST_MS){
-            q.samples=[sample]; q.lastFlushIdx=0;
-            const sess=startSession(uid,sample);
-            q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
-            console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
+          if(!q.candidate||q.candidate.type!=='driving'){ q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs}; }
+          else {
+            q.candidate.lastGoodAt=nowMs; // still driving — refresh, keep the original 'since' so the timer keeps counting
+            if(nowMs-q.candidate.since>=START_HYST_MS){
+              q.samples=[sample]; q.lastFlushIdx=0;
+              const sess=startSession(uid,sample);
+              q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
+              console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
+            }
           }
         } else {
-          q.candidate=null;
+          // Reviewer-caught-class fix: a real drive is a mix of 'driving',
+          // 'ambiguous' (right at the ~10km/h boundary), and even brief
+          // 'stationary'/'walking' blips from GPS noise — especially right
+          // after pulling away from a stop, at lights, or in stop-and-go
+          // traffic. The OLD code reset the candidate to null on a SINGLE
+          // such fix, which meant a real drive essentially never got 15
+          // fully-uninterrupted consecutive 'driving' fixes — this was
+          // very likely the actual reason real drives never registered.
+          // Fix: tolerate brief non-driving gaps (up to
+          // CANDIDATE_TOLERANCE_MS since the last genuinely-driving fix)
+          // before giving up on the candidate — the START_HYST_MS timer
+          // itself is preserved (not reset) through short blips, only
+          // reset if the gap is sustained.
+          if(q.candidate && q.candidate.type==='driving'){
+            const gapMs=nowMs-q.candidate.lastGoodAt;
+            if(gapMs>CANDIDATE_TOLERANCE_MS){ q.candidate=null; }
+            // else: keep the candidate alive, timer keeps counting from the original 'since'
+          } else {
+            q.candidate=null;
+          }
         }
         q.preLastFix=sample; // remember this fix so the NEXT fix's fallback classifier has something to compare against
         try{persistDB();}catch(e){}
@@ -12253,6 +12298,7 @@ function famDevTap(){
    placeholder. Meant to stay available while Driving is still being
    verified on real devices; can be hidden behind a permanent flag later. */
 function drvDebugTap(){
+  if(!famDevMode()) return; // debug overlay is developer-only — see drvAlwaysVisibleStatusHtml's note
   const t=Date.now(); if(t-_drvDebugTapT>1000)_drvDebugTaps=0; _drvDebugTapT=t; _drvDebugTaps++;
   if(_drvDebugTaps>=5){ _drvDebugTaps=0; _drvDebugOverlayOn=!_drvDebugOverlayOn; render(); }
 }
@@ -12695,8 +12741,14 @@ function drvDebugOverlayHtml(uid){
    nothing and have no way to tell the app apart from "broken" vs "just
    needs you to drive". This strip needs zero interaction and shows the
    single most useful fact: is GPS actually flowing right now, yes or no,
-   in plain language, with the real numbers backing it up. */
+   in plain language, with the real numbers backing it up.
+
+   DEV-MODE ONLY: this and the rest of the debug surfaces must never appear
+   in the normal UI — Driving Dashboard is a persisted-data summary screen
+   and must not show or depend on live GPS/watcher state at all. Gated
+   behind the same famDevMode() flag the rest of the app already uses. */
 function drvAlwaysVisibleStatusHtml(){
+  if(!famDevMode()) return '';
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(!fb||!fb.location) return '';
   const loc=fb.location.locationDebugInfo?fb.location.locationDebugInfo():null;
@@ -12742,7 +12794,6 @@ function DrivingDashboard(){
   const wk=drvWeekBounds(_drvWeekOffset);
 
   let h=`<div id="drv-fixed-wrap"><div style="padding:0 16px 90px">`;
-  h+=drvAlwaysVisibleStatusHtml();
   h+=`<div style="display:flex;gap:8px;margin-bottom:16px;overflow-x:auto">
     <button class="btn ${_drvWeekOffset===0?'':'btn-ghost'}" data-fam="drv-week" data-arg="0" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'این هفته':'This week'}</button>
     <button class="btn ${_drvWeekOffset===1?'':'btn-ghost'}" data-fam="drv-week" data-arg="1" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'هفته قبل':'Last week'}</button>
@@ -12793,7 +12844,7 @@ function DrivingDashboard(){
           <div style="font-weight:800;font-size:15px">${esc(m.name)}${isLive?` <span style="font-size:10px;font-weight:800;color:#2FCE6B;background:#2FCE6B18;border-radius:8px;padding:2px 7px;vertical-align:middle">${L==='fa'?'در حال رانندگی':'DRIVING NOW'}</span>`:''}</div>
           <div style="font-size:13px;color:var(--ink3);margin-top:2px">${sess.length?`${sess.length} ${L==='fa'?'سفر این هفته':'drives this week'} · ${drvFmtDistanceKm(dist)} ${L==='fa'?'کیلومتر':'km'}`:(L==='fa'?'بدون سفر در این هفته':'No drives this week')}</div>
           <div style="font-size:11px;color:var(--ink3);margin-top:3px">${lastDriveLabel}</div>
-          ${evs.length?`<div style="font-size:12px;color:var(--ink3);margin-top:4px">${evs.length} ${L==='fa'?'رویداد این هفته':'events this week'}</div>`:''}
+          ${evs.length?`<div style="display:inline-flex;align-items:center;gap:4px;background:#F5A62318;color:#B8791A;border-radius:8px;padding:3px 9px;margin-top:6px;font-size:11px;font-weight:700">${famIcon('shield')} ${evs.length} ${L==='fa'?'رویداد پرخطر':'Risky Events'}</div>`:''}
         </div>
         <span style="color:var(--ink3);opacity:.4">›</span>
         </button>
@@ -14289,6 +14340,32 @@ function famSinceOrHereFor(since){
   if(!since) return '';
   return `${L==='fa'?'از':'Since'} ${famAbsTime(since)}`;
 }
+/* Dev-mode-only diagnostic line showing exactly how the displayed "Since"
+   text was derived, per explicit request — this traces the full chain:
+     displayedSince — the actual text shown to the person right now
+     state.stayStart — the raw value in FamilyLocation's local state
+     hereSince() — what the arrival-event-aware function independently returns
+     lastFix.ts — when the last real GPS/state update was captured
+   If these ever disagree in a way that doesn't make sense (e.g. state.stayStart
+   is fresh but displayedSince is stale), the mismatch is visible directly on
+   the phone screen — no devtools, no console, no reproducing separately. */
+function famSinceDiagLineHtml(m,txt,sinceUsed){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const s=m.state||{};
+  const hereSinceVal=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):null;
+  const lastFixTs=s.capturedAt||s.reportedAt||null;
+  const row=(label,val)=>`<div style="display:flex;gap:6px"><span style="opacity:.6">${esc(label)}:</span><span style="font-weight:700">${esc(val==null?'null':String(val))}</span></div>`;
+  return `<div style="margin-top:8px;padding:8px 10px;background:#0b0d12;color:#e8ecf3;border-radius:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;line-height:1.6">
+    <div style="font-weight:800;opacity:.7;margin-bottom:2px">🐛 SINCE DIAG</div>
+    ${row('displayedSince (txt.l2)', txt.l2)}
+    ${row('sinceUsed (the ISO value)', sinceUsed)}
+    ${row('state.stayStart', s.stayStart)}
+    ${row('hereSince()', hereSinceVal)}
+    ${row('lastFix.ts (capturedAt)', lastFixTs)}
+    ${row('activityType', txt.activityType)}
+    ${row('currentPlaceId', txt.place)}
+  </div>`;
+}
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -14591,6 +14668,7 @@ function famLiveMemberDetail(m, isMe){
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
+        ${famDevMode()?famSinceDiagLineHtml(m,txt,since):''}
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
         <span class="fam-saveplace-ic">${famIcon('pin')}<span class="fam-saveplace-plus">+</span></span>
