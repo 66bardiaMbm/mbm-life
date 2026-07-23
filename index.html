@@ -1780,7 +1780,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v364';
+const APP_VERSION='v365';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10826,6 +10826,7 @@ const FamilyBackend = (function(){
     const ROUTE_MAX  = 300;          // ring-buffer cap for today-scope route
     const ROUTE_MIN_M= 25;           // only append a breadcrumb if moved >=25m
     const APPROX_DP  = 2;            // approximate-location coarsening: ~1.1km grid
+    const MOVEMENT_MAX_ACCURACY_M=100; // coarse fixes update freshness, not movement/arrival
 
     let _locUnsubs=[];               // per-member location listeners
     let _consentUnsub=null;          // my own consent listener
@@ -10891,6 +10892,15 @@ const FamilyBackend = (function(){
       //    far from the immediately-preceding fix (see bugfix note below).
       if(!prev || prev.lat==null){
         return { moving:false, stayStart: fix.capturedAt };
+      }
+      // A coarse network fix can jump hundreds of metres while the phone is
+      // stationary. It may update freshness, but it must not become evidence
+      // of movement or reset the persisted arrival clock. Driving's sample
+      // engine has its own stricter 75 m gate; this protects LocationState.
+      if(fix.accuracy!=null&&Number(fix.accuracy)>MOVEMENT_MAX_ACCURACY_M){
+        return {moving:!!prev.moving,stayStart:prev.stayStart||prev.capturedAt||fix.capturedAt,
+          _lastMovementAt:prev._lastMovementAt||null,_stopCandidateAt:prev._stopCandidateAt||null,
+          _pendingJumpFrom:prev._pendingJumpFrom||null};
       }
       const d = haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
       const dtMs=Date.parse(fix.capturedAt)-Date.parse(prev.capturedAt||'');
@@ -11514,7 +11524,7 @@ const FamilyBackend = (function(){
       // lifecycle
       startListening, stopListening,
       // constants (exposed for UI/tests)
-      consts:{ FRESH_MS, RECENT_MS, STALE_MS, MOVE_MIN_M, ROUTE_MAX }
+      consts:{ FRESH_MS, RECENT_MS, STALE_MS, MOVE_MIN_M, ROUTE_MAX, MOVEMENT_MAX_ACCURACY_M }
     };
   })();
 
@@ -13585,6 +13595,38 @@ function LiveDriving(){
 /* Mount the Live Driving map + a short poll timer to refresh speed/route
    while this screen is open (mirrors famLiveMount's tick pattern). */
 let _drvLiveMapSessionId=null; // which session's map is CURRENTLY mounted — used to decide init() vs setView()-only
+const _drvDisplayPositionCache={};
+function drvDisplayPosition(uid,sample){
+  if(!sample||sample.lat==null||sample.lng==null)return null;
+  const key=(sample.t||'')+'|'+sample.lat+'|'+sample.lng;
+  const prev=_drvDisplayPositionCache[uid];
+  if(prev&&prev.key===key)return prev.pos;
+  const raw=[Number(sample.lat),Number(sample.lng)];
+  if(!prev){_drvDisplayPositionCache[uid]={key,pos:raw};return raw;}
+  const acc=sample.accuracyM!=null&&!isNaN(sample.accuracyM)?Number(sample.accuracyM):40;
+  if(acc>100){prev.key=key;return prev.pos;}
+  const d=famHaversineM(prev.pos[0],prev.pos[1],raw[0],raw[1]);
+  if(d<3){prev.key=key;return prev.pos;}
+  const alpha=acc<=15?.72:acc<=35?.56:.38;
+  const pos=d>1000?raw:[prev.pos[0]+(raw[0]-prev.pos[0])*alpha,prev.pos[1]+(raw[1]-prev.pos[1])*alpha];
+  _drvDisplayPositionCache[uid]={key,pos};
+  return pos;
+}
+const DrivingFollowController=(function(){
+  let timer=null,pending=null,last=null,lastAt=0,seq=0;
+  function reset(){seq++;pending=null;last=null;lastAt=0;if(timer){clearTimeout(timer);timer=null;}}
+  function request(uid,pos,force){
+    if(!pos||!MBMMap.get())return;
+    if(!force&&last&&famHaversineM(last[0],last[1],pos[0],pos[1])<5)return;
+    pending=pos.slice();const mySeq=++seq;
+    if(timer)clearTimeout(timer);
+    const delay=force?0:Math.max(0,500-(Date.now()-lastAt));
+    timer=setTimeout(()=>{timer=null;if(mySeq!==seq||!pending||!MBMMap.get())return;
+      const target=pending;pending=null;MBMMap.setView(target);last=target.slice();lastAt=Date.now();
+    },delay);
+  }
+  return {request,reset};
+})();
 function drvLiveMount(){
   if(_drvLiveTickTimer){ clearInterval(_drvLiveTickTimer); _drvLiveTickTimer=null; }
   const eng=drvEngine(); const uid=drvUid();
@@ -13621,21 +13663,24 @@ function drvLiveMount(){
       MBMMap.setPadding({top:16,right:16,bottom:16,left:16});
       MBMMap.invalidate();
       _drvLiveMapSessionId=active.id;
+      DrivingFollowController.reset();
     }
     if(samples.length>=2) MBMMap.drawRoute(samples);
     if(last){
       const member=famLiveMembers().find(m=>m.uid===uid);
-      MBMMap.setMarker(uid,[last.lat,last.lng],{
+      const displayPos=drvDisplayPosition(uid,last)||[last.lat,last.lng];
+      MBMMap.setMarker(uid,displayPos,{
         photo:member&&member.photo, initial:esc(((member&&member.name)||'?').slice(0,1).toUpperCase()),
         color:(member&&member.color)||'#8652FF', moving:true, heading:last.headingDeg,
         activityType:'driving', calloutL1:L==='fa'?'در حال رانندگی':'Driving',
         calloutL2:`${drvFmtSpeedKph(last.speedMps)} km/h`
       },true,'live',null);
       MBMMap.clearMarkersExcept([uid]);
-      MBMMap.setView([last.lat,last.lng]);
+      DrivingFollowController.request(uid,displayPos,true);
     }
   } else {
     _drvLiveMapSessionId=null; // no active session — next time one starts, mount fresh
+    DrivingFollowController.reset();
     // Seed the health-status baseline NOW (at mount time) so drvLiveApply's
     // first tick compares against the actual current status, not a stale
     // null that would falsely look like a change and force an extra render.
@@ -13707,14 +13752,15 @@ function drvLiveApply(){
   if(samples.length>=2) MBMMap.drawRoute(samples);
   if(last){
     const member=famLiveMembers().find(m=>m.uid===uid);
-    MBMMap.setMarker(uid,[last.lat,last.lng],{
+    const displayPos=drvDisplayPosition(uid,last)||[last.lat,last.lng];
+    MBMMap.setMarker(uid,displayPos,{
       photo:member&&member.photo, initial:esc(((member&&member.name)||'?').slice(0,1).toUpperCase()),
       color:(member&&member.color)||'#8652FF', moving:true, heading:last.headingDeg,
       activityType:'driving', calloutL1:L==='fa'?'در حال رانندگی':'Driving',
       calloutL2:`${drvFmtSpeedKph(last.speedMps)} km/h`
     },true,'live',null);
     MBMMap.clearMarkersExcept([uid]);
-    MBMMap.setView([last.lat,last.lng]);
+    DrivingFollowController.request(uid,displayPos,false);
   }
 }
 let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
@@ -14220,7 +14266,7 @@ const MBMMap = (function(){
   }
 
   let _pad={top:0,right:0,bottom:0,left:0};
-  let _cameraSeq=0;
+  let _cameraSeq=0, _pendingCameraIdle=null, _pendingCameraFallback=null;
   function setView(center,zoom){ if(_map)try{ _panToWithPadding(center); if(zoom!=null)_map.setZoom(zoom); }catch(e){} }
   function panTo(center){ if(_map)try{ _panToWithPadding(center); }catch(e){} }
   // Keeps the selected member visible under the header, right-side controls,
@@ -14231,10 +14277,22 @@ const MBMMap = (function(){
   // This stores the real padding values and panTo/setView apply them as a
   // genuine pixel offset via panBy after centering.
   function setPadding(pad){
-    _pad={top:pad.top||0, right:pad.right||0, bottom:pad.bottom||0, left:pad.left||0};
+    const next={top:Math.round(pad.top||0),right:Math.round(pad.right||0),
+      bottom:Math.round(pad.bottom||0),left:Math.round(pad.left||0)};
+    const changed=next.top!==_pad.top||next.right!==_pad.right||next.bottom!==_pad.bottom||next.left!==_pad.left;
+    _pad=next;
+    return changed;
   }
   function _panToWithPadding(center){
+    if(!center||center[0]==null||center[1]==null)return;
     const seq=++_cameraSeq;
+    // Replace an unfinished camera operation. Google Maps does not expose a
+    // cancellation token for panTo(), but a new pan replaces its destination;
+    // removing the old idle callback/fallback prevents the superseded
+    // operation from applying a late second offset and causing a visible hop.
+    if(_pendingCameraIdle&&_pendingCameraIdle.remove){try{_pendingCameraIdle.remove();}catch(e){}}
+    _pendingCameraIdle=null;
+    if(_pendingCameraFallback){clearTimeout(_pendingCameraFallback);_pendingCameraFallback=null;}
     _map.panTo({lat:center[0],lng:center[1]});
     const dy = (_pad.bottom - _pad.top) / 2;
     const dx = (_pad.right - _pad.left) / 2;
@@ -14249,10 +14307,10 @@ const MBMMap = (function(){
       applied=true;
       try{_map.panBy(dx,dy);}catch(e){}
     };
-    try{window.google.maps.event.addListenerOnce(_map,'idle',applyOffset);}
+    try{_pendingCameraIdle=window.google.maps.event.addListenerOnce(_map,'idle',applyOffset);}
     catch(e){setTimeout(applyOffset,250);}
     // Defensive fallback for browsers that suppress idle on a tiny pan.
-    setTimeout(applyOffset,700);
+    _pendingCameraFallback=setTimeout(applyOffset,700);
   }
   function fitAll(latlngs){
     if(!_map||!available()||!latlngs||!latlngs.length) return;
@@ -14282,10 +14340,10 @@ const MBMMap = (function(){
     _animTimers[uid]=setInterval(()=>{
       i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t;
       const cur=[from[0]+dLat*e, from[1]+dLng*e];
+      _markerPos[uid]=cur;
       try{ mk.position={lat:cur[0],lng:cur[1]}; }catch(_){}
       if(i>=steps){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; _markerPos[uid]=to; try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){} }
     },16);
-    _markerPos[uid]=to;
   }
   function famActivityIcon(kind){
     const I={
@@ -14476,6 +14534,8 @@ const MBMMap = (function(){
     if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
     _markers={}; _markerMeta={}; _markerPos={}; _loaded=false;
     _pad={top:0,right:0,bottom:0,left:0}; _cameraSeq++;
+    if(_pendingCameraIdle&&_pendingCameraIdle.remove){try{_pendingCameraIdle.remove();}catch(e){}} _pendingCameraIdle=null;
+    if(_pendingCameraFallback){clearTimeout(_pendingCameraFallback);_pendingCameraFallback=null;}
     _map=null; _elId=null; _mapEl=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
@@ -14838,6 +14898,74 @@ let _famMapTypeOpen=false;
 let _famCat='people';   // active category row selection (people is the live one)
 let _famFollow=true;    // live-follow defaults on for the current user
 let _famFollowPausedByGesture=false; // explicit map drag wins until user recentres
+const _famDisplayPositionCache={};
+/* Display-only GPS stabilizer. Raw fixes continue untouched into movement,
+   trip recording and persistence. The map consumes one stabilized position
+   per genuinely new fix, so a 30-second label refresh cannot inch the marker
+   toward the same coordinate and stationary accuracy noise stays invisible. */
+function famDisplayPosition(m){
+  const s=m&&m.state; if(!m||!s||s.lat==null||s.lng==null)return null;
+  const key=(s.capturedAt||s.reportedAt||'')+'|'+s.lat+'|'+s.lng;
+  const prev=_famDisplayPositionCache[m.uid];
+  if(prev&&prev.key===key)return prev.pos;
+  const raw=[Number(s.lat),Number(s.lng)];
+  if(!prev){_famDisplayPositionCache[m.uid]={key,pos:raw,raw,at:Date.now()};return raw;}
+  const acc=s.accuracy!=null&&!isNaN(s.accuracy)?Number(s.accuracy):50;
+  const active=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving.activeSession(m.uid):null;
+  const moving=!!active||!!s.moving||(s.speed!=null&&!isNaN(s.speed)&&Number(s.speed)>=2.8);
+  // Ignore a new coarse fix for display if a better prior display position
+  // exists. Freshness/permission UI still updates from the raw state.
+  if(acc>150){prev.key=key;prev.raw=raw;return prev.pos;}
+  const d=famHaversineM(prev.pos[0],prev.pos[1],raw[0],raw[1]);
+  const minMove=moving?3:Math.max(8,Math.min(30,acc*.45));
+  if(d<minMove){prev.key=key;prev.raw=raw;return prev.pos;}
+  // A very large, accurate change is a real relocation/reopen, not something
+  // to animate slowly across the map. Ordinary movement uses accuracy-aware
+  // exponential smoothing.
+  let pos;
+  if(d>1000)pos=raw;
+  else{
+    const alpha=moving?(acc<=15?.72:acc<=35?.56:.38):(acc<=20?.45:.28);
+    pos=[prev.pos[0]+(raw[0]-prev.pos[0])*alpha,prev.pos[1]+(raw[1]-prev.pos[1])*alpha];
+  }
+  _famDisplayPositionCache[m.uid]={key,pos,raw,at:Date.now()};
+  return pos;
+}
+
+/* The only controller allowed to move the Family Live camera. Marker paint,
+   padding changes, viewport changes and explicit recenter actions all submit
+   their latest target here. Requests are coalesced, distance-gated and
+   throttled; a newer request replaces an unfinished one. */
+const FamilyFollowController=(function(){
+  let timer=null,pending=null,lastApplied=null,lastAt=0,lastUid=null,seq=0;
+  function cancel(){seq++;pending=null;if(timer){clearTimeout(timer);timer=null;}}
+  function reset(){cancel();lastApplied=null;lastAt=0;lastUid=null;}
+  function apply(mySeq){
+    timer=null;
+    if(mySeq!==seq||!pending||!_famFollow||!MBMMap.get())return;
+    const p=pending; pending=null;
+    try{ if(p.zoom!=null)MBMMap.setView(p.pos,p.zoom); else MBMMap.panTo(p.pos); }catch(e){return;}
+    lastApplied=p.pos.slice();lastAt=Date.now();lastUid=p.uid;
+  }
+  function request(sel,opts){
+    opts=opts||{};
+    if(!sel||!sel.state||sel.state.lat==null||(!_famFollow&&!opts.force)||!MBMMap.get())return;
+    const pos=opts.pos||famDisplayPosition(sel); if(!pos)return;
+    const active=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving.activeSession(sel.uid):null;
+    const moving=!!active||!!sel.state.moving||(sel.state.speed!=null&&!isNaN(sel.state.speed)&&Number(sel.state.speed)>=2.8);
+    const force=!!opts.force||lastUid!==sel.uid;
+    const minCameraM=moving?5:15;
+    if(!force&&lastApplied&&famHaversineM(lastApplied[0],lastApplied[1],pos[0],pos[1])<minCameraM)return;
+    pending={uid:sel.uid,pos:pos.slice(),zoom:opts.zoom};
+    const throttleMs=moving?500:1200;
+    const delay=force?0:Math.max(0,throttleMs-(Date.now()-lastAt));
+    const mySeq=++seq;
+    if(timer)clearTimeout(timer);
+    timer=setTimeout(()=>apply(mySeq),delay);
+  }
+  function reframe(sel){request(sel,{force:true});}
+  return {request,reframe,cancel,reset};
+})();
 function famUpdateFollowControls(){
   const me=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
   const mine=document.querySelector('[data-fam="live-center-me"]');
@@ -14848,6 +14976,7 @@ function famUpdateFollowControls(){
 function famPauseFollowByGesture(){
   _famFollow=false;
   _famFollowPausedByGesture=true;
+  FamilyFollowController.cancel();
   famUpdateFollowControls();
 }
 let _famLiveFixKicked=false;  // one-shot fresh fix when opening live
@@ -15009,6 +15138,25 @@ function famSinceOrHereFor(since){
   if(!since) return '';
   return `${L==='fa'?'از':'Since'} ${famAbsTime(since)}`;
 }
+/* Arrival/stay and GPS freshness are deliberately separate concepts.
+   Every "Here for" surface calls this helper with the same persisted arrival
+   timestamp; no current-fix timestamp is accepted here. */
+function famHereForDuration(since){
+  return since?famDurSince(since):'';
+}
+function famStayDetailLine(since){
+  const duration=famHereForDuration(since);
+  if(!duration)return '';
+  const clock=famAbsTime(since);
+  return L==='fa'
+    ? `اینجا برای ${duration}${clock?` · از ${clock}`:''}`
+    : `Here for ${duration}${clock?` · Since ${clock}`:''}`;
+}
+function famGpsUpdatedLine(state){
+  const at=state&&(state.reportedAt||state.capturedAt);
+  if(!at)return '';
+  return L==='fa'?`آخرین GPS: ${famRelTime(at)}`:`GPS updated ${famRelTime(at)}`;
+}
 /* Dev-mode-only diagnostic line showing exactly how the displayed "Since"
    text was derived, per explicit request — this traces the full chain:
      displayedSince — the actual text shown to the person right now
@@ -15026,7 +15174,7 @@ function famSinceDiagLineHtml(m,txt,sinceUsed){
   const row=(label,val)=>`<div style="display:flex;gap:6px"><span style="opacity:.6">${esc(label)}:</span><span style="font-weight:700">${esc(val==null?'null':String(val))}</span></div>`;
   return `<div style="margin-top:8px;padding:8px 10px;background:#0b0d12;color:#e8ecf3;border-radius:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;line-height:1.6">
     <div style="font-weight:800;opacity:.7;margin-bottom:2px">🐛 SINCE DIAG</div>
-    ${row('displayedSince (txt.l2)', txt.l2)}
+    ${row('displayed stay line', famStayDetailLine(sinceUsed)||txt.l2)}
     ${row('sinceUsed (the ISO value)', sinceUsed)}
     ${row('state.stayStart', s.stayStart)}
     ${row('hereSince()', hereSinceVal)}
@@ -15113,16 +15261,14 @@ function famComposeStatusText(m){
   return { l1:lines.line1, region:lines.line2||'', l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary', place:!!d.currentPlaceId };
 }
 /* Marker callout presentation uses the SAME composed state/address/arrival
-   timestamp as the detail sheet, but formats a stationary stay like Life360:
-   "Here for" + elapsed duration above the avatar, while the sheet keeps the
-   absolute "Since 21:13". This is presentation-only; there is no second
-   arrival clock or geocoder. Driving continues to show car + live km/h. */
+   timestamp and duration helper as the detail sheet. Temporary GPS loss keeps
+   that persisted arrival visible; freshness is displayed separately below. */
 function famMarkerStatusText(m){
   const txt=famComposeStatusText(m);
-  if(txt.activityType==='stationary'&&txt.since){
+  if((txt.activityType==='stationary'||txt.activityType==='offline')&&txt.since){
     return Object.assign({},txt,{
       l1:L==='fa'?'اینجا برای':'Here for',
-      l2:famDurSince(txt.since)
+      l2:famHereForDuration(txt.since)
     });
   }
   return txt;
@@ -15399,12 +15545,16 @@ function famLiveMemberDetail(m, isMe){
     // ever broken by a future edit.
     const line1 = esc(txt.l1 && txt.l1.trim() ? txt.l1 : (L==='fa'?'موقعیت زنده':'Live location'));
     const regionTxt = txt.region?esc(txt.region):'';
-    const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
+    const stayTxt = ((txt.activityType==='stationary'||txt.activityType==='offline')&&since)
+      ? famStayDetailLine(since)
+      : txt.l2;
+    const updatedTxt=famGpsUpdatedLine(s);
     h+=`<div class="fam-loc-block" data-fam-debug="loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
-        <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
+        ${stayTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${esc(stayTxt)}</div>`:''}
+        ${updatedTxt?`<div style="font-size:12px;color:var(--ink3);margin-top:5px;opacity:.82">${esc(updatedTxt)}</div>`:''}
         ${(famDevMode()||_drvDebugOverlayOn)?famSinceDiagLineHtml(m,txt,since):''}
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
@@ -15475,37 +15625,39 @@ function famLiveMemberDetail(m, isMe){
 }
 
 /* ── Shared marker painter: create/update pins smoothly, cluster overlapping
-   members, draw route + accuracy circle for the selected member, and centre
-   only when the SELECTED member changes (never fight manual pan on refresh). ── */
+   members, and submit the selected display position to the single follow
+   controller (never move the camera directly or fight a manual drag). ── */
 let _famLastCentredUid=null;
 let _famFollowDriveSessionId=null;
 function famLivePaintMarkers(members, sel){
   if(!MBMMap.get()) return;
   const withFixList=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
+  withFixList.forEach(m=>{m._displayPos=famDisplayPosition(m);});
   // ── Real clustering: group members whose genuine fixes are within ~60m of
   //    each other into a SHARED bubble (matches the reference's merged
   //    avatars). Single members render as normal avatar pins. ──
   const CLUSTER_M=60;
   const groups=[]; // each: {lat,lng,members:[m,...]}
   withFixList.forEach(m=>{
-    const g=groups.find(gp=>famHaversineM(gp.lat,gp.lng,m.state.lat,m.state.lng)<=CLUSTER_M);
-    if(g){ g.members.push(m); } else { groups.push({lat:m.state.lat,lng:m.state.lng,members:[m]}); }
+    const p=m._displayPos||[m.state.lat,m.state.lng];
+    const g=groups.find(gp=>famHaversineM(gp.lat,gp.lng,p[0],p[1])<=CLUSTER_M);
+    if(g){ g.members.push(m); } else { groups.push({lat:p[0],lng:p[1],members:[m]}); }
   });
   const activeKeys=[];
   groups.forEach(g=>{
     if(g.members.length===1){
       const m=g.members[0]; const key=m.uid; activeKeys.push(key);
       const txt=famMarkerStatusText(m);
-      MBMMap.setMarker(key,[m.state.lat,m.state.lng],
+      MBMMap.setMarker(key,m._displayPos||[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
          calloutL1:esc(txt.l1), calloutL2:txt.l2?esc(txt.l2):''},
         m.uid===_famSelUid, m.meta.tone,
-        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; famLiveApply(); famEnsureSheetVisible(); });
+        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; FamilyFollowController.reset(); famLiveApply(); famEnsureSheetVisible(); });
     } else {
       // merged cluster bubble at the group's centroid of real fixes
-      const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
-      const cLng=g.members.reduce((s,m)=>s+m.state.lng,0)/g.members.length;
+      const cLat=g.members.reduce((sum,m)=>sum+(m._displayPos?m._displayPos[0]:m.state.lat),0)/g.members.length;
+      const cLng=g.members.reduce((sum,m)=>sum+(m._displayPos?m._displayPos[1]:m.state.lng),0)/g.members.length;
       const key='cluster:'+g.members.map(m=>m.uid).sort().join(',');
       activeKeys.push(key);
       const selectedInCluster=g.members.some(m=>m.uid===_famSelUid);
@@ -15515,32 +15667,30 @@ function famLivePaintMarkers(members, sel){
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; famLiveApply(); famEnsureSheetVisible(); });
+          _famSelUid=next.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; FamilyFollowController.reset(); famLiveApply(); famEnsureSheetVisible(); });
     }
   });
   MBMMap.clearMarkersExcept(activeKeys);
   if(sel && sel.state && sel.state.lat!=null){
+    const selectedPos=sel._displayPos||famDisplayPosition(sel)||[sel.state.lat,sel.state.lng];
     // NOTE: the historical breadcrumb trail is intentionally NOT drawn on the
     // live map — Life360 keeps the main map clean and shows the path only in
     // History/Driving. We clear any existing route so the live screen matches.
     MBMMap.drawRoute(null);
     const acc=famAccuracyInfo(sel.state.accuracy);
-    MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx);
+    MBMMap.setAccuracy(selectedPos, sel.state.accuracy, acc.approx);
     // ── FEATURE 1: real directional heading cone. Only when the selected
     //    member is genuinely moving AND the device reported a real heading. ──
     if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
-      MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], sel.state.heading, sel.state.speed, sel.color);
+      MBMMap.setHeadingCone(selectedPos, sel.state.heading, sel.state.speed, sel.color);
     } else { MBMMap.setHeadingCone(null,null,null); }
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
-  if(sel&&sel.state&&sel.state.lat!=null && _famLastCentredUid!==sel.uid){
-    MBMMap.panTo([sel.state.lat,sel.state.lng]);
-    _famLastCentredUid=sel.uid;
-  }
   // A NEW active driving session resumes follow automatically. Once resumed,
   // an explicit drag during that same session remains paused until recenter;
   // routine GPS renders do not fight the person's gesture.
+  let resumeForNewDrive=false;
   try{
     const activeDrive=sel&&FamilyBackend&&FamilyBackend.driving?FamilyBackend.driving.activeSession(sel.uid):null;
     const driveKey=activeDrive?(sel.uid+':'+activeDrive.id):null;
@@ -15548,6 +15698,7 @@ function famLivePaintMarkers(members, sel){
       _famFollowDriveSessionId=driveKey;
       _famFollow=true;
       _famFollowPausedByGesture=false;
+      resumeForNewDrive=true;
     } else if(!driveKey){
       _famFollowDriveSessionId=null;
     }
@@ -15555,9 +15706,8 @@ function famLivePaintMarkers(members, sel){
   // Live-follow tracks the SELECTED member/vehicle, not always the local
   // account. Padding is already installed, so each smooth pan keeps the full
   // avatar + callout in the safe map area above the sheet.
-  if(_famFollow&&sel&&sel.state&&sel.state.lat!=null){
-    try{MBMMap.panTo([sel.state.lat,sel.state.lng]);}catch(e){}
-  }
+  if(_famFollow&&sel&&sel.state&&sel.state.lat!=null)
+    FamilyFollowController.request(sel,{pos:sel._displayPos||famDisplayPosition(sel),force:resumeForNewDrive});
   famUpdateFollowControls();
 }
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
@@ -15574,7 +15724,7 @@ function famLiveMount(){
     if(!(famView==='live'||famView==='dashboard')){ clearInterval(_famDurTickTimer); _famDurTickTimer=null; return; }
     const allMembers=famLiveMembers();
     const sel=allMembers.find(m=>m.uid===_famSelUid);
-    // Repaint markers so every callout's "Since HH:MM"/"Here for" text stays
+    // Repaint markers so every callout's "Here for" duration stays
     // live even with no new GPS fix — same composeStatusText the sheet uses.
     try{ famLivePaintMarkers(allMembers, sel); }catch(e){}
     const body=document.getElementById('fam-sheet-body');
@@ -15638,9 +15788,8 @@ function famMapLoaded(){
   // now run again because the map didn't exist the first time it was tried.
   try{
     const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
-    const center=(sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
-                :(withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:null);
-    if(center) MBMMap.setView(center,15);
+    const target=(sel&&sel.state&&sel.state.lat!=null)?sel:withFix[0];
+    if(target){_famFollow=true;FamilyFollowController.request(target,{force:true,zoom:15});}
   }catch(e){}
 }
 function famMapUnavailable(msg){
@@ -15686,11 +15835,11 @@ function famUpdateCameraPadding(sheetPx){
       :(sheetPx||0)+144;
     const right=mr&&rr?Math.max(64,mr.right-rr.left+10):72;
     if(typeof MBMMap!=='undefined' && MBMMap.setPadding){
-      MBMMap.setPadding({top, right, bottom, left:16});
-      // setPadding changes future pans; it does not move an already-positioned
-      // camera. Reframe immediately after every detent/padding change.
+      const paddingChanged=MBMMap.setPadding({top, right, bottom, left:16});
+      // Only a REAL geometry change is allowed to request a reframe. Routine
+      // GPS/label renders recompute the same numbers and must not pan again.
       const sel=(typeof famLiveMembers==='function')?famLiveMembers().find(m=>m.uid===_famSelUid):null;
-      if(sel&&sel.state&&sel.state.lat!=null)MBMMap.panTo([sel.state.lat,sel.state.lng]);
+      if(paddingChanged&&sel&&sel.state&&sel.state.lat!=null&&_famFollow)FamilyFollowController.reframe(sel);
     }
   }catch(e){}
 }
@@ -15715,14 +15864,6 @@ function famEnsureSheetVisible(){
       if(wrap){ wrap.classList.remove('fam-sheet-full'); wrap.style.setProperty('--fam-sheet-h', heights[1]+'px'); }
       try{ famUpdateCameraPadding(heights[1]); }catch(e){}
       try{ MBMMap.invalidate(); }catch(e){}
-      // Re-pan to the selected member AFTER padding reflects the now-taller
-      // sheet — famLiveApply's own pan (which ran before this) used the OLD,
-      // shorter padding, so the pin could end up framed for a smaller sheet
-      // and then sit partially behind it once the sheet actually expanded.
-      try{
-        const sel=(typeof famLiveMembers==='function')?famLiveMembers().find(m=>m.uid===_famSelUid):null;
-        if(sel && sel.state && sel.state.lat!=null){ MBMMap.panTo([sel.state.lat,sel.state.lng]); }
-      }catch(e){}
     }
     const body=document.getElementById('fam-sheet-body');
     if(body) body.scrollTop=0;
@@ -15810,12 +15951,6 @@ function famRecenterAfterViewportChange(){
   if(wrap)wrap.style.setProperty('--fam-sheet-h',px+'px');
   try{MBMMap.invalidate();}catch(e){}
   try{famUpdateCameraPadding(px);}catch(e){}
-  if(_famFollow){
-    try{
-      const sel=famLiveMembers().find(m=>m.uid===_famSelUid);
-      if(sel&&sel.state&&sel.state.lat!=null)MBMMap.panTo([sel.state.lat,sel.state.lng]);
-    }catch(e){}
-  }
 }
 function famQueueViewportRecenter(){
   clearTimeout(_famViewportFollowTimer);
@@ -16453,6 +16588,7 @@ function famAction(act,arg,ev){
     case 'live-sel':{
       _famSelUid=arg; _famLastCentredUid=null;
       _famFollow=true; _famFollowPausedByGesture=false;
+      FamilyFollowController.reset();
       if(typeof famLiveApply==='function')famLiveApply(); else render();
       try{ famEnsureSheetVisible(); }catch(e){} return;
     }
@@ -16522,9 +16658,9 @@ function famAction(act,arg,ev){
       }).catch(()=>toast(L==='fa'?'ارسال تأیید ناموفق بود':'Could not send confirmation'));
       return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famSelUid=my; _famFollow=true; _famFollowPausedByGesture=false; famUpdateFollowControls(); const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
-    case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=true; _famFollowPausedByGesture=false; famUpdateFollowControls(); const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
-    case 'live-fit':{ _famFollow=false; _famFollowPausedByGesture=true; famUpdateFollowControls(); const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
+    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famSelUid=my; _famFollow=true; _famFollowPausedByGesture=false; FamilyFollowController.reset(); famUpdateFollowControls(); let members=famLiveMembers(); let member=members.find(m=>m.uid===my); if(member&&member.state&&member.state.lat!=null)FamilyFollowController.request(member,{force:true,zoom:16}); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(member&&member.state&&member.state.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-sel':{ _famFollow=true; _famFollowPausedByGesture=false; FamilyFollowController.reset(); famUpdateFollowControls(); const member=famLiveMembers().find(m=>m.uid===_famSelUid); if(member&&member.state&&member.state.lat!=null)FamilyFollowController.request(member,{force:true,zoom:16}); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
+    case 'live-fit':{ _famFollow=false; _famFollowPausedByGesture=true; FamilyFollowController.cancel(); famUpdateFollowControls(); const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>famDisplayPosition(m)||[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
     case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; }
@@ -16648,7 +16784,7 @@ function famAction(act,arg,ev){
       try{saveDB();}catch(e){}
       render(); return;
     }
-    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; famView='live'; render(); window.scrollTo(0,0); return;
+    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; FamilyFollowController.reset(); famView='live'; render(); window.scrollTo(0,0); return;
     case 'members': go('members'); return;
     case 'places': go('places'); return;
     case 'invites': go('invites'); return;
