@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v361';
+const APP_VERSION='v362';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10871,6 +10871,33 @@ const FamilyBackend = (function(){
         return { moving:false, stayStart: fix.capturedAt };
       }
       const d = haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
+      const dtMs=Date.parse(fix.capturedAt)-Date.parse(prev.capturedAt||'');
+      const reportedSpeed=(fix.speed!=null&&!isNaN(fix.speed))?Number(fix.speed):null;
+      const impliedSpeed=(dtMs>0&&dtMs<=MOVE_MIN_MS)?d/(dtMs/1000):0;
+      const realMovement=(reportedSpeed!=null&&reportedSpeed>=2.8)
+        || (d>=10&&impliedSpeed>=2.8);
+      // Consecutive high-rate driving fixes are commonly less than 40m apart.
+      // Treat real speed/time evidence as movement and keep the old stayStart
+      // until a stop is verified; otherwise the UI can remain "Since" during
+      // a genuine drive and the arrival clock can be reset mid-road.
+      if(realMovement){
+        return {moving:true,stayStart:prev.stayStart||prev.capturedAt||fix.capturedAt,
+          _lastMovementAt:fix.capturedAt,_stopCandidateAt:null,_pendingJumpFrom:null};
+      }
+      // Once movement has been observed, the first stationary fix is the
+      // arrival candidate. Commit that timestamp only after the same 90s stop
+      // window used by the trip engine. These fields persist, so reopening or
+      // a temporary GPS outage cannot replace arrival time with app-open time.
+      if(prev.moving||prev._lastMovementAt||prev._stopCandidateAt){
+        const stopAt=prev._stopCandidateAt||fix.capturedAt;
+        const stoppedFor=Date.parse(fix.capturedAt)-Date.parse(stopAt);
+        if(stoppedFor>=90000){
+          return {moving:false,stayStart:stopAt,_lastMovementAt:null,
+            _stopCandidateAt:null,_pendingJumpFrom:null};
+        }
+        return {moving:false,stayStart:prev.stayStart||prev.capturedAt||fix.capturedAt,
+          _lastMovementAt:prev._lastMovementAt||null,_stopCandidateAt:stopAt,_pendingJumpFrom:null};
+      }
       // BUGFIX (repeatedly reported "Since" freezes forever): confirming a
       // pending jump previously required BOTH (a) this fix be >=MOVE_MIN_M
       // from the immediately-preceding fix AND (b) >=MOVE_MIN_M from the
@@ -10961,12 +10988,13 @@ const FamilyBackend = (function(){
       if(canShare&&c.precise===false){ const q=coarsen(lat,lng); lat=q.lat; lng=q.lng; }
       const capturedAt=raw.capturedAt||nowISO();
       const prev=memberState(uid);
-      const mv=classifyMovement(prev,{lat,lng,capturedAt});
+      const mv=classifyMovement(prev,{lat,lng,capturedAt,speed:raw.speed,accuracy:raw.accuracy});
       const state={ uid, lat, lng,
         accuracy:(c.precise===false?null:(raw.accuracy!=null?raw.accuracy:null)),
         capturedAt, source:raw.source||'gps',
         heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
         moving:mv.moving, stayStart:mv.stayStart, _pendingJumpFrom:mv._pendingJumpFrom||null,
+        _lastMovementAt:mv._lastMovementAt||null, _stopCandidateAt:mv._stopCandidateAt||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO() };
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
@@ -11053,7 +11081,13 @@ const FamilyBackend = (function(){
       const evs=memberEvents(uid);
       const st=memberState(uid);
       for(let i=evs.length-1;i>=0;i--){
-        if(evs[i].type==='arrival') return evs[i].at;
+        if(evs[i].type==='arrival'){
+          // A saved-place arrival event can be older than the current
+          // non-saved-place stay. Always use the newer real arrival source.
+          const eventAt=evs[i].at;
+          if(st&&st.stayStart&&Date.parse(st.stayStart)>Date.parse(eventAt||''))return st.stayStart;
+          return eventAt;
+        }
         if(evs[i].type==='departure'){
           // A departure event only means "no since" if the member's CURRENT
           // stay actually began before or at that departure — i.e. they
@@ -12019,13 +12053,25 @@ const FamilyBackend = (function(){
 
       if(!q.sessionId){
         if(rawType==='driving'){
-          if(!q.candidate||q.candidate.type!=='driving'){ q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs}; }
+          if(!q.candidate||q.candidate.type!=='driving'){
+            q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs,firstSampleAt:sample.t};
+          }
           else {
             q.candidate.lastGoodAt=nowMs; // still driving — refresh, keep the original 'since' so the timer keeps counting
             if(nowMs-q.candidate.since>=START_HYST_MS){
-              q.samples=[sample]; q.lastFlushIdx=0;
-              const sess=startSession(uid,sample);
-              q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
+              // Preserve every accepted real fix from the first credible
+              // driving evidence. Previously only the confirmation sample
+              // survived, truncating the trip start and weakening recovery.
+              const firstAt=Date.parse(q.candidate.firstSampleAt||sample.t);
+              const startSamples=(q.preFixWindow||[]).filter(x=>Date.parse(x.t)>=firstAt);
+              if(!startSamples.length)startSamples.push(sample);
+              startSamples.forEach((x,i)=>{x.seq=i;});
+              q.samples=startSamples; q.lastFlushIdx=0;
+              const sess=startSession(uid,q.samples[0]);
+              q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; q.preFixWindow=[];
+              recomputeMetrics(uid,sess);
+              sess.durationSec=Math.max(0,Math.round((Date.parse(sample.t)-Date.parse(sess.startedAt))/1000));
+              saveSession(uid,sess);
               console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
             }
           }
@@ -14660,6 +14706,13 @@ function famDeriveMemberDisplay(m){
   const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0,_cumHist:[]});
   const nowMs=Date.now();
   let raw=famClassifyRawActivity(m);
+  const fbDrive=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving:null;
+  const activeTrip=fbDrive?fbDrive.activeSession(uid):null;
+  // The trip engine has already applied its real-GPS start hysteresis. Once
+  // it declares a session active, it is the authoritative UI state: show
+  // Driving immediately and keep it through traffic-light pauses until the
+  // engine verifies the stop and ends the session.
+  if(activeTrip)raw='driving';
   // Cumulative-movement override: even when instantaneous speed says
   // "stationary" or is unavailable, real distance covered over the last
   // 20 seconds is an independent, more reliable signal that the person is
@@ -14669,7 +14722,13 @@ function famDeriveMemberDisplay(m){
   if(raw==='driving'||raw==='walking') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
   // offline/paused are never debounced — these are honest device/consent
   // facts, not noisy motion signals, so they apply immediately.
-  if(raw==='offline'||raw==='paused'){
+  if(activeTrip){
+    if(c.activityType!=='driving'){
+      c.activityType='driving';
+      c.activityStartedAt=activeTrip.startedAt||(m.state&&(m.state.capturedAt||m.state.reportedAt))||new Date(nowMs).toISOString();
+    }
+    c._candidate=null; c._candidateSince=0;
+  } else if(raw==='offline'||raw==='paused'){
     if(c.activityType!==raw){ c.activityType=raw; c.activityStartedAt=new Date(nowMs).toISOString(); }
     c._candidate=null; c._candidateSince=0;
   } else if(raw!==c.activityType){
@@ -14732,6 +14791,16 @@ function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(d.activityType==='offline'){
+    // Keep the persisted last-known stay visible through a temporary GPS
+    // outage/app restart. The separate lifecycle banner still says Offline /
+    // GPS unavailable; this text must not discard a genuine arrival clock.
+    const st=m.state||{};
+    const persistedSince=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(st.stayStart||null);
+    if(st.lat!=null&&persistedSince){
+      const lastLines=famLocationLines(st.lat,st.lng,false,st.accuracy);
+      return {l1:lastLines.line1,region:lastLines.line2||'',l2:famSinceOrHereFor(persistedSince),
+        since:persistedSince,activityType:'offline',place:false};
+    }
     return { l1:(L==='fa'?'آفلاین':'Offline'), l2:'', since:null, activityType:'offline' };
   }
   if(d.activityType==='paused'){
@@ -14833,13 +14902,12 @@ const FamGeo = (function(){
   let lastCall = 0;
   const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
   const TTL = 6*3600*1000;   // 6h cache lifetime
-  const STICK_RADIUS_M = 40; // reuse a nearby cached address instead of re-querying
   const MAX_REQUEST_ACCURACY_M=500; // never turn a poor/network-scale fix into a precise civic claim
-  const MAX_RESULT_DISTANCE_M=1500; // reject a reverse result whose mapped object is implausibly far away
+  const MAX_RESULT_DISTANCE_M=500; // hard ceiling; a tighter accuracy-relative limit is applied per request
   // Four decimals are roughly 8–11m in Tasmania. Jitter is handled by the
   // independent 40m stick radius; the cache key itself must not collapse an
   // entire ~100m boundary area into one locality.
-  const GEO_SCHEMA='v3';
+  const GEO_SCHEMA='v4';
   function key(lat,lng){ return GEO_SCHEMA+':'+lat.toFixed(4)+','+lng.toFixed(4); }
   function haversineM(lat1,lng1,lat2,lng2){
     const R=6371000,toR=x=>x*Math.PI/180;
@@ -14847,38 +14915,32 @@ const FamGeo = (function(){
     const s=Math.sin(dLat/2)**2+Math.cos(toR(lat1))*Math.cos(toR(lat2))*Math.sin(dLng/2)**2;
     return 2*R*Math.asin(Math.min(1,Math.sqrt(s)));
   }
-  // Find any live (non-expired) cached entry within STICK_RADIUS_M of this
-  // fix, regardless of exact cell — this is what actually stops the flicker:
-  // two fixes 5m apart for the same standing-still member now always reuse
-  // the same address instead of each computing their own cell key.
-  function findNearby(lat,lng){
-    let best=null,bestD=Infinity;
-    for(const k in cache){
-      const c=cache[k];
-      if((Date.now()-c.ts)>=TTL) continue;
-      if(c.lat==null||c.lng==null) continue;
-      const d=haversineM(lat,lng,c.lat,c.lng);
-      if(d<=STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
-    }
-    return best;
-  }
   function get(lat,lng,accuracy){
     if(accuracy!=null&&accuracy>MAX_REQUEST_ACCURACY_M)return null;
     const k=key(lat,lng); const c=cache[k];
     if(c && (Date.now()-c.ts)<TTL) return c;
-    return findNearby(lat,lng);
+    // Exact cell only. A nearby previous-coordinate response must never
+    // prevent the current coordinate from being reverse-geocoded.
+    return null;
   }
   // Build the two display lines from a Nominatim address object, Life360-style.
   function format(a, displayName){
     a=a||{};
     const road = a.street || a.road || a.pedestrian || a.footway || a.residential || a.path || a.cycleway;
     const num  = a.housenumber || a.house_number;
-    // geocodejson exposes a stable `locality` field. Raw jsonv2 fallbacks are
-    // retained for compatibility, ordered from smallest to broadest. County
-    // is only a last resort and can no longer let a metro `city` hide a real
-    // town/suburb such as Brighton.
-    const suburb = a.locality || a.suburb || a.neighbourhood || a.quarter || a.town || a.village || a.hamlet
-                   || a.city_district || a.district || a.municipality || a.city || a.county;
+    // In geocodejson, `locality` can be a micro-place/estate while
+    // admin.level9 or district is the actual Australian suburb. For example,
+    // William Cooper Drive returns locality=Garrington Park and
+    // admin.level9/district=New Town. Prefer the administrative suburb from
+    // this SAME response, without hardcoding either name. Raw jsonv2 has no
+    // `admin` object, so retain its suburb/town-first hierarchy separately.
+    const admin=a.admin||null;
+    const suburb = admin
+      ? (admin.level10 || admin.level9 || a.district || a.suburb || a.town || a.village || a.locality
+         || a.neighbourhood || a.quarter || a.city_district || a.municipality || a.city || a.county)
+      : (a.suburb || a.town || a.village || a.locality || a.neighbourhood || a.quarter || a.hamlet
+         || a.city_district || a.district || a.municipality || a.city || a.county);
+    const city=a.city||a.municipality||null;
     const region = a.state_code || a.state || a.region || a.province;
     const suburbLine = [suburb, region].filter(Boolean).join(', ');
     let line1, full;
@@ -14891,7 +14953,8 @@ const FamGeo = (function(){
       if(named){ line1 = (L==='fa'? `نزدیک ${named}` : `Near ${named}`); full=[named, suburbLine].filter(Boolean).join(', '); }
       else { line1 = suburb || (L==='fa'?'موقعیت زنده':'Live location'); full=suburbLine||line1; }
     }
-    return { line1, line2: suburbLine, full };
+    full=[line1,suburb,(city&&city!==suburb)?city:null,region].filter(Boolean).join(', ');
+    return { line1, line2: suburbLine, full, locality:suburb||null, city, region:region||null };
   }
   function pump(){
     if(!queue.length) return;
@@ -14914,9 +14977,15 @@ const FamGeo = (function(){
             const resultLat=coords&&coords.length>=2?Number(coords[1]):job.lat;
             const resultDistance=(isFinite(resultLat)&&isFinite(resultLng))
               ?haversineM(job.lat,job.lng,resultLat,resultLng):Infinity;
-            if(resultDistance>MAX_RESULT_DISTANCE_M)throw new Error('Nominatim result too far from GPS fix');
+            const allowedDistance=Math.max(100,Math.min(MAX_RESULT_DISTANCE_M,
+              ((job.accuracy!=null&&!isNaN(job.accuracy))?job.accuracy:50)*2));
+            if(resultDistance>allowedDistance)throw new Error('Nominatim result too far from GPS fix');
             const f=format(props,props.label);
-            cache[k]={ line1:f.line1, line2:f.line2, full:f.full, ts:Date.now(), lat:job.lat, lng:job.lng };
+            // Every displayed component is derived atomically from this one
+            // response for this one coordinate key. A late response for an
+            // older key cannot overwrite the current key.
+            cache[k]={ line1:f.line1, line2:f.line2, full:f.full, locality:f.locality,
+              city:f.city, region:f.region, ts:Date.now(), lat:job.lat, lng:job.lng };
           }
         })
         .catch(()=>{ /* keep whatever we had; no fabricated address */ })
@@ -14930,8 +14999,7 @@ const FamGeo = (function(){
     if(accuracy!=null&&accuracy>MAX_REQUEST_ACCURACY_M)return null;
     const k=key(lat,lng);
     const c=cache[k]; if(c && (Date.now()-c.ts)<TTL) return c;
-    const near=findNearby(lat,lng); if(near) return near;
-    if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng}); pump(); }
+    if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng,accuracy}); pump(); }
     return null;
   }
   return { request, get, format, _key:key, maxRequestAccuracyM:MAX_REQUEST_ACCURACY_M };
