@@ -1350,6 +1350,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
 .fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 64px + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
+.fam-sheet-full .fam-map-cta{opacity:0;pointer-events:none}
 .fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cta-sos{color:#e0447a}
@@ -1485,7 +1486,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   height:42vh;max-height:calc(100% - 150px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
-#fam-sheet.detent-2{height:calc(100% - 150px)}
+#fam-sheet.detent-2{height:68vh;max-height:calc(100% - 230px)}
 #fam-sheet .fam-sheet-draghead{width:100%;height:34px;display:flex;align-items:center;justify-content:center;
   flex:none;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 #fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
@@ -1761,7 +1762,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v362';
+const APP_VERSION='v363';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -13429,6 +13430,7 @@ function drvLiveMount(){
     // screen was being regenerated, not just the map).
     if(_drvLiveMapSessionId!==active.id){
       MBMMap.init('drv-live-map', center);
+      MBMMap.setPadding({top:16,right:16,bottom:16,left:16});
       MBMMap.invalidate();
       _drvLiveMapSessionId=active.id;
     }
@@ -14030,6 +14032,7 @@ const MBMMap = (function(){
   }
 
   let _pad={top:0,right:0,bottom:0,left:0};
+  let _cameraSeq=0;
   function setView(center,zoom){ if(_map)try{ _panToWithPadding(center); if(zoom!=null)_map.setZoom(zoom); }catch(e){} }
   function panTo(center){ if(_map)try{ _panToWithPadding(center); }catch(e){} }
   // Keeps the selected member visible under the header, right-side controls,
@@ -14043,20 +14046,25 @@ const MBMMap = (function(){
     _pad={top:pad.top||0, right:pad.right||0, bottom:pad.bottom||0, left:pad.left||0};
   }
   function _panToWithPadding(center){
+    const seq=++_cameraSeq;
     _map.panTo({lat:center[0],lng:center[1]});
-    // panBy(x,y) moves the map's CENTER in pixel space (confirmed against
-    // Google's own docs: positive y moves the center south/down). Moving
-    // the center DOWN makes the point that was just centered (our marker)
-    // appear HIGHER on screen — which is what we want when bottom padding
-    // (sheet + Check-in/SOS) is eating screen space and the marker needs to
-    // clear it. The previous version negated this (panBy(-dx,-dy)), which
-    // did the opposite: moved the center up, pushing the marker DOWN on
-    // screen — directly toward the sheet it was supposed to avoid. That
-    // sign error was the actual, exact cause of the marker landing behind
-    // the sheet no matter how the padding values themselves were tuned.
     const dy = (_pad.bottom - _pad.top) / 2;
     const dx = (_pad.right - _pad.left) / 2;
-    if(dy || dx){ try{ _map.panBy(dx, dy); }catch(e){} }
+    if(!(dy||dx))return;
+    // Google panTo may animate. Applying panBy immediately lets the panTo
+    // animation finish afterwards and erase the safe-area offset. Apply the
+    // offset on the matching camera idle event instead. Sequence-gating drops
+    // stale completions when new GPS fixes arrive faster than the animation.
+    let applied=false;
+    const applyOffset=()=>{
+      if(applied||seq!==_cameraSeq||!_map)return;
+      applied=true;
+      try{_map.panBy(dx,dy);}catch(e){}
+    };
+    try{window.google.maps.event.addListenerOnce(_map,'idle',applyOffset);}
+    catch(e){setTimeout(applyOffset,250);}
+    // Defensive fallback for browsers that suppress idle on a tiny pan.
+    setTimeout(applyOffset,700);
   }
   function fitAll(latlngs){
     if(!_map||!available()||!latlngs||!latlngs.length) return;
@@ -14279,6 +14287,7 @@ const MBMMap = (function(){
     if(_coneOverlay){ try{_coneOverlay.setMap(null);}catch(e){} _coneOverlay=null; }
     if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
     _markers={}; _markerMeta={}; _markerPos={}; _loaded=false;
+    _pad={top:0,right:0,bottom:0,left:0}; _cameraSeq++;
     _map=null; _elId=null; _mapEl=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
@@ -14530,8 +14539,8 @@ function famLiveView(){
   h+=`<div class="fam-live-top" id="fam-live-top">${famLiveHeaderHtml(sel)}</div>`;
   // map controls
   h+=`<div class="fam-live-ctrls" style="top:88px">
-    <button class="fam-mapbtn${_famFollow?' on':''}" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
-    <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
+    <button class="fam-mapbtn${_famFollow&&sel&&sel.uid===myUid?' on':''}" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
+    <button class="fam-mapbtn${_famFollow&&sel?' on':''}" data-fam="live-center-sel" title="${L==='fa'?'دنبال‌کردن عضو انتخابی':'Follow selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
     <button class="fam-mapbtn" data-fam="live-maptype" title="${L==='fa'?'نوع نقشه':'Map type'}">${famIcon('layers')}</button>
   </div>`;
@@ -14607,7 +14616,18 @@ let _famMapTypeOpen=false;
 let _famCat='people';   // active category row selection (people is the live one)
 let _famFollow=true;    // live-follow defaults on for the current user
 let _famFollowPausedByGesture=false; // explicit map drag wins until user recentres
-function famPauseFollowByGesture(){ _famFollow=false; _famFollowPausedByGesture=true; }
+function famUpdateFollowControls(){
+  const me=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+  const mine=document.querySelector('[data-fam="live-center-me"]');
+  const selected=document.querySelector('[data-fam="live-center-sel"]');
+  if(mine)mine.classList.toggle('on',!!(_famFollow&&_famSelUid===me));
+  if(selected)selected.classList.toggle('on',!!_famFollow);
+}
+function famPauseFollowByGesture(){
+  _famFollow=false;
+  _famFollowPausedByGesture=true;
+  famUpdateFollowControls();
+}
 let _famLiveFixKicked=false;  // one-shot fresh fix when opening live
 let _famDurTickTimer=null;    // interval that refreshes "Here for"/"Since" text only
 
@@ -14863,6 +14883,21 @@ function famComposeStatusText(m){
   // real address) — do not prepend "Near"/"نزدیک" again here, that was
   // producing "Near Near Pirie Street".
   return { l1:lines.line1, region:lines.line2||'', l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary', place:!!d.currentPlaceId };
+}
+/* Marker callout presentation uses the SAME composed state/address/arrival
+   timestamp as the detail sheet, but formats a stationary stay like Life360:
+   "Here for" + elapsed duration above the avatar, while the sheet keeps the
+   absolute "Since 21:13". This is presentation-only; there is no second
+   arrival clock or geocoder. Driving continues to show car + live km/h. */
+function famMarkerStatusText(m){
+  const txt=famComposeStatusText(m);
+  if(txt.activityType==='stationary'&&txt.since){
+    return Object.assign({},txt,{
+      l1:L==='fa'?'اینجا برای':'Here for',
+      l2:famDurSince(txt.since)
+    });
+  }
+  return txt;
 }
 /* Honest consent/permission fallback line — used ONLY when a member has no
    live location to show at all (sharing off/paused, or no fix yet). This is
@@ -15215,6 +15250,7 @@ function famLiveMemberDetail(m, isMe){
    members, draw route + accuracy circle for the selected member, and centre
    only when the SELECTED member changes (never fight manual pan on refresh). ── */
 let _famLastCentredUid=null;
+let _famFollowDriveSessionId=null;
 function famLivePaintMarkers(members, sel){
   if(!MBMMap.get()) return;
   const withFixList=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
@@ -15231,13 +15267,13 @@ function famLivePaintMarkers(members, sel){
   groups.forEach(g=>{
     if(g.members.length===1){
       const m=g.members[0]; const key=m.uid; activeKeys.push(key);
-      const txt=famComposeStatusText(m);
+      const txt=famMarkerStatusText(m);
       MBMMap.setMarker(key,[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
          calloutL1:esc(txt.l1), calloutL2:txt.l2?esc(txt.l2):''},
         m.uid===_famSelUid, m.meta.tone,
-        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
+        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; famLiveApply(); famEnsureSheetVisible(); });
     } else {
       // merged cluster bubble at the group's centroid of real fixes
       const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
@@ -15251,7 +15287,7 @@ function famLivePaintMarkers(members, sel){
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
+          _famSelUid=next.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; famLiveApply(); famEnsureSheetVisible(); });
     }
   });
   MBMMap.clearMarkersExcept(activeKeys);
@@ -15274,20 +15310,27 @@ function famLivePaintMarkers(members, sel){
     MBMMap.panTo([sel.state.lat,sel.state.lng]);
     _famLastCentredUid=sel.uid;
   }
-  // During a locally detected active drive, preserve follow across routine
-  // renders/state updates. An explicit map drag still pauses it until the
-  // person taps the recenter control.
+  // A NEW active driving session resumes follow automatically. Once resumed,
+  // an explicit drag during that same session remains paused until recenter;
+  // routine GPS renders do not fight the person's gesture.
   try{
-    const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-    const activeDrive=my&&FamilyBackend&&FamilyBackend.driving?FamilyBackend.driving.activeSession(my):null;
-    if(activeDrive&&sel&&sel.uid===my&&!_famFollowPausedByGesture)_famFollow=true;
+    const activeDrive=sel&&FamilyBackend&&FamilyBackend.driving?FamilyBackend.driving.activeSession(sel.uid):null;
+    const driveKey=activeDrive?(sel.uid+':'+activeDrive.id):null;
+    if(driveKey&&driveKey!==_famFollowDriveSessionId){
+      _famFollowDriveSessionId=driveKey;
+      _famFollow=true;
+      _famFollowPausedByGesture=false;
+    } else if(!driveKey){
+      _famFollowDriveSessionId=null;
+    }
   }catch(e){}
-  // ── Live-follow: when enabled, keep the map centred on ME as my fix moves ──
-  if(_famFollow){
-    const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-    const mine=my?members.find(m=>m.uid===my):null;
-    if(mine&&mine.state&&mine.state.lat!=null){ try{ MBMMap.panTo([mine.state.lat,mine.state.lng]); }catch(e){} }
+  // Live-follow tracks the SELECTED member/vehicle, not always the local
+  // account. Padding is already installed, so each smooth pan keeps the full
+  // avatar + callout in the safe map area above the sheet.
+  if(_famFollow&&sel&&sel.state&&sel.state.lat!=null){
+    try{MBMMap.panTo([sel.state.lat,sel.state.lng]);}catch(e){}
   }
+  famUpdateFollowControls();
 }
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
    already-mounted map (no destroy/re-init on routine refresh). ── */
@@ -15390,14 +15433,30 @@ function famMapTileError(){
    height. Recomputed on every sheet height change (drag + detent snap). ── */
 function famUpdateCameraPadding(sheetPx){
   try{
-    const HEADER_H=96;      // header row + safe area
-    const RIGHT_CONTROLS_W=64; // recenter/person/fullscreen/layers column
-    const CTA_H=56;         // Check in / SOS row height
-    const CTA_GAP=14;
-    const SHEET_BOTTOM_MARGIN=64; // #fam-sheet's own margin-bottom, reserved for the bottom nav — must be included or the sheet's true top edge is undercounted
-    const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
+    const mapEl=document.getElementById('fam-map');
+    const sheet=document.getElementById('fam-sheet');
+    const topBar=document.getElementById('fam-live-top');
+    const cta=document.querySelector('.fam-map-cta');
+    const wrap=document.getElementById('fam-live-wrap');
+    const ctrls=document.querySelector('.fam-live-ctrls');
+    const mr=mapEl&&mapEl.getBoundingClientRect?mapEl.getBoundingClientRect():null;
+    const sr=sheet&&sheet.getBoundingClientRect?sheet.getBoundingClientRect():null;
+    const tr=topBar&&topBar.getBoundingClientRect?topBar.getBoundingClientRect():null;
+    const cr=cta&&!(wrap&&wrap.classList.contains('fam-sheet-full'))&&cta.getBoundingClientRect?cta.getBoundingClientRect():null;
+    const rr=ctrls&&ctrls.getBoundingClientRect?ctrls.getBoundingClientRect():null;
+    // Use actual rendered geometry rather than assumed vh/pixel constants.
+    // The marker coordinate is framed between the header and the first real
+    // obstruction (CTA row or sheet), with room for the avatar/callout.
+    const top=mr?Math.max(112,(tr?tr.bottom-mr.top:96)+12):112;
+    const obstructionTop=mr?Math.min(
+      sr?sr.top:mr.bottom-(sheetPx||0)-64,
+      cr&&cr.height?cr.top:mr.bottom-(sheetPx||0)-134
+    ):null;
+    const bottom=mr&&obstructionTop!=null?Math.max(90,mr.bottom-obstructionTop+14)
+      :(sheetPx||0)+144;
+    const right=mr&&rr?Math.max(64,mr.right-rr.left+10):72;
     if(typeof MBMMap!=='undefined' && MBMMap.setPadding){
-      MBMMap.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
+      MBMMap.setPadding({top, right, bottom, left:16});
       // setPadding changes future pans; it does not move an already-positioned
       // camera. Reframe immediately after every detent/padding change.
       const sel=(typeof famLiveMembers==='function')?famLiveMembers().find(m=>m.uid===_famSelUid):null;
@@ -15417,13 +15476,13 @@ function famEnsureSheetVisible(){
   try{
     const sheet=document.getElementById('fam-sheet'); if(!sheet) return;
     const H=window.innerHeight||780;
-    const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
+    const heights=[130, Math.round(H*0.40), Math.max(200,Math.min(Math.round(H*0.68),H-230))];
     if(_famSheetDetent<1){
       _famSheetDetent=1;
       sheet.classList.remove('detent-0','detent-2');
       sheet.style.height=heights[1]+'px';
       const wrap=document.getElementById('fam-live-wrap');
-      if(wrap) wrap.style.setProperty('--fam-sheet-h', heights[1]+'px');
+      if(wrap){ wrap.classList.remove('fam-sheet-full'); wrap.style.setProperty('--fam-sheet-h', heights[1]+'px'); }
       try{ famUpdateCameraPadding(heights[1]); }catch(e){}
       try{ MBMMap.invalidate(); }catch(e){}
       // Re-pan to the selected member AFTER padding reflects the now-taller
@@ -15452,7 +15511,7 @@ function famSheetInitDrag(){
   // 40vh), 2=full but NEVER covering the 90px header reserved by CSS
   // max-height. Height-based (not transform) so the sheet is ALWAYS visible
   // from its default CSS even if this JS never runs.
-  const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
+  const heights=[130, Math.round(H*0.40), Math.max(200,Math.min(Math.round(H*0.68),H-230))];
   // Single source of truth the buttons + camera padding both read: writes the
   // CURRENT real sheet height (px) as a CSS var on the map wrapper. .fam-map-cta
   // (Check in/SOS) is bound to this via bottom:calc(var(--fam-sheet-h) + 14px),
@@ -15473,6 +15532,8 @@ function famSheetInitDrag(){
     sheet.classList.remove('detent-0','detent-2');
     if(_famSheetDetent===0)sheet.classList.add('detent-0');
     if(_famSheetDetent===2)sheet.classList.add('detent-2');
+    const wrap=document.getElementById('fam-live-wrap');
+    if(wrap)wrap.classList.toggle('fam-sheet-full',_famSheetDetent===2);
     sheet.style.height=heights[_famSheetDetent]+'px';
     syncSheetVar(heights[_famSheetDetent], true);
   }
@@ -16130,8 +16191,7 @@ function famAction(act,arg,ev){
     case 'live-back': famExitToHub(); return;
     case 'live-sel':{
       _famSelUid=arg; _famLastCentredUid=null;
-      const me=FB.user&&FB.user.uid;
-      if(arg===me){_famFollow=true;_famFollowPausedByGesture=false;} else {_famFollow=false;}
+      _famFollow=true; _famFollowPausedByGesture=false;
       if(typeof famLiveApply==='function')famLiveApply(); else render();
       try{ famEnsureSheetVisible(); }catch(e){} return;
     }
@@ -16154,9 +16214,9 @@ function famAction(act,arg,ev){
       render();
       return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=true; _famFollowPausedByGesture=false; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
-    case 'live-center-sel':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=(_famSelUid===my); _famFollowPausedByGesture=false; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
-    case 'live-fit':{ const fb=FamilyBackend; const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
+    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famSelUid=my; _famFollow=true; _famFollowPausedByGesture=false; famUpdateFollowControls(); const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=true; _famFollowPausedByGesture=false; famUpdateFollowControls(); const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
+    case 'live-fit':{ _famFollow=false; _famFollowPausedByGesture=true; famUpdateFollowControls(); const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
     case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; }
