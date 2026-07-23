@@ -1761,7 +1761,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v360';
+const APP_VERSION='v361';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -1807,7 +1807,9 @@ const KEY='mbmlife_platform_v1';
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof voiceHardStop==='function') voiceHardStop(); });
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof VaultSession!=='undefined'){ VaultSession.lock(); if(typeof _vaultReveal!=='undefined')_vaultReveal={}; if(typeof vaultWipeInputs==='function')vaultWipeInputs(); } });
   document.addEventListener('visibilitychange', ()=>{ try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.location)FamilyBackend.location.reconcileWatch(); }catch(e){} });
+  document.addEventListener('visibilitychange', ()=>{ try{ if(document.hidden&&typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)FamilyBackend.driving.checkpoint(); }catch(e){} });
   window.addEventListener('pagehide', ()=>{ if(typeof voiceHardStop==='function') voiceHardStop(); });
+  window.addEventListener('pagehide', ()=>{ try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)FamilyBackend.driving.checkpoint(); }catch(e){} });
   window.addEventListener('pagehide', ()=>{ if(typeof VaultSession!=='undefined'){VaultSession.lock(); if(typeof vaultWipeInputs==='function')vaultWipeInputs();} });
   window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
 })();
@@ -2060,6 +2062,26 @@ function clearSaveError(){
   const el=document.getElementById('save-error-banner');
   if(el)el.style.display='none';
 }
+/* Cloud-persistence failures must be visible and diagnosable. Local storage
+   success does not clear this banner because a healthy IndexedDB write and a
+   rejected Firestore write are independent facts. */
+function showSyncError(scope,err){
+  const code=(err&&err.code)||'unknown';
+  const detail=(err&&err.message)||String(err||'Unknown error');
+  console.error('[sync]',scope,code,detail);
+  let el=document.getElementById('sync-error-banner');
+  if(!el){
+    el=document.createElement('div');
+    el.id='sync-error-banner';
+    el.style.cssText='position:fixed;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top,0px));z-index:100001;background:#35151d;color:#fff;border:1px solid #f43f5e;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start;box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:12px';
+    el.innerHTML='<span id="sync-error-text" style="flex:1;word-break:break-word"></span><button id="sync-error-dismiss" aria-label="dismiss" style="all:unset;cursor:pointer;font-size:16px">✕</button>';
+    document.body.appendChild(el);
+    el.querySelector('#sync-error-dismiss').onclick=()=>{el.style.display='none';};
+  }
+  const text=el.querySelector('#sync-error-text');
+  if(text)text.textContent=`Driving sync failed (${scope}, ${code}). Local data is retained; cloud retry will continue. ${detail}`;
+  el.style.display='flex';
+}
 
 /* Triggers a downloadable JSON backup of the given data — used once, right
    before the first-ever migration into IndexedDB, so a copy of the user's
@@ -2146,7 +2168,12 @@ async function idbMigrateAndLoad(){
 
 
 let DB=loadDB();
-idbMigrateAndLoad();
+// Boot barrier: Auth/Family/GPS must not start from the stale localStorage
+// bootstrap copy while the newer IndexedDB snapshot is still loading. Without
+// this barrier a first GPS callback could see no previous LocationState,
+// initialise stayStart to "now", and then overwrite the genuine arrival time
+// in Firestore before IndexedDB finished restoring it.
+const dbHydrationReady=idbMigrateAndLoad();
 
 // OBSOLETE — retired deliberately.
 // This one-time migration used to enforce "exactly one ACTIVE list per store",
@@ -10458,12 +10485,16 @@ const FamilyBackend = (function(){
   function start(){
     if(!ready())return;
     stop();
+    // Automatic driving detection is a local foreground capability and must
+    // not depend on whether Family location sharing is enabled. It still uses
+    // the same browser watcher and therefore remains foreground-only.
+    try{ FamilyLocation.refreshPermission(); FamilyLocation.reconcileWatch(); }catch(e){}
     // 1) Watch this user's family pointer. Survives reinstall/new device (§19).
     _linkUnsub = linkRef().onSnapshot(snap=>{
       const fid = snap.exists ? (snap.data()||{}).familyId : null;
       if(fid) watchFamily(fid);
-      else { _current=null; detachFamily(); afterChange(); }
-    }, ()=>{});
+      else { _current=null; detachFamily(); try{FamilyLocation.reconcileWatch();}catch(e){} afterChange(); }
+    }, e=>showSyncError('family link listener',e));
   }
   function stop(){
     if(_linkUnsub){try{_linkUnsub();}catch(e){} _linkUnsub=null;}
@@ -10499,12 +10530,12 @@ const FamilyBackend = (function(){
       _current = Object.assign({id:snap.id}, snap.data());
       // If I was removed server-side, clear my pointer so UI reflects reality.
       if(_current.members && !_current.members[myUid()]){
-        linkRef().delete().catch(()=>{});
+        linkRef().delete().catch(e=>showSyncError('family membership link',e));
       }
       // Attach location listeners for the (possibly changed) member set.
       try{ FamilyLocation.startListening(); }catch(e){}
       afterChange();
-    }, ()=>{});
+    }, e=>showSyncError('family document listener',e));
   }
 
   function afterChange(){
@@ -10531,6 +10562,11 @@ const FamilyBackend = (function(){
       if(isTyping0) return; // never rewrite the Family screen's DOM while a field is focused, on ANY famView
       if((famView==='live'||famView==='dashboard') && typeof famLiveApply==='function'){
         famLiveApply();
+      } else if(famView==='drivingLive' && typeof drvLiveApply==='function'){
+        // A GPS fix must not replace the live-driving map container. Patch the
+        // existing view; drvLiveApply itself requests a full render only when
+        // the screen changes between driving/not-driving states.
+        drvLiveApply();
       } else {
         render();
       }
@@ -10772,6 +10808,8 @@ const FamilyBackend = (function(){
     let _locUnsubs=[];               // per-member location listeners
     let _consentUnsub=null;          // my own consent listener
     let _routeUnsub=null;            // my own route doc listener (to restore after reopen)
+    let _remoteBootstrapReady=true;  // blocks share writes until own remote state/consent have hydrated
+    let _remoteBootstrapFailed=false;
 
     function nowISO(){ return new Date().toISOString(); }
     function ageMs(iso){ const t=Date.parse(iso||''); return isNaN(t)?Infinity:(Date.now()-t); }
@@ -10902,7 +10940,7 @@ const FamilyBackend = (function(){
       const next=Object.assign(cur,patch,{updatedAt:nowISO()});
       consentMap()[uid]=next;                                   // optimistic mirror
       try{ persistDB(); }catch(e){}
-      await consentLocRef(fid,uid).set(next,{merge:true}).catch(()=>{});
+      await consentLocRef(fid,uid).set(next,{merge:true}).catch(e=>showSyncError('location consent',e));
       // Turning sharing off/pause: stop emitting immediately; on/resume: start.
       reconcileWatch();
       afterChange();
@@ -10912,12 +10950,15 @@ const FamilyBackend = (function(){
     /* ── WRITE a fix for myself (called by the Stage-3 foreground watcher).
        Applies consent (approx vs precise), movement/stay, route append. ── */
     async function writeMyFix(raw){
-      if(!ready()||!isMember())return;
+      if(!FB||!FB.user||!myUid())return;
       const c=myConsent();
-      if(!c.enabled||c.paused)return;                           // never emit without consent
+      const canShare=!!(ready()&&isMember()&&c.enabled&&!c.paused&&_remoteBootstrapReady&&!_remoteBootstrapFailed);
+      if(!canShare && !drivingTrackingEnabled())return;
       const uid=myUid(), fid=familyId();
       let lat=raw.lat, lng=raw.lng;
-      if(c.precise===false){ const q=coarsen(lat,lng); lat=q.lat; lng=q.lng; }
+      // Coarsening is a Family-sharing privacy choice. Local trip detection
+      // keeps the real device fix; only the shared LocationState is coarsened.
+      if(canShare&&c.precise===false){ const q=coarsen(lat,lng); lat=q.lat; lng=q.lng; }
       const capturedAt=raw.capturedAt||nowISO();
       const prev=memberState(uid);
       const mv=classifyMovement(prev,{lat,lng,capturedAt});
@@ -10930,23 +10971,25 @@ const FamilyBackend = (function(){
         permission:'granted', reportedAt:nowISO() };
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
       // route breadcrumb (only on meaningful movement, precise mode only)
-      if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt,speedMps:state.speed}); }
+      if(canShare&&c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt,speedMps:state.speed}); }
       try{ persistDB(); }catch(e){}
-      try{ evalGeofences(uid, prev, {lat,lng,capturedAt}); }catch(e){}
-      try{ evalNoShows(); }catch(e){}
-      try{ FamilyDriving.ingestFix(uid, { lat, lng, capturedAt,
-             speedMps:state.speed, accuracyM:state.accuracy,
+      if(canShare){
+        try{ evalGeofences(uid, prev, {lat,lng,capturedAt}); }catch(e){}
+        try{ evalNoShows(); }catch(e){}
+      }
+      try{ FamilyDriving.ingestFix(uid, { lat:raw.lat, lng:raw.lng, capturedAt,
+             speedMps:raw.speed, accuracyM:(raw.accuracy!=null?raw.accuracy:null),
              headingDeg:state.heading, altitudeM:(raw.altitude!=null?raw.altitude:null),
              source:state.source }); }catch(e){ console.error('[FamilyDriving.ingestFix]',e); }
       afterChange();                                           // REPAINT marker/address NOW, before any network
       // ── Canonical Firestore write is THROTTLED for bandwidth, but the local
       //    marker above already moved. The remote write is best-effort. ──
-      if(raw._remote!==false){
+      if(canShare&&raw._remote!==false){
         const now=Date.now();
         if(now-_lastRemoteWriteAt >= WRITE_THROTTLE_MS){
           _lastRemoteWriteAt=now;
-          await locRef(fid,uid).set(state,{merge:true}).catch(()=>{});
-          if(c.precise!==false){ await flushRoute(uid).catch(()=>{}); }
+          await locRef(fid,uid).set(state,{merge:true}).catch(e=>showSyncError('location state',e));
+          if(c.precise!==false){ await flushRoute(uid).catch(e=>showSyncError('location route',e)); }
         }
       }
     }
@@ -10987,7 +11030,7 @@ const FamilyBackend = (function(){
         at:ev.at||nowISO(), createdAt:nowISO() };
       eventsMap()[id]=doc;                                    // optimistic mirror
       try{ persistDB(); }catch(e){}
-      await eventDoc(fid,id).set(doc).catch(e=>{ console.error('[emitEvent]',e&&e.code,e&&e.message); });
+      await eventDoc(fid,id).set(doc).catch(e=>showSyncError('family event',e));
       afterChange();
       return doc;
     }
@@ -11000,7 +11043,7 @@ const FamilyBackend = (function(){
         qs.forEach(d=>{ em[d.id]=Object.assign({id:d.id},d.data()); });
         try{persistDB&&persistDB();}catch(e){}
         afterChange();
-      }, ()=>{});
+      }, e=>showSyncError('family events listener',e));
     }
     function stopEventsListening(){ if(_eventsUnsub){try{_eventsUnsub();}catch(e){} _eventsUnsub=null;} }
     function memberEvents(uid){ return Object.values(eventsMap()).filter(e=>e.memberUid===uid).sort((a,b)=>(a.at||'').localeCompare(b.at||'')); }
@@ -11091,7 +11134,8 @@ const FamilyBackend = (function(){
     async function flushRoute(uid){
       if(!ready()||!isMember())return;
       const r=routeMap()[uid]; if(!r)return;
-      await routeDoc(familyId(),uid).set({points:r.points, updatedAt:r.updatedAt},{merge:true}).catch(()=>{});
+      await routeDoc(familyId(),uid).set({points:r.points, updatedAt:r.updatedAt},{merge:true})
+        .catch(e=>showSyncError('location route',e));
     }
 
     /* ── record a manual check-in: writes the location sample AND a real
@@ -11104,12 +11148,12 @@ const FamilyBackend = (function(){
     }
 
     /* ═══ Foreground watcher (Stage 2) ═══
-       Makes visibility automatic: when MY consent is enabled+not paused and the
-       app is foreground, stream Geolocation fixes into writeMyFix — no manual
-       Check-in needed. Honest by construction: the watcher only runs while the
-       app is open, so when it stops, remote viewers see the timestamp age out
-       through recent→stale→offline. This is the PWA truth; a native companion
-       (source:'companion') can later feed the same pipe in the background. */
+       Runs while the app is visible when either Family sharing is enabled OR
+       local automatic driving detection is enabled. Only the former publishes
+       LocationState/geofences; the latter feeds FamilyDriving locally without
+       silently sharing the person's position. Honest by construction: this
+       browser watcher stops while hidden, so background driving still requires
+       the native companion described by source:'companion'. */
     let _watchId=null;              // geolocation.watchPosition id
     let _lastWriteAt=0;             // (legacy) throttle guard
     let _lastRemoteWriteAt=0;       // throttle for the Firestore write only
@@ -11146,16 +11190,25 @@ const FamilyBackend = (function(){
       try{ if(navigator.getBattery){ navigator.getBattery().then(b=>{_battery=b;}).catch(()=>{_battery=undefined;}); } else { _battery=undefined; } }catch(e){ _battery=undefined; }
     }
 
+    function drivingTrackingEnabled(){
+      // Opt-out-ready preference; defaults on so Driving works without
+      // requiring the unrelated Family-sharing consent switch.
+      return !(DB&&DB.meta&&DB.meta.autoDrivingTracking===false);
+    }
     function shouldWatch(){
-      if(!ready()||!isMember())return false;
+      if(!FB||!FB.user||!myUid())return false;
       const c=myConsent();
-      if(!c.enabled||c.paused)return false;
+      const shareWanted=!!(ready()&&isMember()&&c.enabled&&!c.paused);
+      const driveWanted=drivingTrackingEnabled();
+      if(!shareWanted&&!driveWanted)return false;
+      // When sharing, do not let a first app-open fix overwrite the canonical
+      // stayStart before Firestore's own state and consent snapshots arrive.
+      if(shareWanted&&!_remoteBootstrapReady)return false;
       if(typeof document!=='undefined' && document.visibilityState==='hidden')return false;
       return true;
     }
 
     function onFix(pos){
-      const c=myConsent(); if(!c.enabled||c.paused)return;
       const cr=pos.coords||{};
       const provider=(cr.accuracy!=null&&cr.accuracy<=50)?'gps':'network';
       // Distance from the previous rendered fix (proves movement is flowing).
@@ -11190,7 +11243,10 @@ const FamilyBackend = (function(){
       const st=Object.assign({}, memberState(uid)||{uid});
       st.permission = denied ? 'denied' : (st.permission||'granted');
       if(denied){ locMap()[uid]=st; try{persistDB();}catch(e){}
-        if(ready()&&isMember()){ locRef(familyId(),uid).set({permission:'denied',reportedAt:nowISO()},{merge:true}).catch(()=>{}); }
+        if(ready()&&isMember()){
+          locRef(familyId(),uid).set({permission:'denied',reportedAt:nowISO()},{merge:true})
+            .catch(e=>showSyncError('location permission',e));
+        }
       }
       afterChange();
     }
@@ -11200,7 +11256,9 @@ const FamilyBackend = (function(){
       opts=opts||{};
       if(!('geolocation' in navigator)){ setLocState('unavailable'); diag('freshfix','no geolocation'); if(opts.cb)opts.cb(null); return; }
       const c=myConsent();
-      if(!c.enabled||c.paused){ diag('freshfix','no consent'); if(opts.cb)opts.cb(null); return; }
+      const shareWanted=!!(ready()&&isMember()&&c.enabled&&!c.paused);
+      if(!shareWanted&&!drivingTrackingEnabled()){ diag('freshfix','tracking disabled'); if(opts.cb)opts.cb(null); return; }
+      if(shareWanted&&!_remoteBootstrapReady){ diag('freshfix','waiting for remote bootstrap'); if(opts.cb)opts.cb(null); return; }
       setLocState('obtaining'); diag('freshfix','requesting getCurrentPosition');
       try{
         navigator.geolocation.getCurrentPosition(
@@ -11220,7 +11278,7 @@ const FamilyBackend = (function(){
       setLocState('obtaining'); diag('watch','starting watchPosition');
       try{
         _watchId=navigator.geolocation.watchPosition(onFix,onFixErr,{
-          enableHighAccuracy: c.precise!==false,
+          enableHighAccuracy: drivingTrackingEnabled() || c.precise!==false,
           maximumAge: 5000,
           timeout: 20000
         });
@@ -11274,18 +11332,30 @@ const FamilyBackend = (function(){
         Object.keys(pm).forEach(id=>{ if(!seen[id] && pm[id]&&pm[id]._cloudSeeded) delete pm[id]; });
         try{persistDB&&persistDB();}catch(e){}
         afterChange();
-      }, ()=>{});
+      }, e=>showSyncError('family places listener',e));
     }
     function stopPlacesListening(){ if(_placesUnsub){try{_placesUnsub();}catch(e){} _placesUnsub=null;} }
 
     function startListening(){
       stopListening();
       if(!ready()||!isMember())return;
+      _remoteBootstrapReady=false;
+      _remoteBootstrapFailed=false;
       const fid=familyId();
       const uids=Object.keys((_current&&_current.members)||{});
+      let myLocInitial=false, myConsentInitial=false;
+      function finishOwnBootstrap(){
+        if(myLocInitial&&myConsentInitial&&!_remoteBootstrapReady){
+          _remoteBootstrapReady=true;
+          diag('bootstrap','own remote location + consent hydrated');
+          reconcileWatch();
+        }
+      }
       uids.forEach(uid=>{
-        const u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){
-          const incoming=Object.assign({uid},snap.data());
+        const u1=locRef(fid,uid).onSnapshot(snap=>{
+          if(snap.exists){
+            const incoming=Object.assign({uid},snap.data());
+            let applyIncoming=true;
           // For MY OWN doc, never let the round-tripped server value clobber a
           // newer local GPS fix (that would snap the marker back). Keep whichever
           // reportedAt is newer. Other members always take the server value.
@@ -11293,7 +11363,7 @@ const FamilyBackend = (function(){
             const localSt=locMap()[uid];
             const lt=localSt&&localSt.reportedAt?Date.parse(localSt.reportedAt):0;
             const it=incoming.reportedAt?Date.parse(incoming.reportedAt):0;
-            if(lt>it) return;   // my local fix is newer — ignore stale echo
+            if(lt>it) applyIncoming=false;   // my local fix is newer — ignore stale echo, but still complete bootstrap
             // CRITICAL FIX (found via deep trace of a repeatedly-reported
             // "Since" freeze): reportedAt and stayStart are independent
             // fields. The Firestore write is throttled to once per
@@ -11306,22 +11376,33 @@ const FamilyBackend = (function(){
             // Since stayStart only ever moves forward for a genuine
             // relocation (never backward — see classifyMovement), this is
             // always safe to enforce: never let it regress for own-uid.
-            if(localSt&&localSt.stayStart&&incoming.stayStart){
+            if(applyIncoming&&localSt&&localSt.stayStart&&incoming.stayStart){
               if(Date.parse(incoming.stayStart)<Date.parse(localSt.stayStart)){
                 incoming.stayStart=localSt.stayStart;
               }
             }
           }
-          locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
-        } },()=>{});
-        const u2=consentLocRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange(); } },()=>{});
+            if(applyIncoming){ locMap()[uid]=incoming; persistDB&&persistDB(); afterChange(); }
+          }
+          if(uid===myUid()){ myLocInitial=true; finishOwnBootstrap(); }
+        },e=>{ if(uid===myUid()){ _remoteBootstrapFailed=true; myLocInitial=true; finishOwnBootstrap(); } showSyncError('location listener',e); });
+        const u2=consentLocRef(fid,uid).onSnapshot(snap=>{
+          if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); afterChange(); }
+          if(uid===myUid()){ myConsentInitial=true; finishOwnBootstrap(); }
+        },e=>{ if(uid===myUid()){ _remoteBootstrapFailed=true; myConsentInitial=true; finishOwnBootstrap(); } showSyncError('consent listener',e); });
         _locUnsubs.push(u1,u2);
       });
+      // Defensive: malformed/legacy family docs without my uid must not leave
+      // local driving permanently blocked.
+      if(uids.indexOf(myUid())<0){ myLocInitial=true; myConsentInitial=true; finishOwnBootstrap(); }
       // my own route (so reopening restores today's breadcrumb)
-      _routeUnsub=routeDoc(fid,myUid()).onSnapshot(snap=>{ if(snap.exists){ routeMap()[myUid()]=snap.data(); persistDB&&persistDB(); } },()=>{});
+      _routeUnsub=routeDoc(fid,myUid()).onSnapshot(snap=>{
+        if(snap.exists){ routeMap()[myUid()]=snap.data(); persistDB&&persistDB(); }
+      },e=>showSyncError('location route listener',e));
       startPlacesListening();
       startEventsListening();
       startNoShowListening();
+      try{ FamilyDriving.startListening(); }catch(e){ showSyncError('driving listener start',e); }
       // Stage 2: begin auto-sharing if consent allows + honest permission state.
       refreshPermission();
       reconcileWatch();
@@ -11332,8 +11413,11 @@ const FamilyBackend = (function(){
       stopPlacesListening();
       stopEventsListening();
       stopNoShowListening();
+      try{ FamilyDriving.stopListening(); }catch(e){}
       if(_consentUnsub){try{_consentUnsub();}catch(e){} _consentUnsub=null;}
       stopWatch();
+      _remoteBootstrapReady=true;
+      _remoteBootstrapFailed=false;
     }
 
     function locationDebugInfo(){
@@ -11354,6 +11438,7 @@ const FamilyBackend = (function(){
       memberState, memberStatus, memberConsent, memberRoute, myConsent,
       deriveStatus, statusMeta, permissionState, batteryPct,
       locationDebugInfo,
+      drivingTrackingEnabled,
       // write
       setConsent, writeMyFix, writeCheckin, flushRoute,
       // places (real Firestore sync)
@@ -11417,6 +11502,7 @@ const FamilyBackend = (function(){
     let _ingestFixCallCount=0;
     let _lastIngestFixAt=null;
     let _lastSyncAtDebug=null; // set whenever pushSessionRemote actually succeeds
+    let _sessionsUnsub=null, _drivingEventsUnsub=null;
 
     function queueMap(){ if(!DB.entities.famDriveQueue)DB.entities.famDriveQueue={}; return DB.entities.famDriveQueue; }
     function sessionMap(){ if(!DB.entities.famDriveSessions)DB.entities.famDriveSessions={}; return DB.entities.famDriveSessions; }
@@ -11427,6 +11513,76 @@ const FamilyBackend = (function(){
     function eventsFor(uid){ const m=eventMapAll()[uid]; return m?Object.values(m):[]; }
     function eventsForSession(uid,sessionId){ return eventsFor(uid).filter(e=>e.sessionId===sessionId); }
     function saveEvent(uid,ev){ const m=eventMapAll()[uid]||(eventMapAll()[uid]={}); m[ev.id]=ev; try{persistDB();}catch(e){} }
+
+    function notifyDrivingDataChanged(){
+      if(typeof render!=='function')return;
+      if(screen==='module'&&currentModule==='family'&&
+         ['drivingDash','drivingHistory','drivingTrip'].indexOf(famView)>=0){
+        const ae=document.activeElement;
+        if(!(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.isContentEditable)))render();
+      }
+    }
+    function startListening(){
+      stopListening();
+      if(!ready()||!isMember())return;
+      const fid=familyId();
+      _sessionsUnsub=famRef(fid).collection('drivingSessions').onSnapshot(qs=>{
+        const seen=new Set();
+        qs.forEach(d=>seen.add(d.id));
+        qs.docChanges().forEach(ch=>{
+          const data=Object.assign({id:ch.doc.id},ch.doc.data()||{});
+          const uid=data.memberId||data.memberUid;
+          if(!uid)return;
+          const byUser=sessionMap()[uid]||(sessionMap()[uid]={});
+          if(ch.type==='removed'){ delete byUser[ch.doc.id]; return; }
+          const local=byUser[ch.doc.id];
+          const localT=Date.parse(local&&local.updatedAt||'')||0;
+          const remoteT=Date.parse(data.updatedAt||'')||0;
+          if(!local||remoteT>=localT)byUser[ch.doc.id]=data;
+          else {
+            // Recovery may have ended a locally persisted session before the
+            // family pointer came back. Push that newer local truth instead of
+            // letting an older remote "active" echo resurrect the trip.
+            local.familyId=fid;
+            pushSessionRemote(local).catch(e=>showSyncError('recovered trip summary',e));
+          }
+        });
+        // Sessions created while temporarily offline/not attached to a family
+        // have no remote document yet. Backfill them idempotently on attach.
+        const me=myUid();
+        sessionsFor(me).forEach(sess=>{
+          if(!seen.has(sess.id)){
+            sess.familyId=fid;
+            pushSessionRemote(sess).catch(e=>showSyncError('offline trip backfill',e));
+          }
+        });
+        persistDB();
+        notifyDrivingDataChanged();
+      },e=>showSyncError('drivingSessions listener',e));
+      _drivingEventsUnsub=famRef(fid).collection('drivingEvents').onSnapshot(qs=>{
+        const seen=new Set();
+        qs.forEach(d=>seen.add(d.id));
+        qs.docChanges().forEach(ch=>{
+          const data=Object.assign({id:ch.doc.id},ch.doc.data()||{});
+          const uid=data.memberUid||data.memberId;
+          if(!uid)return;
+          const byUser=eventMapAll()[uid]||(eventMapAll()[uid]={});
+          if(ch.type==='removed')delete byUser[ch.doc.id];
+          else byUser[ch.doc.id]=Object.assign({},byUser[ch.doc.id]||{},data,{_synced:true});
+        });
+        eventsFor(myUid()).forEach(ev=>{
+          if(!seen.has(ev.id)||ev._synced===false){
+            pushEventRemote(ev).then(ok=>{if(ok){ev._synced=true;saveEvent(myUid(),ev);}}).catch(e=>showSyncError('offline event backfill',e));
+          }
+        });
+        persistDB();
+        notifyDrivingDataChanged();
+      },e=>showSyncError('drivingEvents listener',e));
+    }
+    function stopListening(){
+      if(_sessionsUnsub){try{_sessionsUnsub();}catch(e){} _sessionsUnsub=null;}
+      if(_drivingEventsUnsub){try{_drivingEventsUnsub();}catch(e){} _drivingEventsUnsub=null;}
+    }
 
     function newId(prefix){ return prefix+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
     function haversineM(a,b){ if(!a||!b)return Infinity; const R=6371000,toR=x=>x*Math.PI/180;
@@ -11524,15 +11680,16 @@ const FamilyBackend = (function(){
     function eventFsDoc(fid,eventId){ return famRef(fid).collection('drivingEvents').doc(eventId); }
 
     async function pushSessionRemote(sess){
-      if(!ready()||!isMember())return;
+      if(!ready()||!isMember())return false;
       let ok=true;
-      await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(()=>{ ok=false; });
+      await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(e=>{ ok=false; showSyncError('driving session',e); });
       if(ok) _lastSyncAtDebug=nowISO();
+      return ok;
     }
     async function pushEventRemote(ev){
       if(!ready()||!isMember())return false;
       let ok=true;
-      await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}).catch(()=>{ ok=false; });
+      await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}).catch(e=>{ ok=false; showSyncError('driving event',e); });
       return ok;
     }
     async function flushSamplesRemote(uid){
@@ -11560,7 +11717,7 @@ const FamilyBackend = (function(){
         let ok=true;
         await sampleChunkDoc(fid,q.sessionId,chunkIdx).set({
           sessionId:q.sessionId, chunkIndex:chunkIdx, points:chunkPts, updatedAt:nowISO()
-        },{merge:true}).catch(()=>{ ok=false; });
+        },{merge:true}).catch(e=>{ ok=false; showSyncError('driving sample chunk',e); });
         if(!ok) break; // stop here — don't attempt later chunks out of order, retry from this point next cycle
         lastSuccessfulEnd=chunkEnd;
         i=chunkEnd;
@@ -11646,7 +11803,7 @@ const FamilyBackend = (function(){
       Object.assign(sess,m);
       sess.eventCount=eventsForSession(uid,sess.id).length;
       saveSession(uid,sess);
-      try{ pushSessionRemote(sess); }catch(e){}
+      pushSessionRemote(sess).catch(e=>showSyncError('recomputed trip summary',e));
       return sess;
     }
 
@@ -11687,7 +11844,7 @@ const FamilyBackend = (function(){
         avgSpeedMps:0, maxSpeedMps:0, sampleCount:1, eventCount:0,
         schemaVersion:SCHEMA_VERSION, createdAt:nowISO(), updatedAt:nowISO() };
       saveSession(uid,sess);
-      try{ pushSessionRemote(sess); }catch(e){}
+      pushSessionRemote(sess).catch(e=>showSyncError('new trip summary',e));
       return sess;
     }
     const SAMPLE_IDB_PREFIX = 'drivingSamples:';
@@ -11701,18 +11858,28 @@ const FamilyBackend = (function(){
        lose a trip's samples, but IDB is the intended, honest path. */
     async function writeSamplesStore(sessionId,samples){
       if(idbReady && _idbHandle){
-        try{ await idbSet(sampleIdbKey(sessionId),samples); return true; }catch(e){ console.error('[FamilyDriving] idbSet samples failed',e); }
+        try{ await idbSet(sampleIdbKey(sessionId),samples); return true; }catch(e){
+          console.error('[FamilyDriving] idbSet samples failed',e);
+          showSaveError(L==='fa'?'⚠ ذخیره نمونه‌های سفر در IndexedDB ناموفق بود؛ از ذخیره جایگزین استفاده می‌شود.':'⚠ Trip sample IndexedDB write failed; using fallback storage.');
+        }
       }
       try{
         if(!DB.entities.famDriveSamplesFallback)DB.entities.famDriveSamplesFallback={};
         DB.entities.famDriveSamplesFallback[sessionId]=samples;
         persistDB();
         return true;
-      }catch(e){ console.error('[FamilyDriving] fallback sample store failed',e); return false; }
+      }catch(e){
+        console.error('[FamilyDriving] fallback sample store failed',e);
+        showSaveError(L==='fa'?'⚠ ذخیره نمونه‌های سفر ناموفق بود؛ صف سفر برای بازیابی نگه داشته شد.':'⚠ Trip samples could not be saved; the recovery queue was retained.');
+        return false;
+      }
     }
     async function readSamplesStore(sessionId){
       if(idbReady && _idbHandle){
-        try{ const v=await idbGet(sampleIdbKey(sessionId)); if(Array.isArray(v)) return v; }catch(e){}
+        try{ const v=await idbGet(sampleIdbKey(sessionId)); if(Array.isArray(v)) return v; }catch(e){
+          showSaveError(L==='fa'?'⚠ خواندن نمونه‌های سفر از IndexedDB ناموفق بود.':'⚠ Reading trip samples from IndexedDB failed.');
+          console.error('[FamilyDriving] sample read failed',e);
+        }
       }
       const fb=DB.entities.famDriveSamplesFallback;
       if(fb && Array.isArray(fb[sessionId])) return fb[sessionId];
@@ -11724,26 +11891,43 @@ const FamilyBackend = (function(){
       if(fb && fb[sessionId]){ delete fb[sessionId]; try{persistDB();}catch(e){} }
     }
 
+    async function finalizeEndedQueue(uid,sess,q){
+      if(!q||q.sessionId!==sess.id)return true;
+      const samplesToStore=q.samples.slice();
+      q.closing=true;
+      sess.sampleStoreKey=sess.id;
+      try{persistDB();}catch(e){}
+      const stored=await writeSamplesStore(sess.id,samplesToStore);
+      // Retry/finish cloud writes while the queue still contains all samples.
+      try{ await Promise.all([pushSessionRemote(sess),flushSamplesRemote(uid)]); }catch(e){ showSyncError('trip finalization',e); }
+      if(!stored){
+        q.closing=false;
+        try{persistDB();}catch(e){}
+        return false;
+      }
+      q.sessionId=null; q.samples=[]; q.lastFlushIdx=0; q.candidate=null; q.closing=false;
+      try{persistDB();}catch(e){}
+      return true;
+    }
+
     function endSession(uid,sess,endSample){
+      const q=queueMap()[uid];
+      if(q&&q.closing)return sess;
       sess.status='ended';
       sess.endedAt=endSample?endSample.t:nowISO();
       sess.durationSec=Math.max(0,Math.round((Date.parse(sess.endedAt)-Date.parse(sess.startedAt))/1000));
       recomputeMetrics(uid,sess);
-      const q=queueMap()[uid];
       // Move raw samples OUT of the session summary and into the dedicated
       // sample store (IndexedDB, see writeSamplesStore) — the session
       // object keeps only a pointer (sampleStoreKey), not the array itself.
       // This is the reviewer's storage-separation fix: hundreds of trips'
       // worth of raw GPS samples must never live inside DB.entities, which
       // gets fully re-serialized on every persistDB() call.
-      if(q&&q.sessionId===sess.id){
-        const samplesToStore=q.samples.slice();
-        sess.sampleStoreKey=sess.id; // deterministic: sampleIdbKey(sess.sampleStoreKey) is where to read it back
-        writeSamplesStore(sess.id,samplesToStore).catch(()=>{});
-      }
+      if(q&&q.sessionId===sess.id)sess.sampleStoreKey=sess.id;
       saveSession(uid,sess);
-      try{ pushSessionRemote(sess); flushSamplesRemote(uid); }catch(e){}
-      if(q&&q.sessionId===sess.id){ q.sessionId=null; q.samples=[]; q.lastFlushIdx=0; try{persistDB();}catch(e){} }
+      if(q&&q.sessionId===sess.id)finalizeEndedQueue(uid,sess,q).catch(e=>{ q.closing=false; showSaveError('⚠ Trip finalization failed; recovery data was retained.'); console.error(e); });
+      else pushSessionRemote(sess).catch(e=>showSyncError('ended trip summary',e));
+      return sess;
     }
 
     /* Reviewer point 2: a trip is only genuinely stopped when BOTH the
@@ -11800,6 +11984,7 @@ const FamilyBackend = (function(){
         source:raw.source||'gps' };
 
       const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0,preLastFix:null,preFixWindow:[]});
+      if(q.closing)return; // final sample store/remote flush is in progress
       // Rolling pre-session window (last ~25s of fixes) for cumulative
       // displacement + elapsed-time + movement-consistency classification.
       // This is the PRIMARY signal — coords.speed is used as a fast-path
@@ -11880,7 +12065,7 @@ const FamilyBackend = (function(){
         evs.forEach(ev=>{
           ev._synced=false; // tracked locally so a failed push can be retried, not silently lost
           saveEvent(uid,ev);
-          pushEventRemote(ev).then(ok=>{ if(ok){ ev._synced=true; saveEvent(uid,ev); } }).catch(()=>{});
+          pushEventRemote(ev).then(ok=>{ if(ok){ ev._synced=true; saveEvent(uid,ev); } }).catch(e=>showSyncError('driving event retry',e));
         });
       }catch(e){ console.error('[FamilyDriving.detectEvents]',e); }
 
@@ -11901,6 +12086,7 @@ const FamilyBackend = (function(){
         if(!q.candidate||q.candidate.type!=='end'){ q.candidate={type:'end',since:nowMs}; }
         else if(nowMs-q.candidate.since>=END_HYST_MS){
           endSession(uid,sess,sample);
+          return;
         }
       } else {
         q.candidate=null;
@@ -11916,7 +12102,7 @@ const FamilyBackend = (function(){
           // (e.g. during a network outage) — these are cheap, independent
           // document writes, safe to retry as many times as needed.
           eventsForSession(uid,sess.id).filter(ev=>ev._synced===false).forEach(ev=>{
-            pushEventRemote(ev).then(ok=>{ if(ok){ ev._synced=true; saveEvent(uid,ev); } }).catch(()=>{});
+            pushEventRemote(ev).then(ok=>{ if(ok){ ev._synced=true; saveEvent(uid,ev); } }).catch(e=>showSyncError('driving event retry',e));
           });
         }catch(e){}
       }
@@ -11926,9 +12112,25 @@ const FamilyBackend = (function(){
     function recoverOnStart(uid){
       uid=uid||myUid(); if(!uid) return;
       const q=queueMap()[uid];
-      if(!q||!q.sessionId) return;
+      if(!q)return;
+      // A pre-trip candidate is meaningful only within the current foreground
+      // observation window. Never let an hours-old persisted timer instantly
+      // create a trip after reopening.
+      if(!q.sessionId&&q.candidate){
+        const last=q.candidate.lastGoodAt||q.candidate.since||0;
+        if(!last||Date.now()-last>CANDIDATE_TOLERANCE_MS)q.candidate=null;
+        try{persistDB();}catch(e){}
+        return;
+      }
+      if(!q.sessionId) return;
       const sess=sessionById(uid,q.sessionId);
-      if(!sess||sess.status!=='active'){ q.sessionId=null; return; }
+      if(!sess){ q.sessionId=null; q.samples=[]; q.closing=false; try{persistDB();}catch(e){} return; }
+      if(sess.status==='ended'){
+        q.closing=false;
+        finalizeEndedQueue(uid,sess,q).catch(e=>{q.closing=false;console.error(e);});
+        return;
+      }
+      if(sess.status!=='active'){ q.sessionId=null; q.closing=false; try{persistDB();}catch(e){} return; }
       const lastSample=q.samples.length?q.samples[q.samples.length-1]:null;
       const lastAt=lastSample?Date.parse(lastSample.t):Date.parse(sess.startedAt);
       if(isNaN(lastAt)) return;
@@ -11963,7 +12165,20 @@ const FamilyBackend = (function(){
 
     function memberSessions(uid){ return sessionsFor(uid).sort((a,b)=>(a.startedAt||'').localeCompare(b.startedAt||'')); }
     function session(uid,sessionId){ return sessionById(uid,sessionId); }
-    function activeSession(uid){ const q=queueMap()[uid]; return (q&&q.sessionId)?sessionById(uid,q.sessionId):null; }
+    function activeSession(uid){
+      const q=queueMap()[uid], sess=(q&&q.sessionId)?sessionById(uid,q.sessionId):null;
+      return sess&&sess.status==='active'&&!q.closing?sess:null;
+    }
+    function checkpoint(uid){
+      uid=uid||myUid(); if(!uid)return;
+      const q=queueMap()[uid];
+      try{persistDB();}catch(e){}
+      if(!q||!q.sessionId)return;
+      const sess=sessionById(uid,q.sessionId);
+      if(!sess)return;
+      pushSessionRemote(sess).catch(e=>showSyncError('trip checkpoint',e));
+      flushSamplesRemote(uid).catch(e=>showSyncError('sample checkpoint',e));
+    }
     /* Live/active trip: samples are in the in-memory queue — this stays a
        CHEAP SYNC lookup since the live driving screen will poll this often.
        Returns null (not []) if the requested session isn't the active one,
@@ -11993,7 +12208,7 @@ const FamilyBackend = (function(){
         let out=[];
         qs.forEach(d=>{ const data=d.data(); if(Array.isArray(data.points)) out=out.concat(data.points); });
         return out;
-      }catch(e){ return []; }
+      }catch(e){ showSyncError('driving sample read',e); return []; }
     }
     function sessionEvents(uid,sessionId){ return eventsForSession(uid,sessionId).sort((a,b)=>(a.at||'').localeCompare(b.at||'')); }
 
@@ -12251,6 +12466,8 @@ const FamilyBackend = (function(){
 
     return {
       ingestFix, recoverOnStart,
+      startListening, stopListening,
+      checkpoint,
       manualStart, manualStop,
       memberSessions, session, activeSession, sessionSamples, sessionSamplesLive, sessionSamplesRemote,
       sessionEvents, memberEventsInRange, memberSessionsInRange, deriveTimeline,
@@ -13036,7 +13253,7 @@ function LiveDriving(){
     const live=eng.sessionSamplesLive(uid,active.id);
     const lastSample=(live&&live.length)?live[live.length-1]:null;
     const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
-    const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
+    const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true,lastSample.accuracyM):null;
 
     h+=`<div id="drv-live-map" style="height:38vh;flex:none;position:relative;background:#dfe3ea"></div>`;
     h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
@@ -13079,7 +13296,7 @@ function LiveDriving(){
 
   if(isHealthy){
     // ── STATE 2: Online but not driving ──────────────────────────────
-    const loc=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
+    const loc=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false,memberState.accuracy):null;
     const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
     h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
       <div style="width:64px;height:64px;border-radius:50%;background:#6e56f822;display:flex;align-items:center;justify-content:center;font-size:28px">${famIcon('car')}</div>
@@ -13114,7 +13331,7 @@ function LiveDriving(){
       const meta=fb.location.statusMeta(status);
       label=meta[L]||meta.en;
     }
-    const lastKnown=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
+    const lastKnown=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false,memberState.accuracy):null;
     const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
     h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
       <div style="width:64px;height:64px;border-radius:50%;background:#F5A62322;display:flex;align-items:center;justify-content:center;font-size:28px">📡</div>
@@ -13170,7 +13387,17 @@ function drvLiveMount(){
       _drvLiveMapSessionId=active.id;
     }
     if(samples.length>=2) MBMMap.drawRoute(samples);
-    if(last) MBMMap.setView([last.lat,last.lng]);
+    if(last){
+      const member=famLiveMembers().find(m=>m.uid===uid);
+      MBMMap.setMarker(uid,[last.lat,last.lng],{
+        photo:member&&member.photo, initial:esc(((member&&member.name)||'?').slice(0,1).toUpperCase()),
+        color:(member&&member.color)||'#8652FF', moving:true, heading:last.headingDeg,
+        activityType:'driving', calloutL1:L==='fa'?'در حال رانندگی':'Driving',
+        calloutL2:`${drvFmtSpeedKph(last.speedMps)} km/h`
+      },true,'live',null);
+      MBMMap.clearMarkersExcept([uid]);
+      MBMMap.setView([last.lat,last.lng]);
+    }
   } else {
     _drvLiveMapSessionId=null; // no active session — next time one starts, mount fresh
     // Seed the health-status baseline NOW (at mount time) so drvLiveApply's
@@ -13225,7 +13452,7 @@ function drvLiveApply(){
   const live=eng.sessionSamplesLive(uid,active.id);
   const lastSample=(live&&live.length)?live[live.length-1]:null;
   const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
-  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
+  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true,lastSample.accuracyM):null;
   if(bodyEl) bodyEl.innerHTML=drvLiveBodyHtml(active,curSpeedKph,loc,lastSample);
   // Debug overlay: patch in place too, so it shows real-time pipeline data
   // during an actual drive (watch callback count, ingestFix count, sample
@@ -13242,7 +13469,17 @@ function drvLiveApply(){
   const samples=live||[];
   const last=samples.length?samples[samples.length-1]:null;
   if(samples.length>=2) MBMMap.drawRoute(samples);
-  if(last) MBMMap.setView([last.lat,last.lng]);
+  if(last){
+    const member=famLiveMembers().find(m=>m.uid===uid);
+    MBMMap.setMarker(uid,[last.lat,last.lng],{
+      photo:member&&member.photo, initial:esc(((member&&member.name)||'?').slice(0,1).toUpperCase()),
+      color:(member&&member.color)||'#8652FF', moving:true, heading:last.headingDeg,
+      activityType:'driving', calloutL1:L==='fa'?'در حال رانندگی':'Driving',
+      calloutL2:`${drvFmtSpeedKph(last.speedMps)} km/h`
+    },true,'live',null);
+    MBMMap.clearMarkersExcept([uid]);
+    MBMMap.setView([last.lat,last.lng]);
+  }
 }
 let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
 
@@ -13699,7 +13936,10 @@ const MBMMap = (function(){
         }, 4000);
         if(typeof famMapLoaded==='function')famMapLoaded();
       });
-      _map.addListener('dragstart', ()=>{ try{ if(typeof _famFollow!=='undefined') _famFollow=false; }catch(e){} });
+      _map.addListener('dragstart', ()=>{ try{
+        if(typeof famPauseFollowByGesture==='function')famPauseFollowByGesture();
+        else if(typeof _famFollow!=='undefined')_famFollow=false;
+      }catch(e){} });
       _apiReady=true;
     }catch(e){ _map=null; _loadErr='load-fail'; showFatal('load-fail'); }
     return _map;
@@ -14319,7 +14559,9 @@ function famLiveView(){
 }
 let _famMapTypeOpen=false;
 let _famCat='people';   // active category row selection (people is the live one)
-let _famFollow=false;   // live-follow: keep map centred on me as I move
+let _famFollow=true;    // live-follow defaults on for the current user
+let _famFollowPausedByGesture=false; // explicit map drag wins until user recentres
+function famPauseFollowByGesture(){ _famFollow=false; _famFollowPausedByGesture=true; }
 let _famLiveFixKicked=false;  // one-shot fresh fix when opening live
 let _famDurTickTimer=null;    // interval that refreshes "Here for"/"Since" text only
 
@@ -14497,7 +14739,7 @@ function famComposeStatusText(m){
   }
   const s=m.state||{};
   if(d.activityType==='driving'){
-    const road=famBareRoadName(s.lat,s.lng);
+    const road=famBareRoadName(s.lat,s.lng,s.accuracy);
     const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
     // Live speed: priority 1 = real coords.speed when valid; priority 2 =
     // calculated from real GPS distance/elapsed time between the last two
@@ -14529,7 +14771,7 @@ function famComposeStatusText(m){
     return { l1, l2, region, since:null, activityType:'driving' };
   }
   if(d.activityType==='walking'){
-    const road=famBareRoadName(s.lat,s.lng);
+    const road=famBareRoadName(s.lat,s.lng,s.accuracy);
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
     // Same reasoning as driving above — live speed while moving, not a
     // "Since" timestamp (matches the reference app's 9th screenshot:
@@ -14545,7 +14787,7 @@ function famComposeStatusText(m){
   // We still track whether this is genuinely inside a saved place (for the
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
-  const lines=famLocationLines(s.lat,s.lng,false);
+  const lines=famLocationLines(s.lat,s.lng,false,s.accuracy);
   const since2=d.currentPlaceId?(d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null)))
                                 :((fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null));
   // NOTE: famLocationLines already formats line1 as "Near <road>" (or the
@@ -14592,14 +14834,13 @@ const FamGeo = (function(){
   const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
   const TTL = 6*3600*1000;   // 6h cache lifetime
   const STICK_RADIUS_M = 40; // reuse a nearby cached address instead of re-querying
-  // ~35m cells (3 decimals) instead of ~11m (4 decimals) — the old cell size
-  // was smaller than typical GPS jitter (routinely ±3-10m even standing
-  // still), so consecutive fixes for the SAME physical spot could land in
-  // DIFFERENT cells and trigger a fresh Nominatim lookup each time, which
-  // can legitimately return a different nearby road name — that's what was
-  // making the address flip-flop every few seconds while stationary.
-  const GEO_SCHEMA='v2'; // bumped: locality precedence fix invalidates all pre-fix cached entries
-  function key(lat,lng){ return GEO_SCHEMA+':'+lat.toFixed(3)+','+lng.toFixed(3); }
+  const MAX_REQUEST_ACCURACY_M=500; // never turn a poor/network-scale fix into a precise civic claim
+  const MAX_RESULT_DISTANCE_M=1500; // reject a reverse result whose mapped object is implausibly far away
+  // Four decimals are roughly 8–11m in Tasmania. Jitter is handled by the
+  // independent 40m stick radius; the cache key itself must not collapse an
+  // entire ~100m boundary area into one locality.
+  const GEO_SCHEMA='v3';
+  function key(lat,lng){ return GEO_SCHEMA+':'+lat.toFixed(4)+','+lng.toFixed(4); }
   function haversineM(lat1,lng1,lat2,lng2){
     const R=6371000,toR=x=>x*Math.PI/180;
     const dLat=toR(lat2-lat1),dLng=toR(lng2-lng1);
@@ -14621,7 +14862,8 @@ const FamGeo = (function(){
     }
     return best;
   }
-  function get(lat,lng){
+  function get(lat,lng,accuracy){
+    if(accuracy!=null&&accuracy>MAX_REQUEST_ACCURACY_M)return null;
     const k=key(lat,lng); const c=cache[k];
     if(c && (Date.now()-c.ts)<TTL) return c;
     return findNearby(lat,lng);
@@ -14629,17 +14871,14 @@ const FamGeo = (function(){
   // Build the two display lines from a Nominatim address object, Life360-style.
   function format(a, displayName){
     a=a||{};
-    const road = a.road || a.pedestrian || a.footway || a.residential || a.path || a.cycleway || a.street;
-    const num  = a.house_number;
-    // Locality precedence FIX: the most SPECIFIC locality field must win.
-    // Nominatim's addressdetails often includes BOTH a specific suburb/town
-    // (e.g. "Brighton") AND a broader city field for the metro area (e.g.
-    // "Hobart") on the same result — the old order checked a.city before
-    // a.town/a.village, so an outer-suburb address could show the wrong,
-    // broader locality name. suburb/neighbourhood/town/village/hamlet are
-    // always more specific than city/municipality and must be tried first.
-    const suburb = a.suburb || a.neighbourhood || a.quarter || a.town || a.village || a.hamlet
-                   || a.city_district || a.municipality || a.city;
+    const road = a.street || a.road || a.pedestrian || a.footway || a.residential || a.path || a.cycleway;
+    const num  = a.housenumber || a.house_number;
+    // geocodejson exposes a stable `locality` field. Raw jsonv2 fallbacks are
+    // retained for compatibility, ordered from smallest to broadest. County
+    // is only a last resort and can no longer let a metro `city` hide a real
+    // town/suburb such as Brighton.
+    const suburb = a.locality || a.suburb || a.neighbourhood || a.quarter || a.town || a.village || a.hamlet
+                   || a.city_district || a.district || a.municipality || a.city || a.county;
     const region = a.state_code || a.state || a.region || a.province;
     const suburbLine = [suburb, region].filter(Boolean).join(', ');
     let line1, full;
@@ -14661,12 +14900,22 @@ const FamGeo = (function(){
       const job = queue.shift(); if(!job){ return; }
       lastCall = Date.now();
       const k=job.key;
-      const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
+      // geocodejson is Nominatim's stable address-category format; jsonv2's
+      // raw OSM keys vary by country and caused broader metro labels to win.
+      const url=`https://nominatim.openstreetmap.org/reverse?format=geocodejson&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
       fetch(url,{headers:{'Accept':'application/json'}})
-        .then(r=>r.json())
+        .then(r=>{ if(!r.ok)throw new Error('Nominatim HTTP '+r.status); return r.json(); })
         .then(res=>{
-          if(res && (res.address || res.display_name)){
-            const f=format(res.address, res.display_name);
+          const feature=res&&res.features&&res.features[0];
+          const props=feature&&feature.properties&&feature.properties.geocoding;
+          const coords=feature&&feature.geometry&&feature.geometry.coordinates;
+          if(props){
+            const resultLng=coords&&coords.length>=2?Number(coords[0]):job.lng;
+            const resultLat=coords&&coords.length>=2?Number(coords[1]):job.lat;
+            const resultDistance=(isFinite(resultLat)&&isFinite(resultLng))
+              ?haversineM(job.lat,job.lng,resultLat,resultLng):Infinity;
+            if(resultDistance>MAX_RESULT_DISTANCE_M)throw new Error('Nominatim result too far from GPS fix');
+            const f=format(props,props.label);
             cache[k]={ line1:f.line1, line2:f.line2, full:f.full, ts:Date.now(), lat:job.lat, lng:job.lng };
           }
         })
@@ -14676,15 +14925,16 @@ const FamGeo = (function(){
   }
   // Public: request an address for a fix. Returns cached result immediately (or
   // null) and schedules a lookup if not cached. Caller re-renders on resolve.
-  function request(lat,lng){
+  function request(lat,lng,accuracy){
     if(lat==null||lng==null) return null;
+    if(accuracy!=null&&accuracy>MAX_REQUEST_ACCURACY_M)return null;
     const k=key(lat,lng);
     const c=cache[k]; if(c && (Date.now()-c.ts)<TTL) return c;
     const near=findNearby(lat,lng); if(near) return near;
     if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng}); pump(); }
     return null;
   }
-  return { request, get, format, _key:key };
+  return { request, get, format, _key:key, maxRequestAccuracyM:MAX_REQUEST_ACCURACY_M };
 })();
 // Re-render the Family surface when a reverse-geocode resolves (throttled by
 // the queue itself). Only touches the live/members screens.
@@ -14705,13 +14955,13 @@ function afterGeoResolved(){
    While the member is actively moving we DON'T queue a fresh lookup for every
    ~11m cell (that would spam Nominatim); we show the last cached address if any,
    else a neutral placeholder, and let it resolve once they settle. */
-function famLocationLines(lat,lng,moving){
+function famLocationLines(lat,lng,moving,accuracy){
   // No saved-place-name shortcut here — always resolve to the real geocoded
   // address. A saved place's name is never shown as the location label.
-  const cached=FamGeo.get(lat,lng);
+  const cached=FamGeo.get(lat,lng,accuracy);
   if(cached) return { line1:cached.line1, line2:cached.line2, source:'geo' };
   if(moving) return { line1:(L==='fa'?'در حال حرکت':'On the move'), line2:'', source:'moving' };
-  const g=FamGeo.request(lat,lng);
+  const g=FamGeo.request(lat,lng,accuracy);
   if(g) return { line1:g.line1, line2:g.line2, source:'geo' };
   return { line1:(L==='fa'?'موقعیت زنده':'Live location'), line2:'', source:'pending' };
 }
@@ -14722,16 +14972,16 @@ function famLocationLines(lat,lng,moving){
    it always requests/returns the real cached road name, or null if none is
    cached yet, so the caller can fall back to something honest instead of
    composing "Driving near On the move". */
-function famBareRoadName(lat,lng){
+function famBareRoadName(lat,lng,accuracy){
   // No saved-place-name shortcut — always the real road name.
-  const cached=FamGeo.get(lat,lng);
+  const cached=FamGeo.get(lat,lng,accuracy);
   if(cached){
     // cached.line1 may itself be prefixed ("Near <road>") by the geocoder's
     // own no-house-number case — strip that prefix since we're building our
     // own "Driving/Walking near X" template around it.
     return cached.line1.replace(/^(Near |نزدیک )/,'');
   }
-  FamGeo.request(lat,lng); // kick off a lookup for next time; don't block on it
+  FamGeo.request(lat,lng,accuracy); // kick off a lookup for next time; don't block on it
   return null;
 }
 
@@ -14956,6 +15206,14 @@ function famLivePaintMarkers(members, sel){
     MBMMap.panTo([sel.state.lat,sel.state.lng]);
     _famLastCentredUid=sel.uid;
   }
+  // During a locally detected active drive, preserve follow across routine
+  // renders/state updates. An explicit map drag still pauses it until the
+  // person taps the recenter control.
+  try{
+    const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+    const activeDrive=my&&FamilyBackend&&FamilyBackend.driving?FamilyBackend.driving.activeSession(my):null;
+    if(activeDrive&&sel&&sel.uid===my&&!_famFollowPausedByGesture)_famFollow=true;
+  }catch(e){}
   // ── Live-follow: when enabled, keep the map centred on ME as my fix moves ──
   if(_famFollow){
     const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
@@ -15072,6 +15330,10 @@ function famUpdateCameraPadding(sheetPx){
     const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
     if(typeof MBMMap!=='undefined' && MBMMap.setPadding){
       MBMMap.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
+      // setPadding changes future pans; it does not move an already-positioned
+      // camera. Reframe immediately after every detent/padding change.
+      const sel=(typeof famLiveMembers==='function')?famLiveMembers().find(m=>m.uid===_famSelUid):null;
+      if(sel&&sel.state&&sel.state.lat!=null)MBMMap.panTo([sel.state.lat,sel.state.lng]);
     }
   }catch(e){}
 }
@@ -15675,6 +15937,16 @@ function famSettingsView(){
     h+=`<label class="fl">${L==='fa'?'نام نمایشی شما':'Your display name'}</label>
       <input class="finput" id="fam-profile-name" value="${esc((DB.meta.displayName||'').trim())}" placeholder="${L==='fa'?'نام و نام خانوادگی':'Your full name'}">
       <button class="btn" data-fam="profile-save" style="width:100%;margin-top:8px;background:var(--fam-purple,#8652FF);color:#fff;font-size:15px;font-weight:700">${L==='fa'?'ذخیره نام':'Save name'}</button>`;
+    {
+      const trackingOn=DB.meta.autoDrivingTracking!==false;
+      h+=`<div style="margin-top:16px;padding:12px 14px;border:1px solid var(--b1);border-radius:12px;background:var(--s1);display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:800">${L==='fa'?'تشخیص خودکار رانندگی':'Automatic driving detection'}</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:3px">${L==='fa'?'فقط وقتی PWA روی صفحه و قابل‌مشاهده است؛ مستقل از اشتراک‌گذاری خانواده.':'Foreground PWA only; independent of Family location sharing.'}</div>
+        </div>
+        <button class="btn ${trackingOn?'':'btn-ghost'}" data-fam="driving-tracking-toggle" style="width:auto;padding:8px 13px;font-size:12px;background:${trackingOn?'#2FCE6B':'var(--s2)'};color:${trackingOn?'#fff':'var(--ink2)'}">${trackingOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')}</button>
+      </div>`;
+    }
     if(inCloud){
       const st=fb.getState();
       const canRename=st.role==='owner'||st.role==='admin';
@@ -15774,11 +16046,27 @@ function famAction(act,arg,ev){
       if(famView!=='settings'){ famView='live'; } render(); window.scrollTo(0,0);
       return;
     }
+    case 'driving-tracking-toggle':{
+      DB.meta.autoDrivingTracking=!(DB.meta.autoDrivingTracking!==false);
+      saveDB();
+      try{ FamilyBackend.location.reconcileWatch(); }catch(e){}
+      toast(DB.meta.autoDrivingTracking
+        ?(L==='fa'?'تشخیص رانندگی در پیش‌زمینه روشن شد':'Foreground driving detection enabled')
+        :(L==='fa'?'تشخیص رانندگی خاموش شد':'Driving detection disabled'));
+      render();
+      return;
+    }
     case 'diag-run': famRunDiagnostics(); return;
     case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
-    case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); try{ famEnsureSheetVisible(); }catch(e){} return;
+    case 'live-sel':{
+      _famSelUid=arg; _famLastCentredUid=null;
+      const me=FB.user&&FB.user.uid;
+      if(arg===me){_famFollow=true;_famFollowPausedByGesture=false;} else {_famFollow=false;}
+      if(typeof famLiveApply==='function')famLiveApply(); else render();
+      try{ famEnsureSheetVisible(); }catch(e){} return;
+    }
     case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }
       // Force a real re-fetch of the family roster too — the real-time
       // listener can miss updates (e.g. a new member joined while this
@@ -15798,8 +16086,8 @@ function famAction(act,arg,ev){
       render();
       return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=true; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
-    case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=false; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
+    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=true; _famFollowPausedByGesture=false; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-sel':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=(_famSelUid===my); _famFollowPausedByGesture=false; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
     case 'live-fit':{ const fb=FamilyBackend; const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
@@ -18123,7 +18411,10 @@ function initAuth(){
     authError(L==='fa'?'سرویس ورود در دسترس نیست. اتصال اینترنت را بررسی کنید و دوباره باز کنید.':'Sign-in service unavailable. Check your connection and reopen.');
     return;
   }
-  FB.auth.onAuthStateChanged(user=>{
+  FB.auth.onAuthStateChanged(async user=>{
+    // Always finish durable local-state hydration before changing identity,
+    // starting Firestore listeners, or allowing a GPS watcher to run.
+    try{ await dbHydrationReady; }catch(e){ console.warn('DB hydration barrier failed; continuing with fallback storage',e); }
     if(user){
       // SECURITY: if a different account signs in on this device, discard the
       // previous user's locally cached data so it is never shown to the new
