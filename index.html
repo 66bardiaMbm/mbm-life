@@ -1374,6 +1374,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
 .fam-mapbtn:active{transform:scale(.94)}
 .fam-mapbtn.on{background:var(--fam-purple,#8652FF);color:#fff}
+.fam-mapbtn[disabled]{opacity:.45;cursor:not-allowed;transform:none}
 .fam-mapbtn svg{width:22px;height:22px}
 /* avatar pins — Life360-style TRUE teardrop: a single rotated-square shape
    (border-radius trick) forms the pin body AND its pointed tip in one piece,
@@ -1544,6 +1545,23 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 /* honest offline / map-unavailable overlay (non-blocking; sheet stays usable) */
 .fam-map-msg{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:1100;background:var(--s1);
   border:1px solid var(--b1);border-radius:12px;padding:8px 14px;font-size:12px;color:var(--ink2);box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:88%;text-align:center}
+.fam-road-alert{position:absolute;top:88px;left:14px;z-index:1260;width:min(290px,calc(100% - 92px));
+  background:var(--s1);border:1px solid var(--b1);border-radius:18px;padding:12px;
+  box-shadow:0 5px 18px rgba(0,0,0,.24);color:var(--ink)}
+.fam-road-alert-head{display:flex;align-items:center;gap:10px;font-weight:800;font-size:14px}
+.fam-road-alert-ic{width:38px;height:38px;border-radius:12px;background:#ff8a001c;color:#e66f00;
+  display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}
+.fam-road-alert-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.fam-road-alert-actions button{min-height:48px;border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer}
+.fam-road-still{background:#e8f8ef;color:#167846}.fam-road-gone{background:#f2f3f6;color:#454955}
+.fam-road-menu-bg{position:absolute;inset:0;z-index:1550;background:rgba(0,0,0,.46);display:flex;align-items:flex-end}
+.fam-road-menu{width:100%;background:var(--s1);border-radius:24px 24px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom,0px));
+  box-shadow:0 -8px 30px rgba(0,0,0,.28)}
+.fam-road-types{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.fam-road-type{min-height:70px;border:1px solid var(--b1);border-radius:16px;background:var(--s2);color:var(--ink);
+  display:flex;align-items:center;gap:10px;padding:12px;text-align:start;font-weight:800;cursor:pointer}
+.fam-road-type span{font-size:24px}.fam-road-report-btn{color:#e66f00}
+@media (max-width:380px){.fam-road-alert{width:calc(100% - 84px);left:10px}.fam-road-types{grid-template-columns:1fr}}
 .maplibregl-map{font-family:inherit}
 /* Life360-like cast for the keyless RASTER fallback basemap (OSM/Esri are
    cold/standard by default). The reference light theme is a bright, slightly
@@ -1762,7 +1780,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v363';
+const APP_VERSION='v364';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2080,7 +2098,7 @@ function showSyncError(scope,err){
     el.querySelector('#sync-error-dismiss').onclick=()=>{el.style.display='none';};
   }
   const text=el.querySelector('#sync-error-text');
-  if(text)text.textContent=`Driving sync failed (${scope}, ${code}). Local data is retained; cloud retry will continue. ${detail}`;
+  if(text)text.textContent=`Cloud sync failed (${scope}, ${code}). Local data is retained where available; retry after checking your connection or Firebase permissions. ${detail}`;
   el.style.display='flex';
 }
 
@@ -10475,6 +10493,7 @@ const FamilyBackend = (function(){
   function placeDoc(fid,placeId){ return famRef(fid).collection('places').doc(placeId); }  // shared Place (owner/admin write, member read — generic {sub}/{docId} rule)
   function eventDoc(fid,eventId){ return famRef(fid).collection('events').doc(eventId); }   // FamilyEvent: arrival/departure/check-in (generic {sub}/{docId} rule)
   function noshowDoc(fid,id){ return famRef(fid).collection('noshow').doc(id); }             // No-Show alert config (generic {sub}/{docId} rule)
+  function roadReportsRef(fid){ return famRef(fid).collection('roadReports'); }
 
   /* ── current server family (cached) ── */
   function current(){ return _current; }
@@ -10649,7 +10668,8 @@ const FamilyBackend = (function(){
 
   async function revokeInvite(code){
     if(!ready())return;
-    await inviteRef(code).set({status:'revoked', revokedAt:new Date().toISOString()},{merge:true}).catch(()=>{});
+    try{ await inviteRef(code).set({status:'revoked', revokedAt:new Date().toISOString()},{merge:true}); }
+    catch(e){ showSyncError('revoke invitation',e); throw e; }
   }
 
   /* ── REDEEM: accept an invite by code. Idempotent; §5.1 duplicate-safe ── */
@@ -10687,7 +10707,8 @@ const FamilyBackend = (function(){
     }
     await linkRef().set({ familyId:fid, role:(fam.members&&fam.members[myUid()]?fam.members[myUid()].role:(inv.role||'adult')), joinedAt:t });
     // mark single-use invite consumed (multi-use variants can be added later)
-    await inviteRef(code).set({status:'accepted', acceptedBy:myUid(), acceptedAt:t},{merge:true}).catch(()=>{});
+    try{ await inviteRef(code).set({status:'accepted', acceptedBy:myUid(), acceptedAt:t},{merge:true}); }
+    catch(e){ showSyncError('accept invitation status',e); throw e; }
     _pendingCode=null;
     return fid;
   }
@@ -10707,13 +10728,13 @@ const FamilyBackend = (function(){
       await famRef(fid).update(patch);
     } else if(isOwner){
       // sole member → delete the family
-      await famRef(fid).delete().catch(()=>{});
+      try{ await famRef(fid).delete(); }catch(e){ showSyncError('delete family',e); throw e; }
     } else {
       const patch={}; patch['members.'+me]=firebase.firestore.FieldValue.delete();
       patch['updatedAt']=new Date().toISOString();
       await famRef(fid).update(patch);
     }
-    await linkRef().delete().catch(()=>{});
+    try{ await linkRef().delete(); }catch(e){ showSyncError('leave family link',e); throw e; }
     _current=null; afterChange();
   }
 
@@ -10746,7 +10767,7 @@ const FamilyBackend = (function(){
     const famPhoto=DB.meta.famPhoto||null;
     const patch={}; patch['members.'+myUid()+'.name']=selfName(); patch['members.'+myUid()+'.photo']=famPhoto;
     patch['updatedAt']=new Date().toISOString();
-    await famRef(familyId()).update(patch).catch(()=>{});
+    try{ await famRef(familyId()).update(patch); }catch(e){ showSyncError('family profile',e); throw e; }
   }
 
   /* ── PREVIEW an invite (read-only, for the in-app confirmation screen) ── */
@@ -11059,7 +11080,8 @@ const FamilyBackend = (function(){
         at:ev.at||nowISO(), createdAt:nowISO() };
       eventsMap()[id]=doc;                                    // optimistic mirror
       try{ persistDB(); }catch(e){}
-      await eventDoc(fid,id).set(doc).catch(e=>showSyncError('family event',e));
+      try{ await eventDoc(fid,id).set(doc); }
+      catch(e){ showSyncError('family event',e); throw e; }
       afterChange();
       return doc;
     }
@@ -11116,13 +11138,15 @@ const FamilyBackend = (function(){
       const doc={ id, memberUid:cfg.memberUid, placeId:cfg.placeId||null, placeName:cfg.placeName||null,
         deadline:cfg.deadline, createdBy:myUid(), status:'armed', createdAt:nowISO() };
       noshowMap()[id]=doc; try{persistDB();}catch(e){}
-      await noshowDoc(familyId(),id).set(doc).catch(e=>{ console.error('[setNoShow]',e&&e.code,e&&e.message); });
+      try{ await noshowDoc(familyId(),id).set(doc); }
+      catch(e){ delete noshowMap()[id]; showSyncError('no-show alert',e); throw e; }
       afterChange(); return doc;
     }
     async function cancelNoShow(id){
       if(!ready()||!isMember())return;
       delete noshowMap()[id]; try{persistDB();}catch(e){}
-      await noshowDoc(familyId(),id).delete().catch(()=>{});
+      try{ await noshowDoc(familyId(),id).delete(); }
+      catch(e){ showSyncError('cancel no-show alert',e); throw e; }
       afterChange();
     }
     function memberNoShows(uid){ return Object.values(noshowMap()).filter(a=>a.memberUid===uid&&a.status==='armed'); }
@@ -11178,8 +11202,8 @@ const FamilyBackend = (function(){
     async function writeCheckin(raw){
       await writeMyFix(Object.assign({},raw,{source:'manual-checkin'}));
       const place=(typeof famMatchSavedPlace==='function')?famMatchSavedPlace(raw.lat,raw.lng):null;
-      try{ await emitEvent({type:'checkin', lat:raw.lat, lng:raw.lng, note:raw.note||null,
-        placeId:place?place.id:null, placeName:place?place.name:null, at:raw.capturedAt||nowISO()}); }catch(e){}
+      await emitEvent({type:'checkin', lat:raw.lat, lng:raw.lng, note:raw.note||null,
+        placeId:place?place.id:null, placeName:place?place.name:null, at:raw.capturedAt||nowISO()});
     }
 
     /* ═══ Foreground watcher (Stage 2) ═══
@@ -11438,6 +11462,7 @@ const FamilyBackend = (function(){
       startEventsListening();
       startNoShowListening();
       try{ FamilyDriving.startListening(); }catch(e){ showSyncError('driving listener start',e); }
+      try{ FamilyRoadReports.startListening(); }catch(e){ showSyncError('road reports listener start',e); }
       // Stage 2: begin auto-sharing if consent allows + honest permission state.
       refreshPermission();
       reconcileWatch();
@@ -11449,6 +11474,7 @@ const FamilyBackend = (function(){
       stopEventsListening();
       stopNoShowListening();
       try{ FamilyDriving.stopListening(); }catch(e){}
+      try{ FamilyRoadReports.stopListening(); }catch(e){}
       if(_consentUnsub){try{_consentUnsub();}catch(e){} _consentUnsub=null;}
       stopWatch();
       _remoteBootstrapReady=true;
@@ -12527,11 +12553,173 @@ const FamilyBackend = (function(){
     };
   })();
 
+  /* ═══════════════════════════════════════════════════════════════════
+     FamilyRoadReports — foreground, community road reports.
+
+     Reports always come from the device's current real GPS state. The PWA
+     never fabricates a coordinate and refuses stale/low-accuracy fixes.
+     While driving, only reports that are genuinely ahead of the local
+     vehicle (bearing + direction checks) are returned to the compact UI.
+     Firestore TTL is expected on `expiresAt`; the client also filters
+     expired documents immediately so stale reports never render.
+     ═══════════════════════════════════════════════════════════════════ */
+  const FamilyRoadReports = (function(){
+    const TYPES={
+      police:{en:'Police',fa:'پلیس',icon:'🚓',ttlMs:45*60*1000},
+      speed_camera:{en:'Mobile speed camera',fa:'دوربین سیار سرعت',icon:'📷',ttlMs:45*60*1000},
+      crash:{en:'Crash',fa:'تصادف',icon:'💥',ttlMs:4*60*60*1000},
+      congestion:{en:'Congestion',fa:'ترافیک سنگین',icon:'🚗',ttlMs:60*60*1000},
+      roadworks:{en:'Roadworks',fa:'عملیات جاده‌ای',icon:'🚧',ttlMs:4*60*60*1000},
+      closure:{en:'Road closure',fa:'مسدودی جاده',icon:'⛔',ttlMs:4*60*60*1000}
+    };
+    const MAX_FIX_AGE_MS=90*1000;
+    const MAX_FIX_ACCURACY_M=100;
+    const DUPLICATE_RADIUS_M=250;
+    const ALERT_MAX_DISTANCE_M=5000;
+    const AHEAD_CONE_DEG=70;
+    const SAME_DIRECTION_DEG=80;
+    let _unsub=null;
+
+    function reportsMap(){ if(!DB.entities.famRoadReports)DB.entities.famRoadReports={}; return DB.entities.famRoadReports; }
+    function voteMap(){ if(!DB.entities.famRoadVotes)DB.entities.famRoadVotes={}; return DB.entities.famRoadVotes; }
+    function toMs(v){
+      if(v&&typeof v.toMillis==='function')return v.toMillis();
+      if(v&&v.seconds!=null)return Number(v.seconds)*1000;
+      const n=Date.parse(v||''); return isNaN(n)?0:n;
+    }
+    function normalize(id,data){
+      data=data||{};
+      return Object.assign({},data,{id,
+        expiresAtMs:toMs(data.expiresAt)||Date.parse(data.expiresAtIso||'')||0,
+        myVote:voteMap()[id]||null});
+    }
+    function activeReports(){
+      const nowMs=Date.now();
+      return Object.values(reportsMap()).filter(r=>r&&r.status!=='cleared'&&r.expiresAtMs>nowMs&&TYPES[r.type]);
+    }
+    function degDiff(a,b){ let d=Math.abs(Number(a)-Number(b))%360; return d>180?360-d:d; }
+    function bearing(a,b){
+      const r=x=>x*Math.PI/180;
+      const y=Math.sin(r(b.lng-a.lng))*Math.cos(r(b.lat));
+      const x=Math.cos(r(a.lat))*Math.sin(r(b.lat))-Math.sin(r(a.lat))*Math.cos(r(b.lat))*Math.cos(r(b.lng-a.lng));
+      return (Math.atan2(y,x)*180/Math.PI+360)%360;
+    }
+    function distanceM(a,b){
+      const R=6371000,r=x=>x*Math.PI/180;
+      const dLat=r(b.lat-a.lat),dLng=r(b.lng-a.lng);
+      const q=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
+      return 2*R*Math.asin(Math.min(1,Math.sqrt(q)));
+    }
+    function currentFix(){
+      const me=myUid();
+      const s=me?FamilyLocation.memberState(me):null;
+      if(!s||s.lat==null||s.lng==null)throw Object.assign(new Error('location-unavailable'),{code:'location-unavailable'});
+      const fixAt=Date.parse(s.capturedAt||s.reportedAt||'');
+      if(!fixAt||Date.now()-fixAt>MAX_FIX_AGE_MS)throw Object.assign(new Error('location-stale'),{code:'location-stale'});
+      if(s.accuracy!=null&&Number(s.accuracy)>MAX_FIX_ACCURACY_M)throw Object.assign(new Error('accuracy-low'),{code:'accuracy-low'});
+      return s;
+    }
+    function duplicateFor(type,s){
+      return activeReports().find(r=>{
+        if(r.type!==type)return false;
+        if(distanceM({lat:s.lat,lng:s.lng},{lat:r.lat,lng:r.lng})>DUPLICATE_RADIUS_M)return false;
+        if(s.heading!=null&&r.headingDeg!=null&&degDiff(s.heading,r.headingDeg)>SAME_DIRECTION_DEG)return false;
+        return true;
+      })||null;
+    }
+    async function add(type){
+      if(!TYPES[type])throw Object.assign(new Error('invalid-type'),{code:'invalid-type'});
+      if(!ready()||!isMember())throw Object.assign(new Error('not-in-family'),{code:'not-in-family'});
+      if(FamilyDriving.activeSession(myUid()))throw Object.assign(new Error('driving-active'),{code:'driving-active'});
+      const s=currentFix();
+      const dup=duplicateFor(type,s);
+      if(dup){ await vote(dup.id,'still'); return {report:dup,merged:true}; }
+      const id='rr_'+myUid()+'_'+Date.now().toString(36);
+      const createdMs=Date.now(), expiresMs=createdMs+TYPES[type].ttlMs;
+      const doc={id,type,status:'active',reporterUid:myUid(),lat:Number(s.lat),lng:Number(s.lng),
+        accuracyM:s.accuracy!=null?Number(s.accuracy):null,
+        headingDeg:s.heading!=null&&!isNaN(s.heading)?Number(s.heading):null,
+        createdAt:new Date(createdMs).toISOString(),updatedAt:new Date(createdMs).toISOString(),
+        expiresAt:firebase.firestore.Timestamp.fromMillis(expiresMs),
+        expiresAtIso:new Date(expiresMs).toISOString()};
+      reportsMap()[id]=normalize(id,doc); voteMap()[id]='still';
+      try{ persistDB(); }catch(e){}
+      try{
+        await roadReportsRef(familyId()).doc(id).set(doc);
+        await roadReportsRef(familyId()).doc(id).collection('confirmations').doc(myUid())
+          .set({uid:myUid(),vote:'still',at:new Date().toISOString()});
+      }catch(e){
+        delete reportsMap()[id]; delete voteMap()[id];
+        try{persistDB();}catch(_){}
+        showSyncError('road report create',e);
+        throw e;
+      }
+      afterChange();
+      return {report:reportsMap()[id],merged:false};
+    }
+    async function vote(reportId,value){
+      if(value!=='still'&&value!=='not')throw Object.assign(new Error('invalid-vote'),{code:'invalid-vote'});
+      if(!ready()||!isMember())throw Object.assign(new Error('not-in-family'),{code:'not-in-family'});
+      const r=reportsMap()[reportId];
+      if(!r||r.expiresAtMs<=Date.now())throw Object.assign(new Error('report-expired'),{code:'report-expired'});
+      const prev=voteMap()[reportId]||null;
+      voteMap()[reportId]=value; r.myVote=value;
+      try{persistDB();}catch(e){}
+      afterChange();
+      try{
+        await roadReportsRef(familyId()).doc(reportId).collection('confirmations').doc(myUid())
+          .set({uid:myUid(),vote:value,at:new Date().toISOString()});
+      }catch(e){
+        if(prev)voteMap()[reportId]=prev; else delete voteMap()[reportId];
+        r.myVote=prev;
+        try{persistDB();}catch(_){}
+        showSyncError('road report confirmation',e);
+        afterChange();
+        throw e;
+      }
+      return true;
+    }
+    function nearbyAhead(){
+      const me=myUid(), trip=me?FamilyDriving.activeSession(me):null;
+      if(!trip)return [];
+      let s; try{s=currentFix();}catch(e){return [];}
+      const heading=(s.heading!=null&&!isNaN(s.heading))?Number(s.heading):null;
+      if(heading==null||(s.speed!=null&&Number(s.speed)<2))return [];
+      return activeReports().filter(r=>{
+        if(r.reporterUid===me||r.myVote==='not')return false;
+        const d=distanceM({lat:s.lat,lng:s.lng},{lat:r.lat,lng:r.lng});
+        if(d<30||d>ALERT_MAX_DISTANCE_M)return false;
+        if(degDiff(heading,bearing({lat:s.lat,lng:s.lng},{lat:r.lat,lng:r.lng}))>AHEAD_CONE_DEG)return false;
+        if(r.headingDeg!=null&&degDiff(heading,r.headingDeg)>SAME_DIRECTION_DEG)return false;
+        r._distanceAheadM=Math.round(d);
+        return true;
+      }).sort((a,b)=>a._distanceAheadM-b._distanceAheadM);
+    }
+    function startListening(){
+      stopListening();
+      if(!ready()||!isMember())return;
+      let q=roadReportsRef(familyId());
+      try{ q=q.where('expiresAt','>',firebase.firestore.Timestamp.fromMillis(Date.now()-60000)).limit(150); }catch(e){}
+      _unsub=q.onSnapshot(qs=>{
+        const map=reportsMap(), seen={};
+        qs.forEach(d=>{seen[d.id]=true;map[d.id]=normalize(d.id,d.data());});
+        Object.keys(map).forEach(id=>{if(!seen[id]&&map[id]&&map[id].expiresAtMs>Date.now())delete map[id];});
+        try{persistDB();}catch(e){}
+        afterChange();
+      },e=>showSyncError('road reports listener',e));
+    }
+    function stopListening(){ if(_unsub){try{_unsub();}catch(e){} _unsub=null;} }
+    function typeMeta(type){ return TYPES[type]||null; }
+
+    return {TYPES,typeMeta,activeReports,nearbyAhead,add,vote,startListening,stopListening,
+      consts:{MAX_FIX_AGE_MS,MAX_FIX_ACCURACY_M,DUPLICATE_RADIUS_M,ALERT_MAX_DISTANCE_M,AHEAD_CONE_DEG,SAME_DIRECTION_DEG}};
+  })();
+
   return { start, stop, ready, current, familyId, isMember, myServerRole, getState,
            createFamily, createInvite, revokeInvite, redeemInvite, previewInvite,
            leaveFamily, removeMember, setRole, renameFamily, updateSelfProfile,
            setPending, pendingCode, clearPending, refreshRoster,
-           location:FamilyLocation, driving:FamilyDriving };
+           location:FamilyLocation, driving:FamilyDriving, roadReports:FamilyRoadReports };
 })();
 
 
@@ -13723,7 +13911,7 @@ function drvTripMount(){
       MBMMap.drawRoute(samples);
       MBMMap.fitAll(samples.map(s=>[s.lat,s.lng]));
     }
-  }).catch(()=>{});
+  }).catch(e=>{ console.error('[drvTripMount]',e); showSaveError(L==='fa'?'بارگذاری مسیر سفر ناموفق بود':'Could not load the trip route'); });
 }
 
 function famLaterTile(icon,label,phase){ return `<button class="ul-row" data-fam="later" data-arg="${esc(label)}" style="width:100%;text-align:start;border:1px dashed var(--b2);background:transparent;border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;opacity:.72">
@@ -14507,6 +14695,36 @@ function famBottomNavHtml(){
     <button class="fam-navbtn" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
   </div>`;
 }
+let _famRoadReportMenuOpen=false;
+function famRoadReportAlertHtml(){
+  const rr=(typeof FamilyBackend!=='undefined'&&FamilyBackend.roadReports)?FamilyBackend.roadReports:null;
+  const report=rr&&rr.nearbyAhead?rr.nearbyAhead()[0]:null;
+  if(!report)return '';
+  const meta=rr.typeMeta(report.type); if(!meta)return '';
+  const d=report._distanceAheadM||0;
+  const distance=d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} km`:`${Math.max(1,d)} m`;
+  return `<div class="fam-road-alert" id="fam-road-alert" role="status" aria-live="polite">
+    <div class="fam-road-alert-head"><span class="fam-road-alert-ic">${meta.icon}</span>
+      <div><div>${esc(L==='fa'?meta.fa:meta.en)}</div><div style="font-size:12px;color:var(--ink3);font-weight:700">${esc(distance)} ${L==='fa'?'جلوتر':'ahead'}</div></div></div>
+    <div class="fam-road-alert-actions">
+      <button class="fam-road-still" data-fam="road-vote" data-arg="${esc(report.id)}:still">${L==='fa'?'هنوز هست':'Still there'}</button>
+      <button class="fam-road-gone" data-fam="road-vote" data-arg="${esc(report.id)}:not">${L==='fa'?'دیگر نیست':'Not there'}</button>
+    </div>
+  </div>`;
+}
+function famRoadReportMenuHtml(){
+  if(!_famRoadReportMenuOpen)return '';
+  const rr=(typeof FamilyBackend!=='undefined'&&FamilyBackend.roadReports)?FamilyBackend.roadReports:null;
+  const types=rr?rr.TYPES:{};
+  return `<div class="fam-road-menu-bg" data-fam="road-add-close">
+    <div class="fam-road-menu" role="dialog" aria-modal="true" aria-label="${L==='fa'?'افزودن گزارش جاده':'Add road report'}">
+      <div style="display:flex;align-items:center;gap:10px"><div style="flex:1;font-size:20px;font-weight:850">${L==='fa'?'افزودن گزارش جاده':'Add road report'}</div>
+        <button class="fam-mapbtn" data-fam="road-add-close" style="width:42px;height:42px;box-shadow:none;background:var(--s2)">✕</button></div>
+      <div style="font-size:12px;color:var(--ink3);margin-top:4px">${L==='fa'?'گزارش با موقعیت فعلی GPS ثبت می‌شود.':'The report uses your current GPS position.'}</div>
+      <div class="fam-road-types">${Object.keys(types).map(type=>{const m=types[type];return `<button class="fam-road-type" data-fam="road-add-type" data-arg="${type}"><span>${m.icon}</span><b>${esc(L==='fa'?m.fa:m.en)}</b></button>`;}).join('')}</div>
+    </div>
+  </div>`;
+}
 function famLiveView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   // Not in a cloud family / offline → Live can't show members; send to management.
@@ -14529,6 +14747,7 @@ function famLiveView(){
   _famRosterSig = famRosterSig(members);
   const myUid=FB.user&&FB.user.uid;
   const myConsent=fb.location.myConsent();
+  const ownDriving=!!(fb.driving&&myUid&&fb.driving.activeSession(myUid));
 
   let h=`<div id="fam-live-wrap">`;
   h+=`<div id="fam-map"></div>`;
@@ -14543,7 +14762,9 @@ function famLiveView(){
     <button class="fam-mapbtn${_famFollow&&sel?' on':''}" data-fam="live-center-sel" title="${L==='fa'?'دنبال‌کردن عضو انتخابی':'Follow selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
     <button class="fam-mapbtn" data-fam="live-maptype" title="${L==='fa'?'نوع نقشه':'Map type'}">${famIcon('layers')}</button>
+    <button class="fam-mapbtn fam-road-report-btn" data-fam="road-add-open" ${ownDriving?'disabled aria-disabled="true"':''} title="${ownDriving?(L==='fa'?'هنگام رانندگی فقط تأیید یک‌ضرب':'One-tap confirmations only while driving'):(L==='fa'?'گزارش جاده':'Road report')}">⚠</button>
   </div>`;
+  h+=`<div id="fam-road-alert-slot">${famRoadReportAlertHtml()}</div>`;
   // honest sharing banner if I'm not sharing yet
   if(!myConsent.enabled){
     h+=`<div class="fam-map-msg" id="fam-share-banner" style="top:auto;bottom:calc(40vh + 16px)">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
@@ -14605,6 +14826,7 @@ function famLiveView(){
     });
     h+=`</div></div>`;
   }
+  h+=famRoadReportMenuHtml();
   // ── Life360-style bottom navigation. Location and Driving are live; the
   //    others are honest labelled placeholders (later-phase), never faked
   //    as working screens. ──
@@ -14655,6 +14877,12 @@ function famLiveApply(){
     // preserve check-in note text if the user is mid-typing (not on live screen normally)
     body.innerHTML=famLiveSheetBodyHtml(members, sel, myUid);
   }
+  const roadSlot=document.getElementById('fam-road-alert-slot');
+  if(roadSlot)roadSlot.innerHTML=famRoadReportAlertHtml();
+  try{
+    const sheet=document.getElementById('fam-sheet');
+    famUpdateCameraPadding(sheet&&sheet.getBoundingClientRect?sheet.getBoundingClientRect().height:0);
+  }catch(e){}
   // 3) markers (smooth) — reuse the shared painter
   famLivePaintMarkers(members, sel);
   // 4) rebind just the family click handlers for the freshly-written nodes
@@ -14919,7 +15147,7 @@ function famLiveStatusLine(m){
 /* ═══════════════════════════════════════════════════════════════════════
    REVERSE GEOCODING (coords → civic address), Life360-style.
    Turns a member's real GPS fix into a human address for the sheet/list:
-     • house number + street present → "12 Elizabeth Street" + "New Town, TAS"
+     • house number + street present → "12 Example Street" + "Local suburb, TAS"
      • street but no number           → "Near Elizabeth Street" + suburb line
      • neither                         → nearest named feature, else "Live location"
    Uses OpenStreetMap Nominatim /reverse (no key). Honest + polite:
@@ -14966,7 +15194,7 @@ const FamGeo = (function(){
     // In geocodejson, `locality` can be a micro-place/estate while
     // admin.level9 or district is the actual Australian suburb. For example,
     // William Cooper Drive returns locality=Garrington Park and
-    // admin.level9/district=New Town. Prefer the administrative suburb from
+    // admin.level9/district can contain the correct suburb. Prefer that
     // this SAME response, without hardcoding either name. Raw jsonv2 has no
     // `admin` object, so retain its suburb/town-first hierarchy separately.
     const admin=a.admin||null;
@@ -15439,15 +15667,17 @@ function famUpdateCameraPadding(sheetPx){
     const cta=document.querySelector('.fam-map-cta');
     const wrap=document.getElementById('fam-live-wrap');
     const ctrls=document.querySelector('.fam-live-ctrls');
+    const roadAlert=document.getElementById('fam-road-alert');
     const mr=mapEl&&mapEl.getBoundingClientRect?mapEl.getBoundingClientRect():null;
     const sr=sheet&&sheet.getBoundingClientRect?sheet.getBoundingClientRect():null;
     const tr=topBar&&topBar.getBoundingClientRect?topBar.getBoundingClientRect():null;
     const cr=cta&&!(wrap&&wrap.classList.contains('fam-sheet-full'))&&cta.getBoundingClientRect?cta.getBoundingClientRect():null;
     const rr=ctrls&&ctrls.getBoundingClientRect?ctrls.getBoundingClientRect():null;
+    const ar=roadAlert&&roadAlert.getBoundingClientRect?roadAlert.getBoundingClientRect():null;
     // Use actual rendered geometry rather than assumed vh/pixel constants.
     // The marker coordinate is framed between the header and the first real
     // obstruction (CTA row or sheet), with room for the avatar/callout.
-    const top=mr?Math.max(112,(tr?tr.bottom-mr.top:96)+12):112;
+    const top=mr?Math.max(112,(tr?tr.bottom-mr.top:96)+12,(ar&&ar.height?ar.bottom-mr.top+12:0)):112;
     const obstructionTop=mr?Math.min(
       sr?sr.top:mr.bottom-(sheetPx||0)-64,
       cr&&cr.height?cr.top:mr.bottom-(sheetPx||0)-134
@@ -15506,12 +15736,14 @@ function famSheetInitDrag(){
   // duplicate mousemove/mouseup handlers on the window.
   if(sheet._dragBound){ return; }
   sheet._dragBound=true;
-  const H=window.innerHeight||780;
+  function heightsNow(){
+    const H=window.innerHeight||780;
+    return [130,Math.round(H*0.40),Math.max(200,Math.min(Math.round(H*0.68),H-230))];
+  }
   // heights in px per detent — 0=collapsed (peek), 1=partial (CSS default
   // 40vh), 2=full but NEVER covering the 90px header reserved by CSS
   // max-height. Height-based (not transform) so the sheet is ALWAYS visible
   // from its default CSS even if this JS never runs.
-  const heights=[130, Math.round(H*0.40), Math.max(200,Math.min(Math.round(H*0.68),H-230))];
   // Single source of truth the buttons + camera padding both read: writes the
   // CURRENT real sheet height (px) as a CSS var on the map wrapper. .fam-map-cta
   // (Check in/SOS) is bound to this via bottom:calc(var(--fam-sheet-h) + 14px),
@@ -15528,6 +15760,7 @@ function famSheetInitDrag(){
     if(updatePadding){ try{ famUpdateCameraPadding(px); }catch(e){} }
   }
   function apply(i){
+    const heights=heightsNow();
     _famSheetDetent=Math.max(0,Math.min(2,i));
     sheet.classList.remove('detent-0','detent-2');
     if(_famSheetDetent===0)sheet.classList.add('detent-0');
@@ -15545,25 +15778,52 @@ function famSheetInitDrag(){
   // our touchmove handler could preventDefault() — the actual cause of the
   // sheet feeling stuck/unresponsive instead of dragging smoothly.
   grab.style.touchAction='none';
-  let startY=0, startH=heights[_famSheetDetent], dragging=false;
+  let startY=0, startH=heightsNow()[_famSheetDetent], dragging=false;
   const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; if(e.cancelable)e.preventDefault(); };
   let _dragRaf=null;
   const onMove=e=>{
     if(!dragging)return;
     if(e.cancelable)e.preventDefault();   // ALWAYS block native scroll during an active drag, not conditionally
+    const heights=heightsNow();
     const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt));
     sheet.style.height=hgt+'px';
     // Only the CSS var (cheap, 1:1 with finger movement) updates every
     // frame — camera padding is deferred to release, see syncSheetVar above.
     if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt, false); }); }
   };
-  const onUp=(e)=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); try{ MBMMap.invalidate(); }catch(err){} };
+  const onUp=(e)=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heightsNow().forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); try{ MBMMap.invalidate(); }catch(err){} };
   grab.addEventListener('touchstart',onDown,{passive:false});
   grab.addEventListener('touchmove',onMove,{passive:false});
   grab.addEventListener('touchend',onUp,{passive:true});
   grab.addEventListener('touchcancel',onUp,{passive:true});
   grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
 }
+let _famViewportFollowTimer=null;
+function famRecenterAfterViewportChange(){
+  if(!(screen==='module'&&currentModule==='family'&&(famView==='live'||famView==='dashboard')))return;
+  const sheet=document.getElementById('fam-sheet');
+  const H=window.innerHeight||780;
+  const heights=[130,Math.round(H*0.40),Math.max(200,Math.min(Math.round(H*0.68),H-230))];
+  const px=heights[Math.max(0,Math.min(2,_famSheetDetent))];
+  if(sheet)sheet.style.height=px+'px';
+  const wrap=document.getElementById('fam-live-wrap');
+  if(wrap)wrap.style.setProperty('--fam-sheet-h',px+'px');
+  try{MBMMap.invalidate();}catch(e){}
+  try{famUpdateCameraPadding(px);}catch(e){}
+  if(_famFollow){
+    try{
+      const sel=famLiveMembers().find(m=>m.uid===_famSelUid);
+      if(sel&&sel.state&&sel.state.lat!=null)MBMMap.panTo([sel.state.lat,sel.state.lng]);
+    }catch(e){}
+  }
+}
+function famQueueViewportRecenter(){
+  clearTimeout(_famViewportFollowTimer);
+  _famViewportFollowTimer=setTimeout(famRecenterAfterViewportChange,180);
+}
+window.addEventListener('orientationchange',famQueueViewportRecenter);
+window.addEventListener('resize',famQueueViewportRecenter);
+if(window.visualViewport)window.visualViewport.addEventListener('resize',famQueueViewportRecenter);
 /* ── Daily History — real captured route + real arrival/departure/check-in
    events (never fabricated). Day-scoped date navigation. ── */
 let _famHistUid=null;
@@ -16149,6 +16409,7 @@ function bindFamily(){
     if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
     el.onclick=(ev)=>{ ev.stopPropagation(); const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
   });
+  document.querySelectorAll('.fam-road-menu').forEach(el=>{el.onclick=ev=>ev.stopPropagation();});
   // tel/sms anchors: log the action was opened (never claim delivered)
   document.querySelectorAll('a[data-fam="sos-log"]').forEach(a=>a.addEventListener('click',()=>{ famLog('sos_action',{action:a.dataset.arg}); saveDB(); }));
   // live-bind toggle time box for quiet hours
@@ -16214,6 +16475,53 @@ function famAction(act,arg,ev){
       render();
       return;
     }
+    case 'road-add-open':{
+      const rr=FamilyBackend&&FamilyBackend.roadReports;
+      const me=FB.user&&FB.user.uid;
+      if(!rr){toast(L==='fa'?'گزارش جاده در دسترس نیست':'Road reports unavailable');return;}
+      if(FamilyBackend.driving&&FamilyBackend.driving.activeSession(me)){
+        toast(L==='fa'?'هنگام رانندگی فقط تأیید یک‌ضرب فعال است':'While driving, only one-tap confirmations are available');
+        return;
+      }
+      _famRoadReportMenuOpen=true; render(); return;
+    }
+    case 'road-add-close': if(ev&&ev.stopPropagation)ev.stopPropagation(); _famRoadReportMenuOpen=false; render(); return;
+    case 'road-add-type':{
+      if(ev&&ev.stopPropagation)ev.stopPropagation();
+      const rr=FamilyBackend&&FamilyBackend.roadReports;
+      if(!rr)return;
+      const finish=result=>{
+        _famRoadReportMenuOpen=false;
+        toast(result&&result.merged
+          ?(L==='fa'?'با گزارش نزدیک ادغام و تأیید شد':'Merged with and confirmed the nearby report')
+          :(L==='fa'?'گزارش جاده ثبت شد':'Road report added'));
+        render();
+      };
+      const fail=err=>{
+        const code=err&&err.code;
+        if(code==='driving-active')toast(L==='fa'?'هنگام رانندگی امکان افزودن گزارش جدید نیست':'New reports cannot be added while driving');
+        else if(code==='accuracy-low')toast(L==='fa'?'دقت GPS برای ثبت گزارش کافی نیست':'GPS accuracy is too low to add a report');
+        else if(code==='location-stale'||code==='location-unavailable')toast(L==='fa'?'موقعیت تازه در دسترس نیست؛ دوباره تلاش کنید':'A fresh location is not available; try again');
+        else toast(L==='fa'?'ثبت گزارش ناموفق بود':'Could not save the road report');
+      };
+      rr.add(arg).then(finish).catch(err=>{
+        if(err&&(err.code==='location-stale'||err.code==='location-unavailable')&&FamilyBackend.location){
+          FamilyBackend.location.requestFreshFix({cb:pos=>{if(!pos){fail(err);return;}rr.add(arg).then(finish).catch(fail);}});
+        }else fail(err);
+      });
+      return;
+    }
+    case 'road-vote':{
+      const cut=(arg||'').lastIndexOf(':');
+      const reportId=cut>0?arg.slice(0,cut):'', value=cut>0?arg.slice(cut+1):'';
+      const rr=FamilyBackend&&FamilyBackend.roadReports;
+      if(!rr||!reportId)return;
+      rr.vote(reportId,value).then(()=>{
+        toast(value==='still'?(L==='fa'?'تأیید شد':'Confirmed'):(L==='fa'?'به‌عنوان «دیگر نیست» ثبت شد':'Marked as not there'));
+        if(typeof famLiveApply==='function')famLiveApply();
+      }).catch(()=>toast(L==='fa'?'ارسال تأیید ناموفق بود':'Could not send confirmation'));
+      return;
+    }
     case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famSelUid=my; _famFollow=true; _famFollowPausedByGesture=false; famUpdateFollowControls(); const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
     case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=true; _famFollowPausedByGesture=false; famUpdateFollowControls(); const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
     case 'live-fit':{ _famFollow=false; _famFollowPausedByGesture=true; famUpdateFollowControls(); const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
@@ -16268,9 +16576,9 @@ function famAction(act,arg,ev){
         pos=>{
           if(!_famCheckinPending)return; // cancelled before resolving
           _famCheckinPending=false;
-          FamilyBackend.location.writeCheckin({lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0),note}).catch(()=>{});
-          toast(L==='fa'?'ثبت شد':'Checked in');
-          famView='live'; render(); window.scrollTo(0,0);
+          FamilyBackend.location.writeCheckin({lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0),note})
+            .then(()=>{ toast(L==='fa'?'ثبت شد':'Checked in'); famView='live'; render(); window.scrollTo(0,0); })
+            .catch(()=>{ _famCheckinError=L==='fa'?'موقعیت گرفته شد اما ذخیره ابری ناموفق بود':'Location was captured, but cloud save failed'; render(); });
         },
         err=>{
           if(!_famCheckinPending)return;
@@ -18712,7 +19020,7 @@ function syncPush(){
   Object.values(DB.entities.tasks||{}).forEach(t=>batch.set(col('tasks').doc(t.id),t));
   Object.values(DB.entities.lists||{}).forEach(l=>batch.set(col('lists').doc(l.id),l));
   Object.values(DB.entities.appts||{}).forEach(a=>batch.set(col('appts').doc(a.id),a));
-  batch.commit().catch(()=>{});
+  batch.commit().catch(e=>showSyncError('workspace data',e));
 }
 
 /* ── Profile sync (name + photo/avatar) — separate doc, small payload ── */
@@ -18726,7 +19034,7 @@ function pushProfile(){
     _savedAt:new Date().toISOString()
   };
   FB.db.collection('workspaces').doc(ws).collection('profile').doc('main')
-    .set(data,{merge:true}).catch(()=>{});
+    .set(data,{merge:true}).catch(e=>showSyncError('profile',e));
 }
 function pullProfile(){
   if(!FB.ready||!FB.user)return;
@@ -18871,7 +19179,7 @@ async function storeDeviceToken(token){
     tzOffsetMin,
     lang:DB.meta.lang||'en',
     updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true}).catch(e=>console.warn('storeDeviceToken:',e));
+  },{merge:true}).catch(e=>showSyncError('push notification device',e));
 }
 
 // Remove token (called on sign-out or when user disables).
@@ -18880,7 +19188,8 @@ async function removeDeviceToken(){
     if(_fcmToken&&FB.messaging&&FB.messaging.deleteToken)await FB.messaging.deleteToken();
     if(FB.ready&&FB.user&&_fcmToken){
       const ws=wsId(FB.user.uid);
-      await FB.db.collection('workspaces').doc(ws).collection('devices').doc(_fcmToken).delete().catch(()=>{});
+      await FB.db.collection('workspaces').doc(ws).collection('devices').doc(_fcmToken).delete()
+        .catch(e=>{showSyncError('remove push notification device',e);throw e;});
     }
   }catch(e){console.warn('removeDeviceToken:',e);}
   _fcmToken=null;DB.meta.pushEnabled=false;DB.meta.notifPermGranted=false;saveDB();
@@ -19355,7 +19664,7 @@ function openNotificationsSheet(){
     if(FB.ready&&FB.user&&_fcmToken){
       const ws=wsId(FB.user.uid);
       FB.db.collection('workspaces').doc(ws).collection('devices').doc(_fcmToken)
-        .set({prefs:DB.meta.notifPrefs},{merge:true}).catch(()=>{});
+        .set({prefs:DB.meta.notifPrefs},{merge:true}).catch(e=>showSyncError('notification preferences',e));
     }
   });
 }
