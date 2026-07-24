@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "541048775101-f64t5cuodgr8onglmnpi0nckorifvqvk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mbmlife.companion",
+            "certificate_hash": "36e10d777711dfa5f6f41b72fbf51741130d9886"
+          }
+        },
+        {
           "client_id": "541048775101-orc34a5f1biim2vtc0nivul08l45ggjn.apps.googleusercontent.com",
           "client_type": 3
         }
