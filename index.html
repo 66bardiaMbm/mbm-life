@@ -1781,7 +1781,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v367.1';
+const APP_VERSION='v367.2';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11038,6 +11038,10 @@ const FamilyBackend = (function(){
         _lastMovementAt:mv._lastMovementAt||null, _stopCandidateAt:mv._stopCandidateAt||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO() };
+      // Display diagnostics only. Keep the writer label out of persisted
+      // LocationState / Firestore while allowing the marker stabilizer to
+      // identify which live source supplied the current in-memory fix.
+      try{ Object.defineProperty(state,'_displayWriter',{value:raw._displayWriter||'local-location-write',enumerable:false}); }catch(e){}
       // The driving engine is the single speed authority. It prefers a valid
       // device coords.speed, falls back to distance/time between accepted GPS
       // samples, rejects spikes, and returns a smoothed live value. Feed that
@@ -11303,7 +11307,7 @@ const FamilyBackend = (function(){
       return true;
     }
 
-    function onFix(pos){
+    function onFix(pos, writerName){
       const cr=pos.coords||{};
       const provider=(cr.accuracy!=null&&cr.accuracy<=50)?'gps':'network';
       // Distance from the previous rendered fix (proves movement is flowing).
@@ -11325,7 +11329,8 @@ const FamilyBackend = (function(){
         speed:(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null,
         battery:batteryPct(),
         capturedAt:new Date(pos.timestamp||Date.now()).toISOString(),
-        source:provider
+        source:provider,
+        _displayWriter:writerName||'geolocation'
       });
     }
     function onFixErr(err){
@@ -11359,7 +11364,7 @@ const FamilyBackend = (function(){
       setLocState('obtaining'); diag('freshfix','requesting getCurrentPosition');
       try{
         navigator.geolocation.getCurrentPosition(
-          pos=>{ _lastWriteAt=0; onFix(pos); diag('freshfix','ok'); if(opts.cb)opts.cb(pos); },
+          pos=>{ _lastWriteAt=0; onFix(pos,'geolocation.getCurrentPosition'); diag('freshfix','ok'); if(opts.cb)opts.cb(pos); },
           err=>{ onFixErr(err); diag('freshfix','err '+(err&&err.code)); if(opts.cb)opts.cb(null); },
           { enableHighAccuracy:true, timeout:opts.timeout||20000, maximumAge:0 }
         );
@@ -11374,7 +11379,7 @@ const FamilyBackend = (function(){
       const c=myConsent();
       setLocState('obtaining'); diag('watch','starting watchPosition');
       try{
-        _watchId=navigator.geolocation.watchPosition(onFix,onFixErr,{
+        _watchId=navigator.geolocation.watchPosition(pos=>onFix(pos,'geolocation.watchPosition'),onFixErr,{
           enableHighAccuracy: drivingTrackingEnabled() || c.precise!==false,
           maximumAge: 5000,
           timeout: 20000
@@ -11452,6 +11457,7 @@ const FamilyBackend = (function(){
         const u1=locRef(fid,uid).onSnapshot(snap=>{
           if(snap.exists){
             const incoming=Object.assign({uid},snap.data());
+            try{ Object.defineProperty(incoming,'_displayWriter',{value:'firestore.location.onSnapshot',enumerable:false}); }catch(e){}
             let applyIncoming=true;
           // For MY OWN doc, never let the round-tripped server value clobber a
           // newer local GPS fix (that would snap the marker back). Keep whichever
@@ -15089,36 +15095,88 @@ let _famCat='people';   // active category row selection (people is the live one
 let _famFollow=true;    // live-follow defaults on for the current user
 let _famFollowPausedByGesture=false; // explicit map drag wins until user recentres
 const _famDisplayPositionCache={};
+const _famMarkerUpdateLog=[];
 /* Display-only GPS stabilizer. Raw fixes continue untouched into movement,
    trip recording and persistence. The map consumes one stabilized position
    per genuinely new fix, so a 30-second label refresh cannot inch the marker
    toward the same coordinate and stationary accuracy noise stays invisible. */
+function famMarkerUpdateDiag(entry){
+  _famMarkerUpdateLog.push(entry);
+  if(_famMarkerUpdateLog.length>200)_famMarkerUpdateLog.shift();
+  try{console.debug('[fam-marker]',entry);}catch(e){}
+}
+function famDisplayDirectionConsistent(origin, previousRaw, nextRaw){
+  if(!origin||!previousRaw||!nextRaw)return false;
+  const ax=previousRaw[0]-origin[0], ay=previousRaw[1]-origin[1];
+  const bx=nextRaw[0]-origin[0], by=nextRaw[1]-origin[1];
+  const am=Math.hypot(ax,ay), bm=Math.hypot(bx,by);
+  if(am<1e-10||bm<1e-10)return false;
+  return ((ax*bx+ay*by)/(am*bm))>=0.72 && bm>=am*.72;
+}
 function famDisplayPosition(m){
   const s=m&&m.state; if(!m||!s||s.lat==null||s.lng==null)return null;
   const key=(s.capturedAt||s.reportedAt||'')+'|'+s.lat+'|'+s.lng;
   const prev=_famDisplayPositionCache[m.uid];
   if(prev&&prev.key===key)return prev.pos;
   const raw=[Number(s.lat),Number(s.lng)];
-  if(!prev){_famDisplayPositionCache[m.uid]={key,pos:raw,raw,at:Date.now()};return raw;}
-  const acc=s.accuracy!=null&&!isNaN(s.accuracy)?Number(s.accuracy):50;
+  const acc=s.accuracy!=null&&!isNaN(s.accuracy)?Math.max(3,Number(s.accuracy)):50;
+  const source=s._displayWriter||s.source||'cached-location-state';
+  if(!prev){
+    _famDisplayPositionCache[m.uid]={key,pos:raw,raw,displayAccuracy:acc,at:Date.now(),pending:null};
+    famMarkerUpdateDiag({uid:m.uid,rawCoordinate:raw.slice(),displayedCoordinate:raw.slice(),
+      accuracyM:acc,distanceM:0,acceptanceThresholdM:0,accepted:true,reason:'initial-fix',source});
+    return raw;
+  }
   const active=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving.activeSession(m.uid):null;
-  const moving=!!active||!!s.moving||(s.speed!=null&&!isNaN(s.speed)&&Number(s.speed)>=2.8);
+  const speed=(s.speed!=null&&!isNaN(s.speed))?Number(s.speed):0;
+  const verifiedMoving=!!active||speed>=2.8;
+  const movementHint=verifiedMoving||!!s.moving;
+  const d=famHaversineM(prev.pos[0],prev.pos[1],raw[0],raw[1]);
+  // Accuracy circles overlap when their centre distance is no larger than
+  // the sum of their radii. Cap only pathological values so a single coarse
+  // fix cannot permanently freeze later accurate movement.
+  const overlapThreshold=Math.max(8,Math.min(120,(prev.displayAccuracy||acc)+acc));
+  function reject(reason){
+    prev.key=key;prev.raw=raw;
+    famMarkerUpdateDiag({uid:m.uid,rawCoordinate:raw.slice(),displayedCoordinate:prev.pos.slice(),
+      accuracyM:acc,distanceM:Math.round(d*10)/10,acceptanceThresholdM:Math.round(overlapThreshold*10)/10,
+      accepted:false,reason,source});
+    return prev.pos;
+  }
   // Ignore a new coarse fix for display if a better prior display position
   // exists. Freshness/permission UI still updates from the raw state.
-  if(acc>150){prev.key=key;prev.raw=raw;return prev.pos;}
-  const d=famHaversineM(prev.pos[0],prev.pos[1],raw[0],raw[1]);
-  const minMove=moving?3:Math.max(8,Math.min(30,acc*.45));
-  if(d<minMove){prev.key=key;prev.raw=raw;return prev.pos;}
-  // A very large, accurate change is a real relocation/reopen, not something
-  // to animate slowly across the map. Ordinary movement uses accuracy-aware
-  // exponential smoothing.
-  let pos;
-  if(d>1000)pos=raw;
-  else{
-    const alpha=moving?(acc<=15?.72:acc<=35?.56:.38):(acc<=20?.45:.28);
-    pos=[prev.pos[0]+(raw[0]-prev.pos[0])*alpha,prev.pos[1]+(raw[1]-prev.pos[1])*alpha];
+  if(acc>150){prev.pending=null;return reject('rejected-coarse-accuracy');}
+  if(d<=overlapThreshold){
+    prev.pending=null;
+    return reject('rejected-overlapping-accuracy-radius');
   }
-  _famDisplayPositionCache[m.uid]={key,pos,raw,at:Date.now()};
+
+  // An outside-dead-zone coordinate is only a candidate. Stationary GPS
+  // multipath commonly bounces between nearby points, so require fixes that
+  // continue in the same direction away from the stable display anchor.
+  let pending=prev.pending;
+  if(!pending||!famDisplayDirectionConsistent(prev.pos,pending.lastRaw,raw)){
+    pending={count:1,lastRaw:raw.slice(),firstRaw:raw.slice(),source};
+  }else{
+    pending.count++;
+    pending.lastRaw=raw.slice();
+    pending.source=source;
+  }
+  prev.pending=pending;prev.key=key;prev.raw=raw;
+  const required=verifiedMoving?2:3;
+  if(pending.count<required){
+    return reject('rejected-awaiting-'+required+'-consistent-fixes-'+pending.count);
+  }
+
+  // Sustained direction is now established. Move the one persistent marker
+  // instance; raw GPS/freshness data were never modified or delayed.
+  const alpha=verifiedMoving?(acc<=15?.78:acc<=35?.62:.45):(acc<=20?.62:.48);
+  const pos=d>1000?raw:[prev.pos[0]+(raw[0]-prev.pos[0])*alpha,prev.pos[1]+(raw[1]-prev.pos[1])*alpha];
+  _famDisplayPositionCache[m.uid]={key,pos,raw,displayAccuracy:acc,at:Date.now(),pending:null};
+  famMarkerUpdateDiag({uid:m.uid,rawCoordinate:raw.slice(),displayedCoordinate:pos.slice(),
+    accuracyM:acc,distanceM:Math.round(d*10)/10,acceptanceThresholdM:Math.round(overlapThreshold*10)/10,
+    accepted:true,reason:verifiedMoving?'accepted-verified-movement':'accepted-sustained-directional-movement',
+    source,movementHint});
   return pos;
 }
 
