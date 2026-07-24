@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.GeolocationPermissions
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logger: DiagnosticLogger
     private val handler = Handler(Looper.getMainLooper())
     private var webContextMessage: String? = null
+    private var pendingGoogleIdToken: String? = null
     private var receiverRegistered = false
 
     private val foregroundPermissionLauncher =
@@ -76,6 +78,16 @@ class MainActivity : AppCompatActivity() {
             readFamilyContextFromPwa()
             handler.postDelayed(this, 4_000L)
         }
+    }
+
+    private inner class NativeAuthBridge {
+        @JavascriptInterface
+        fun requestGoogleSignIn() {
+            runOnUiThread { signInWithGoogle() }
+        }
+
+        @JavascriptInterface
+        fun isNativeApp(): Boolean = true
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -170,6 +182,8 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                installNativeAuthBridgeInPwa()
+                deliverPendingGoogleCredentialToPwa()
                 readFamilyContextFromPwa()
                 lifecycleScope.launch {
                     val uid = auth.currentUser?.uid ?: return@launch
@@ -197,8 +211,88 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        binding.webView.addJavascriptInterface(NativeAuthBridge(), "MbmNativeAuth")
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         binding.webView.loadUrl(BuildConfig.PWA_URL)
+    }
+
+    private fun installNativeAuthBridgeInPwa() {
+        val js = """
+            (function(){
+              if (window.__mbmNativeAuthInstalled) return;
+              window.__mbmNativeAuthInstalled = true;
+              window.mbmNativeGoogleSignInFailed = function(message) {
+                var btn = document.getElementById('auth-google');
+                if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+                if (typeof authError === 'function') {
+                  authError('Sign-in failed: ' + (message || 'unknown'));
+                }
+              };
+              window.mbmCompleteNativeGoogleSignIn = function(idToken) {
+                if (typeof FB === 'undefined' || !FB.ready || !idToken) {
+                  window.mbmNativeGoogleSignInFailed('Firebase authentication is not ready.');
+                  return;
+                }
+                var credential = firebase.auth.GoogleAuthProvider.credential(idToken);
+                FB.auth.signInWithCredential(credential).catch(function(error) {
+                  window.mbmNativeGoogleSignInFailed(
+                    error && error.message ? error.message : 'Native sign-in failed'
+                  );
+                });
+              };
+              window.__mbmOriginalSignInWithGoogle = window.signInWithGoogle;
+              window.signInWithGoogle = function() {
+                if (typeof authClearError === 'function') authClearError();
+                var btn = document.getElementById('auth-google');
+                if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+                try {
+                  window.MbmNativeAuth.requestGoogleSignIn();
+                } catch (error) {
+                  window.mbmNativeGoogleSignInFailed(
+                    error && error.message ? error.message : 'Native sign-in bridge unavailable'
+                  );
+                }
+              };
+            })()
+        """.trimIndent()
+        binding.webView.evaluateJavascript(js, null)
+    }
+
+    private fun deliverGoogleCredentialToPwa(idToken: String) {
+        pendingGoogleIdToken = idToken
+        deliverPendingGoogleCredentialToPwa()
+    }
+
+    private fun deliverPendingGoogleCredentialToPwa() {
+        val idToken = pendingGoogleIdToken ?: return
+        val js = """
+            (function(token){
+              try {
+                if (typeof window.mbmCompleteNativeGoogleSignIn !== 'function') return false;
+                window.mbmCompleteNativeGoogleSignIn(token);
+                return true;
+              } catch(e) {
+                return false;
+              }
+            })(${JSONObject.quote(idToken)})
+        """.trimIndent()
+        binding.webView.evaluateJavascript(js) { delivered ->
+            if (delivered == "true") {
+                pendingGoogleIdToken = null
+                logger.info("Auth", "Google credential delivered to PWA without redirect")
+            }
+        }
+    }
+
+    private fun notifyPwaGoogleSignInFailed(message: String) {
+        val js = """
+            (function(message){
+              if (typeof window.mbmNativeGoogleSignInFailed === 'function') {
+                window.mbmNativeGoogleSignInFailed(message);
+              }
+            })(${JSONObject.quote(message)})
+        """.trimIndent()
+        binding.webView.evaluateJavascript(js, null)
     }
 
     private fun readFamilyContextFromPwa() {
@@ -332,11 +426,13 @@ class MainActivity : AppCompatActivity() {
                     GoogleAuthProvider.getCredential(googleCredential.idToken, null)
                 ).await()
                 logger.info("Auth", "Firebase Google sign-in succeeded", auth.currentUser?.uid)
+                deliverGoogleCredentialToPwa(googleCredential.idToken)
                 resolveFamilyNatively()
                 readFamilyContextFromPwa()
                 refreshSetupUi()
             } catch (error: Exception) {
                 logger.error("Auth", "Google/Firebase sign-in failed", error.toString())
+                notifyPwaGoogleSignInFailed(error.message ?: "Native Google sign-in failed")
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Sign-in failed")
                     .setMessage(error.message ?: error.toString())
