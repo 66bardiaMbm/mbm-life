@@ -1781,7 +1781,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v367.3';
+const APP_VERSION='v367.4';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -15129,8 +15129,13 @@ function famDisplayPosition(m){
   }
   const active=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving.activeSession(m.uid):null;
   const speed=(s.speed!=null&&!isNaN(s.speed))?Number(s.speed):0;
-  const verifiedMoving=!!active||speed>=2.8;
-  const movementHint=verifiedMoving||!!s.moving;
+  // Use the SAME hysteresis-controlled activity that renders Here for /
+  // Walking / Driving. A noisy raw state.moving flag must never move the
+  // profile while the visible UI still says the person is stationary.
+  const displayState=m._derivedDisplay||famDeriveMemberDisplay(m);
+  m._derivedDisplay=displayState;
+  const movementHint=displayState&&(displayState.activityType==='driving'||displayState.activityType==='walking');
+  const verifiedMoving=!!movementHint&&(!!active||speed>=2.8);
   const d=famHaversineM(prev.pos[0],prev.pos[1],raw[0],raw[1]);
   // Accuracy circles overlap when their centre distance is no larger than
   // the sum of their radii. Cap only pathological values so a single coarse
@@ -15477,7 +15482,7 @@ function famSinceDiagLineHtml(m,txt,sinceUsed){
   </div>`;
 }
 function famComposeStatusText(m){
-  const d=famDeriveMemberDisplay(m);
+  const d=m&&m._derivedDisplay?m._derivedDisplay:famDeriveMemberDisplay(m);
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(d.activityType==='offline'){
     // Keep the persisted last-known stay visible through a temporary GPS
