@@ -1543,6 +1543,9 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 /* honest offline / map-unavailable overlay (non-blocking; sheet stays usable) */
 .fam-map-msg{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:1100;background:var(--s1);
   border:1px solid var(--b1);border-radius:12px;padding:8px 14px;font-size:12px;color:var(--ink2);box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:88%;text-align:center}
+.fam-road-alert{position:absolute;top:88px;left:14px;z-index:1260;width:min(290px,calc(100% - 92px));background:var(--s1);border:1px solid var(--b1);border-radius:18px;padding:12px;box-shadow:0 5px 18px rgba(0,0,0,.24);color:var(--ink)}
+.fam-road-alert-head{display:flex;align-items:center;gap:10px;font-weight:800;font-size:14px}.fam-road-alert-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.fam-road-alert-actions button{min-height:48px;border:none;border-radius:14px;font-size:14px;font-weight:800}.fam-road-still{background:#e8f8ef;color:#167846}.fam-road-gone{background:#f2f3f6;color:#454955}
+.fam-road-menu-bg{position:absolute;inset:0;z-index:1550;background:rgba(0,0,0,.46);display:flex;align-items:flex-end}.fam-road-menu{width:100%;background:var(--s1);border-radius:24px 24px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom,0px));box-shadow:0 -8px 30px rgba(0,0,0,.28)}.fam-road-types{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.fam-road-type{min-height:70px;border:1px solid var(--b1);border-radius:16px;background:var(--s2);color:var(--ink);display:flex;align-items:center;gap:10px;padding:12px;text-align:start;font-weight:800}.fam-road-type span{font-size:24px}.fam-road-report-btn{color:#e66f00}
 .maplibregl-map{font-family:inherit}
 /* Life360-like cast for the keyless RASTER fallback basemap (OSM/Esri are
    cold/standard by default). The reference light theme is a bright, slightly
@@ -1761,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v360';
+const APP_VERSION='v368.0-v360base';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10447,6 +10450,7 @@ const FamilyBackend = (function(){
   function placeDoc(fid,placeId){ return famRef(fid).collection('places').doc(placeId); }  // shared Place (owner/admin write, member read — generic {sub}/{docId} rule)
   function eventDoc(fid,eventId){ return famRef(fid).collection('events').doc(eventId); }   // FamilyEvent: arrival/departure/check-in (generic {sub}/{docId} rule)
   function noshowDoc(fid,id){ return famRef(fid).collection('noshow').doc(id); }             // No-Show alert config (generic {sub}/{docId} rule)
+  function roadReportsRef(fid){ return famRef(fid).collection('roadReports'); }
 
   /* ── current server family (cached) ── */
   function current(){ return _current; }
@@ -10469,6 +10473,8 @@ const FamilyBackend = (function(){
     if(_linkUnsub){try{_linkUnsub();}catch(e){} _linkUnsub=null;}
     detachFamily();
     try{ FamilyLocation.stopListening(); }catch(e){}
+    try{ FamilyDriving.stopCloudListening(); }catch(e){}
+    try{ FamilyRoadReports.stopListening(); }catch(e){}
     _current=null;
   }
   function detachFamily(){ if(_famUnsub){try{_famUnsub();}catch(e){} _famUnsub=null;} }
@@ -10503,6 +10509,8 @@ const FamilyBackend = (function(){
       }
       // Attach location listeners for the (possibly changed) member set.
       try{ FamilyLocation.startListening(); }catch(e){}
+      try{ FamilyDriving.startCloudListening(); }catch(e){}
+      try{ FamilyRoadReports.startListening(); }catch(e){}
       afterChange();
     }, ()=>{});
   }
@@ -10937,7 +10945,16 @@ const FamilyBackend = (function(){
       try{ FamilyDriving.ingestFix(uid, { lat, lng, capturedAt,
              speedMps:state.speed, accuracyM:state.accuracy,
              headingDeg:state.heading, altitudeM:(raw.altitude!=null?raw.altitude:null),
-             source:state.source }); }catch(e){ console.error('[FamilyDriving.ingestFix]',e); }
+             source:state.source });
+        // If Android did not provide coords.speed, expose the engine's real
+        // distance/time fallback to the UI. This is derived from accepted GPS
+        // fixes; it is not a simulated or hard-coded speed.
+        if(state.speed==null && FamilyDriving.currentSpeed){
+          const fallbackSpeed=FamilyDriving.currentSpeed(uid);
+          if(fallbackSpeed!=null&&!isNaN(fallbackSpeed)) state.speed=fallbackSpeed;
+        }
+      }catch(e){ console.error('[FamilyDriving.ingestFix]',e); }
+      locMap()[uid]=state;
       afterChange();                                           // REPAINT marker/address NOW, before any network
       // ── Canonical Firestore write is THROTTLED for bandwidth, but the local
       //    marker above already moved. The remote write is best-effort. ──
@@ -11284,38 +11301,19 @@ const FamilyBackend = (function(){
       const fid=familyId();
       const uids=Object.keys((_current&&_current.members)||{});
       uids.forEach(uid=>{
-        const u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){
+        // The signed-in user's marker has one authoritative source:
+        // local watchPosition -> writeMyFix -> famLivePaintMarkers.
+        // We still upload this user's location document, but never subscribe
+        // to its echoed copy because an echo can race a newer local fix and
+        // move the same marker backwards.
+        let u1=null;
+        if(uid!==myUid()) u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){
           const incoming=Object.assign({uid},snap.data());
-          // For MY OWN doc, never let the round-tripped server value clobber a
-          // newer local GPS fix (that would snap the marker back). Keep whichever
-          // reportedAt is newer. Other members always take the server value.
-          if(uid===myUid()){
-            const localSt=locMap()[uid];
-            const lt=localSt&&localSt.reportedAt?Date.parse(localSt.reportedAt):0;
-            const it=incoming.reportedAt?Date.parse(incoming.reportedAt):0;
-            if(lt>it) return;   // my local fix is newer — ignore stale echo
-            // CRITICAL FIX (found via deep trace of a repeatedly-reported
-            // "Since" freeze): reportedAt and stayStart are independent
-            // fields. The Firestore write is throttled to once per
-            // WRITE_THROTTLE_MS, so the write that happens to land during
-            // that window can carry a stayStart from BEFORE a relocation
-            // was confirmed locally (the pending-jump window), even though
-            // its reportedAt is legitimately "newer" than what was last
-            // synced. Applying that incoming doc wholesale would silently
-            // roll the correctly-updated LOCAL stayStart backward in time.
-            // Since stayStart only ever moves forward for a genuine
-            // relocation (never backward — see classifyMovement), this is
-            // always safe to enforce: never let it regress for own-uid.
-            if(localSt&&localSt.stayStart&&incoming.stayStart){
-              if(Date.parse(incoming.stayStart)<Date.parse(localSt.stayStart)){
-                incoming.stayStart=localSt.stayStart;
-              }
-            }
-          }
           locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
-        } },()=>{});
+        } },err=>{ diag('firestore-location-listener',{uid,code:err&&err.code,message:err&&err.message}); });
         const u2=consentLocRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange(); } },()=>{});
-        _locUnsubs.push(u1,u2);
+        if(u1)_locUnsubs.push(u1);
+        _locUnsubs.push(u2);
       });
       // my own route (so reopening restores today's breadcrumb)
       _routeUnsub=routeDoc(fid,myUid()).onSnapshot(snap=>{ if(snap.exists){ routeMap()[myUid()]=snap.data(); persistDB&&persistDB(); } },()=>{});
@@ -11411,12 +11409,23 @@ const FamilyBackend = (function(){
     const HEADING_MIN_MPS   = 2.0;      // below this speed, GPS heading is noise and must not be trusted (reviewer point 3)
     const SPIKE_NEIGHBOR_MPS = 15;      // a sample >this much faster than BOTH neighbors is treated as a GPS speed spike (reviewer point 4)
     const PRE_WINDOW_MS = 25000;        // rolling pre-session window for cumulative displacement + movement-consistency
-    const PRE_WINDOW_DRIVE_M = 130;     // >=130m real displacement within PRE_WINDOW_MS ⇒ driving, independent of coords.speed
+    const PRE_WINDOW_DRIVE_M = 55;      // verified net movement within the window; supports slow city driving
+    const MAX_VALID_SPEED_MPS = 55;     // 198 km/h: reject impossible/isolated GPS speed spikes
+    const SPEED_FILTER_ALPHA = 0.55;     // responsive EMA; does not freeze a real speed at zero
 
     // ── Debug overlay counters (real, not simulated) ──
     let _ingestFixCallCount=0;
     let _lastIngestFixAt=null;
     let _lastSyncAtDebug=null; // set whenever pushSessionRemote actually succeeds
+    let _cloudUnsubs=[];
+    let _cloudDiag=[];
+    function cloudDiag(op,err,extra){
+      const row={at:nowISO(),op,code:err&&err.code||null,message:err&&err.message||String(err||''),extra:extra||null};
+      _cloudDiag.push(row); if(_cloudDiag.length>40)_cloudDiag.shift();
+      console.error('[FamilyDriving.cloud]',row);
+      return row;
+    }
+    function cloudDiagnostics(){ return _cloudDiag.slice(); }
 
     function queueMap(){ if(!DB.entities.famDriveQueue)DB.entities.famDriveQueue={}; return DB.entities.famDriveQueue; }
     function sessionMap(){ if(!DB.entities.famDriveSessions)DB.entities.famDriveSessions={}; return DB.entities.famDriveSessions; }
@@ -11458,10 +11467,11 @@ const FamilyBackend = (function(){
         const first=window[0], last=window[window.length-1];
         const dt=(Date.parse(last.t)-Date.parse(first.t))/1000;
         if(dt>0){
-          let cum=0;
-          for(let i=1;i<window.length;i++) cum+=haversineM(window[i-1],window[i]);
-          if(cum>=PRE_WINDOW_DRIVE_M) return 'driving';
-          const avgMps=cum/dt;
+          const usable=window.filter(s=>s.accuracyM==null||s.accuracyM<=MAX_ACCEPT_ACCURACY_M);
+          if(usable.length<2) return 'stationary';
+          const net=haversineM(usable[0],usable[usable.length-1]);
+          const avgMps=net/dt;
+          if(net>=PRE_WINDOW_DRIVE_M && avgMps>=DRIVE_MIN_MS) return 'driving';
           if(avgMps>0.3 && avgMps<=WALK_MAX_MS) return 'walking';
         }
       }
@@ -11524,16 +11534,20 @@ const FamilyBackend = (function(){
     function eventFsDoc(fid,eventId){ return famRef(fid).collection('drivingEvents').doc(eventId); }
 
     async function pushSessionRemote(sess){
-      if(!ready()||!isMember())return;
-      let ok=true;
-      await sessionDoc(familyId(),sess.id).set(sess,{merge:true}).catch(()=>{ ok=false; });
-      if(ok) _lastSyncAtDebug=nowISO();
+      if(!ready()||!isMember())return false;
+      try{
+        await sessionDoc(familyId(),sess.id).set(sess,{merge:true});
+        _lastSyncAtDebug=nowISO();
+        return true;
+      }catch(e){
+        cloudDiag('drivingSessions.write',e,{sessionId:sess&&sess.id});
+        return false;
+      }
     }
     async function pushEventRemote(ev){
       if(!ready()||!isMember())return false;
-      let ok=true;
-      await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}).catch(()=>{ ok=false; });
-      return ok;
+      try{ await eventFsDoc(familyId(),ev.id).set(ev,{merge:true}); return true; }
+      catch(e){ cloudDiag('drivingEvents.write',e,{eventId:ev&&ev.id}); return false; }
     }
     async function flushSamplesRemote(uid){
       if(!ready()||!isMember())return;
@@ -11560,13 +11574,29 @@ const FamilyBackend = (function(){
         let ok=true;
         await sampleChunkDoc(fid,q.sessionId,chunkIdx).set({
           sessionId:q.sessionId, chunkIndex:chunkIdx, points:chunkPts, updatedAt:nowISO()
-        },{merge:true}).catch(()=>{ ok=false; });
+        },{merge:true}).catch(e=>{ ok=false; cloudDiag('drivingSamples.write',e,{sessionId:q.sessionId,chunkIndex:chunkIdx}); });
         if(!ok) break; // stop here — don't attempt later chunks out of order, retry from this point next cycle
         lastSuccessfulEnd=chunkEnd;
         i=chunkEnd;
       }
       q.lastFlushIdx=lastSuccessfulEnd; // only advance past what actually synced
       try{persistDB();}catch(e){}
+    }
+    async function pushCompletedSamplesRemote(sessionId,samples){
+      if(!ready()||!isMember()||!sessionId||!samples||!samples.length)return false;
+      for(let start=0;start<samples.length;start+=SAMPLES_PER_CHUNK){
+        const chunkIndex=Math.floor(start/SAMPLES_PER_CHUNK);
+        const points=samples.slice(start,start+SAMPLES_PER_CHUNK);
+        try{
+          await sampleChunkDoc(familyId(),sessionId,chunkIndex).set({
+            sessionId,chunkIndex,points,updatedAt:nowISO()
+          },{merge:true});
+        }catch(e){
+          cloudDiag('drivingSamples.finalize',e,{sessionId,chunkIndex});
+          return false;
+        }
+      }
+      return true;
     }
 
     /* A speed reading is treated as a GPS spike (reviewer point 4) if it is
@@ -11736,13 +11766,15 @@ const FamilyBackend = (function(){
       // This is the reviewer's storage-separation fix: hundreds of trips'
       // worth of raw GPS samples must never live inside DB.entities, which
       // gets fully re-serialized on every persistDB() call.
+      let samplesToStore=[];
       if(q&&q.sessionId===sess.id){
-        const samplesToStore=q.samples.slice();
+        samplesToStore=q.samples.slice();
         sess.sampleStoreKey=sess.id; // deterministic: sampleIdbKey(sess.sampleStoreKey) is where to read it back
         writeSamplesStore(sess.id,samplesToStore).catch(()=>{});
       }
       saveSession(uid,sess);
-      try{ pushSessionRemote(sess); flushSamplesRemote(uid); }catch(e){}
+      Promise.all([pushSessionRemote(sess),pushCompletedSamplesRemote(sess.id,samplesToStore)])
+        .catch(e=>cloudDiag('trip.finalize',e,{sessionId:sess.id}));
       if(q&&q.sessionId===sess.id){ q.sessionId=null; q.samples=[]; q.lastFlushIdx=0; try{persistDB();}catch(e){} }
     }
 
@@ -11786,7 +11818,8 @@ const FamilyBackend = (function(){
       _ingestFixCallCount++; _lastIngestFixAt=nowISO();
       if(!uid||raw.lat==null||raw.lng==null) return;
       const t=raw.capturedAt||nowISO();
-      const rawSpeed=(raw.speedMps!=null&&!isNaN(raw.speedMps))?raw.speedMps:null;
+      let rawSpeed=(raw.speedMps!=null&&!isNaN(raw.speedMps)&&raw.speedMps>=0)?raw.speedMps:null;
+      if(rawSpeed!=null && rawSpeed>MAX_VALID_SPEED_MPS) rawSpeed=null;
       // Heading is only meaningful when the device is actually moving fast
       // enough for GPS to derive a real bearing — near zero speed it's noise
       // (reviewer point 3). Store null rather than a misleading value; this
@@ -11810,6 +11843,27 @@ const FamilyBackend = (function(){
       // window is required for genuine "movement consistency".
       if(!q.preFixWindow) q.preFixWindow=[];
       const prevSample=q.sessionId?(q.samples.length?q.samples[q.samples.length-1]:null):q.preLastFix;
+      let calculatedSpeed=null;
+      if(prevSample && (sample.accuracyM==null||sample.accuracyM<=MAX_ACCEPT_ACCURACY_M)
+          && (prevSample.accuracyM==null||prevSample.accuracyM<=MAX_ACCEPT_ACCURACY_M)){
+        const dt=(Date.parse(sample.t)-Date.parse(prevSample.t))/1000;
+        if(dt>0 && dt<=30){
+          const implied=haversineM(prevSample,sample)/dt;
+          if(implied>=0 && implied<=MAX_VALID_SPEED_MPS) calculatedSpeed=implied;
+        }
+      }
+      const speedInput=rawSpeed!=null?rawSpeed:calculatedSpeed;
+      if(speedInput!=null){
+        const prior=(q.filteredSpeedMps!=null&&!isNaN(q.filteredSpeedMps))?q.filteredSpeedMps:speedInput;
+        q.filteredSpeedMps=SPEED_FILTER_ALPHA*speedInput+(1-SPEED_FILTER_ALPHA)*prior;
+        sample.speedMps=Math.max(0,Math.round(q.filteredSpeedMps*100)/100);
+      }
+      sample.rawSpeedMps=rawSpeed;
+      sample.calculatedSpeedMps=calculatedSpeed;
+      console.debug('[FamilyDriving.speed]',{
+        uid,rawSpeedMps:rawSpeed,calculatedSpeedMps:calculatedSpeed,
+        filteredSpeedMps:sample.speedMps,accuracyM:sample.accuracyM
+      });
       sample.seq=prevSample?prevSample.seq+1:0;
       if(!q.sessionId){
         q.preFixWindow.push(sample);
@@ -11838,8 +11892,10 @@ const FamilyBackend = (function(){
           else {
             q.candidate.lastGoodAt=nowMs; // still driving — refresh, keep the original 'since' so the timer keeps counting
             if(nowMs-q.candidate.since>=START_HYST_MS){
-              q.samples=[sample]; q.lastFlushIdx=0;
-              const sess=startSession(uid,sample);
+              const acceptedPre=q.preFixWindow.filter(s=>s.accuracyM==null||s.accuracyM<=MAX_ACCEPT_ACCURACY_M);
+              q.samples=(acceptedPre.length?acceptedPre:[sample]).slice();
+              q.lastFlushIdx=0;
+              const sess=startSession(uid,q.samples[0]);
               q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
               console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
             }
@@ -11932,9 +11988,50 @@ const FamilyBackend = (function(){
       const lastSample=q.samples.length?q.samples[q.samples.length-1]:null;
       const lastAt=lastSample?Date.parse(lastSample.t):Date.parse(sess.startedAt);
       if(isNaN(lastAt)) return;
-      if(Date.now()-lastAt>=END_HYST_MS){
-        endSession(uid,sess,lastSample);
-      }
+      // A suspended PWA cannot know whether the person stopped while it was
+      // hidden. Keep the active trip recoverable and let fresh foreground GPS
+      // provide the sustained-stop evidence. Never invent an end at app-open.
+      q.recoveredAt=nowISO();
+      q.candidate=null;
+      try{persistDB();}catch(e){}
+    }
+
+    function stopCloudListening(){
+      _cloudUnsubs.forEach(u=>{try{u();}catch(e){}}); _cloudUnsubs=[];
+    }
+    function startCloudListening(){
+      stopCloudListening();
+      if(!ready()||!isMember()||!familyId()) return;
+      const fid=familyId();
+      const u1=famRef(fid).collection('drivingSessions').onSnapshot(qs=>{
+        qs.docChanges().forEach(ch=>{
+          const d=Object.assign({id:ch.doc.id},ch.doc.data());
+          const owner=d.memberId||d.memberUid;
+          if(!owner)return;
+          const m=sessionMap()[owner]||(sessionMap()[owner]={});
+          if(ch.type==='removed')delete m[ch.doc.id];
+          else {
+            const local=m[ch.doc.id];
+            const localAt=Date.parse(local&&local.updatedAt||'')||0;
+            const remoteAt=Date.parse(d.updatedAt||'')||0;
+            if(!local||remoteAt>=localAt)m[ch.doc.id]=d;
+          }
+        });
+        try{persistDB();}catch(e){}
+        afterChange();
+      },e=>cloudDiag('drivingSessions.listen',e));
+      const u2=famRef(fid).collection('drivingEvents').onSnapshot(qs=>{
+        qs.docChanges().forEach(ch=>{
+          const d=Object.assign({id:ch.doc.id},ch.doc.data());
+          const owner=d.memberUid;
+          if(!owner)return;
+          const m=eventMapAll()[owner]||(eventMapAll()[owner]={});
+          if(ch.type==='removed')delete m[ch.doc.id]; else m[ch.doc.id]=d;
+        });
+        try{persistDB();}catch(e){}
+        afterChange();
+      },e=>cloudDiag('drivingEvents.listen',e));
+      _cloudUnsubs=[u1,u2];
     }
 
     function manualStart(uid){
@@ -11963,7 +12060,14 @@ const FamilyBackend = (function(){
 
     function memberSessions(uid){ return sessionsFor(uid).sort((a,b)=>(a.startedAt||'').localeCompare(b.startedAt||'')); }
     function session(uid,sessionId){ return sessionById(uid,sessionId); }
-    function activeSession(uid){ const q=queueMap()[uid]; return (q&&q.sessionId)?sessionById(uid,q.sessionId):null; }
+    function activeSession(uid){
+      const q=queueMap()[uid];
+      return (q&&q.sessionId)?sessionById(uid,q.sessionId):(sessionsFor(uid).find(s=>s.status==='active')||null);
+    }
+    function currentSpeed(uid){
+      const q=queueMap()[uid];
+      return q&&q.filteredSpeedMps!=null?q.filteredSpeedMps:null;
+    }
     /* Live/active trip: samples are in the in-memory queue — this stays a
        CHEAP SYNC lookup since the live driving screen will poll this often.
        Returns null (not []) if the requested session isn't the active one,
@@ -12245,16 +12349,17 @@ const FamilyBackend = (function(){
         activeSessionId:active?active.id:null,
         activeSessionSampleCount:active?active.sampleCount:null,
         activeSessionDistanceM:active?active.distanceM:null,
-        activeSessionDurationSec:active?active.durationSec:null
+        activeSessionDurationSec:active?active.durationSec:null,
+        cloudDiagnostics:cloudDiagnostics()
       };
     }
 
     return {
-      ingestFix, recoverOnStart,
+      ingestFix, recoverOnStart, startCloudListening, stopCloudListening,
       manualStart, manualStop,
-      memberSessions, session, activeSession, sessionSamples, sessionSamplesLive, sessionSamplesRemote,
+      memberSessions, session, activeSession, currentSpeed, sessionSamples, sessionSamplesLive, sessionSamplesRemote,
       sessionEvents, memberEventsInRange, memberSessionsInRange, deriveTimeline,
-      recomputeMetricsAsync, engineDebugInfo,
+      recomputeMetricsAsync, engineDebugInfo, cloudDiagnostics,
       replay: FamilyDrivingReplay,
       consts:{ DRIVE_MIN_MS, WALK_MAX_MS, START_HYST_MS, END_HYST_MS, SYNC_THROTTLE_MS,
                MAX_JUMP_MS, MAX_ACCEPT_ACCURACY_M, HARD_BRAKE_MPS2, RAPID_ACCEL_MPS2,
@@ -12263,11 +12368,62 @@ const FamilyBackend = (function(){
     };
   })();
 
+  const FamilyRoadReports=(function(){
+    const TYPES={
+      police:{en:'Police',fa:'پلیس',icon:'🚓',ttlMs:45*60*1000},
+      mobile_speed_camera:{en:'Mobile speed camera',fa:'دوربین سیار سرعت',icon:'📷',ttlMs:45*60*1000},
+      crash:{en:'Crash',fa:'تصادف',icon:'💥',ttlMs:4*60*60*1000},
+      congestion:{en:'Congestion',fa:'ترافیک سنگین',icon:'🚗',ttlMs:60*60*1000},
+      roadworks:{en:'Roadworks',fa:'عملیات جاده‌ای',icon:'🚧',ttlMs:4*60*60*1000},
+      road_closure:{en:'Road closure',fa:'مسدودی جاده',icon:'⛔',ttlMs:4*60*60*1000}
+    };
+    const MAX_FIX_AGE_MS=90000,MAX_FIX_ACCURACY_M=100,DUPLICATE_RADIUS_M=250,ALERT_MAX_DISTANCE_M=5000;
+    let _unsub=null;
+    function reportsMap(){if(!DB.entities.famRoadReports)DB.entities.famRoadReports={};return DB.entities.famRoadReports;}
+    function votes(){if(!DB.entities.famRoadVotes)DB.entities.famRoadVotes={};return DB.entities.famRoadVotes;}
+    function toMs(v){if(v&&typeof v.toMillis==='function')return v.toMillis();if(v&&v.seconds!=null)return Number(v.seconds)*1000;const n=Date.parse(v||'');return isNaN(n)?0:n;}
+    function normalize(id,d){d=d||{};return Object.assign({},d,{id,expiresAtMs:toMs(d.expiresAt)||Date.parse(d.expiresAtIso||'')||0,myVote:votes()[id]||null});}
+    function activeReports(){return Object.values(reportsMap()).filter(r=>r&&r.status==='active'&&r.expiresAtMs>Date.now()&&TYPES[r.type]);}
+    function distanceM(a,b){const R=6371000,r=x=>x*Math.PI/180,dLat=r(b.lat-a.lat),dLng=r(b.lng-a.lng),q=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.min(1,Math.sqrt(q)));}
+    function currentFix(){const s=FamilyLocation.memberState(myUid());if(!s||s.lat==null)throw Object.assign(new Error('location-unavailable'),{code:'location-unavailable'});const at=Date.parse(s.capturedAt||s.reportedAt||'');if(!at||Date.now()-at>MAX_FIX_AGE_MS)throw Object.assign(new Error('location-stale'),{code:'location-stale'});if(s.accuracy!=null&&s.accuracy>MAX_FIX_ACCURACY_M)throw Object.assign(new Error('accuracy-low'),{code:'accuracy-low'});return s;}
+    async function vote(id,value){
+      if(value!=='still'&&value!=='not')throw Object.assign(new Error('invalid-vote'),{code:'invalid-vote'});
+      const r=reportsMap()[id];if(!r||r.expiresAtMs<=Date.now())throw Object.assign(new Error('report-expired'),{code:'report-expired'});
+      const prev=votes()[id]||null;votes()[id]=value;r.myVote=value;try{persistDB();}catch(e){}
+      try{await roadReportsRef(familyId()).doc(id).collection('confirmations').doc(myUid()).set({uid:myUid(),vote:value,at:firebase.firestore.FieldValue.serverTimestamp()});}
+      catch(e){if(prev)votes()[id]=prev;else delete votes()[id];r.myVote=prev;showSyncError('road report confirmation',e);throw e;}
+      afterChange();return true;
+    }
+    async function add(type){
+      if(!TYPES[type])throw Object.assign(new Error('invalid-type'),{code:'invalid-type'});
+      if(!ready()||!isMember())throw Object.assign(new Error('not-in-family'),{code:'not-in-family'});
+      if(FamilyDriving.activeSession(myUid()))throw Object.assign(new Error('driving-active'),{code:'driving-active'});
+      const s=currentFix();
+      const duplicate=activeReports().find(r=>r.type===type&&distanceM(s,r)<=DUPLICATE_RADIUS_M);
+      if(duplicate){await vote(duplicate.id,'still');return {report:duplicate,merged:true};}
+      const id='rr_'+myUid()+'_'+Date.now().toString(36),createdMs=Date.now(),expiresMs=createdMs+TYPES[type].ttlMs,iso=new Date(createdMs).toISOString();
+      const doc={id,type,status:'active',reporterUid:myUid(),lat:Number(s.lat),lng:Number(s.lng),accuracyM:s.accuracy==null?null:Number(s.accuracy),headingDeg:s.heading==null?null:Number(s.heading),createdAt:firebase.firestore.Timestamp.fromMillis(createdMs),updatedAt:firebase.firestore.Timestamp.fromMillis(createdMs),expiresAt:firebase.firestore.Timestamp.fromMillis(expiresMs),createdAtIso:iso,updatedAtIso:iso,expiresAtIso:new Date(expiresMs).toISOString(),confirmationCount:1,rejectionCount:0};
+      reportsMap()[id]=normalize(id,doc);votes()[id]='still';try{persistDB();}catch(e){}
+      try{const ref=roadReportsRef(familyId()).doc(id),confirmation=ref.collection('confirmations').doc(myUid()),batch=db().batch();batch.set(ref,Object.assign({},doc,{createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()}));batch.set(confirmation,{uid:myUid(),vote:'still',at:firebase.firestore.FieldValue.serverTimestamp()});await batch.commit();}
+      catch(e){delete reportsMap()[id];delete votes()[id];showSyncError('road report create',e);throw e;}
+      afterChange();return {report:reportsMap()[id],merged:false};
+    }
+    function nearbyAhead(){
+      if(!FamilyDriving.activeSession(myUid()))return [];
+      let s;try{s=currentFix();}catch(e){return [];}
+      return activeReports().filter(r=>r.reporterUid!==myUid()&&r.myVote!=='not').map(r=>{r._distanceAheadM=Math.round(distanceM(s,r));return r;}).filter(r=>r._distanceAheadM>=30&&r._distanceAheadM<=ALERT_MAX_DISTANCE_M).sort((a,b)=>a._distanceAheadM-b._distanceAheadM);
+    }
+    function startListening(){stopListening();if(!ready()||!isMember())return;const q=roadReportsRef(familyId()).where('expiresAt','>',firebase.firestore.Timestamp.fromMillis(Date.now())).limit(150);_unsub=q.onSnapshot(qs=>{const map=reportsMap(),seen={};qs.forEach(d=>{const x=d.data()||{};if(x.status!=='active')return;seen[d.id]=true;map[d.id]=normalize(d.id,x);});Object.keys(map).forEach(id=>{if(!seen[id])delete map[id];});try{persistDB();}catch(e){}afterChange();},e=>showSyncError('road reports listener',e));}
+    function stopListening(){if(_unsub){try{_unsub();}catch(e){}_unsub=null;}}
+    function typeMeta(type){return TYPES[type]||null;}
+    return {TYPES,typeMeta,activeReports,nearbyAhead,add,vote,startListening,stopListening};
+  })();
+
   return { start, stop, ready, current, familyId, isMember, myServerRole, getState,
            createFamily, createInvite, revokeInvite, redeemInvite, previewInvite,
            leaveFamily, removeMember, setRole, renameFamily, updateSelfProfile,
            setPending, pendingCode, clearPending, refreshRoster,
-           location:FamilyLocation, driving:FamilyDriving };
+           location:FamilyLocation, driving:FamilyDriving, roadReports:FamilyRoadReports };
 })();
 
 
@@ -12407,6 +12563,21 @@ function famShowDiag(op, err){
   document.body.appendChild(ov);
   document.getElementById('fam-diag-copy').onclick=()=>{ try{ navigator.clipboard.writeText(text); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ const r=document.createRange(); r.selectNode(document.getElementById('fam-diag-text')); getSelection().removeAllRanges(); getSelection().addRange(r); try{document.execCommand('copy');toast('Copied');}catch(_){} } };
   document.getElementById('fam-diag-close').onclick=()=>ov.remove();
+}
+function showSyncError(scope,err){
+  const code=(err&&err.code)||'unknown';
+  const detail=(err&&err.message)||String(err||'Unknown error');
+  console.error('[sync]',scope,code,detail);
+  let el=document.getElementById('sync-error-banner');
+  if(!el){
+    el=document.createElement('div'); el.id='sync-error-banner';
+    el.style.cssText='position:fixed;left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:420px;top:calc(8px + env(safe-area-inset-top,0px));z-index:100001;background:#35151d;color:#fff;border:1px solid #f43f5e;border-radius:10px;padding:8px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 6px 20px rgba(0,0,0,.3);font-size:11px;line-height:1.35';
+    el.innerHTML='<span id="sync-error-text" style="flex:1;min-width:0"></span><button id="sync-error-dismiss" aria-label="dismiss" style="all:unset;cursor:pointer;font-size:15px;padding:2px">✕</button>';
+    document.body.appendChild(el);
+    el.querySelector('#sync-error-dismiss').onclick=()=>{el.style.display='none';};
+  }
+  el.querySelector('#sync-error-text').textContent=`Cloud sync failed (${scope}: ${code}).`;
+  el.style.display='flex';
 }
 /* ═══ Profile setup gate (Foundation step 1) ═══
    A real user-confirmed profile is required before Family creation/join or
@@ -13170,7 +13341,7 @@ function drvLiveMount(){
       _drvLiveMapSessionId=active.id;
     }
     if(samples.length>=2) MBMMap.drawRoute(samples);
-    if(last) MBMMap.setView([last.lat,last.lng]);
+    if(last) FamilyMapCamera.request([last.lat,last.lng],{follow:true});
   } else {
     _drvLiveMapSessionId=null; // no active session — next time one starts, mount fresh
     // Seed the health-status baseline NOW (at mount time) so drvLiveApply's
@@ -13242,7 +13413,7 @@ function drvLiveApply(){
   const samples=live||[];
   const last=samples.length?samples[samples.length-1]:null;
   if(samples.length>=2) MBMMap.drawRoute(samples);
-  if(last) MBMMap.setView([last.lat,last.lng]);
+  if(last) FamilyMapCamera.request([last.lat,last.lng],{follow:true});
 }
 let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
 
@@ -13436,7 +13607,7 @@ function drvTripMount(){
     if(screen!=='module'||currentModule!=='family'||famView!=='drivingTrip'||_drvActiveTripId!==sessionId) return;
     if(samples&&samples.length>=2){
       MBMMap.drawRoute(samples);
-      MBMMap.fitAll(samples.map(s=>[s.lat,s.lng]));
+      FamilyMapCamera.fit(samples.map(s=>[s.lat,s.lng]));
     }
   }).catch(()=>{});
 }
@@ -13699,7 +13870,9 @@ const MBMMap = (function(){
         }, 4000);
         if(typeof famMapLoaded==='function')famMapLoaded();
       });
-      _map.addListener('dragstart', ()=>{ try{ if(typeof _famFollow!=='undefined') _famFollow=false; }catch(e){} });
+      _map.addListener('dragstart', ()=>{ try{
+        if(typeof FamilyMapCamera!=='undefined')FamilyMapCamera.pauseByGesture();
+      }catch(e){} });
       _apiReady=true;
     }catch(e){ _map=null; _loadErr='load-fail'; showFatal('load-fail'); }
     return _map;
@@ -14000,6 +14173,54 @@ const MBMMap = (function(){
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding };
 })();
 
+/* The only application-level camera authority. Marker code never recentres
+   independently; screens submit a target here. New requests replace pending
+   movement, padding is applied before centring, and sheet/viewport changes
+   reframe the same target without creating another controller. */
+const FamilyMapCamera=(function(){
+  let lastTarget=null, lastZoom=null, follow=false, pausedByGesture=false;
+  let timer=null, lastMoveAt=0, activeDriveId=null;
+  const MIN_MOVE_MS=450;
+  function apply(force){
+    if(!lastTarget||!MBMMap.get()||(!follow&&!force))return;
+    const run=()=>{
+      timer=null; lastMoveAt=Date.now();
+      MBMMap.setView(lastTarget,lastZoom);
+    };
+    const wait=force?0:Math.max(0,MIN_MOVE_MS-(Date.now()-lastMoveAt));
+    if(timer)clearTimeout(timer);
+    if(wait)timer=setTimeout(run,wait); else run();
+  }
+  function request(pos,opts){
+    opts=opts||{}; if(!pos||pos[0]==null||pos[1]==null)return;
+    lastTarget=[pos[0],pos[1]];
+    if(opts.zoom!=null)lastZoom=opts.zoom;
+    if(opts.follow===true){follow=true;pausedByGesture=false;}
+    apply(!!opts.force);
+  }
+  function fit(points){
+    if(!points||!points.length)return;
+    follow=false; pausedByGesture=true;
+    if(timer){clearTimeout(timer);timer=null;}
+    MBMMap.fitAll(points);
+  }
+  function pauseByGesture(){ follow=false; pausedByGesture=true; _famFollow=false; }
+  function resume(pos,zoom){ follow=true;pausedByGesture=false;_famFollow=true;request(pos,{zoom,force:true}); }
+  function setPadding(pad){
+    MBMMap.setPadding(pad);
+    if(follow&&lastTarget)apply(true);
+  }
+  function drivingState(session,pos){
+    const id=session&&session.id||null;
+    if(id&&id!==activeDriveId){activeDriveId=id;resume(pos,null);}
+    else if(id&&follow&&!pausedByGesture)request(pos,{follow:true});
+    else if(!id)activeDriveId=null;
+  }
+  function reset(){if(timer)clearTimeout(timer);timer=null;lastTarget=null;lastZoom=null;follow=false;pausedByGesture=false;activeDriveId=null;}
+  function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),activeDriveId};}
+  return {request,fit,pauseByGesture,resume,setPadding,drivingState,reset,state};
+})();
+
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
    action bar, per the production-icon requirement). Purely presentational. ── */
 const FAM_ICON = {
@@ -14212,6 +14433,16 @@ function famBottomNavHtml(){
     <button class="fam-navbtn" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
   </div>`;
 }
+let _famRoadReportMenuOpen=false;
+function famRoadReportAlertHtml(){
+  const rr=FamilyBackend&&FamilyBackend.roadReports,report=rr&&rr.nearbyAhead()[0];
+  if(!report)return '';const meta=rr.typeMeta(report.type),d=report._distanceAheadM||0,distance=d>=1000?`${(d/1000).toFixed(1)} km`:`${d} m`;
+  return `<div class="fam-road-alert"><div class="fam-road-alert-head"><span style="font-size:24px">${meta.icon}</span><div>${esc(L==='fa'?meta.fa:meta.en)}<div style="font-size:12px;color:var(--ink3)">${distance} ${L==='fa'?'جلوتر':'ahead'}</div></div></div><div class="fam-road-alert-actions"><button class="fam-road-still" data-fam="road-vote" data-arg="${esc(report.id)}:still">${L==='fa'?'هنوز هست':'Still there'}</button><button class="fam-road-gone" data-fam="road-vote" data-arg="${esc(report.id)}:not">${L==='fa'?'دیگر نیست':'Not there'}</button></div></div>`;
+}
+function famRoadReportMenuHtml(){
+  if(!_famRoadReportMenuOpen)return '';const rr=FamilyBackend&&FamilyBackend.roadReports;
+  return `<div class="fam-road-menu-bg" data-fam="road-add-close"><div class="fam-road-menu" role="dialog"><div style="display:flex;align-items:center"><b style="flex:1;font-size:20px">${L==='fa'?'افزودن گزارش جاده':'Add road report'}</b><button class="fam-mapbtn" data-fam="road-add-close">✕</button></div><div class="fam-road-types">${Object.keys(rr.TYPES).map(t=>{const m=rr.TYPES[t];return `<button class="fam-road-type" data-fam="road-add-type" data-arg="${t}"><span>${m.icon}</span><b>${esc(L==='fa'?m.fa:m.en)}</b></button>`;}).join('')}</div></div></div>`;
+}
 function famLiveView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   // Not in a cloud family / offline → Live can't show members; send to management.
@@ -14234,6 +14465,7 @@ function famLiveView(){
   _famRosterSig = famRosterSig(members);
   const myUid=FB.user&&FB.user.uid;
   const myConsent=fb.location.myConsent();
+  const ownDriving=!!(fb.driving&&myUid&&fb.driving.activeSession(myUid));
 
   let h=`<div id="fam-live-wrap">`;
   h+=`<div id="fam-map"></div>`;
@@ -14248,7 +14480,9 @@ function famLiveView(){
     <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
     <button class="fam-mapbtn" data-fam="live-maptype" title="${L==='fa'?'نوع نقشه':'Map type'}">${famIcon('layers')}</button>
+    <button class="fam-mapbtn fam-road-report-btn" data-fam="road-add-open" ${ownDriving?'disabled':''} title="${L==='fa'?'گزارش جاده':'Road report'}">⚠</button>
   </div>`;
+  h+=`<div id="fam-road-alert-slot">${famRoadReportAlertHtml()}</div>`;
   // honest sharing banner if I'm not sharing yet
   if(!myConsent.enabled){
     h+=`<div class="fam-map-msg" id="fam-share-banner" style="top:auto;bottom:calc(40vh + 16px)">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
@@ -14263,6 +14497,7 @@ function famLiveView(){
   h+=`<div id="fam-sheet"><div class="fam-sheet-draghead"><div class="fam-sheet-grab"></div></div><div class="fam-sheet-body" id="fam-sheet-body">`;
   h+=famLiveSheetBodyHtml(members, sel, myUid);
   h+=`</div></div>`; // sheet-body, sheet
+  h+=famRoadReportMenuHtml();
   // ── FEATURE 6: Map Type sheet (Auto / Street / Satellite). Only genuinely
   //    working types are enabled; a type backed by no working provider is
   //    shown disabled, never as a fake option. ──
@@ -14347,6 +14582,8 @@ function famLiveApply(){
     // preserve check-in note text if the user is mid-typing (not on live screen normally)
     body.innerHTML=famLiveSheetBodyHtml(members, sel, myUid);
   }
+  const roadSlot=document.getElementById('fam-road-alert-slot');
+  if(roadSlot)roadSlot.innerHTML=famRoadReportAlertHtml();
   // 3) markers (smooth) — reuse the shared painter
   famLivePaintMarkers(members, sel);
   // 4) rebind just the family click handlers for the freshly-written nodes
@@ -14378,6 +14615,13 @@ function famClassifyRawActivity(m){
   if(m.consent.paused) return 'paused';
   if(!m.state||m.state.lat==null) return 'offline';
   if(m.status==='offline') return 'offline';
+  // An active verified trip is authoritative. A traffic light, congestion,
+  // or one slow GPS fix must not downgrade Driving to Walking.
+  try{
+    const eng=FamilyBackend&&FamilyBackend.driving;
+    const active=eng&&(eng.activeSession(m.uid)||eng.memberSessions(m.uid).find(s=>s.status==='active'));
+    if(active) return 'driving';
+  }catch(e){}
   const s=m.state;
   const speed=(s.speed!=null && !isNaN(s.speed))?s.speed:null;
   if(speed!=null){
@@ -14400,7 +14644,7 @@ function famClassifyRawActivity(m){
    state for one member. MUST be the only place that decides activityType —
    both the marker callout and the sheet read from this cache. */
 const FAM_CUM_WINDOW_MS=25000;   // rolling window for cumulative-distance driving detection — MUST match the Engine's PRE_WINDOW_MS
-const FAM_CUM_DRIVE_M=130;       // >=130m covered within the window ⇒ driving — MUST match the Engine's PRE_WINDOW_DRIVE_M
+const FAM_CUM_DRIVE_M=55;        // verified net movement within the window — matches the Engine
 function famCumulativeIsDriving(c,m){
   const s=m.state; if(!s||s.lat==null) return false;
   const t=Date.parse(s.reportedAt||s.capturedAt||'')||Date.now();
@@ -14409,9 +14653,9 @@ function famCumulativeIsDriving(c,m){
   hist.push({lat:s.lat,lng:s.lng,t});
   while(hist.length && t-hist[0].t>FAM_CUM_WINDOW_MS) hist.shift();
   if(hist.length<2) return false;
-  let dist=0;
-  for(let i=1;i<hist.length;i++) dist+=famHaversineM(hist[i-1].lat,hist[i-1].lng,hist[i].lat,hist[i].lng);
-  return dist>=FAM_CUM_DRIVE_M;
+  const dist=famHaversineM(hist[0].lat,hist[0].lng,hist[hist.length-1].lat,hist[hist.length-1].lng);
+  const elapsed=Math.max(1,(hist[hist.length-1].t-hist[0].t)/1000);
+  return dist>=FAM_CUM_DRIVE_M&&(dist/elapsed)>=FAM_DRIVE_MIN_MS;
 }
 function famDeriveMemberDisplay(m){
   const uid=m.uid;
@@ -14459,6 +14703,11 @@ function nowISOSafe(){ try{ return new Date().toISOString(); }catch(e){ return n
 function famSinceOrHereFor(since){
   if(!since) return '';
   return `${L==='fa'?'از':'Since'} ${famAbsTime(since)}`;
+}
+function famHereForDuration(since){
+  if(!since)return '';
+  const duration=famDurSince(since);
+  return duration?(L==='fa'?`اینجا برای ${duration}`:`Here for ${duration}`):'';
 }
 /* Dev-mode-only diagnostic line showing exactly how the displayed "Since"
    text was derived, per explicit request — this traces the full chain:
@@ -14525,7 +14774,9 @@ function famComposeStatusText(m){
     }
     const cachedGeo=FamGeo.get(s.lat,s.lng);
     const region=cachedGeo?cachedGeo.line2:'';
-    const l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    // Status text must remain plain text. The car icon is rendered by the
+    // marker's dedicated safe SVG badge, never embedded into a text string.
+    const l2=speedKph!=null?`${speedKph} km/h`:'';
     return { l1, l2, region, since:null, activityType:'driving' };
   }
   if(d.activityType==='walking'){
@@ -14535,7 +14786,7 @@ function famComposeStatusText(m){
     // "Since" timestamp (matches the reference app's 9th screenshot:
     // "Walking near Menin Drive" shows "0 km/h", not a start time).
     const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
-    const l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    const l2=speedKph!=null?`${speedKph} km/h`:'';
     return { l1, l2, since:null, activityType:'walking', speedKph };
   }
   // stationary — ALWAYS show the real geocoded address, never a saved
@@ -14545,13 +14796,18 @@ function famComposeStatusText(m){
   // We still track whether this is genuinely inside a saved place (for the
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
-  const lines=famLocationLines(s.lat,s.lng,false);
+  const lines=famLocationLines(s.lat,s.lng,false,s.accuracy);
   const since2=d.currentPlaceId?(d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null)))
                                 :((fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null));
   // NOTE: famLocationLines already formats line1 as "Near <road>" (or the
   // real address) — do not prepend "Near"/"نزدیک" again here, that was
   // producing "Near Near Pirie Street".
-  return { l1:lines.line1, region:lines.line2||'', l2:famSinceOrHereFor(since2), since:since2, activityType:'stationary', place:!!d.currentPlaceId };
+  return {
+    l1:lines.line1, region:lines.line2||'',
+    l2:famSinceOrHereFor(since2),
+    calloutL2:famHereForDuration(since2),
+    since:since2, activityType:'stationary', place:!!d.currentPlaceId
+  };
 }
 /* Honest consent/permission fallback line — used ONLY when a member has no
    live location to show at all (sharing off/paused, or no fix yet). This is
@@ -14591,7 +14847,7 @@ const FamGeo = (function(){
   let lastCall = 0;
   const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
   const TTL = 6*3600*1000;   // 6h cache lifetime
-  const STICK_RADIUS_M = 40; // reuse a nearby cached address instead of re-querying
+  const STICK_RADIUS_M = 25; // never reuse an address for a noticeably different position
   // ~35m cells (3 decimals) instead of ~11m (4 decimals) — the old cell size
   // was smaller than typical GPS jitter (routinely ±3-10m even standing
   // still), so consecutive fixes for the SAME physical spot could land in
@@ -14623,7 +14879,7 @@ const FamGeo = (function(){
   }
   function get(lat,lng){
     const k=key(lat,lng); const c=cache[k];
-    if(c && (Date.now()-c.ts)<TTL) return c;
+    if(c && (Date.now()-c.ts)<TTL && haversineM(lat,lng,c.lat,c.lng)<=STICK_RADIUS_M) return c;
     return findNearby(lat,lng);
   }
   // Build the two display lines from a Nominatim address object, Life360-style.
@@ -14638,9 +14894,11 @@ const FamGeo = (function(){
     // a.town/a.village, so an outer-suburb address could show the wrong,
     // broader locality name. suburb/neighbourhood/town/village/hamlet are
     // always more specific than city/municipality and must be tried first.
-    const suburb = a.suburb || a.neighbourhood || a.quarter || a.town || a.village || a.hamlet
-                   || a.city_district || a.municipality || a.city;
-    const region = a.state_code || a.state || a.region || a.province;
+    const suburb = a.suburb || a.town || a.village || a.hamlet || a.city_district
+                   || a.neighbourhood || a.quarter || a.municipality || a.city;
+    const isoState=a['ISO3166-2-lvl4'];
+    const region = a.state_code || (isoState&&isoState.indexOf('-')>=0?isoState.split('-').pop():null)
+                   || a.state || a.region || a.province;
     const suburbLine = [suburb, region].filter(Boolean).join(', ');
     let line1, full;
     if(road && num){ line1 = `${num} ${road}`; full = [line1, suburbLine].filter(Boolean).join(', '); }
@@ -14679,7 +14937,8 @@ const FamGeo = (function(){
   function request(lat,lng){
     if(lat==null||lng==null) return null;
     const k=key(lat,lng);
-    const c=cache[k]; if(c && (Date.now()-c.ts)<TTL) return c;
+    const c=cache[k];
+    if(c && (Date.now()-c.ts)<TTL && haversineM(lat,lng,c.lat,c.lng)<=STICK_RADIUS_M) return c;
     const near=findNearby(lat,lng); if(near) return near;
     if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng}); pump(); }
     return null;
@@ -14705,11 +14964,14 @@ function afterGeoResolved(){
    While the member is actively moving we DON'T queue a fresh lookup for every
    ~11m cell (that would spam Nominatim); we show the last cached address if any,
    else a neutral placeholder, and let it resolve once they settle. */
-function famLocationLines(lat,lng,moving){
+function famLocationLines(lat,lng,moving,accuracyM){
   // No saved-place-name shortcut here — always resolve to the real geocoded
   // address. A saved place's name is never shown as the location label.
   const cached=FamGeo.get(lat,lng);
   if(cached) return { line1:cached.line1, line2:cached.line2, source:'geo' };
+  if(accuracyM!=null&&accuracyM>100){
+    return {line1:(L==='fa'?'موقعیت تقریبی':'Approximate location'),line2:'',source:'accuracy'};
+  }
   if(moving) return { line1:(L==='fa'?'در حال حرکت':'On the move'), line2:'', source:'moving' };
   const g=FamGeo.request(lat,lng);
   if(g) return { line1:g.line1, line2:g.line2, source:'geo' };
@@ -14905,9 +15167,11 @@ function famLivePaintMarkers(members, sel){
   //    avatars). Single members render as normal avatar pins. ──
   const CLUSTER_M=60;
   const groups=[]; // each: {lat,lng,members:[m,...]}
+  const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
   withFixList.forEach(m=>{
-    const g=groups.find(gp=>famHaversineM(gp.lat,gp.lng,m.state.lat,m.state.lng)<=CLUSTER_M);
-    if(g){ g.members.push(m); } else { groups.push({lat:m.state.lat,lng:m.state.lng,members:[m]}); }
+    const g=m.uid===localUid?null:groups.find(gp=>!gp.local&&famHaversineM(gp.lat,gp.lng,m.state.lat,m.state.lng)<=CLUSTER_M);
+    if(g){ g.members.push(m); }
+    else { groups.push({lat:m.state.lat,lng:m.state.lng,members:[m],local:m.uid===localUid}); }
   });
   const activeKeys=[];
   groups.forEach(g=>{
@@ -14917,7 +15181,7 @@ function famLivePaintMarkers(members, sel){
       MBMMap.setMarker(key,[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
-         calloutL1:esc(txt.l1), calloutL2:txt.l2?esc(txt.l2):''},
+         calloutL1:esc(txt.l1), calloutL2:(txt.calloutL2||txt.l2)?esc(txt.calloutL2||txt.l2):''},
         m.uid===_famSelUid, m.meta.tone,
         ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
     } else {
@@ -14953,14 +15217,26 @@ function famLivePaintMarkers(members, sel){
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
   if(sel&&sel.state&&sel.state.lat!=null && _famLastCentredUid!==sel.uid){
-    MBMMap.panTo([sel.state.lat,sel.state.lng]);
+    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true});
     _famLastCentredUid=sel.uid;
+  }
+  const myForDrive=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+  const mineForDrive=myForDrive?members.find(m=>m.uid===myForDrive):null;
+  if(mineForDrive&&mineForDrive.state&&mineForDrive.state.lat!=null){
+    const engForDrive=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
+    const activeForDrive=engForDrive&&(engForDrive.activeSession(myForDrive)||engForDrive.memberSessions(myForDrive).find(s=>s.status==='active'));
+    FamilyMapCamera.drivingState(activeForDrive,[mineForDrive.state.lat,mineForDrive.state.lng]);
   }
   // ── Live-follow: when enabled, keep the map centred on ME as my fix moves ──
   if(_famFollow){
     const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
     const mine=my?members.find(m=>m.uid===my):null;
-    if(mine&&mine.state&&mine.state.lat!=null){ try{ MBMMap.panTo([mine.state.lat,mine.state.lng]); }catch(e){} }
+    if(mine&&mine.state&&mine.state.lat!=null){
+      const eng=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
+      const active=eng&&(eng.activeSession(my)||eng.memberSessions(my).find(s=>s.status==='active'));
+      FamilyMapCamera.drivingState(active,[mine.state.lat,mine.state.lng]);
+      if(!active)FamilyMapCamera.request([mine.state.lat,mine.state.lng],{follow:true});
+    }
   }
 }
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
@@ -15043,7 +15319,7 @@ function famMapLoaded(){
     const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
     const center=(sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
                 :(withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:null);
-    if(center) MBMMap.setView(center,15);
+    if(center) FamilyMapCamera.request(center,{zoom:15,force:true});
   }catch(e){}
 }
 function famMapUnavailable(msg){
@@ -15070,8 +15346,8 @@ function famUpdateCameraPadding(sheetPx){
     const CTA_GAP=14;
     const SHEET_BOTTOM_MARGIN=64; // #fam-sheet's own margin-bottom, reserved for the bottom nav — must be included or the sheet's true top edge is undercounted
     const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
-    if(typeof MBMMap!=='undefined' && MBMMap.setPadding){
-      MBMMap.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
+    if(typeof FamilyMapCamera!=='undefined'){
+      FamilyMapCamera.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
     }
   }catch(e){}
 }
@@ -15102,7 +15378,7 @@ function famEnsureSheetVisible(){
       // and then sit partially behind it once the sheet actually expanded.
       try{
         const sel=(typeof famLiveMembers==='function')?famLiveMembers().find(m=>m.uid===_famSelUid):null;
-        if(sel && sel.state && sel.state.lat!=null){ MBMMap.panTo([sel.state.lat,sel.state.lng]); }
+        if(sel && sel.state && sel.state.lat!=null){ FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true}); }
       }catch(e){}
     }
     const body=document.getElementById('fam-sheet-body');
@@ -15798,9 +16074,24 @@ function famAction(act,arg,ev){
       render();
       return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; _famFollow=true; const st=fb.location.memberState(my); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)MBMMap.setView([s2.lat,s2.lng],16); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
-    case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=false; const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)MBMMap.setView([st.lat,st.lng],16); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
-    case 'live-fit':{ const fb=FamilyBackend; const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)MBMMap.fitAll(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
+    case 'road-add-open':{
+      const me=FB.user&&FB.user.uid;
+      if(FamilyBackend.driving.activeSession(me)){toast(L==='fa'?'هنگام رانندگی فقط تأیید یک‌ضرب فعال است':'Only one-tap confirmations are available while driving');return;}
+      _famRoadReportMenuOpen=true;render();return;
+    }
+    case 'road-add-close':_famRoadReportMenuOpen=false;render();return;
+    case 'road-add-type':{
+      FamilyBackend.roadReports.add(arg).then(r=>{_famRoadReportMenuOpen=false;toast(r.merged?(L==='fa'?'با گزارش نزدیک ادغام شد':'Merged with nearby report'):(L==='fa'?'گزارش ثبت شد':'Report added'));render();}).catch(e=>{
+        const c=e&&e.code;toast(c==='accuracy-low'?(L==='fa'?'دقت GPS کافی نیست':'GPS accuracy is too low'):(L==='fa'?'ثبت گزارش ناموفق بود':'Could not save report'));
+      });return;
+    }
+    case 'road-vote':{
+      const cut=arg.lastIndexOf(':'),id=arg.slice(0,cut),value=arg.slice(cut+1);
+      FamilyBackend.roadReports.vote(id,value).then(()=>{toast(L==='fa'?'ثبت شد':'Recorded');if(typeof famLiveApply==='function')famLiveApply();}).catch(()=>toast(L==='fa'?'ارسال ناموفق بود':'Could not send confirmation'));return;
+    }
+    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; const st=fb.location.memberState(my); if(st&&st.lat!=null)FamilyMapCamera.resume([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)FamilyMapCamera.request([s2.lat,s2.lng],{follow:true,force:true}); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=false; FamilyMapCamera.pauseByGesture(); const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)FamilyMapCamera.request([st.lat,st.lng],{zoom:16,force:true}); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
+    case 'live-fit':{ const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)FamilyMapCamera.fit(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
     case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; }
