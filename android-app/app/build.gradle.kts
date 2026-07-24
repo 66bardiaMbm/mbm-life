@@ -24,6 +24,25 @@ android {
         )
     }
 
+    signingConfigs {
+        val ciKeystorePath = System.getenv("MBM_ANDROID_KEYSTORE_PATH")
+        if (!ciKeystorePath.isNullOrBlank()) {
+            create("ciDebug") {
+                storeFile = file(ciKeystorePath)
+                storePassword = System.getenv("MBM_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MBM_ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("MBM_ANDROID_KEY_PASSWORD")
+                storeType = "PKCS12"
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfigs.findByName("ciDebug")?.let { signingConfig = it }
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         viewBinding = true
