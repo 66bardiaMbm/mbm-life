@@ -1614,6 +1614,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;pointer-events:none}
 .fam-arrived .fam-arrived-ic{color:var(--fam-purple,#8652FF);display:flex}
 .fam-arrived .fam-arrived-ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
+.fam-motion-icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .fam-arrived .fam-arrived-t{font-size:12.5px;color:var(--ink2)}
 .fam-arrived .fam-arrived-t b{color:var(--ink);font-weight:800}
 .fam-arrived-2l{display:flex;flex-direction:column;line-height:1.2}
@@ -1780,7 +1781,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v365';
+const APP_VERSION='v367';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -2092,13 +2093,20 @@ function showSyncError(scope,err){
   if(!el){
     el=document.createElement('div');
     el.id='sync-error-banner';
-    el.style.cssText='position:fixed;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top,0px));z-index:100001;background:#35151d;color:#fff;border:1px solid #f43f5e;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start;box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:12px';
-    el.innerHTML='<span id="sync-error-text" style="flex:1;word-break:break-word"></span><button id="sync-error-dismiss" aria-label="dismiss" style="all:unset;cursor:pointer;font-size:16px">✕</button>';
+    el.style.cssText='position:fixed;left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:420px;top:calc(8px + env(safe-area-inset-top,0px));z-index:100001;background:#35151d;color:#fff;border:1px solid #f43f5e;border-radius:10px;padding:8px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 6px 20px rgba(0,0,0,.3);font-size:11px;line-height:1.35';
+    el.innerHTML='<span id="sync-error-text" style="flex:1;min-width:0"></span><button id="sync-error-dismiss" aria-label="dismiss" style="all:unset;cursor:pointer;font-size:15px;line-height:1;padding:2px">✕</button>';
     document.body.appendChild(el);
     el.querySelector('#sync-error-dismiss').onclick=()=>{el.style.display='none';};
   }
   const text=el.querySelector('#sync-error-text');
-  if(text)text.textContent=`Cloud sync failed (${scope}, ${code}). Local data is retained where available; retry after checking your connection or Firebase permissions. ${detail}`;
+  if(text){
+    const roadReport=/^road report/.test(scope);
+    if(roadReport&&code==='permission-denied'){
+      text.textContent=L==='fa'?'گزارش ذخیره نشد؛ مجوز Firebase کافی نیست.':'Road report not saved — Firebase permission denied.';
+    }else{
+      text.textContent=L==='fa'?`همگام‌سازی ابری ناموفق بود (${scope}: ${code}).`:`Cloud sync failed (${scope}: ${code}).`;
+    }
+  }
   el.style.display='flex';
 }
 
@@ -11025,10 +11033,32 @@ const FamilyBackend = (function(){
         accuracy:(c.precise===false?null:(raw.accuracy!=null?raw.accuracy:null)),
         capturedAt, source:raw.source||'gps',
         heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
+        rawSpeed:raw.speed!=null?raw.speed:null, calculatedSpeed:null, speedSource:raw.speed!=null?'gps':null,
         moving:mv.moving, stayStart:mv.stayStart, _pendingJumpFrom:mv._pendingJumpFrom||null,
         _lastMovementAt:mv._lastMovementAt||null, _stopCandidateAt:mv._stopCandidateAt||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO() };
+      // The driving engine is the single speed authority. It prefers a valid
+      // device coords.speed, falls back to distance/time between accepted GPS
+      // samples, rejects spikes, and returns a smoothed live value. Feed that
+      // value back into LocationState so the map callout, detail sheet and
+      // Driving screen cannot each derive a different speed.
+      let speedResult=null;
+      try{ speedResult=FamilyDriving.ingestFix(uid, { lat:raw.lat, lng:raw.lng, capturedAt,
+             speedMps:raw.speed, accuracyM:(raw.accuracy!=null?raw.accuracy:null),
+             headingDeg:state.heading, altitudeM:(raw.altitude!=null?raw.altitude:null),
+             source:state.source }); }catch(e){ console.error('[FamilyDriving.ingestFix]',e); }
+      if(speedResult){
+        state.rawSpeed=speedResult.rawSpeedMps;
+        state.calculatedSpeed=speedResult.calculatedSpeedMps;
+        state.speed=speedResult.filteredSpeedMps;
+        state.speedSource=speedResult.source;
+        if(state.speed!=null&&state.speed>=2.8){
+          state.moving=true;
+          state._lastMovementAt=capturedAt;
+          state._stopCandidateAt=null;
+        }
+      }
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
       // route breadcrumb (only on meaningful movement, precise mode only)
       if(canShare&&c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt,speedMps:state.speed}); }
@@ -11037,10 +11067,6 @@ const FamilyBackend = (function(){
         try{ evalGeofences(uid, prev, {lat,lng,capturedAt}); }catch(e){}
         try{ evalNoShows(); }catch(e){}
       }
-      try{ FamilyDriving.ingestFix(uid, { lat:raw.lat, lng:raw.lng, capturedAt,
-             speedMps:raw.speed, accuracyM:(raw.accuracy!=null?raw.accuracy:null),
-             headingDeg:state.heading, altitudeM:(raw.altitude!=null?raw.altitude:null),
-             source:state.source }); }catch(e){ console.error('[FamilyDriving.ingestFix]',e); }
       afterChange();                                           // REPAINT marker/address NOW, before any network
       // ── Canonical Firestore write is THROTTLED for bandwidth, but the local
       //    marker above already moved. The remote write is best-effort. ──
@@ -11286,7 +11312,9 @@ const FamilyBackend = (function(){
       _lastCallbackAt=Date.now();
       _watchCallbackCount++;
       _lastRawSpeed=(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null; // exact device value, debug overlay only
-      diag('fix',{lat:+cr.latitude.toFixed(6),lng:+cr.longitude.toFixed(6),acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,movedM:moved,ts:pos.timestamp});
+      diag('fix',{lat:+cr.latitude.toFixed(6),lng:+cr.longitude.toFixed(6),
+        rawSpeedMps:(cr.speed!=null&&!isNaN(cr.speed))?Number(cr.speed):null,
+        acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,movedM:moved,ts:pos.timestamp});
       setLocState('active');
       // Update the LOCAL marker on EVERY valid callback (no throttle here). The
       // Firestore write inside writeMyFix is what's throttled, not the marker.
@@ -11568,6 +11596,9 @@ const FamilyBackend = (function(){
     const SPIKE_NEIGHBOR_MPS = 15;      // a sample >this much faster than BOTH neighbors is treated as a GPS speed spike (reviewer point 4)
     const PRE_WINDOW_MS = 25000;        // rolling pre-session window for cumulative displacement + movement-consistency
     const PRE_WINDOW_DRIVE_M = 130;     // >=130m real displacement within PRE_WINDOW_MS ⇒ driving, independent of coords.speed
+    const RAW_SPEED_MAX_MPS = 60;       // 216 km/h: reject impossible device/fallback spikes for this consumer app
+    const SPEED_FALLBACK_MAX_DT_S = 30; // older pairs are not a useful live-speed estimate
+    const SPEED_HOLD_MS = 8000;         // bridge one missing fix, never freeze a stale speed indefinitely
 
     // ── Debug overlay counters (real, not simulated) ──
     let _ingestFixCallCount=0;
@@ -11660,6 +11691,91 @@ const FamilyBackend = (function(){
       const dLat=toR(b.lat-a.lat),dLng=toR(b.lng-a.lng);
       const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
       return 2*R*Math.asin(Math.min(1,Math.sqrt(s))); }
+
+    /* One authoritative real-device speed pipeline:
+       coords.speed -> accepted distance/time fallback -> spike gate -> EMA.
+       The returned value is used by both trip samples and LocationState UI.
+       Raw/calculated/filtered values remain on every sample for diagnostics. */
+    function deriveLiveSpeed(q,raw,t){
+      const accuracyM=(raw.accuracyM!=null&&!isNaN(raw.accuracyM))?Number(raw.accuracyM):null;
+      const rawCandidate=(raw.speedMps!=null&&!isNaN(raw.speedMps))?Number(raw.speedMps):null;
+      const rawValid=rawCandidate!=null&&rawCandidate>=0&&rawCandidate<=RAW_SPEED_MAX_MPS
+        &&(accuracyM==null||accuracyM<=100);
+      const current={lat:Number(raw.lat),lng:Number(raw.lng),t,accuracyM};
+      const prev=q._speedFix||null;
+      let calculated=null,calculatedAccepted=false;
+      if(prev){
+        const dt=(Date.parse(t)-Date.parse(prev.t))/1000;
+        if(dt>=0.5&&dt<=SPEED_FALLBACK_MAX_DT_S
+          &&(accuracyM==null||accuracyM<=MAX_ACCEPT_ACCURACY_M)
+          &&(prev.accuracyM==null||prev.accuracyM<=MAX_ACCEPT_ACCURACY_M)){
+          const dist=haversineM(prev,current);
+          const implied=dist/dt;
+          const uncertainty=Math.max(3,Math.min(20,Math.max(accuracyM||0,prev.accuracyM||0)*0.25));
+          if(dist>=uncertainty&&implied>=0&&implied<=MAX_JUMP_MS){
+            calculated=implied;
+            calculatedAccepted=true;
+          } else if(dist<uncertainty){
+            calculated=0;
+            calculatedAccepted=true;
+          }
+        }
+      }
+      // Keep the fallback base only when this coordinate itself is usable.
+      // An impossible jump must not poison the next otherwise-good estimate.
+      let acceptAsBase=(accuracyM==null||accuracyM<=MAX_ACCEPT_ACCURACY_M);
+      if(prev&&acceptAsBase){
+        const dt=(Date.parse(t)-Date.parse(prev.t))/1000;
+        if(dt<=0)acceptAsBase=false;
+        else if(dt<=SPEED_FALLBACK_MAX_DT_S&&haversineM(prev,current)/dt>MAX_JUMP_MS)acceptAsBase=false;
+        // A stale previous base (app reopen / long GPS gap) is deliberately
+        // replaced by this accepted fix so fallback speed recovers on the
+        // following callback instead of remaining disabled forever.
+      }
+      if(acceptAsBase)q._speedFix=current;
+
+      let candidate=null,source=null;
+      if(rawValid){ candidate=rawCandidate; source='gps'; }
+      // Some Android devices emit a literal zero while position deltas prove
+      // vehicle movement. Treat that as unavailable for this fix rather than
+      // freezing the display at zero.
+      if(calculatedAccepted&&(!rawValid||(rawCandidate<0.5&&calculated>=DRIVE_MIN_MS))){
+        candidate=calculated; source='distance_time';
+      }
+      if(candidate!=null&&(candidate<0||candidate>RAW_SPEED_MAX_MPS)){candidate=null;source=null;}
+
+      const nowT=Date.parse(t)||Date.now();
+      let filtered=null;
+      if(candidate!=null){
+        const prevFiltered=(q._filteredSpeedMps!=null&&!isNaN(q._filteredSpeedMps))?q._filteredSpeedMps:null;
+        if(prevFiltered==null)filtered=candidate;
+        else {
+          // Rise quickly enough that a real pull-away does not stay at zero;
+          // decay more gently so one slow fix at lights does not flicker.
+          const alpha=candidate>prevFiltered?0.72:0.38;
+          filtered=prevFiltered+(candidate-prevFiltered)*alpha;
+        }
+        if(filtered<0.15)filtered=0;
+        q._filteredSpeedMps=Math.round(filtered*100)/100;
+        q._filteredSpeedAt=nowT;
+      } else if(q._filteredSpeedMps!=null&&nowT-(q._filteredSpeedAt||0)<=SPEED_HOLD_MS){
+        filtered=q._filteredSpeedMps;
+        source='held';
+      } else {
+        q._filteredSpeedMps=null;
+        filtered=null;
+      }
+      const result={
+        rawSpeedMps:rawCandidate,
+        calculatedSpeedMps:calculatedAccepted?Math.round(calculated*100)/100:null,
+        filteredSpeedMps:filtered!=null?Math.round(filtered*100)/100:null,
+        source,
+        accuracyM
+      };
+      q._lastSpeedDebug=result;
+      try{console.debug('[FamilyDriving.speed]',result);}catch(e){}
+      return result;
+    }
 
     function classifyFixWindow(curSample,prevSample,window){
       // Fast path: trust a real, valid coords.speed reading immediately —
@@ -12039,9 +12155,11 @@ const FamilyBackend = (function(){
 
     function ingestFix(uid, raw){
       _ingestFixCallCount++; _lastIngestFixAt=nowISO();
-      if(!uid||raw.lat==null||raw.lng==null) return;
+      if(!uid||raw.lat==null||raw.lng==null) return null;
       const t=raw.capturedAt||nowISO();
-      const rawSpeed=(raw.speedMps!=null&&!isNaN(raw.speedMps))?raw.speedMps:null;
+      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0,preLastFix:null,preFixWindow:[]});
+      const speedResult=deriveLiveSpeed(q,raw,t);
+      const rawSpeed=speedResult.filteredSpeedMps;
       // Heading is only meaningful when the device is actually moving fast
       // enough for GPS to derive a real bearing — near zero speed it's noise
       // (reviewer point 3). Store null rather than a misleading value; this
@@ -12049,13 +12167,15 @@ const FamilyBackend = (function(){
       const validHeading=(rawSpeed!=null&&rawSpeed>=HEADING_MIN_MPS&&raw.headingDeg!=null&&!isNaN(raw.headingDeg));
       const sample={ lat:raw.lat, lng:raw.lng, t, seq:0,
         speedMps:rawSpeed,
+        rawSpeedMps:speedResult.rawSpeedMps,
+        calculatedSpeedMps:speedResult.calculatedSpeedMps,
+        speedSource:speedResult.source,
         accuracyM:raw.accuracyM!=null?raw.accuracyM:null,
         headingDeg:validHeading?raw.headingDeg:null,
         altitudeM:raw.altitudeM!=null?raw.altitudeM:null,
         source:raw.source||'gps' };
 
-      const q=queueMap()[uid]||(queueMap()[uid]={sessionId:null,samples:[],candidate:null,lastFlushIdx:0,preLastFix:null,preFixWindow:[]});
-      if(q.closing)return; // final sample store/remote flush is in progress
+      if(q.closing)return speedResult; // final sample store/remote flush is in progress
       // Rolling pre-session window (last ~25s of fixes) for cumulative
       // displacement + elapsed-time + movement-consistency classification.
       // This is the PRIMARY signal — coords.speed is used as a fast-path
@@ -12136,7 +12256,7 @@ const FamilyBackend = (function(){
         }
         q.preLastFix=sample; // remember this fix so the NEXT fix's fallback classifier has something to compare against
         try{persistDB();}catch(e){}
-        return;
+        return speedResult;
       }
 
       q.samples.push(sample);
@@ -12169,7 +12289,7 @@ const FamilyBackend = (function(){
         if(!q.candidate||q.candidate.type!=='end'){ q.candidate={type:'end',since:nowMs}; }
         else if(nowMs-q.candidate.since>=END_HYST_MS){
           endSession(uid,sess,sample);
-          return;
+          return speedResult;
         }
       } else {
         q.candidate=null;
@@ -12190,6 +12310,7 @@ const FamilyBackend = (function(){
         }catch(e){}
       }
       try{persistDB();}catch(e){}
+      return speedResult;
     }
 
     function recoverOnStart(uid){
@@ -12540,6 +12661,11 @@ const FamilyBackend = (function(){
         queueSessionId:q?q.sessionId:null,
         queueSampleCount:q?q.samples.length:0,
         queueCandidate:q?q.candidate:null,
+        rawSpeedMps:q&&q._lastSpeedDebug?q._lastSpeedDebug.rawSpeedMps:null,
+        calculatedSpeedMps:q&&q._lastSpeedDebug?q._lastSpeedDebug.calculatedSpeedMps:null,
+        filteredSpeedMps:q&&q._lastSpeedDebug?q._lastSpeedDebug.filteredSpeedMps:null,
+        speedSource:q&&q._lastSpeedDebug?q._lastSpeedDebug.source:null,
+        speedAccuracyM:q&&q._lastSpeedDebug?q._lastSpeedDebug.accuracyM:null,
         activeSessionId:active?active.id:null,
         activeSessionSampleCount:active?active.sampleCount:null,
         activeSessionDistanceM:active?active.distanceM:null,
@@ -12576,12 +12702,13 @@ const FamilyBackend = (function(){
   const FamilyRoadReports = (function(){
     const TYPES={
       police:{en:'Police',fa:'پلیس',icon:'🚓',ttlMs:45*60*1000},
-      speed_camera:{en:'Mobile speed camera',fa:'دوربین سیار سرعت',icon:'📷',ttlMs:45*60*1000},
+      mobile_speed_camera:{en:'Mobile speed camera',fa:'دوربین سیار سرعت',icon:'📷',ttlMs:45*60*1000},
       crash:{en:'Crash',fa:'تصادف',icon:'💥',ttlMs:4*60*60*1000},
       congestion:{en:'Congestion',fa:'ترافیک سنگین',icon:'🚗',ttlMs:60*60*1000},
       roadworks:{en:'Roadworks',fa:'عملیات جاده‌ای',icon:'🚧',ttlMs:4*60*60*1000},
-      closure:{en:'Road closure',fa:'مسدودی جاده',icon:'⛔',ttlMs:4*60*60*1000}
+      road_closure:{en:'Road closure',fa:'مسدودی جاده',icon:'⛔',ttlMs:4*60*60*1000}
     };
+    const LEGACY_TYPES={speed_camera:'mobile_speed_camera',closure:'road_closure'};
     const MAX_FIX_AGE_MS=90*1000;
     const MAX_FIX_ACCURACY_M=100;
     const DUPLICATE_RADIUS_M=250;
@@ -12599,7 +12726,8 @@ const FamilyBackend = (function(){
     }
     function normalize(id,data){
       data=data||{};
-      return Object.assign({},data,{id,
+      const normalizedType=LEGACY_TYPES[data.type]||data.type;
+      return Object.assign({},data,{id,type:normalizedType,
         expiresAtMs:toMs(data.expiresAt)||Date.parse(data.expiresAtIso||'')||0,
         myVote:voteMap()[id]||null});
     }
@@ -12646,18 +12774,31 @@ const FamilyBackend = (function(){
       if(dup){ await vote(dup.id,'still'); return {report:dup,merged:true}; }
       const id='rr_'+myUid()+'_'+Date.now().toString(36);
       const createdMs=Date.now(), expiresMs=createdMs+TYPES[type].ttlMs;
+      const createdIso=new Date(createdMs).toISOString();
       const doc={id,type,status:'active',reporterUid:myUid(),lat:Number(s.lat),lng:Number(s.lng),
         accuracyM:s.accuracy!=null?Number(s.accuracy):null,
         headingDeg:s.heading!=null&&!isNaN(s.heading)?Number(s.heading):null,
-        createdAt:new Date(createdMs).toISOString(),updatedAt:new Date(createdMs).toISOString(),
+        createdAt:firebase.firestore.Timestamp.fromMillis(createdMs),
+        updatedAt:firebase.firestore.Timestamp.fromMillis(createdMs),
         expiresAt:firebase.firestore.Timestamp.fromMillis(expiresMs),
-        expiresAtIso:new Date(expiresMs).toISOString()};
+        createdAtIso:createdIso,updatedAtIso:createdIso,expiresAtIso:new Date(expiresMs).toISOString(),
+        confirmationCount:1,rejectionCount:0};
       reportsMap()[id]=normalize(id,doc); voteMap()[id]='still';
       try{ persistDB(); }catch(e){}
       try{
-        await roadReportsRef(familyId()).doc(id).set(doc);
-        await roadReportsRef(familyId()).doc(id).collection('confirmations').doc(myUid())
-          .set({uid:myUid(),vote:'still',at:new Date().toISOString()});
+        // Atomic create: a report can never be left in Firestore without the
+        // reporter's matching initial confirmation if the second write fails.
+        const reportRef=roadReportsRef(familyId()).doc(id);
+        const confirmationRef=reportRef.collection('confirmations').doc(myUid());
+        const batch=db().batch();
+        batch.set(reportRef,Object.assign({},doc,{
+          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+        }));
+        batch.set(confirmationRef,{
+          uid:myUid(),vote:'still',at:firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await batch.commit();
       }catch(e){
         delete reportsMap()[id]; delete voteMap()[id];
         try{persistDB();}catch(_){}
@@ -12678,7 +12819,7 @@ const FamilyBackend = (function(){
       afterChange();
       try{
         await roadReportsRef(familyId()).doc(reportId).collection('confirmations').doc(myUid())
-          .set({uid:myUid(),vote:value,at:new Date().toISOString()});
+          .set({uid:myUid(),vote:value,at:firebase.firestore.FieldValue.serverTimestamp()});
       }catch(e){
         if(prev)voteMap()[reportId]=prev; else delete voteMap()[reportId];
         r.myVote=prev;
@@ -12709,7 +12850,11 @@ const FamilyBackend = (function(){
       stopListening();
       if(!ready()||!isMember())return;
       let q=roadReportsRef(familyId());
-      try{ q=q.where('expiresAt','>',firebase.firestore.Timestamp.fromMillis(Date.now()-60000)).limit(150); }catch(e){}
+      try{
+        q=q.where('status','==','active')
+          .where('expiresAt','>',firebase.firestore.Timestamp.fromMillis(Date.now()))
+          .limit(150);
+      }catch(e){}
       _unsub=q.onSnapshot(qs=>{
         const map=reportsMap(), seen={};
         qs.forEach(d=>{seen[d.id]=true;map[d.id]=normalize(d.id,d.data());});
@@ -13282,6 +13427,11 @@ function drvDebugOverlayHtml(uid){
   h+=row('queue.sessionId', dbg.queueSessionId);
   h+=row('queue sample count', dbg.queueSampleCount);
   h+=row('pre-trip candidate', dbg.queueCandidate?`${dbg.queueCandidate.type} (${Math.round((Date.now()-dbg.queueCandidate.since)/1000)}s)`:'none');
+  h+=row('raw speed', dbg.rawSpeedMps!=null?`${Number(dbg.rawSpeedMps).toFixed(2)} m/s`:'null');
+  h+=row('calculated speed', dbg.calculatedSpeedMps!=null?`${Number(dbg.calculatedSpeedMps).toFixed(2)} m/s`:'null');
+  h+=row('filtered speed', dbg.filteredSpeedMps!=null?`${Number(dbg.filteredSpeedMps).toFixed(2)} m/s`:'null');
+  h+=row('speed source', dbg.speedSource);
+  h+=row('GPS accuracy', dbg.speedAccuracyM!=null?`±${Math.round(dbg.speedAccuracyM)}m`:'unknown');
   h+=row('active session id', dbg.activeSessionId);
   h+=row('active session samples', dbg.activeSessionSampleCount);
   h+=row('active distance (m)', dbg.activeSessionDistanceM);
@@ -13613,16 +13763,29 @@ function drvDisplayPosition(uid,sample){
   return pos;
 }
 const DrivingFollowController=(function(){
-  let timer=null,pending=null,last=null,lastAt=0,seq=0;
-  function reset(){seq++;pending=null;last=null;lastAt=0;if(timer){clearTimeout(timer);timer=null;}}
+  let timer=null,verifyTimer=null,pending=null,last=null,lastAt=0,seq=0;
+  function reset(){seq++;pending=null;last=null;lastAt=0;if(timer){clearTimeout(timer);timer=null;}if(verifyTimer){clearTimeout(verifyTimer);verifyTimer=null;}}
   function request(uid,pos,force){
     if(!pos||!MBMMap.get())return;
+    if(MBMMap.hasMarker(uid)&&!MBMMap.isMarkerInSafeViewport(uid,8))force=true;
     if(!force&&last&&famHaversineM(last[0],last[1],pos[0],pos[1])<5)return;
-    pending=pos.slice();const mySeq=++seq;
+    pending={uid,pos:pos.slice(),retry:0};const mySeq=++seq;
     if(timer)clearTimeout(timer);
     const delay=force?0:Math.max(0,500-(Date.now()-lastAt));
     timer=setTimeout(()=>{timer=null;if(mySeq!==seq||!pending||!MBMMap.get())return;
-      const target=pending;pending=null;MBMMap.setView(target);last=target.slice();lastAt=Date.now();
+      const target=pending;pending=null;MBMMap.setView(target.pos);last=target.pos.slice();lastAt=Date.now();
+      if(target.retry<1){
+        verifyTimer=setTimeout(()=>{verifyTimer=null;
+          if(mySeq!==seq||!MBMMap.get())return;
+          if(!MBMMap.isMarkerInSafeViewport(target.uid,8)){
+            pending={uid:target.uid,pos:target.pos.slice(),retry:1};
+            const retrySeq=++seq;
+            timer=setTimeout(()=>{timer=null;if(retrySeq!==seq||!pending||!MBMMap.get())return;
+              const retry=pending;pending=null;MBMMap.setView(retry.pos);last=retry.pos.slice();lastAt=Date.now();
+            },0);
+          }
+        },900);
+      }
     },delay);
   }
   return {request,reset};
@@ -14325,6 +14488,16 @@ const MBMMap = (function(){
 
   function hasMarker(uid){ return !!_markers[uid]; }
   function markerLatLng(uid){ const p=_markerPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
+  function isMarkerInSafeViewport(uid,margin){
+    const mk=_markers[uid], el=mk&&(mk.content||mk._el);
+    if(!el||!_mapEl||!el.getBoundingClientRect||!_mapEl.getBoundingClientRect)return false;
+    const er=el.getBoundingClientRect(),mr=_mapEl.getBoundingClientRect();
+    const m=margin==null?10:Number(margin);
+    return er.left>=mr.left+_pad.left+m
+      && er.right<=mr.right-_pad.right-m
+      && er.top>=mr.top+_pad.top+m
+      && er.bottom<=mr.bottom-_pad.bottom-m;
+  }
 
   /* Smooth eased glide of an existing marker to a new position — GPS drives
      this on every valid callback, never waiting on Firestore. */
@@ -14539,7 +14712,7 @@ const MBMMap = (function(){
     _map=null; _elId=null; _mapEl=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
-           hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
+           hasMarker, markerLatLng, isMarkerInSafeViewport, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding };
 })();
 
@@ -14565,6 +14738,7 @@ const FAM_ICON = {
   heart:'<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>',
   sos:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.2"></circle><line x1="12" y1="3" x2="12" y2="7"></line><line x1="12" y1="17" x2="12" y2="21"></line><line x1="3" y1="12" x2="7" y2="12"></line><line x1="17" y1="12" x2="21" y2="12"></line></svg>',
   car:'<svg viewBox="0 0 24 24"><path d="M5 13l1.5-4.5A2 2 0 018.4 7h7.2a2 2 0 011.9 1.5L19 13"></path><path d="M4 13h16v4a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H7v1a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path><circle cx="7.5" cy="15.5" r="1"></circle><circle cx="16.5" cy="15.5" r="1"></circle></svg>',
+  walk:'<svg viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"></circle><path d="M13 6l-2 4 3 2-1 6M11 10l-4 2 1 6M9 12l-3 1"></path></svg>',
   shield:'<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path></svg>',
   badge:'<svg viewBox="0 0 24 24"><polygon points="12 3 14.5 7 19 7.5 15.7 10.8 16.6 15.3 12 13.2 7.4 15.3 8.3 10.8 5 7.5 9.5 7"></polygon></svg>',
   people:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"></circle><path d="M3 20a6 6 0 0112 0"></path><path d="M16 5.5a3 3 0 010 5.8"></path><path d="M15 20a6 6 0 016-6"></path></svg>',
@@ -14575,6 +14749,15 @@ const FAM_ICON = {
   mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="4 7 12 13 20 7"></polyline></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
+/* Motion labels remain plain text in state. Rendering is the only layer that
+   may add an allow-listed SVG, so escaping a status can never expose literal
+   <svg> markup to the person again. */
+function famMotionStatusHtml(txt){
+  if(!txt||!txt.l2)return '';
+  const icon=txt.activityType==='driving'?famIcon('car')
+    :(txt.activityType==='walking'?famIcon('walk'):'');
+  return `${icon?`<span class="fam-motion-icon" aria-hidden="true" style="display:inline-flex;width:18px;height:18px;vertical-align:-4px;margin-inline-end:4px">${icon}</span>`:''}${esc(txt.l2)}`;
+}
 
 /* Relative time for honest freshness display (never rounds up to "now"). */
 function famRelTime(iso){
@@ -14937,8 +15120,8 @@ function famDisplayPosition(m){
    their latest target here. Requests are coalesced, distance-gated and
    throttled; a newer request replaces an unfinished one. */
 const FamilyFollowController=(function(){
-  let timer=null,pending=null,lastApplied=null,lastAt=0,lastUid=null,seq=0;
-  function cancel(){seq++;pending=null;if(timer){clearTimeout(timer);timer=null;}}
+  let timer=null,verifyTimer=null,pending=null,lastApplied=null,lastAt=0,lastUid=null,seq=0;
+  function cancel(){seq++;pending=null;if(timer){clearTimeout(timer);timer=null;}if(verifyTimer){clearTimeout(verifyTimer);verifyTimer=null;}}
   function reset(){cancel();lastApplied=null;lastAt=0;lastUid=null;}
   function apply(mySeq){
     timer=null;
@@ -14946,6 +15129,17 @@ const FamilyFollowController=(function(){
     const p=pending; pending=null;
     try{ if(p.zoom!=null)MBMMap.setView(p.pos,p.zoom); else MBMMap.panTo(p.pos); }catch(e){return;}
     lastApplied=p.pos.slice();lastAt=Date.now();lastUid=p.uid;
+    if((p.retry||0)<1){
+      verifyTimer=setTimeout(()=>{
+        verifyTimer=null;
+        if(mySeq!==seq||!_famFollow||!MBMMap.get())return;
+        if(!MBMMap.isMarkerInSafeViewport(p.uid,8)){
+          pending={uid:p.uid,pos:p.pos.slice(),zoom:p.zoom,retry:1};
+          const retrySeq=++seq;
+          timer=setTimeout(()=>apply(retrySeq),0);
+        }
+      },900);
+    }
   }
   function request(sel,opts){
     opts=opts||{};
@@ -14953,10 +15147,11 @@ const FamilyFollowController=(function(){
     const pos=opts.pos||famDisplayPosition(sel); if(!pos)return;
     const active=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving.activeSession(sel.uid):null;
     const moving=!!active||!!sel.state.moving||(sel.state.speed!=null&&!isNaN(sel.state.speed)&&Number(sel.state.speed)>=2.8);
-    const force=!!opts.force||lastUid!==sel.uid;
+    const outsideSafe=MBMMap.hasMarker(sel.uid)&&!MBMMap.isMarkerInSafeViewport(sel.uid,8);
+    const force=!!opts.force||lastUid!==sel.uid||outsideSafe;
     const minCameraM=moving?5:15;
     if(!force&&lastApplied&&famHaversineM(lastApplied[0],lastApplied[1],pos[0],pos[1])<minCameraM)return;
-    pending={uid:sel.uid,pos:pos.slice(),zoom:opts.zoom};
+    pending={uid:sel.uid,pos:pos.slice(),zoom:opts.zoom,retry:0};
     const throttleMs=moving?500:1200;
     const delay=force?0:Math.max(0,throttleMs-(Date.now()-lastAt));
     const mySeq=++seq;
@@ -15036,14 +15231,22 @@ function famLiveApply(){
 const _famActivityCache={}; // uid -> {activityType, activityStartedAt, currentPlaceId, placeEnteredAt, lastMovementAt, _candidate, _candidateSince}
 const FAM_WALK_MAX_MS=2.3;   // m/s — ~8.3 km/h ceiling for "walking"
 const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving" (small gap vs walk ceiling = hysteresis band)
-const FAM_HYST_MS=15000;     // candidate activity must hold for 15s before committing
+const FAM_ENTER_HYST_MS=10000;     // sustained movement before entering a new activity
+const FAM_DRIVE_EXIT_HYST_MS=90000;// traffic lights/slow traffic must not become Walking
 
 function famClassifyRawActivity(m){
-  if(!m.consent||!m.consent.enabled) return 'offline';
-  if(m.consent.paused) return 'paused';
+  const localDriveOnly=m.uid===myUid()
+    && typeof FamilyBackend!=='undefined'
+    && FamilyBackend.location&&FamilyBackend.location.drivingTrackingEnabled
+    && FamilyBackend.location.drivingTrackingEnabled();
+  if((!m.consent||!m.consent.enabled)&&!localDriveOnly) return 'offline';
+  if(m.consent&&m.consent.paused&&!localDriveOnly) return 'paused';
   if(!m.state||m.state.lat==null) return 'offline';
-  if(m.status==='offline') return 'offline';
+  if(m.status==='offline'&&!localDriveOnly) return 'offline';
   const s=m.state;
+  // A poor fix may update freshness, but it cannot provide enough evidence
+  // to change Driving into Walking/Stationary.
+  if(s.accuracy!=null&&Number(s.accuracy)>75)return 'uncertain';
   const speed=(s.speed!=null && !isNaN(s.speed))?s.speed:null;
   if(speed!=null){
     if(speed>=FAM_DRIVE_MIN_MS) return 'driving';
@@ -15080,7 +15283,7 @@ function famCumulativeIsDriving(c,m){
 }
 function famDeriveMemberDisplay(m){
   const uid=m.uid;
-  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0,_cumHist:[]});
+  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,lastDrivingEvidenceAt:0,_candidate:null,_candidateSince:0,_cumHist:[]});
   const nowMs=Date.now();
   let raw=famClassifyRawActivity(m);
   const fbDrive=(typeof FamilyBackend!=='undefined'&&FamilyBackend.driving)?FamilyBackend.driving:null;
@@ -15097,6 +15300,7 @@ function famDeriveMemberDisplay(m){
   // but the GPS fix positions themselves clearly show a car moving.
   if(raw!=='offline' && raw!=='paused' && famCumulativeIsDriving(c,m)) raw='driving';
   if(raw==='driving'||raw==='walking') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
+  if(raw==='driving')c.lastDrivingEvidenceAt=nowMs;
   // offline/paused are never debounced — these are honest device/consent
   // facts, not noisy motion signals, so they apply immediately.
   if(activeTrip){
@@ -15108,11 +15312,23 @@ function famDeriveMemberDisplay(m){
   } else if(raw==='offline'||raw==='paused'){
     if(c.activityType!==raw){ c.activityType=raw; c.activityStartedAt=new Date(nowMs).toISOString(); }
     c._candidate=null; c._candidateSince=0;
+  } else if(raw==='uncertain'){
+    // No state transition from an inaccurate fix. This also preserves
+    // Driving if Android briefly falls back to a coarse network location.
+    c._candidate=null; c._candidateSince=0;
   } else if(raw!==c.activityType){
     if(c._candidate!==raw){ c._candidate=raw; c._candidateSince=nowMs; }
-    else if(nowMs-c._candidateSince>=FAM_HYST_MS){
+    else {
+      const requiredMs=c.activityType==='driving'?FAM_DRIVE_EXIT_HYST_MS:FAM_ENTER_HYST_MS;
+      // Leaving Driving requires both sustained non-driving evidence and no
+      // recent driving evidence. One slow fix or a traffic-light pause can
+      // never switch the badge to Walking.
+      const driveExitReady=c.activityType!=='driving'
+        || nowMs-(c.lastDrivingEvidenceAt||0)>=FAM_DRIVE_EXIT_HYST_MS;
+      if(nowMs-c._candidateSince>=requiredMs&&driveExitReady){
       c.activityType=raw; c.activityStartedAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
       c._candidate=null; c._candidateSince=0;
+      }
     }
   } else {
     c._candidate=null; c._candidateSince=0;
@@ -15232,7 +15448,7 @@ function famComposeStatusText(m){
     }
     const cachedGeo=FamGeo.get(s.lat,s.lng);
     const region=cachedGeo?cachedGeo.line2:'';
-    const l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    const l2=speedKph!=null?`${speedKph} km/h`:'';
     return { l1, l2, region, since:null, activityType:'driving' };
   }
   if(d.activityType==='walking'){
@@ -15242,7 +15458,7 @@ function famComposeStatusText(m){
     // "Since" timestamp (matches the reference app's 9th screenshot:
     // "Walking near Menin Drive" shows "0 km/h", not a start time).
     const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
-    const l2=speedKph!=null?`${famIcon('car')} ${speedKph} km/h`:'';
+    const l2=speedKph!=null?`${speedKph} km/h`:'';
     return { l1, l2, since:null, activityType:'walking', speedKph };
   }
   // stationary — ALWAYS show the real geocoded address, never a saved
@@ -15553,7 +15769,7 @@ function famLiveMemberDetail(m, isMe){
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
-        ${stayTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${esc(stayTxt)}</div>`:''}
+        ${stayTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${(txt.activityType==='driving'||txt.activityType==='walking')?famMotionStatusHtml(txt):esc(stayTxt)}</div>`:''}
         ${updatedTxt?`<div style="font-size:12px;color:var(--ink3);margin-top:5px;opacity:.82">${esc(updatedTxt)}</div>`:''}
         ${(famDevMode()||_drvDebugOverlayOn)?famSinceDiagLineHtml(m,txt,since):''}
       </div>
@@ -15651,7 +15867,7 @@ function famLivePaintMarkers(members, sel){
       MBMMap.setMarker(key,m._displayPos||[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
-         calloutL1:esc(txt.l1), calloutL2:txt.l2?esc(txt.l2):''},
+         calloutL1:esc(txt.l1), calloutL2:txt.l2?famMotionStatusHtml(txt):''},
         m.uid===_famSelUid, m.meta.tone,
         ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famFollow=true; _famFollowPausedByGesture=false; FamilyFollowController.reset(); famLiveApply(); famEnsureSheetVisible(); });
     } else {
