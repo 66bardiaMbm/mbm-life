@@ -31,7 +31,7 @@ data class LocationSampleEntity(
     val rejectionReason: String?
 )
 
-@Entity(tableName = "trips", indices = [Index("uid"), Index("status")])
+@Entity(tableName = "trips", indices = [Index("memberId"), Index("status")])
 data class TripEntity(
     @PrimaryKey val id: String,
     val memberId: String,
