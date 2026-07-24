@@ -41,14 +41,31 @@ jobs:
         working-directory: android-app
         run: ./gradlew --no-daemon testDebugUnitTest
 
-      - name: Assemble debug APK
+      - name: Restore stable APK signing key
+        env:
+          MBM_ANDROID_KEYSTORE_B64: ${{ secrets.MBM_ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$MBM_ANDROID_KEYSTORE_B64"
+          printf '%s' "$MBM_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbm-life-ci.p12"
+
+      - name: Assemble auth-fixed debug APK
         working-directory: android-app
+        env:
+          MBM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mbm-life-ci.p12
+          MBM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBM_ANDROID_KEYSTORE_PASSWORD }}
+          MBM_ANDROID_KEY_ALIAS: ${{ secrets.MBM_ANDROID_KEY_ALIAS }}
+          MBM_ANDROID_KEY_PASSWORD: ${{ secrets.MBM_ANDROID_KEY_PASSWORD }}
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Upload app-debug.apk
+      - name: Verify APK signing certificate
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload auth-fixed APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: app-debug-auth-fixed
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
