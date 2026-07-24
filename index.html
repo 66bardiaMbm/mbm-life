@@ -1781,7 +1781,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v367';
+const APP_VERSION='v367.1';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -12851,13 +12851,20 @@ const FamilyBackend = (function(){
       if(!ready()||!isMember())return;
       let q=roadReportsRef(familyId());
       try{
-        q=q.where('status','==','active')
-          .where('expiresAt','>',firebase.firestore.Timestamp.fromMillis(Date.now()))
+        // Production hotfix: the intended status+expiresAt compound query
+        // requires the composite index declared in firestore.indexes.json,
+        // but that index has not been deployed yet. expiresAt alone uses
+        // Firestore's automatic single-field index; status is filtered below.
+        q=q.where('expiresAt','>',firebase.firestore.Timestamp.fromMillis(Date.now()))
           .limit(150);
       }catch(e){}
       _unsub=q.onSnapshot(qs=>{
         const map=reportsMap(), seen={};
-        qs.forEach(d=>{seen[d.id]=true;map[d.id]=normalize(d.id,d.data());});
+        qs.forEach(d=>{
+          const data=d.data()||{};
+          if(data.status!=='active')return;
+          seen[d.id]=true;map[d.id]=normalize(d.id,data);
+        });
         Object.keys(map).forEach(id=>{if(!seen[id]&&map[id]&&map[id].expiresAtMs>Date.now())delete map[id];});
         try{persistDB();}catch(e){}
         afterChange();
@@ -13612,7 +13619,7 @@ function drvLiveBodyHtml(active,curSpeedKph,loc,lastSample){
    deriveStatus(), and they could disagree. Now there is only one
    implementation; both callers get identical answers by construction. */
 function drvLocationHealth(fb,uid){
-  const isSelf=(uid===myUid());
+  const isSelf=(uid===famAuthenticatedUid());
   if(isSelf && fb.location.locState){
     const selfLocState=fb.location.locState();
     return { isHealthy:['active','obtaining','requesting'].indexOf(selfLocState)>=0, isSelf, selfLocState };
@@ -15234,8 +15241,16 @@ const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving" (small gap 
 const FAM_ENTER_HYST_MS=10000;     // sustained movement before entering a new activity
 const FAM_DRIVE_EXIT_HYST_MS=90000;// traffic lights/slow traffic must not become Walking
 
+/* UI code lives outside FamilyBackend's closure, so it must never call that
+   closure's private myUid(). Resolve auth from the public Firebase mirror and
+   return null while auth is still bootstrapping. */
+function famAuthenticatedUid(){
+  return (typeof FB!=='undefined'&&FB&&FB.user&&FB.user.uid)?FB.user.uid:null;
+}
 function famClassifyRawActivity(m){
-  const localDriveOnly=m.uid===myUid()
+  if(!m||!m.uid)return 'offline';
+  const authUid=famAuthenticatedUid();
+  const localDriveOnly=!!authUid&&m.uid===authUid
     && typeof FamilyBackend!=='undefined'
     && FamilyBackend.location&&FamilyBackend.location.drivingTrackingEnabled
     && FamilyBackend.location.drivingTrackingEnabled();
