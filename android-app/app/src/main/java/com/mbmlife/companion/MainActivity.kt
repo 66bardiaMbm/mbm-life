@@ -138,7 +138,7 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
-            geolocationEnabled = false
+            setGeolocationEnabled(false)
             mediaPlaybackRequiresUserGesture = true
             allowFileAccess = false
             allowContentAccess = true
