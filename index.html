@@ -1781,7 +1781,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v367.4';
+const APP_VERSION='v367.5';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11454,46 +11454,35 @@ const FamilyBackend = (function(){
         }
       }
       uids.forEach(uid=>{
-        const u1=locRef(fid,uid).onSnapshot(snap=>{
-          if(snap.exists){
-            const incoming=Object.assign({uid},snap.data());
-            try{ Object.defineProperty(incoming,'_displayWriter',{value:'firestore.location.onSnapshot',enumerable:false}); }catch(e){}
-            let applyIncoming=true;
-          // For MY OWN doc, never let the round-tripped server value clobber a
-          // newer local GPS fix (that would snap the marker back). Keep whichever
-          // reportedAt is newer. Other members always take the server value.
-          if(uid===myUid()){
-            const localSt=locMap()[uid];
-            const lt=localSt&&localSt.reportedAt?Date.parse(localSt.reportedAt):0;
-            const it=incoming.reportedAt?Date.parse(incoming.reportedAt):0;
-            if(lt>it) applyIncoming=false;   // my local fix is newer — ignore stale echo, but still complete bootstrap
-            // CRITICAL FIX (found via deep trace of a repeatedly-reported
-            // "Since" freeze): reportedAt and stayStart are independent
-            // fields. The Firestore write is throttled to once per
-            // WRITE_THROTTLE_MS, so the write that happens to land during
-            // that window can carry a stayStart from BEFORE a relocation
-            // was confirmed locally (the pending-jump window), even though
-            // its reportedAt is legitimately "newer" than what was last
-            // synced. Applying that incoming doc wholesale would silently
-            // roll the correctly-updated LOCAL stayStart backward in time.
-            // Since stayStart only ever moves forward for a genuine
-            // relocation (never backward — see classifyMovement), this is
-            // always safe to enforce: never let it regress for own-uid.
-            if(applyIncoming&&localSt&&localSt.stayStart&&incoming.stayStart){
-              if(Date.parse(incoming.stayStart)<Date.parse(localSt.stayStart)){
-                incoming.stayStart=localSt.stayStart;
-              }
+        const isLocalUid=uid===myUid();
+        let u1=null;
+        if(isLocalUid){
+          // The signed-in device has exactly one authoritative marker source:
+          // geolocation.watchPosition → writeMyFix → local mirror. We still
+          // upload that state to Firestore, but deliberately do not subscribe
+          // to its echoed location document, so a round trip can never move
+          // the same local marker.
+          myLocInitial=true;
+          diag('marker-source',{source:'firestore',accepted:false,reason:'local-user-location-listener-disabled',uid});
+          finishOwnBootstrap();
+        }else{
+          // Other family members remain Firestore-driven.
+          u1=locRef(fid,uid).onSnapshot(snap=>{
+            if(snap.exists){
+              const incoming=Object.assign({uid},snap.data());
+              try{ Object.defineProperty(incoming,'_displayWriter',{value:'firestore.location.onSnapshot',enumerable:false}); }catch(e){}
+              locMap()[uid]=incoming;
+              persistDB&&persistDB();
+              afterChange();
             }
-          }
-            if(applyIncoming){ locMap()[uid]=incoming; persistDB&&persistDB(); afterChange(); }
-          }
-          if(uid===myUid()){ myLocInitial=true; finishOwnBootstrap(); }
-        },e=>{ if(uid===myUid()){ _remoteBootstrapFailed=true; myLocInitial=true; finishOwnBootstrap(); } showSyncError('location listener',e); });
+          },e=>showSyncError('location listener',e));
+        }
         const u2=consentLocRef(fid,uid).onSnapshot(snap=>{
           if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); afterChange(); }
           if(uid===myUid()){ myConsentInitial=true; finishOwnBootstrap(); }
         },e=>{ if(uid===myUid()){ _remoteBootstrapFailed=true; myConsentInitial=true; finishOwnBootstrap(); } showSyncError('consent listener',e); });
-        _locUnsubs.push(u1,u2);
+        if(u1)_locUnsubs.push(u1);
+        _locUnsubs.push(u2);
       });
       // Defensive: malformed/legacy family docs without my uid must not leave
       // local driving permanently blocked.
@@ -15101,6 +15090,14 @@ const _famMarkerUpdateLog=[];
    per genuinely new fix, so a 30-second label refresh cannot inch the marker
    toward the same coordinate and stationary accuracy noise stays invisible. */
 function famMarkerUpdateDiag(entry){
+  const authUid=famAuthenticatedUid();
+  const rawSource=String(entry&&entry.source||'');
+  entry.source=(rawSource.indexOf('firestore')>=0||(authUid&&entry.uid!==authUid))?'firestore':'local-gps';
+  if(entry.rawCoordinate){
+    entry.latitude=entry.rawCoordinate[0];
+    entry.longitude=entry.rawCoordinate[1];
+  }
+  if(!entry.timestamp)entry.timestamp=new Date().toISOString();
   _famMarkerUpdateLog.push(entry);
   if(_famMarkerUpdateLog.length>200)_famMarkerUpdateLog.shift();
   try{console.debug('[fam-marker]',entry);}catch(e){}
