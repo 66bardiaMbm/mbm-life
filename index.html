@@ -1781,7 +1781,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v367.2';
+const APP_VERSION='v367.3';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -15150,6 +15150,13 @@ function famDisplayPosition(m){
     prev.pending=null;
     return reject('rejected-overlapping-accuracy-radius');
   }
+  // A directionally consistent GPS drift is still only noise while the
+  // authoritative movement pipeline says stationary. Do not move the
+  // displayed marker at all until real movement has been established.
+  if(!movementHint){
+    prev.pending=null;
+    return reject('rejected-stationary-lock');
+  }
 
   // An outside-dead-zone coordinate is only a candidate. Stationary GPS
   // multipath commonly bounces between nearby points, so require fixes that
@@ -15434,12 +15441,9 @@ function famHereForDuration(since){
   return since?famDurSince(since):'';
 }
 function famStayDetailLine(since){
-  const duration=famHereForDuration(since);
-  if(!duration)return '';
+  if(!since)return '';
   const clock=famAbsTime(since);
-  return L==='fa'
-    ? `اینجا برای ${duration}${clock?` · از ${clock}`:''}`
-    : `Here for ${duration}${clock?` · Since ${clock}`:''}`;
+  return clock?(L==='fa'?`از ${clock}`:`Since ${clock}`):'';
 }
 function famGpsUpdatedLine(state){
   const at=state&&(state.reportedAt||state.capturedAt);
