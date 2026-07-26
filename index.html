@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v368.0-v360base';
+const APP_VERSION='v369';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10822,73 +10822,177 @@ const FamilyBackend = (function(){
     function coarsen(lat,lng){ const f=Math.pow(10,APPROX_DP); return {lat:Math.round(lat*f)/f, lng:Math.round(lng*f)/f}; }
 
     /* Movement + stay detection from previous cached state → this fix. */
+    /* ══════════════════════════════════════════════════════════════════
+       PRESENCE STATE MACHINE — replaces the old single-timestamp
+       "classifyMovement" approach, which conflated several distinct
+       real-world questions into one _pendingJumpFrom/stayStart pair with
+       a hard 120-second confirmation window. That window is exactly why
+       "left home and came back today" failed: if the confirming fix
+       didn't land within 2 minutes of the departure fix (very likely —
+       fixes are irregular, the app can background, the person can be gone
+       for hours), the code fell through to comparing the CURRENT fix
+       against the ORIGINAL pre-departure anchor. If the person had
+       returned to that same original spot, that comparison found "not far
+       from the anchor" and silently kept the OLD stayStart — exactly the
+       "Since 18:31 / Here for 21 hr" bug from a real device.
+
+       This machine tracks five DISTINCT timestamps, never conflated:
+         - lastGpsRequestAt   : when a fix was last REQUESTED (pending or not)
+         - lastAcceptedFixAt  : when a fix was last ACCEPTED (passed accuracy/consent checks)
+         - placeArrivedAt     : when the CURRENT anchor point was first reached
+         - stayStart          : alias of placeArrivedAt, kept for existing readers
+         - lastDepartureAt    : when we last confirmed the person LEFT the previous anchor
+
+       Departure/return logic:
+         - "away" is judged by distance from the anchor, weighted by the
+           fix's OWN reported accuracy (a low-accuracy fix near the anchor
+           radius must not be treated as a confident departure).
+         - Departure is CONFIRMED once accepted fixes show the person
+           consistently outside the anchor radius for AWAY_CONFIRM_MS,
+           not by a single two-fix jump/confirm pair with a fixed window.
+         - Once departure is confirmed, the anchor is cleared (uncertain
+           state) until the person is next found STEADY (little net
+           movement) near some point for STEADY_CONFIRM_MS — that moment
+           becomes the NEW placeArrivedAt/stayStart, regardless of how
+           long they were away or how much time passed since departure.
+       ══════════════════════════════════════════════════════════════════ */
+    const AWAY_CONFIRM_MS   = 90*1000;   // accepted fixes must show "away" for this long before departure is confirmed
+    const STEADY_CONFIRM_MS = 60*1000;   // accepted fixes must show "steady near one point" for this long before a NEW stay is confirmed
+    const STEADY_RADIUS_M   = 60;        // "steady" = net movement under this, across the steady-confirmation window
+
+    function accuracyAdjustedRadius(fixAccuracyM){
+      // A low-accuracy fix needs a wider berth before we trust a distance
+      // reading against it — otherwise normal GPS jitter on a poor fix
+      // could look like a confirmed departure or a confirmed return.
+      const base=MOVE_MIN_M;
+      if(fixAccuracyM==null||isNaN(fixAccuracyM)) return base;
+      return Math.max(base, fixAccuracyM*1.5);
+    }
+
     function classifyMovement(prev, fix){
-      // Honest "here since" logic:
-      //  - First-ever fix: stayStart = now (just arrived, as far as we know).
-      //  - Same place (moved < MOVE_MIN_M since the previous fix): KEEP the
-      //    existing stayStart — this is what makes "Here for 11 hrs" survive
-      //    every GPS callback instead of resetting on jitter or refresh.
-      //  - Apparent relocation (moved >= MOVE_MIN_M from the previous fix):
-      //    do NOT commit immediately. A single noisy/multipath GPS fix
-      //    (common indoors or in dense areas) can register a false 40m+
-      //    jump that snaps back on the very next fix — committing on one
-      //    outlier fix was silently resetting the real "Since" time to a
-      //    wrong moment. Instead, require the NEXT fix to ALSO be far from
-      //    the ORIGINAL (pre-jump) position before treating it as a real
-      //    relocation — REGARDLESS of whether that confirming fix is ALSO
-      //    far from the immediately-preceding fix (see bugfix note below).
+      const nowAt=fix.capturedAt;
       if(!prev || prev.lat==null){
-        return { moving:false, stayStart: fix.capturedAt };
+        // First-ever fix for this member: nothing to compare against yet.
+        return {
+          moving:false,
+          stayStart:nowAt, placeArrivedAt:nowAt,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:null,
+          _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:nowAt}
+        };
       }
-      const d = haversine({lat:prev.lat,lng:prev.lng},{lat:fix.lat,lng:fix.lng});
-      // BUGFIX (repeatedly reported "Since" freezes forever): confirming a
-      // pending jump previously required BOTH (a) this fix be >=MOVE_MIN_M
-      // from the immediately-preceding fix AND (b) >=MOVE_MIN_M from the
-      // original pre-jump point. But the overwhelmingly common real case is
-      // "drove somewhere and parked" — the person is NOT moving anymore by
-      // the time the confirming fix arrives, so (a) is false even though
-      // they genuinely did relocate. This check must ONLY be about (b):
-      // are they still far from where they used to be, not are they
-      // currently in motion. Checked FIRST, before the d>=MOVE_MIN_M gate,
-      // so a stationary-at-the-new-place confirming fix isn't skipped.
-      if(prev._pendingJumpFrom){
-        const pendingAgeMs = Date.parse(fix.capturedAt) - Date.parse(prev.capturedAt||fix.capturedAt);
-        const dFromOriginal = haversine({lat:prev._pendingJumpFrom.lat,lng:prev._pendingJumpFrom.lng},{lat:fix.lat,lng:fix.lng});
-        if(pendingAgeMs>0 && pendingAgeMs<=120000){
-          if(dFromOriginal >= MOVE_MIN_M){
-            // Confirmed real relocation — whether still moving or already
-            // stopped at the new spot, they are genuinely no longer at the
-            // original place, so the new stayStart starts now.
-            return { moving: d>=MOVE_MIN_M, stayStart: fix.capturedAt };
-          }
-          // Snapped back near the original spot — the jump was noise.
-          return { moving:false, stayStart: prev._pendingJumpFrom.stayStart || prev.stayStart || fix.capturedAt };
+      const presence=prev._presence||{anchorLat:prev.lat,anchorLng:prev.lng,state:'steady',since:prev.stayStart||prev.capturedAt||nowAt};
+      const radius=accuracyAdjustedRadius(fix.accuracy!=null?fix.accuracy:prev.accuracy);
+      const dFromAnchor=haversine({lat:presence.anchorLat,lng:presence.anchorLng},{lat:fix.lat,lng:fix.lng});
+      const isAwayNow=dFromAnchor>=radius;
+
+      if(presence.state==='steady'){
+        if(!isAwayNow){
+          // Still near the known anchor — ordinary fix, stay untouched.
+          return {
+            moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+            _presence:presence
+          };
         }
-        // BUGFIX: confirmation window expired (e.g. app was closed and
-        // reopened much later) — this must NOT silently fall through to
-        // comparing against `prev` (the stale, still-unconfirmed mid-jump
-        // position), because if the new fix happens to be close to THAT
-        // (not the true original position), the outer d>=MOVE_MIN_M gate
-        // below would also fail, leaving stayStart stuck on the old
-        // pre-jump value with no pending-jump tracking re-established at
-        // all — a permanent freeze. Instead, resolve directly against the
-        // TRUE original position (_pendingJumpFrom), same question as
-        // above, just without the time constraint.
-        if(dFromOriginal >= MOVE_MIN_M){
-          return { moving: d>=MOVE_MIN_M, stayStart: fix.capturedAt };
+        // First sign of leaving the anchor — start the "leaving" candidate,
+        // but do NOT clear stayStart yet: a single noisy fix must not undo
+        // an otherwise-confirmed stay. Real departure is confirmed only if
+        // accepted fixes keep reporting "away" for AWAY_CONFIRM_MS.
+        return {
+          moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+          _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
+        };
+      }
+
+      if(presence.state==='leaving'){
+        if(!isAwayNow){
+          // Snapped back near the anchor before departure was ever
+          // confirmed — this was GPS noise, not a real trip. Return to
+          // steady at the SAME anchor/stayStart, nothing changes.
+          return {
+            moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+            _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
+          };
         }
-        return { moving:false, stayStart: prev._pendingJumpFrom.stayStart || prev.stayStart || fix.capturedAt };
+        const awayMs=Date.parse(nowAt)-Date.parse(presence.since);
+        if(awayMs>=AWAY_CONFIRM_MS){
+          // Departure CONFIRMED: accepted fixes have shown "away from the
+          // old anchor" continuously for long enough. The old stay is over
+          // — mark the departure time and move into "away" (uncertain,
+          // no valid anchor) until a new steady point is found. This is
+          // what correctly handles "gone all day, came back this evening":
+          // there is no 2-minute window requirement anywhere in this path.
+          console.debug('[presence] departure detected', {
+            previousStayCoord:{lat:presence.anchorLat,lng:presence.anchorLng},
+            currentCoord:{lat:fix.lat,lng:fix.lng},
+            distanceM:dFromAnchor, oldStayStart:prev.stayStart, newStayStart:null
+          });
+          return {
+            moving:true, stayStart:null, placeArrivedAt:null,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:presence.since,
+            _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'away',since:nowAt,departedAt:presence.since}
+          };
+        }
+        // Still within the confirmation window — keep waiting, old stay
+        // (and its real stayStart) is still technically intact.
+        return {
+          moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+          _presence:presence
+        };
       }
-      if(d >= MOVE_MIN_M){
-        // First fix showing the jump — mark it pending, do NOT reset
-        // stayStart yet. Real relocations get confirmed on the next fix
-        // within a few seconds (per the check above, regardless of
-        // whether that confirming fix is itself still moving).
-        return { moving:false, stayStart: prev.stayStart || prev.capturedAt || fix.capturedAt,
-                 _pendingJumpFrom:{lat:prev.lat,lng:prev.lng,stayStart:prev.stayStart||prev.capturedAt} };
+
+      // presence.state === 'away': departure is confirmed, no valid anchor.
+      // We are now looking for the FIRST steady point to become the new
+      // stay — judged by NET movement over STEADY_CONFIRM_MS, not by
+      // comparing against the old (now-irrelevant) anchor at all. This is
+      // the fix for the exact reported bug: returning to the same
+      // building as yesterday must NOT reuse yesterday's stayStart, since
+      // presence.state is 'away' and there is no anchor to "snap back" to
+      // — a brand new steady period is required regardless of location.
+      if(!presence.candidateLat){
+        return {
+          moving:true, stayStart:null, placeArrivedAt:null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt})
+        };
       }
-      // Still within the same spot — never touch stayStart on ordinary fixes.
-      return { moving:false, stayStart: prev.stayStart || prev.capturedAt || fix.capturedAt };
+      const dFromCandidate=haversine({lat:presence.candidateLat,lng:presence.candidateLng},{lat:fix.lat,lng:fix.lng});
+      if(dFromCandidate>=STEADY_RADIUS_M){
+        // Still moving around (still "away") — reset the candidate to
+        // this newest point and keep waiting for a genuinely steady spell.
+        return {
+          moving:true, stayStart:null, placeArrivedAt:null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt})
+        };
+      }
+      const candidateMs=Date.parse(nowAt)-Date.parse(presence.candidateSince);
+      if(candidateMs>=STEADY_CONFIRM_MS){
+        // NEW arrival confirmed: steady near one point for long enough.
+        // This is a genuinely NEW stayStart — the exact moment the
+        // steady period began, never today's "now" and never yesterday's
+        // old value.
+        console.debug('[presence] return detected (new stay confirmed)', {
+          currentCoord:{lat:presence.candidateLat,lng:presence.candidateLng},
+          oldStayStart:prev.stayStart, newStayStart:presence.candidateSince,
+          lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          source:fix.source||'gps'
+        });
+        return {
+          moving:false, stayStart:presence.candidateSince, placeArrivedAt:presence.candidateSince,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          _presence:{anchorLat:presence.candidateLat,anchorLng:presence.candidateLng,state:'steady',since:presence.candidateSince}
+        };
+      }
+      // Still confirming the new steady spell — not there yet.
+      return {
+        moving:true, stayStart:null, placeArrivedAt:null,
+        lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+        _presence:presence
+      };
     }
 
     /* ── local cache accessors (mirror) ── */
@@ -10919,6 +11023,7 @@ const FamilyBackend = (function(){
 
     /* ── WRITE a fix for myself (called by the Stage-3 foreground watcher).
        Applies consent (approx vs precise), movement/stay, route append. ── */
+    let _lastGpsRequestAt=null; // set the MOMENT any GPS request is made (pending or not) — distinct from lastAcceptedFixAt, never implies a fix was received
     async function writeMyFix(raw){
       if(!ready()||!isMember())return;
       const c=myConsent();
@@ -10928,14 +11033,24 @@ const FamilyBackend = (function(){
       if(c.precise===false){ const q=coarsen(lat,lng); lat=q.lat; lng=q.lng; }
       const capturedAt=raw.capturedAt||nowISO();
       const prev=memberState(uid);
-      const mv=classifyMovement(prev,{lat,lng,capturedAt});
+      // Log: GPS fix accepted, with the exact inputs used for presence
+      // classification (accuracy included — this is what departure/return
+      // detection weighs against MOVE_MIN_M).
+      console.debug('[presence] fix accepted', {uid, lat, lng, accuracy:raw.accuracy, prevLat:prev&&prev.lat, prevLng:prev&&prev.lng, prevStayStart:prev&&prev.stayStart, source:raw.source});
+      const mv=classifyMovement(prev,{lat,lng,capturedAt,accuracy:raw.accuracy,source:raw.source});
+      if(prev && prev.stayStart!==mv.stayStart){
+        console.debug('[presence] stayStart changed', {uid, oldStayStart:prev.stayStart, newStayStart:mv.stayStart, lastDepartureAt:mv.lastDepartureAt, presenceState:mv._presence&&mv._presence.state});
+      }
       const state={ uid, lat, lng,
         accuracy:(c.precise===false?null:(raw.accuracy!=null?raw.accuracy:null)),
         capturedAt, source:raw.source||'gps',
         heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
-        moving:mv.moving, stayStart:mv.stayStart, _pendingJumpFrom:mv._pendingJumpFrom||null,
+        moving:mv.moving, stayStart:mv.stayStart, placeArrivedAt:mv.placeArrivedAt,
+        lastAcceptedFixAt:mv.lastAcceptedFixAt, lastDepartureAt:mv.lastDepartureAt,
+        _presence:mv._presence||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
-        permission:'granted', reportedAt:nowISO() };
+        permission:'granted', reportedAt:nowISO(),
+        lastGpsRequestAt:_lastGpsRequestAt||null };
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
       // route breadcrumb (only on meaningful movement, precise mode only)
       if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt,speedMps:state.speed}); }
@@ -11215,17 +11330,19 @@ const FamilyBackend = (function(){
     /* Force a brand-new high-accuracy GPS fix RIGHT NOW (never cached). */
     function requestFreshFix(opts){
       opts=opts||{};
-      if(!('geolocation' in navigator)){ setLocState('unavailable'); diag('freshfix','no geolocation'); if(opts.cb)opts.cb(null); return; }
+      _lastGpsRequestAt=nowISO();
+      console.debug('[presence] GPS request started', {at:_lastGpsRequestAt, via:'requestFreshFix'});
+      if(!('geolocation' in navigator)){ setLocState('unavailable'); diag('freshfix','no geolocation'); console.debug('[presence] GPS request rejected: no geolocation API'); if(opts.cb)opts.cb(null); return; }
       const c=myConsent();
-      if(!c.enabled||c.paused){ diag('freshfix','no consent'); if(opts.cb)opts.cb(null); return; }
+      if(!c.enabled||c.paused){ diag('freshfix','no consent'); console.debug('[presence] GPS request rejected: no consent'); if(opts.cb)opts.cb(null); return; }
       setLocState('obtaining'); diag('freshfix','requesting getCurrentPosition');
       try{
         navigator.geolocation.getCurrentPosition(
-          pos=>{ _lastWriteAt=0; onFix(pos); diag('freshfix','ok'); if(opts.cb)opts.cb(pos); },
-          err=>{ onFixErr(err); diag('freshfix','err '+(err&&err.code)); if(opts.cb)opts.cb(null); },
+          pos=>{ _lastWriteAt=0; console.debug('[presence] GPS fix accepted from request', {accuracy:pos&&pos.coords&&pos.coords.accuracy}); onFix(pos); diag('freshfix','ok'); if(opts.cb)opts.cb(pos); },
+          err=>{ console.debug('[presence] GPS request rejected', {code:err&&err.code, message:err&&err.message}); onFixErr(err); diag('freshfix','err '+(err&&err.code)); if(opts.cb)opts.cb(null); },
           { enableHighAccuracy:true, timeout:opts.timeout||20000, maximumAge:0 }
         );
-      }catch(e){ diag('freshfix','throw'); setLocState('unavailable'); if(opts.cb)opts.cb(null); }
+      }catch(e){ diag('freshfix','throw'); console.debug('[presence] GPS request threw', e); setLocState('unavailable'); if(opts.cb)opts.cb(null); }
     }
 
     function startWatch(){
@@ -11235,6 +11352,8 @@ const FamilyBackend = (function(){
       initBattery();
       const c=myConsent();
       setLocState('obtaining'); diag('watch','starting watchPosition');
+      _lastGpsRequestAt=nowISO();
+      console.debug('[presence] GPS watch started', {at:_lastGpsRequestAt});
       try{
         _watchId=navigator.geolocation.watchPosition(onFix,onFixErr,{
           enableHighAccuracy: c.precise!==false,
@@ -14609,6 +14728,7 @@ const _famActivityCache={}; // uid -> {activityType, activityStartedAt, currentP
 const FAM_WALK_MAX_MS=2.3;   // m/s — ~8.3 km/h ceiling for "walking"
 const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving" (small gap vs walk ceiling = hysteresis band)
 const FAM_HYST_MS=15000;     // candidate activity must hold for 15s before committing
+const STALE_PRESENCE_MS=45*60*1000; // beyond this fix age, "Since"/"Here for" is shown as "Last confirmed" instead of an unqualified live claim
 
 function famClassifyRawActivity(m){
   if(!m.consent||!m.consent.enabled) return 'offline';
@@ -14802,6 +14922,19 @@ function famComposeStatusText(m){
   // NOTE: famLocationLines already formats line1 as "Near <road>" (or the
   // real address) — do not prepend "Near"/"نزدیک" again here, that was
   // producing "Near Near Pirie Street".
+  // Requirement #6: a "Since"/"Here for" claim is only meaningful if it's
+  // backed by a RECENT accepted fix — if the last accepted fix is old
+  // (app was closed a long time, GPS genuinely stopped delivering), do not
+  // silently keep presenting yesterday's stay as still-confirmed. This is
+  // display-layer honesty only — it does not touch the real stayStart
+  // value itself (that's still correctly owned by classifyMovement).
+  const lastFixAt=Date.parse(s.reportedAt||s.capturedAt||'');
+  const fixAgeMs=isNaN(lastFixAt)?Infinity:(Date.now()-lastFixAt);
+  const isStale=fixAgeMs>STALE_PRESENCE_MS;
+  if(isStale && since2){
+    const lastConfirmed=L==='fa'?`آخرین تأیید: ${famAbsTime(s.reportedAt||s.capturedAt)}`:`Last confirmed: ${famAbsTime(s.reportedAt||s.capturedAt)}`;
+    return { l1:lines.line1, region:lines.line2||'', l2:lastConfirmed, calloutL2:lastConfirmed, since:null, activityType:'stationary', place:!!d.currentPlaceId, stale:true };
+  }
   return {
     l1:lines.line1, region:lines.line2||'',
     l2:famSinceOrHereFor(since2),
