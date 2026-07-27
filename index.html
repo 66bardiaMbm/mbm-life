@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v374';
+const APP_VERSION='v377';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10884,6 +10884,17 @@ const FamilyBackend = (function(){
         : null;
       if(!prev || prev.lat==null){
         // First-ever fix for this member: nothing to compare against yet.
+        // DIAGNOSTIC: this branch has been repeatedly suspected of firing
+        // incorrectly right at app-open time even when real persisted
+        // data should exist. Log exactly what 'prev' looked like at this
+        // moment (undefined vs an object with a missing lat) so a future
+        // report can distinguish "no record at all" from "record present
+        // but malformed" instead of guessing.
+        console.debug('[presence] FIRST-FIX BRANCH TRIGGERED',{
+          prevWasNull:prev==null, prevValue:prev,
+          dbEntitiesFamLocationsExists:(typeof DB!=='undefined'&&DB.entities)?!!DB.entities.famLocations:'DB undefined',
+          fix:{lat:fix.lat,lng:fix.lng,capturedAt:fix.capturedAt}
+        });
         return {
           moving:false,
           stayStart:nowAt, placeArrivedAt:nowAt,
@@ -15538,6 +15549,18 @@ const FamGeo = (function(){
           if(res && (res.address || res.display_name)){
             const f=format(res.address, res.display_name);
             cache[k]={ line1:f.line1, line2:f.line2, full:f.full, ts:Date.now(), lat:job.lat, lng:job.lng };
+            // Minimal diagnostic (per explicit request): raw query
+            // coordinate, geocoder's raw address object, and the returned
+            // house_number — enough to actually measure a discrepancy
+            // between the queried GPS point and the resolved address next
+            // time, instead of asserting one without evidence.
+            console.debug('[FamGeo.diag]',{
+              queryLat:job.lat, queryLng:job.lng,
+              returnedHouseNumber:(res.address&&res.address.house_number)||null,
+              returnedRoad:(res.address&&res.address.road)||null,
+              rawAddress:res.address||null,
+              displayName:res.display_name||null
+            });
           }
         })
         .catch(()=>{ /* keep whatever we had; no fabricated address */ })
@@ -15829,8 +15852,17 @@ function famLivePaintMarkers(members, sel){
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
   if(sel&&sel.state&&sel.state.lat!=null && _famLastCentredUid!==sel.uid){
-    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true});
+    const isViewingSelf=(typeof FB!=='undefined'&&FB.user&&FB.user.uid===sel.uid);
+    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true, follow:isViewingSelf});
     _famLastCentredUid=sel.uid;
+  } else if(sel&&sel.state&&sel.state.lat!=null && typeof FB!=='undefined'&&FB.user&&FB.user.uid===sel.uid){
+    // Already centred once on the local user — keep FOLLOWING as their
+    // position keeps updating (every live fix), instead of leaving the
+    // camera fixed at wherever it happened to be when first selected. This
+    // is what makes the visible map background actually track a live
+    // drive, matching the marker/address text (which already update on
+    // every fix) instead of drifting apart from a stale pan position.
+    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{follow:true});
   }
   const myForDrive=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
   const mineForDrive=myForDrive?members.find(m=>m.uid===myForDrive):null;
