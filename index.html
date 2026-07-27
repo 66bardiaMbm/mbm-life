@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v369';
+const APP_VERSION='v371';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10859,6 +10859,8 @@ const FamilyBackend = (function(){
     const AWAY_CONFIRM_MS   = 90*1000;   // accepted fixes must show "away" for this long before departure is confirmed
     const STEADY_CONFIRM_MS = 60*1000;   // accepted fixes must show "steady near one point" for this long before a NEW stay is confirmed
     const STEADY_RADIUS_M   = 60;        // "steady" = net movement under this, across the steady-confirmation window
+    const UNCERTAIN_GAP_MS  = 20*60*1000; // if the PRIOR fix was more than this long ago, presence through that gap cannot be confirmed — MUST match the display layer's copy of this same constant (famComposeStatusText's scope) exactly.
+    const FIX_CADENCE_CREDIT_CAP_MS = 30*1000; // a fix-to-fix gap wider than this is too sparse to credit toward reconfirmation accumulation — real watchPosition cadence is normally much tighter than this while the app is foregrounded
 
     function accuracyAdjustedRadius(fixAccuracyM){
       // A low-accuracy fix needs a wider berth before we trust a distance
@@ -10871,26 +10873,141 @@ const FamilyBackend = (function(){
 
     function classifyMovement(prev, fix){
       const nowAt=fix.capturedAt;
+      // Pure informational fact, fed into every branch's return value below
+      // UNCHANGED — this does not alter stayStart, _presence, or any
+      // departure/return decision. It exists ONLY so the display layer can
+      // honestly show "Presence unconfirmed" instead of implying
+      // continuity through a gap where no data exists. See
+      // famComposeStatusText's stationary branch for where this is used.
+      const priorFixGapMs=(prev&&(prev.lastAcceptedFixAt||prev.capturedAt))
+        ? Date.parse(nowAt)-Date.parse(prev.lastAcceptedFixAt||prev.capturedAt)
+        : null;
       if(!prev || prev.lat==null){
         // First-ever fix for this member: nothing to compare against yet.
         return {
           moving:false,
           stayStart:nowAt, placeArrivedAt:nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:null, priorFixGapMs:null,
           _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:nowAt}
         };
       }
+      // NOTE: a "gap-awareness" check that RESET stayStart/_presence based
+      // on this gap was tried here and reverted. It broke the far more
+      // common case: a person sitting still at home all evening, only
+      // opening the app every 20-30+ minutes, would have their stayStart
+      // silently reset every time — never accumulating a real multi-hour
+      // "Here for", which is worse than the bug it aimed to fix. The truth
+      // is this cannot be resolved by JS heuristics on GPS DATA alone:
+      // while the app is backgrounded (foreground-only PWA limitation —
+      // see shouldWatch()), there is no fix at all, so no algorithm here
+      // can distinguish "genuinely still here the whole time" from "left
+      // and came back during the gap" without more information than
+      // exists. This requires continuous background tracking (a native
+      // app) to RECONSTRUCT what actually happened — it is not attempted
+      // here. What IS done here (and only here) is exposing priorFixGapMs
+      // so the UI can be honest about the uncertainty instead of silently
+      // implying confirmed continuity — see famComposeStatusText.
       const presence=prev._presence||{anchorLat:prev.lat,anchorLng:prev.lng,state:'steady',since:prev.stayStart||prev.capturedAt||nowAt};
       const radius=accuracyAdjustedRadius(fix.accuracy!=null?fix.accuracy:prev.accuracy);
       const dFromAnchor=haversine({lat:presence.anchorLat,lng:presence.anchorLng},{lat:fix.lat,lng:fix.lng});
       const isAwayNow=dFromAnchor>=radius;
+      // STICKY UNCERTAINTY: a large gap just before this fix means we
+      // cannot confirm continuous presence through it — but that
+      // uncertainty must not vanish the moment a single fresh fix arrives
+      // (the previous version's bug: priorFixGapMs shrinks on the very
+      // next fix, silently un-flagging the uncertainty while stayStart is
+      // still the stale pre-gap value). Once flagged, uncertainty is only
+      // cleared by STEADY_CONFIRM_MS of CONTINUOUS accepted fixes staying
+      // near the position where the gap ended — at which point stayStart
+      // becomes the timestamp of the FIRST post-gap fix, never the old
+      // pre-gap value and never fabricated as "now".
+      const hadPriorGap=priorFixGapMs!=null && priorFixGapMs>UNCERTAIN_GAP_MS;
+      if(presence.state==='steady' && hadPriorGap && !presence.uncertainSince){
+        console.debug('[presence] gap exceeded threshold — marking uncertain (sticky) and starting re-confirmation window',{priorFixGapMs,anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng}});
+        return {
+          moving:isAwayNow, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+          _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence.since,
+                     uncertainSince:nowAt, reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:0}
+        };
+      }
+      if(presence.state==='steady' && presence.uncertainSince){
+        // Already flagged uncertain from an earlier gap. Two genuinely
+        // different things can happen next, and they must NOT be
+        // conflated:
+        //   (a) the person is still near the ORIGINAL anchor (never
+        //       actually left) — this is the "was I here the whole time"
+        //       question, resolved by accumulating close-together fixes.
+        //   (b) the person is now clearly AWAY from the original anchor —
+        //       this is a REAL departure, and must fall through to the
+        //       exact same leaving/away detection used everywhere else,
+        //       not get stuck forever "restarting a reconfirm timer"
+        //       against whatever point they happen to be at. The earlier
+        //       version measured distance from a reconfirm point that
+        //       itself gets replaced every fix, so a genuine departure
+        //       just silently looked like "still resetting", and a real
+        //       trip (like leaving for work) never triggered proper
+        //       departure/AWAY_CONFIRM_MS logic at all.
+        if(isAwayNow){
+          console.debug('[presence] departure while uncertain — falling through to real leaving/away detection',{anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng},distanceM:dFromAnchor});
+          return {
+            moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
+          };
+        }
+        // Still near the ORIGINAL anchor — this is the "was I here the
+        // whole time" question. Reconfirmation must be built from an
+        // ACCUMULATION of small, back-to-back gaps between consecutive
+        // fixes — never from wall-clock time elapsed since a single
+        // earlier fix (a SINGLE fix landing once, any amount of time
+        // later, would otherwise trivially "reconfirm" with zero real
+        // evidence of continuous presence in between).
+        const dFromReconfirm=haversine({lat:presence.reconfirmLat||presence.anchorLat,lng:presence.reconfirmLng||presence.anchorLng},{lat:fix.lat,lng:fix.lng});
+        const thisGapMs=priorFixGapMs!=null?priorFixGapMs:Infinity;
+        const isCloseFollowUp=thisGapMs<=FIX_CADENCE_CREDIT_CAP_MS;
+        if(dFromReconfirm>=radius || !isCloseFollowUp){
+          // Moved a bit within the anchor radius but away from the exact
+          // reconfirm point, OR this fix arrived too long after the
+          // previous one to credit — restart the accumulator at this
+          // fix, but keep the ORIGINAL anchor unchanged (still needed to
+          // detect a real departure on a future fix).
+          return {
+            moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            _presence:Object.assign({},presence,{reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:0})
+          };
+        }
+        const priorAccum=presence.reconfirmAccumMs||0;
+        const newAccum=priorAccum+thisGapMs; // only THIS fix's own close gap is credited, never wall-clock-since-start
+        if(newAccum>=STEADY_CONFIRM_MS){
+          // Continuity genuinely reconfirmed: an ACCUMULATION of real,
+          // close-together fix-to-fix gaps (not a single distant data
+          // point) adds up to at least STEADY_CONFIRM_MS near the SAME
+          // spot since the gap ended. "Here for" now counts from the
+          // FIRST post-gap fix (presence.uncertainSince), not the stale
+          // pre-gap stayStart — this is the actual new stay.
+          console.debug('[presence] uncertainty cleared — continuity reconfirmed via accumulated close-together fixes',{oldStayStart:prev.stayStart,newStayStart:presence.uncertainSince,accumulatedMs:newAccum});
+          return {
+            moving:false, stayStart:presence.uncertainSince, placeArrivedAt:presence.uncertainSince,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence.uncertainSince}
+          };
+        }
+        // Still accumulating — stay flagged uncertain, keep the running total.
+        return {
+          moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+          _presence:Object.assign({},presence,{reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:newAccum})
+        };
+      }
 
       if(presence.state==='steady'){
         if(!isAwayNow){
           // Still near the known anchor — ordinary fix, stay untouched.
           return {
             moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:presence
           };
         }
@@ -10900,7 +11017,7 @@ const FamilyBackend = (function(){
         // accepted fixes keep reporting "away" for AWAY_CONFIRM_MS.
         return {
           moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
         };
       }
@@ -10912,7 +11029,7 @@ const FamilyBackend = (function(){
           // steady at the SAME anchor/stayStart, nothing changes.
           return {
             moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
           };
         }
@@ -10931,7 +11048,7 @@ const FamilyBackend = (function(){
           });
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:presence.since,
+            lastAcceptedFixAt:nowAt, lastDepartureAt:presence.since, priorFixGapMs,
             _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'away',since:nowAt,departedAt:presence.since}
           };
         }
@@ -10939,7 +11056,7 @@ const FamilyBackend = (function(){
         // (and its real stayStart) is still technically intact.
         return {
           moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:presence
         };
       }
@@ -10955,7 +11072,7 @@ const FamilyBackend = (function(){
       if(!presence.candidateLat){
         return {
           moving:true, stayStart:null, placeArrivedAt:null,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
           _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt})
         };
       }
@@ -10965,7 +11082,7 @@ const FamilyBackend = (function(){
         // this newest point and keep waiting for a genuinely steady spell.
         return {
           moving:true, stayStart:null, placeArrivedAt:null,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
           _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt})
         };
       }
@@ -10983,14 +11100,14 @@ const FamilyBackend = (function(){
         });
         return {
           moving:false, stayStart:presence.candidateSince, placeArrivedAt:presence.candidateSince,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:presence.candidateLat,anchorLng:presence.candidateLng,state:'steady',since:presence.candidateSince}
         };
       }
       // Still confirming the new steady spell — not there yet.
       return {
         moving:true, stayStart:null, placeArrivedAt:null,
-        lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
+        lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
         _presence:presence
       };
     }
@@ -11047,6 +11164,7 @@ const FamilyBackend = (function(){
         heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
         moving:mv.moving, stayStart:mv.stayStart, placeArrivedAt:mv.placeArrivedAt,
         lastAcceptedFixAt:mv.lastAcceptedFixAt, lastDepartureAt:mv.lastDepartureAt,
+        priorFixGapMs:mv.priorFixGapMs!=null?mv.priorFixGapMs:null,
         _presence:mv._presence||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO(),
@@ -14729,6 +14847,7 @@ const FAM_WALK_MAX_MS=2.3;   // m/s — ~8.3 km/h ceiling for "walking"
 const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving" (small gap vs walk ceiling = hysteresis band)
 const FAM_HYST_MS=15000;     // candidate activity must hold for 15s before committing
 const STALE_PRESENCE_MS=45*60*1000; // beyond this fix age, "Since"/"Here for" is shown as "Last confirmed" instead of an unqualified live claim
+const UNCERTAIN_GAP_MS=20*60*1000;  // if the PRIOR fix was more than this long ago, we cannot honestly claim continuous presence through that gap — even though the CURRENT fix is fresh. Distinct from STALE_PRESENCE_MS (which is about the current fix being old, not a past gap).
 
 function famClassifyRawActivity(m){
   if(!m.consent||!m.consent.enabled) return 'offline';
@@ -14934,6 +15053,25 @@ function famComposeStatusText(m){
   if(isStale && since2){
     const lastConfirmed=L==='fa'?`آخرین تأیید: ${famAbsTime(s.reportedAt||s.capturedAt)}`:`Last confirmed: ${famAbsTime(s.reportedAt||s.capturedAt)}`;
     return { l1:lines.line1, region:lines.line2||'', l2:lastConfirmed, calloutL2:lastConfirmed, since:null, activityType:'stationary', place:!!d.currentPlaceId, stale:true };
+  }
+  // Requirement: a fresh CURRENT fix does not, by itself, prove continuous
+  // presence through whatever gap preceded it. If the prior accepted fix
+  // was more than UNCERTAIN_GAP_MS ago, we genuinely cannot tell (from GPS
+  // data alone, on a foreground-only PWA) whether the person stayed put
+  // that whole time or left and came back during the gap — both produce
+  // identical before/after data points. Rather than silently presenting
+  // "Here for 28 hrs" as a confirmed fact when it might only be true for
+  // the time since the LAST fix, show it honestly: "Presence unconfirmed"
+  // plus the real last-confirmed timestamp. This does NOT alter stayStart
+  // itself (still owned entirely by classifyMovement) — it only changes
+  // what confidence the DISPLAY claims about it.
+  const priorGapMs=s.priorFixGapMs;
+  const hasUnconfirmedGap=priorGapMs!=null && priorGapMs>UNCERTAIN_GAP_MS;
+  if(hasUnconfirmedGap && since2){
+    const unconfirmedLabel=L==='fa'?'حضور تأیید نشده':'Presence unconfirmed';
+    const lastConfirmedGap=L==='fa'?`آخرین تأیید: ${famAbsTime(since2)}`:`Last confirmed: ${famAbsTime(since2)}`;
+    console.debug('[presence] display: showing uncertainty, not a confirmed duration', {uid:m.uid, priorFixGapMs:priorGapMs, since2, stayStartUnchanged:s.stayStart});
+    return { l1:lines.line1, region:lines.line2||'', l2:unconfirmedLabel, calloutL2:lastConfirmedGap, since:since2, activityType:'stationary', place:!!d.currentPlaceId, uncertain:true };
   }
   return {
     l1:lines.line1, region:lines.line2||'',
