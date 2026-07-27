@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v373';
+const APP_VERSION='v374';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10981,13 +10981,31 @@ const FamilyBackend = (function(){
         const priorAccum=presence.reconfirmAccumMs||0;
         const newAccum=priorAccum+thisGapMs; // only THIS fix's own close gap is credited, never wall-clock-since-start
         if(newAccum>=STEADY_CONFIRM_MS){
-          // Continuity genuinely reconfirmed: an ACCUMULATION of real,
-          // close-together fix-to-fix gaps (not a single distant data
-          // point) adds up to at least STEADY_CONFIRM_MS near the SAME
-          // spot since the gap ended. "Here for" now counts from the
-          // FIRST post-gap fix (presence.uncertainSince), not the stale
-          // pre-gap stayStart — this is the actual new stay.
-          console.debug('[presence] uncertainty cleared — continuity reconfirmed via accumulated close-together fixes',{oldStayStart:prev.stayStart,newStayStart:presence.uncertainSince,accumulatedMs:newAccum});
+          // BUGFIX: before treating this as a NEW stay (replacing
+          // stayStart with the gap-detection timestamp), check whether the
+          // person is STILL within the ORIGINAL anchor's radius — the same
+          // distance check (isAwayNow, computed above from the unchanged
+          // presence.anchorLat/anchorLng) already used for real departure
+          // detection. If they never actually left the original spot, a
+          // gap this large was caused by something else entirely (a brief
+          // foreground interruption, one delayed fix) — NOT a real
+          // departure — and the true "Since" must remain the original
+          // arrival time, never jump forward to whenever the gap happened
+          // to be noticed.
+          if(!isAwayNow){
+            console.debug('[presence] uncertainty cleared — still within original anchor radius, preserving TRUE original stayStart (this was a foreground hiccup, not a real departure)',{oldStayStart:prev.stayStart,distanceFromOriginalAnchorM:dFromAnchor,accumulatedMs:newAccum});
+            return {
+              moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+              lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+              _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
+            };
+          }
+          // Continuity genuinely reconfirmed AWAY from the original anchor
+          // (isAwayNow was already true when uncertainty was first flagged,
+          // and the reconfirm point is near where they ended up, not near
+          // the original spot) — this is a real relocation. "Here for" now
+          // counts from the FIRST post-gap fix (presence.uncertainSince).
+          console.debug('[presence] uncertainty cleared — continuity reconfirmed via accumulated close-together fixes, AWAY from original anchor (real relocation)',{oldStayStart:prev.stayStart,newStayStart:presence.uncertainSince,accumulatedMs:newAccum});
           return {
             moving:false, stayStart:presence.uncertainSince, placeArrivedAt:presence.uncertainSince,
             lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
