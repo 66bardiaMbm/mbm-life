@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v371';
+const APP_VERSION='v373';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11652,6 +11652,14 @@ const FamilyBackend = (function(){
 
     // ── Debug overlay counters (real, not simulated) ──
     let _ingestFixCallCount=0;
+    let _acceptedFixCount=0;
+    let _rejectedFixCount=0;
+    let _lastRejectReason=null;
+    let _pipelineEvents=[]; // ring buffer, last 50 — real stage transitions for the self-diagnosing report
+    function pipelineLog(stage,detail){
+      _pipelineEvents.push({at:nowISO(),stage,detail:detail||null});
+      if(_pipelineEvents.length>50) _pipelineEvents.shift();
+    }
     let _lastIngestFixAt=null;
     let _lastSyncAtDebug=null; // set whenever pushSessionRemote actually succeeds
     let _cloudUnsubs=[];
@@ -11771,13 +11779,18 @@ const FamilyBackend = (function(){
     function eventFsDoc(fid,eventId){ return famRef(fid).collection('drivingEvents').doc(eventId); }
 
     async function pushSessionRemote(sess){
-      if(!ready()||!isMember())return false;
+      if(!ready()||!isMember()){
+        pipelineLog('firestore-write-skipped',{sessionId:sess&&sess.id,ready:ready(),isMember:isMember(),reason:'not ready or not a family member — check uid/familyId'});
+        return false;
+      }
       try{
         await sessionDoc(familyId(),sess.id).set(sess,{merge:true});
         _lastSyncAtDebug=nowISO();
+        pipelineLog('firestore-write-ok',{sessionId:sess.id,familyId:familyId()});
         return true;
       }catch(e){
         cloudDiag('drivingSessions.write',e,{sessionId:sess&&sess.id});
+        pipelineLog('firestore-write-fail',{sessionId:sess&&sess.id,error:e&&e.message});
         return false;
       }
     }
@@ -11843,15 +11856,19 @@ const FamilyBackend = (function(){
        and last sample of a session have only one neighbor, so they're
        checked against that single neighbor instead of being auto-rejected. */
     function isSpeedSpike(all,i){
-      const cur=all[i]; if(cur.speedMps==null) return false;
+      const cur=all[i];
+      const curSpeed=cur.rawSpeedMps!=null?cur.rawSpeedMps:cur.calculatedSpeedMps;
+      if(curSpeed==null) return false;
       const prev=all[i-1], next=all[i+1];
-      const prevOk=prev&&prev.speedMps!=null;
-      const nextOk=next&&next.speedMps!=null;
+      const prevSpeed=prev?(prev.rawSpeedMps!=null?prev.rawSpeedMps:prev.calculatedSpeedMps):null;
+      const nextSpeed=next?(next.rawSpeedMps!=null?next.rawSpeedMps:next.calculatedSpeedMps):null;
+      const prevOk=prevSpeed!=null;
+      const nextOk=nextSpeed!=null;
       if(prevOk&&nextOk){
-        return (cur.speedMps-prev.speedMps>SPIKE_NEIGHBOR_MPS) && (cur.speedMps-next.speedMps>SPIKE_NEIGHBOR_MPS);
+        return (curSpeed-prevSpeed>SPIKE_NEIGHBOR_MPS) && (curSpeed-nextSpeed>SPIKE_NEIGHBOR_MPS);
       }
-      if(prevOk) return cur.speedMps-prev.speedMps>SPIKE_NEIGHBOR_MPS;
-      if(nextOk) return cur.speedMps-next.speedMps>SPIKE_NEIGHBOR_MPS;
+      if(prevOk) return curSpeed-prevSpeed>SPIKE_NEIGHBOR_MPS;
+      if(nextOk) return curSpeed-nextSpeed>SPIKE_NEIGHBOR_MPS;
       return false;
     }
 
@@ -11865,8 +11882,17 @@ const FamilyBackend = (function(){
       let prevAccepted=null;
       for(let i=0;i<all.length;i++){
         const cur=all[i];
-        if(cur.speedMps!=null && !isNaN(cur.speedMps) && cur.speedMps>=0 && !isSpeedSpike(all,i)){
-          maxSpeedMps=Math.max(maxSpeedMps,cur.speedMps);
+        // BUGFIX: maxSpeedMps must reflect the RAW/device-measured speed
+        // ONLY — never the EMA-filtered sample.speedMps (which smooths
+        // every reading, including genuine peaks, corrupting the figure),
+        // and never calculatedSpeedMps (a distance/time ESTIMATE, valid
+        // for trip start/stop classification but never honest enough to
+        // report as a measured max speed — per this project's established
+        // principle of never claiming a speed the device didn't actually
+        // measure).
+        const instantSpeed=cur.rawSpeedMps;
+        if(instantSpeed!=null && !isNaN(instantSpeed) && instantSpeed>=0 && !isSpeedSpike(all,i)){
+          maxSpeedMps=Math.max(maxSpeedMps,instantSpeed);
         }
         if(prevAccepted && isAcceptableForMetrics(prevAccepted,cur)){
           const d=haversineM(prevAccepted,cur);
@@ -11996,6 +12022,7 @@ const FamilyBackend = (function(){
       sess.endedAt=endSample?endSample.t:nowISO();
       sess.durationSec=Math.max(0,Math.round((Date.parse(sess.endedAt)-Date.parse(sess.startedAt))/1000));
       recomputeMetrics(uid,sess);
+      pipelineLog('session-end',{uid,sessionId:sess.id,durationSec:sess.durationSec,distanceM:sess.distanceM});
       const q=queueMap()[uid];
       // Move raw samples OUT of the session summary and into the dedicated
       // sample store (IndexedDB, see writeSamplesStore) — the session
@@ -12026,7 +12053,16 @@ const FamilyBackend = (function(){
        job; this function's job is only to decide whether the *current*
        instant qualifies as stopped at all. */
     function isGenuinelyStopped(sessionSamples,curSample){
-      if(curSample.speedMps!=null && !isNaN(curSample.speedMps) && curSample.speedMps>=STOP_SPEED_MPS) return false;
+      // BUGFIX: must check the RAW/instantaneous speed, not the EMA-
+      // filtered sample.speedMps. The filter decays slowly from a high
+      // value — after a genuine stop (raw speed truly 0), the filtered
+      // value could still read well above STOP_SPEED_MPS for several
+      // samples, silently preventing trip-end detection from ever
+      // recognizing a real, current stop. "Is the vehicle stopped RIGHT
+      // NOW" is an instantaneous question; the filtered speed is for
+      // display/smoothing, not for this decision.
+      const instantSpeed=curSample.rawSpeedMps!=null?curSample.rawSpeedMps:curSample.calculatedSpeedMps;
+      if(instantSpeed!=null && !isNaN(instantSpeed) && instantSpeed>=STOP_SPEED_MPS) return false;
       // Walk backwards from the END of sessionSamples collecting the
       // CONTIGUOUS trailing run of low-speed samples — stop as soon as we
       // hit a moving sample or exceed the 20s lookback. This deliberately
@@ -12043,7 +12079,8 @@ const FamilyBackend = (function(){
         const s=sessionSamples[i];
         const ts=Date.parse(s.t);
         if(isNaN(ts)||ts<cutoff) break;
-        if(!(s.speedMps==null || s.speedMps<STOP_SPEED_MPS)) break; // hit a moving sample — stop the run here
+        const sInstant=s.rawSpeedMps!=null?s.rawSpeedMps:s.calculatedSpeedMps;
+        if(!(sInstant==null || sInstant<STOP_SPEED_MPS)) break; // hit a moving sample — stop the run here
         run.unshift(s);
       }
       if(run.length<2) return true; // not enough contiguous low-speed history yet — trust the instantaneous speed reading
@@ -12053,7 +12090,12 @@ const FamilyBackend = (function(){
 
     function ingestFix(uid, raw){
       _ingestFixCallCount++; _lastIngestFixAt=nowISO();
-      if(!uid||raw.lat==null||raw.lng==null) return;
+      if(!uid||raw.lat==null||raw.lng==null){
+        _rejectedFixCount++; _lastRejectReason='missing uid/lat/lng';
+        pipelineLog('reject',{reason:'missing uid/lat/lng',uid,lat:raw.lat,lng:raw.lng});
+        return;
+      }
+      _acceptedFixCount++;
       const t=raw.capturedAt||nowISO();
       let rawSpeed=(raw.speedMps!=null&&!isNaN(raw.speedMps)&&raw.speedMps>=0)?raw.speedMps:null;
       if(rawSpeed!=null && rawSpeed>MAX_VALID_SPEED_MPS) rawSpeed=null;
@@ -12092,8 +12134,28 @@ const FamilyBackend = (function(){
       const speedInput=rawSpeed!=null?rawSpeed:calculatedSpeed;
       if(speedInput!=null){
         const prior=(q.filteredSpeedMps!=null&&!isNaN(q.filteredSpeedMps))?q.filteredSpeedMps:speedInput;
-        q.filteredSpeedMps=SPEED_FILTER_ALPHA*speedInput+(1-SPEED_FILTER_ALPHA)*prior;
-        sample.speedMps=Math.max(0,Math.round(q.filteredSpeedMps*100)/100);
+        // BUGFIX: a genuine spike (isolated, unconfirmed jump) must not be
+        // blended into the EMA baseline — doing so silently diluted a
+        // spike that should have been excluded from maxSpeedMps into a
+        // value close enough to "normal" that isSpeedSpike's downstream
+        // neighbor-comparison (which runs on the ALREADY-FILTERED
+        // sample.speedMps) never recognized it as a spike at all. Detect
+        // an ingestion-time spike here, relative to the current filtered
+        // baseline (the best "neighbor" reference available at this
+        // point), and skip the EMA update for it — the filter continues
+        // from its last good value, so one bad reading can't drag it.
+        const deviationFromBaseline=Math.abs(speedInput-prior);
+        const isIngestSpike=deviationFromBaseline>SPIKE_NEIGHBOR_MPS;
+        if(!isIngestSpike){
+          q.filteredSpeedMps=SPEED_FILTER_ALPHA*speedInput+(1-SPEED_FILTER_ALPHA)*prior;
+          sample.speedMps=Math.max(0,Math.round(q.filteredSpeedMps*100)/100);
+        } else {
+          // Keep the filter where it was; store the spike's OWN value
+          // (not the filtered one) so downstream spike-rejection logic
+          // still has the real, unfiltered reading to compare against
+          // real neighbors and correctly exclude it from maxSpeedMps.
+          sample.speedMps=Math.max(0,Math.round(speedInput*100)/100);
+        }
       }
       sample.rawSpeedMps=rawSpeed;
       sample.calculatedSpeedMps=calculatedSpeed;
@@ -12125,7 +12187,10 @@ const FamilyBackend = (function(){
 
       if(!q.sessionId){
         if(rawType==='driving'){
-          if(!q.candidate||q.candidate.type!=='driving'){ q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs}; }
+          if(!q.candidate||q.candidate.type!=='driving'){
+            q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs};
+            pipelineLog('candidate-start',{uid,speedMps:sample.speedMps,accuracyM:sample.accuracyM});
+          }
           else {
             q.candidate.lastGoodAt=nowMs; // still driving — refresh, keep the original 'since' so the timer keeps counting
             if(nowMs-q.candidate.since>=START_HYST_MS){
@@ -12135,6 +12200,7 @@ const FamilyBackend = (function(){
               const sess=startSession(uid,q.samples[0]);
               q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
               console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
+              pipelineLog('session-start',{uid,sessionId:sess.id});
             }
           }
         } else {
@@ -12578,16 +12644,21 @@ const FamilyBackend = (function(){
       const active=uid?activeSession(uid):null;
       return {
         ingestFixCallCount:_ingestFixCallCount,
+        acceptedFixCount:_acceptedFixCount,
+        rejectedFixCount:_rejectedFixCount,
+        lastRejectReason:_lastRejectReason,
         lastIngestFixAt:_lastIngestFixAt,
         lastSyncAt:_lastSyncAtDebug,
         queueSessionId:q?q.sessionId:null,
         queueSampleCount:q?q.samples.length:0,
         queueCandidate:q?q.candidate:null,
+        queueFilteredSpeedMps:q?q.filteredSpeedMps:null,
         activeSessionId:active?active.id:null,
         activeSessionSampleCount:active?active.sampleCount:null,
         activeSessionDistanceM:active?active.distanceM:null,
         activeSessionDurationSec:active?active.durationSec:null,
-        cloudDiagnostics:cloudDiagnostics()
+        cloudDiagnostics:cloudDiagnostics(),
+        pipelineEvents:_pipelineEvents.slice()
       };
     }
 
@@ -13201,6 +13272,239 @@ function drvWeekBounds(offset){
    FamilyLocation.locationDebugInfo() / FamilyDriving.engineDebugInfo().
    No placeholder or simulated numbers. Monospace, high information
    density on purpose — this is a diagnostic tool, not polished UI. */
+/* Self-diagnosing pipeline analysis — decides PASS/FAIL and the most
+   likely root cause from real Engine + Location state, in plain language.
+   No counters need to be read or reported back by the user; this IS the
+   report. Every case explicitly required is covered below, checked in the
+   order a real fix would actually travel through the pipeline, so the
+   FIRST unmet stage is reported as the root cause — later stages are
+   irrelevant if an earlier one never happened. */
+function drvDiagnosePipeline(uid){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const eng=drvEngine();
+  if(!fb||!eng){
+    return {status:'FAIL',stage:'init',rootCause:L==='fa'?'اپ یا سرویس خانواده هنوز آماده نشده':'App or family service not ready yet',evidence:'FamilyBackend/FamilyDriving unavailable'};
+  }
+  const loc=fb.location.locationDebugInfo?fb.location.locationDebugInfo():{};
+  const dbg=eng.engineDebugInfo(uid);
+  const consent=fb.location.myConsent?fb.location.myConsent():null;
+
+  // Stage 0: consent / permission / visibility — nothing downstream can
+  // work at all if these are wrong. This directly covers "permissions
+  // stop the pipeline" and part of "native/PWA duplicate-writer" (a
+  // paused or disabled consent looks identical from the Engine's side to
+  // "no fixes arriving", so it must be ruled out FIRST).
+  if(!consent||!consent.enabled){
+    return {status:'FAIL',stage:'consent',
+      rootCause:L==='fa'?'اشتراک موقعیت خاموش است — GPS اصلاً درخواست نمی‌شود':'Location sharing is OFF — GPS is never requested at all',
+      evidence:`consent.enabled=${consent?consent.enabled:'unknown'}`};
+  }
+  if(consent.paused){
+    return {status:'FAIL',stage:'consent',
+      rootCause:L==='fa'?'اشتراک موقعیت موقتاً متوقف شده است':'Location sharing is paused',
+      evidence:'consent.paused=true'};
+  }
+  if(loc.permissionState==='denied'){
+    return {status:'FAIL',stage:'permission',
+      rootCause:L==='fa'?'دسترسی GPS توسط سیستم‌عامل رد شده است':'GPS permission was denied by the OS',
+      evidence:`permissionState=denied`};
+  }
+  if(!loc.shouldWatch){
+    return {status:'FAIL',stage:'visibility',
+      rootCause:L==='fa'?'صفحه در پس‌زمینه یا غیرفعال است — این محدودیت مرورگر است، نه باگ اپ':'Screen/tab is backgrounded or hidden — this is a browser limitation, not an app bug: GPS only runs while the tab is in the foreground',
+      evidence:`shouldWatch=false, visibilityState governs this`};
+  }
+
+  // Stage 1: is the watcher even receiving callbacks from the device at all?
+  if(loc.watchId==null){
+    return {status:'FAIL',stage:'watcher',
+      rootCause:L==='fa'?'واچر GPS هیچ‌وقت شروع نشده است':'The GPS watcher was never started',
+      evidence:`watchId=null`};
+  }
+  if(!loc.watchCallbackCount||loc.watchCallbackCount===0){
+    return {status:'FAIL',stage:'watcher',
+      rootCause:L==='fa'?'واچر فعال است ولی هنوز هیچ callback واقعی از GPS دریافت نکرده':'Watcher is active but has never received a real GPS callback yet',
+      evidence:`watchCallbackCount=0`};
+  }
+
+  // Stage 2: do fixes reach FamilyDriving.ingestFix at all?
+  if(!dbg.ingestFixCallCount||dbg.ingestFixCallCount===0){
+    return {status:'FAIL',stage:'ingestFix',
+      rootCause:L==='fa'?'GPS دریافت می‌شود ولی هرگز به FamilyDriving.ingestFix نمی‌رسد':'GPS fixes never reach FamilyDriving.ingestFix — the writeMyFix→ingestFix call chain is broken',
+      evidence:`watchCallbackCount=${loc.watchCallbackCount}, ingestFixCallCount=0`};
+  }
+  // Every call was rejected outright (missing uid/lat/lng) — covers the
+  // "wrong uid/familyId" case at the earliest possible point.
+  if(dbg.rejectedFixCount>0 && dbg.acceptedFixCount===0){
+    return {status:'FAIL',stage:'ingestFix',
+      rootCause:L==='fa'?'همه‌ی fixها رد می‌شوند — احتمالاً uid یا مختصات نامعتبر است':'All fixes are being rejected at entry — likely a missing/invalid uid or coordinates',
+      evidence:`rejectedFixCount=${dbg.rejectedFixCount}, lastRejectReason=${dbg.lastRejectReason}`};
+  }
+
+  // Stage 3: does a driving candidate ever start? IMPORTANT: activeSessionId
+  // and queueCandidate are both correctly null/none once a completed trip
+  // has ENDED — this looks identical to "never drove at all" from this
+  // check alone. So before concluding "candidate never started", check the
+  // pipeline event log for evidence of a PAST session-end — if one exists,
+  // the real question is what happened AFTER that (Firestore write, UI
+  // read), not whether a candidate ever started at all.
+  const eventsSoFar=dbg.pipelineEvents||[];
+  const hasPastSessionEnd=eventsSoFar.some(e=>e.stage==='session-end');
+  if(dbg.activeSessionId==null && !dbg.queueCandidate && !hasPastSessionEnd){
+    // Distinguish "no candidate ever" from "speed filtering rejects valid
+    // samples" — if we have a filtered speed on record and it's
+    // persistently near zero despite many accepted fixes, that's the
+    // speed-filter case specifically, not a generic "never started".
+    const filteredKph=dbg.queueFilteredSpeedMps!=null?Math.round(dbg.queueFilteredSpeedMps*3.6):null;
+    if(dbg.acceptedFixCount>=20 && filteredKph!=null && filteredKph<8){
+      return {status:'FAIL',stage:'candidate',
+        rootCause:L==='fa'?'داده‌ی GPS پذیرفته می‌شود ولی سرعت فیلترشده هیچ‌وقت به آستانه‌ی رانندگی نمی‌رسد — یا واقعاً رانندگی‌ای اتفاق نیفتاده، یا فیلتر سرعت بیش‌ازحد سخت‌گیرانه است':'Fixes are accepted, but the filtered speed never reaches the driving threshold — either no real driving occurred, or the speed filter is rejecting valid driving samples',
+        evidence:`acceptedFixCount=${dbg.acceptedFixCount}, filteredSpeedKph=${filteredKph}`};
+    }
+    return {status:'PASS',stage:'idle',
+      rootCause:L==='fa'?'همه‌چیز سالم است، فقط هنوز رانندگی‌ای ثبت نشده':'Everything is healthy — no drive has been recorded yet because none has occurred',
+      evidence:`acceptedFixCount=${dbg.acceptedFixCount}, candidate=none`};
+  }
+
+  // Stage 4: candidate exists but never became a session
+  if(dbg.activeSessionId==null && dbg.queueCandidate){
+    const ageMs=dbg.queueCandidate.since?Date.now()-dbg.queueCandidate.since:null;
+    return {status:'FAIL',stage:'candidate-to-session',
+      rootCause:L==='fa'?'candidate رانندگی شروع شده ولی هنوز به آستانه‌ی زمانی لازم برای شروع سفر نرسیده — این می‌تواند فقط به این معنی باشد که رانندگی هنوز به اندازه‌ی کافی طول نکشیده':'A driving candidate has started but has not yet reached the time threshold to become a real trip — may simply mean the drive has not lasted long enough yet',
+      evidence:`candidateAgeMs=${ageMs}`};
+  }
+
+  // Stage 5: session is active — this is actually a PASS for everything up
+  // to here, reported as such (an in-progress trip is expected to show
+  // "no completed drives yet" on the Dashboard, which is correct behavior,
+  // not a failure).
+  if(dbg.activeSessionId){
+    return {status:'PASS',stage:'session-active',
+      rootCause:L==='fa'?'سفر در حال ثبت است':'A trip is currently being recorded',
+      evidence:`activeSessionId=${dbg.activeSessionId}, distanceM=${dbg.activeSessionDistanceM}, durationSec=${dbg.activeSessionDurationSec}`};
+  }
+
+  // Stage 6: check pipeline log for the most recent session-end +
+  // Firestore write outcome, to distinguish "session ends but Firestore
+  // write fails" from "write succeeds but UI doesn't read it".
+  const events=dbg.pipelineEvents||[];
+  const lastEnd=[...events].reverse().find(e=>e.stage==='session-end');
+  const lastWriteOk=[...events].reverse().find(e=>e.stage==='firestore-write-ok');
+  const lastWriteFail=[...events].reverse().find(e=>e.stage==='firestore-write-fail');
+  const lastWriteSkipped=[...events].reverse().find(e=>e.stage==='firestore-write-skipped');
+  if(lastEnd){
+    if(lastWriteSkipped && (!lastWriteOk || Date.parse(lastWriteSkipped.at)>Date.parse(lastWriteOk.at))){
+      return {status:'FAIL',stage:'firestore-write',
+        rootCause:L==='fa'?'سفر تمام شده ولی نوشتن در Firestore رد شده — احتمالاً uid یا familyId اشتباه است':'Trip ended, but the Firestore write was skipped — likely wrong uid/familyId (not recognized as ready/family member)',
+        evidence:JSON.stringify(lastWriteSkipped.detail)};
+    }
+    if(lastWriteFail && (!lastWriteOk || Date.parse(lastWriteFail.at)>Date.parse(lastWriteOk.at))){
+      return {status:'FAIL',stage:'firestore-write',
+        rootCause:L==='fa'?'سفر تمام شده ولی نوشتن در Firestore با خطا مواجه شده':'Trip ended, but the Firestore write failed',
+        evidence:JSON.stringify(lastWriteFail.detail)};
+    }
+    if(!lastWriteOk){
+      return {status:'FAIL',stage:'firestore-write',
+        rootCause:L==='fa'?'سفر تمام شده ولی هیچ تلاشی برای نوشتن در Firestore ثبت نشده':'Trip ended, but no Firestore write attempt was ever logged',
+        evidence:`last session-end at ${lastEnd.at}`};
+    }
+    // Write succeeded — if the Dashboard STILL shows zero trips, the gap
+    // is specifically "write succeeded but History/Weekly UI does not
+    // read it" — a real, distinct case from everything above.
+    return {status:'FAIL',stage:'ui-read',
+      rootCause:L==='fa'?'سفر با موفقیت ذخیره شده ولی نمایش هفتگی/تاریخچه آن را نمی‌خواند — این باید در eng.memberSessions بررسی شود':'Trip was saved successfully, but the Weekly Report/History UI is not reading it back — check eng.memberSessions()/memberSessionsInRange()',
+      evidence:`last successful write at ${lastWriteOk.at}, sessionId in that write`};
+  }
+
+  // No session has ever started or ended — but everything upstream (GPS,
+  // ingestFix, watcher) is healthy. Simply no drive has happened yet.
+  return {status:'PASS',stage:'idle',
+    rootCause:L==='fa'?'همه‌چیز سالم است، فقط هنوز رانندگی‌ای ثبت نشده':'Everything is healthy — no drive has been recorded yet because none has occurred',
+    evidence:`acceptedFixCount=${dbg.acceptedFixCount}, watchCallbackCount=${loc.watchCallbackCount}`};
+}
+/* Produces the complete diagnostic snapshot as downloadable JSON, per the
+   exact required field list — app version, uid/familyId, permissions,
+   visibility, fix counts, accuracy/speed/source, candidate/session state,
+   last trip end, last Firestore error, and the last 50 pipeline events.
+   Triggers a browser download; nothing needs to be copied or reported
+   back manually. */
+function drvExportDiagnostics(uid){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const eng=drvEngine();
+  const loc=(fb&&fb.location&&fb.location.locationDebugInfo)?fb.location.locationDebugInfo():{};
+  const dbg=(eng&&eng.engineDebugInfo)?eng.engineDebugInfo(uid):{};
+  const consent=(fb&&fb.location&&fb.location.myConsent)?fb.location.myConsent():null;
+  const diag=drvDiagnosePipeline(uid);
+  const allSessions=(eng&&eng.memberSessions)?eng.memberSessions(uid):[];
+  const lastEndedSession=allSessions.filter(s=>s.status==='ended').sort((a,b)=>(b.endedAt||'').localeCompare(a.endedAt||''))[0]||null;
+  const cloudErrs=(eng&&eng.cloudDiagnostics)?eng.cloudDiagnostics():[];
+  const lastCloudErr=cloudErrs.length?cloudErrs[cloudErrs.length-1]:null;
+
+  let familyIdVal=null;
+  try{ familyIdVal=(typeof FamilyBackend!=='undefined'&&FamilyBackend.familyId)?FamilyBackend.familyId():null; }catch(e){}
+
+  const report={
+    generatedAt:nowISO(),
+    appVersion:(typeof APP_VERSION!=='undefined')?APP_VERSION:null,
+    uid:uid||null,
+    familyId:familyIdVal,
+    diagnosis:diag,
+    permissions:{
+      consentEnabled:consent?consent.enabled:null,
+      consentPaused:consent?consent.paused:null,
+      consentPrecise:consent?consent.precise:null,
+      permissionState:loc.permissionState||null
+    },
+    visibility:{
+      documentVisibilityState:(typeof document!=='undefined')?document.visibilityState:null,
+      shouldWatch:loc.shouldWatch!=null?loc.shouldWatch:null,
+      watchId:loc.watchId!=null?loc.watchId:null
+    },
+    fixCounts:{
+      watchCallbackCount:loc.watchCallbackCount!=null?loc.watchCallbackCount:null,
+      ingestFixCallCount:dbg.ingestFixCallCount!=null?dbg.ingestFixCallCount:null,
+      acceptedFixCount:dbg.acceptedFixCount!=null?dbg.acceptedFixCount:null,
+      rejectedFixCount:dbg.rejectedFixCount!=null?dbg.rejectedFixCount:null,
+      lastRejectReason:dbg.lastRejectReason||null
+    },
+    latestFix:{
+      lastCallbackAt:loc.lastCallbackAt||null,
+      callbackAgeMs:loc.callbackAgeMs!=null?loc.callbackAgeMs:null,
+      lastRawSpeed:loc.lastRawSpeed!==undefined?loc.lastRawSpeed:null,
+      lastIngestFixAt:dbg.lastIngestFixAt||null,
+      filteredSpeedMps:dbg.queueFilteredSpeedMps!=null?dbg.queueFilteredSpeedMps:null
+    },
+    candidateState:dbg.queueCandidate||null,
+    activeSession:{
+      id:dbg.activeSessionId||null,
+      sampleCount:dbg.activeSessionSampleCount!=null?dbg.activeSessionSampleCount:null,
+      distanceM:dbg.activeSessionDistanceM!=null?dbg.activeSessionDistanceM:null,
+      durationSec:dbg.activeSessionDurationSec!=null?dbg.activeSessionDurationSec:null
+    },
+    lastTripEnd:lastEndedSession?{
+      id:lastEndedSession.id, endedAt:lastEndedSession.endedAt,
+      distanceM:lastEndedSession.distanceM, durationSec:lastEndedSession.durationSec
+    }:null,
+    lastFirestoreError:lastCloudErr||null,
+    lastFirestoreSyncAt:dbg.lastSyncAt||null,
+    last50PipelineEvents:dbg.pipelineEvents||[]
+  };
+
+  const json=JSON.stringify(report,null,2);
+  try{
+    const blob=new Blob([json],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=`mbm-driving-diagnostics-${Date.now()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    toast(L==='fa'?'فایل تشخیصی دانلود شد':'Diagnostics file downloaded');
+  }catch(e){
+    console.error('[drvExportDiagnostics] download failed',e);
+    toast(L==='fa'?'دانلود ناموفق بود، جزئیات در کنسول':'Download failed — see console for details');
+    console.log('[drvExportDiagnostics] full report:',json);
+  }
+}
 function drvDebugOverlayHtml(uid){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const eng=drvEngine();
@@ -13323,6 +13627,25 @@ function DrivingDashboard(){
     h+=`<div class="hub-ph" style="margin-top:16px"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc;font-size:28px">${famIcon('car')}</div>
       <div class="hub-ph-t">${L==='fa'?'هنوز سفری ثبت نشده':'No drives recorded yet'}</div>
       <div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی رانندگی شروع شود، سفرها اینجا نمایش داده می‌شوند.':'Start driving and your trips will appear here.'}</div></div>`;
+    // SELF-DIAGNOSING summary — always visible (no gesture required)
+    // whenever the Dashboard has zero trips. Shows a plain-language
+    // PASS/FAIL verdict with root cause, not raw counters — nothing here
+    // needs to be read back or reported manually. Also offers an Export
+    // button producing the complete diagnostic JSON as a downloadable
+    // text block, per explicit requirement.
+    try{
+      const diag=drvDiagnosePipeline(selUid);
+      const statusColor=diag.status==='PASS'?'#2fce6b':'#e0447a';
+      h+=`<div style="margin-top:10px;padding:12px 14px;background:${statusColor}14;border:1px solid ${statusColor}44;border-radius:12px">
+        <div style="font-size:13px;font-weight:800;color:${statusColor};margin-bottom:6px">${L==='fa'?'وضعیت خط لوله رانندگی':'Driving pipeline'}: ${diag.status}</div>
+        <div style="font-size:12px;color:var(--ink);margin-bottom:3px"><b>${L==='fa'?'مرحله':'Stage reached'}:</b> ${esc(diag.stage)}</div>
+        <div style="font-size:12px;color:var(--ink);margin-bottom:3px"><b>${L==='fa'?'علت احتمالی':'Root cause'}:</b> ${esc(diag.rootCause)}</div>
+        <div style="font-size:11px;color:var(--ink3)"><b>${L==='fa'?'شواهد':'Evidence'}:</b> ${esc(diag.evidence)}</div>
+        <button data-fam="drv-export-diag" data-arg="${esc(selUid)}" style="margin-top:10px;width:100%;background:var(--ink);color:#fff;border:none;border-radius:10px;padding:9px;font-size:12px;font-weight:700;cursor:pointer">${L==='fa'?'خروجی تشخیصی کامل':'Export diagnostics'}</button>
+      </div>`;
+    }catch(e){
+      h+=`<div style="margin-top:10px;padding:10px 12px;background:#e0447a14;border:1px solid #e0447a44;border-radius:10px;font-size:12px;color:var(--ink)">${L==='fa'?'خطا در اجرای تشخیص':'Diagnosis failed to run'}: ${esc(e&&e.message||String(e))}</div>`;
+    }
   }
 
   h+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">${L==='fa'?'اعضا':'Members'}</div>`;
@@ -16385,6 +16708,7 @@ function famAction(act,arg,ev){
     // ── Driving (Phase 2A) ──
     case 'drv-week': _drvWeekOffset=parseInt(arg,10)||0; render(); return;
     case 'drv-debug-tap': drvDebugTap(); return;
+    case 'drv-export-diag': drvExportDiagnostics(arg); return;
     case 'drv-sel-member': _drvSelUid=arg; render(); return;
     case 'drv-open-member': _drvSelUid=arg; famView='drivingLive'; render(); window.scrollTo(0,0); return;
     case 'drv-open-member-history': _drvSelUid=arg; famView='drivingHistory'; render(); window.scrollTo(0,0); return;
