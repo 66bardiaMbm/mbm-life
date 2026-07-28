@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v384';
+const APP_VERSION='v385';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13893,7 +13893,7 @@ function LiveDriving(){
     const live=eng.sessionSamplesLive(uid,active.id);
     const lastSample=(live&&live.length)?live[live.length-1]:null;
     const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
-    const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
+    const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true,null,lastSample.capturedAt||lastSample.at):null;
 
     h+=`<div id="drv-live-map" style="height:38vh;flex:none;position:relative;background:#dfe3ea"></div>`;
     h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
@@ -13936,7 +13936,7 @@ function LiveDriving(){
 
   if(isHealthy){
     // ── STATE 2: Online but not driving ──────────────────────────────
-    const loc=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
+    const loc=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false,memberState.accuracy,memberState.capturedAt||memberState.reportedAt):null;
     const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
     h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
       <div style="width:64px;height:64px;border-radius:50%;background:#6e56f822;display:flex;align-items:center;justify-content:center;font-size:28px">${famIcon('car')}</div>
@@ -13971,7 +13971,7 @@ function LiveDriving(){
       const meta=fb.location.statusMeta(status);
       label=meta[L]||meta.en;
     }
-    const lastKnown=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false):null;
+    const lastKnown=(memberState&&memberState.lat!=null)?famLocationLines(memberState.lat,memberState.lng,false,memberState.accuracy,memberState.capturedAt||memberState.reportedAt):null;
     const lastUpdateLabel=memberState&&memberState.reportedAt?famRelTime(memberState.reportedAt):null;
     h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;gap:14px">
       <div style="width:64px;height:64px;border-radius:50%;background:#F5A62322;display:flex;align-items:center;justify-content:center;font-size:28px">📡</div>
@@ -14082,8 +14082,7 @@ function drvLiveApply(){
   const live=eng.sessionSamplesLive(uid,active.id);
   const lastSample=(live&&live.length)?live[live.length-1]:null;
   const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
-  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true):null;
-  if(bodyEl) bodyEl.innerHTML=drvLiveBodyHtml(active,curSpeedKph,loc,lastSample);
+  const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true,null,lastSample.capturedAt||lastSample.at):null;
   // Debug overlay: patch in place too, so it shows real-time pipeline data
   // during an actual drive (watch callback count, ingestFix count, sample
   // count all ticking up live) rather than a stale snapshot from mount time.
@@ -15450,7 +15449,7 @@ function famComposeStatusText(m){
   }
   const s=m.state||{};
   if(d.activityType==='driving'){
-    const road=famBareRoadName(s.lat,s.lng);
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
     const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
     // Live speed: priority 1 = real coords.speed when valid; priority 2 =
     // calculated from real GPS distance/elapsed time between the last two
@@ -15484,7 +15483,7 @@ function famComposeStatusText(m){
     return { l1, l2, region, since:null, activityType:'driving' };
   }
   if(d.activityType==='walking'){
-    const road=famBareRoadName(s.lat,s.lng);
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
     // Same reasoning as driving above — live speed while moving, not a
     // "Since" timestamp (matches the reference app's 9th screenshot:
@@ -15500,7 +15499,7 @@ function famComposeStatusText(m){
   // We still track whether this is genuinely inside a saved place (for the
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
-  const lines=famLocationLines(s.lat,s.lng,false,s.accuracy);
+  const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt);
   const since2=d.currentPlaceId?(d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null)))
                                 :((fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null));
   // NOTE: famLocationLines already formats line1 as "Near <road>" (or the
@@ -15603,7 +15602,10 @@ function famLiveStatusLine(m){
 const FamGeo = (function(){
   const cache = {};          // key -> {line1,line2,full,ts,lat,lng}
   const pending = {};        // key -> true (in flight / queued)
-  let queue = [];            // [{key,lat,lng}]
+  const inflight = {};       // key -> fixId of the request currently in flight for that key —
+                              // used to detect and discard a response that arrives after a
+                              // newer request for the same key has been sent (see pump()).
+  let queue = [];            // [{key,lat,lng,fixId}]
   let lastCall = 0;
   const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
   const TTL = 6*3600*1000;   // 6h cache lifetime
@@ -15692,12 +15694,26 @@ const FamGeo = (function(){
       const job = queue.shift(); if(!job){ return; }
       lastCall = Date.now();
       const k=job.key;
+      // Staleness guard: record which fixId is "in flight" for this cell key
+      // at send time. If a NEWER request for the same key gets enqueued
+      // before this one's response arrives (pending[k] would already be
+      // cleared and re-set by a fresh request() call), inflight[k] will no
+      // longer equal job.fixId when the response lands — in that case this
+      // response is for a fix that is no longer the accepted one, and it
+      // must be discarded rather than written to cache.
+      inflight[k]=job.fixId;
       const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
       const requestedAt=Date.now();
       fetch(url,{headers:{'Accept':'application/json'}})
         .then(r=>r.json())
         .then(res=>{
           const respondedAt=Date.now();
+          if(inflight[k]!==job.fixId){
+            // A newer fix superseded this request while it was in flight.
+            // Discard: never let a stale response overwrite the current fix.
+            console.debug('[FamGeo.diag] discarded stale response',{key:k,requestedFixId:job.fixId,currentFixId:inflight[k]});
+            return;
+          }
           if(res && (res.address || res.display_name)){
             const f=format(res.address, res.display_name);
             cache[k]={ line1:f.line1, line2:f.line2, full:f.full, ts:Date.now(), lat:job.lat, lng:job.lng };
@@ -15727,12 +15743,17 @@ const FamGeo = (function(){
           }
         })
         .catch(()=>{ /* keep whatever we had; no fabricated address */ })
-        .then(()=>{ delete pending[k]; if(typeof afterGeoResolved==='function')afterGeoResolved(); if(queue.length)pump(); });
+        .then(()=>{ delete pending[k]; delete inflight[k]; if(typeof afterGeoResolved==='function')afterGeoResolved(); if(queue.length)pump(); });
     }, wait);
   }
   // Public: request an address for a fix. Returns cached result immediately (or
   // null) and schedules a lookup if not cached. Caller re-renders on resolve.
-  function request(lat,lng){
+  // fixId identifies WHICH accepted fix this request is for (its own lat/lng
+  // is already that identity, since a genuinely different fix has different
+  // coordinates by definition — no separate id needed). Kept as an explicit
+  // parameter so a caller can pass a monotonic token if it ever has two
+  // in-flight fixes with numerically identical coordinates.
+  function request(lat,lng,fixId){
     if(lat==null||lng==null) return null;
     const k=key(lat,lng);
     const c=cache[k];
@@ -15748,7 +15769,9 @@ const FamGeo = (function(){
         resultLine1:near.line1, resultLine2:near.line2 };
       return near;
     }
-    if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng}); pump(); }
+    const resolvedFixId=fixId!=null?fixId:k;
+    if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId}); pump(); }
+    else { inflight[k]=resolvedFixId; } // a newer fix wants this same cell; invalidate the older in-flight response
     return null;
   }
   function famGeoDiagnosticInfo(){ return _lastLookup; }
@@ -15773,7 +15796,7 @@ function afterGeoResolved(){
    While the member is actively moving we DON'T queue a fresh lookup for every
    ~11m cell (that would spam Nominatim); we show the last cached address if any,
    else a neutral placeholder, and let it resolve once they settle. */
-function famLocationLines(lat,lng,moving,accuracyM){
+function famLocationLines(lat,lng,moving,accuracyM,fixTimestamp){
   // No saved-place-name shortcut here — always resolve to the real geocoded
   // address. A saved place's name is never shown as the location label.
   const cached=FamGeo.get(lat,lng);
@@ -15782,7 +15805,7 @@ function famLocationLines(lat,lng,moving,accuracyM){
     return {line1:(L==='fa'?'موقعیت تقریبی':'Approximate location'),line2:'',source:'accuracy'};
   }
   if(moving) return { line1:(L==='fa'?'در حال حرکت':'On the move'), line2:'', source:'moving' };
-  const g=FamGeo.request(lat,lng);
+  const g=FamGeo.request(lat,lng,fixTimestamp);
   if(g) return { line1:g.line1, line2:g.line2, source:'geo' };
   return { line1:(L==='fa'?'موقعیت زنده':'Live location'), line2:'', source:'pending' };
 }
@@ -15793,7 +15816,7 @@ function famLocationLines(lat,lng,moving,accuracyM){
    it always requests/returns the real cached road name, or null if none is
    cached yet, so the caller can fall back to something honest instead of
    composing "Driving near On the move". */
-function famBareRoadName(lat,lng){
+function famBareRoadName(lat,lng,fixTimestamp){
   // No saved-place-name shortcut — always the real road name.
   const cached=FamGeo.get(lat,lng);
   if(cached){
@@ -15802,7 +15825,7 @@ function famBareRoadName(lat,lng){
     // own "Driving/Walking near X" template around it.
     return cached.line1.replace(/^(Near |نزدیک )/,'');
   }
-  FamGeo.request(lat,lng); // kick off a lookup for next time; don't block on it
+  FamGeo.request(lat,lng,fixTimestamp); // kick off a lookup for next time; don't block on it
   return null;
 }
 
@@ -20103,6 +20126,12 @@ function ensureUserGeo(cb){
   if(_userGeo){cb(_userGeo);return;}
   if(_userGeoTried){cb(null);return;}
   if(!navigator.geolocation){_userGeoTried=true;cb(null);return;}
+  if(typeof isNativeWrapper==='function' && isNativeWrapper()){
+    // Browser geolocation is intentionally disabled inside the Android
+    // wrapper; there is no browser-side fix to obtain here. This must
+    // resolve to "unknown", never a fabricated coordinate.
+    _userGeoTried=true; cb(null); return;
+  }
   navigator.geolocation.getCurrentPosition(
     p=>{
       _userGeo={lat:p.coords.latitude,lon:p.coords.longitude};
@@ -20111,9 +20140,11 @@ function ensureUserGeo(cb){
     },
     err=>{
       _userGeoTried=true;
-      // Fallback: use Hobart (user's home city) if permission denied.
-      _userGeo={lat:-42.8821,lon:147.3272,cc:'au'};
-      cb(_userGeo);
+      // A failed/denied geolocation request MUST resolve to unknown.
+      // No fallback coordinate of any kind — Hobart or otherwise — is
+      // ever substituted for a real fix.
+      _userGeo=null;
+      cb(null);
     },
     {enableHighAccuracy:false,timeout:8000,maximumAge:300000});
 }
