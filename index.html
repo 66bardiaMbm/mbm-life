@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v380';
+const APP_VERSION='v381';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -15353,50 +15353,6 @@ function famHereForDuration(since){
    If these ever disagree in a way that doesn't make sense (e.g. state.stayStart
    is fresh but displayedSince is stale), the mismatch is visible directly on
    the phone screen — no devtools, no console, no reproducing separately. */
-/* ALWAYS-VISIBLE geocode diagnostic — no 5-tap, no dev mode. The previous
-   gesture-gated panel did not work on a real device when it mattered, so
-   this renders unconditionally directly under the location text whenever
-   a member's location is shown. Shows exactly: fix lat/lng, request
-   lat/lng, cache mode, cache age, raw suburb/town/city fields, and the
-   selected locality — plus an explicit statement of WHICH of the four
-   possible sources (raw geocoder response / exact-cell cache / sticky
-   proximity cache / rejected-as-stale) produced the CURRENTLY DISPLAYED
-   locality, so a Brighton-shows-as-Hobart report can be traced to one of
-   those four causes directly from the screen, without needing device logs. */
-function famGeoAlwaysVisibleDiagHtml(m){
-  const s=m.state||{};
-  const geo=(typeof FamGeo!=='undefined'&&FamGeo.famGeoDiagnosticInfo)?FamGeo.famGeoDiagnosticInfo():null;
-  const row=(label,val)=>`<div style="display:flex;justify-content:space-between;gap:8px"><span style="opacity:.6">${esc(label)}</span><span style="font-weight:700;text-align:end;word-break:break-all">${esc(val==null?'—':String(val))}</span></div>`;
-  if(!geo){
-    return `<div style="margin-top:6px;padding:7px 9px;background:#0b0d1210;border:1px solid #0b0d1222;border-radius:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9.5px;color:var(--ink3)">GEO: no lookup recorded yet for this session</div>`;
-  }
-  // Explicit source determination for the CURRENTLY DISPLAYED locality —
-  // requirement: never leave this ambiguous. cacheStatus is set at the
-  // exact moment this specific result was produced/reused (see FamGeo's
-  // request()/pump()), so it directly answers "where did THIS value come
-  // from" rather than requiring inference.
-  const sourceLabel={
-    'fresh-network':'RAW GEOCODER RESPONSE (fresh network fetch just now)',
-    'exact-cell-hit':'EXACT CACHE (same rounded coordinate cell, still within 6h TTL)',
-    'sticky-proximity-reuse':'STICKY CACHE (nearby cached point within 25m, within 3min dwell window)'
-  }[geo.cacheStatus] || geo.cacheStatus || 'unknown';
-  const rawAddr=geo.rawAddress||{};
-  return `<div style="margin-top:6px;padding:8px 10px;background:#0b0d12;color:#e8ecf3;border-radius:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9.5px;line-height:1.55">
-    <div style="font-weight:800;opacity:.75;margin-bottom:3px">GEO SOURCE: ${esc(sourceLabel)}</div>
-    ${row('fix lat,lng (current)', s.lat!=null?s.lat.toFixed(6)+','+s.lng.toFixed(6):null)}
-    ${row('request lat,lng', geo.requestLat!=null?geo.requestLat.toFixed(6)+','+geo.requestLng.toFixed(6):null)}
-    ${row('cache mode', geo.cacheStatus)}
-    ${row('cache entry age (ms)', geo.cacheAgeMs!=null?geo.cacheAgeMs:(geo.responseAgeMs!=null?'0 (just fetched)':null))}
-    ${geo.distanceFromCachedPointM!=null?row('distance from reused point (m)', geo.distanceFromCachedPointM.toFixed(1)):''}
-    ${row('raw suburb', rawAddr.suburb)}
-    ${row('raw town', rawAddr.town)}
-    ${row('raw village', rawAddr.village)}
-    ${row('raw city_district', rawAddr.city_district)}
-    ${row('raw city', rawAddr.city)}
-    ${row('selected field', geo.selectedField)}
-    ${row('selected locality (shown)', geo.resultLine2||geo.selectedValue)}
-  </div>`;
-}
 function famSinceDiagLineHtml(m,txt,sinceUsed){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const s=m.state||{};
@@ -15874,7 +15830,6 @@ function famLiveMemberDetail(m, isMe){
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
-        ${famGeoAlwaysVisibleDiagHtml(m)}
         ${(famDevMode()||_drvDebugOverlayOn)?famSinceDiagLineHtml(m,txt,since):''}
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
