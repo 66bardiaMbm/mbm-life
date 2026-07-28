@@ -1764,9 +1764,18 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v383';
+const APP_VERSION='v384';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
+/* Global: true when running inside the MBM Life Android companion WebView
+   (MainActivity.kt appends "MBMLifeNative/<version>" to the WebView's user
+   agent). Used anywhere in the app that needs to know browser geolocation
+   and browser sign-in popups are unavailable/meaningless, and that the
+   native layer (injected fixes, native Google sign-in) is authoritative
+   instead. Defined once here at global scope so every module can call it. */
+function isNativeWrapper(){
+  try{ return /MBMLifeNative/.test(navigator.userAgent); }catch(e){ return false; }
+}
 
 /* ═══ Back-button navigation — gesture-only history guards ═══
    ROOT CAUSE (verified via Chromium history_manipulation_intervention docs):
@@ -11526,6 +11535,19 @@ const FamilyBackend = (function(){
       opts=opts||{};
       _lastGpsRequestAt=nowISO();
       console.debug('[presence] GPS request started', {at:_lastGpsRequestAt, via:'requestFreshFix'});
+      if(isNativeWrapper()){
+        // Browser geolocation is intentionally disabled inside the Android
+        // wrapper (setGeolocationEnabled(false)) — calling getCurrentPosition
+        // here would always fail with PERMISSION_DENIED even though the
+        // native service is delivering real fixes via injectNativeFix().
+        // Treat the latest injected fix as the answer instead of asking the
+        // browser again.
+        diag('freshfix','native wrapper — using last injected fix');
+        const uid=myUid(); const st=uid?memberState(uid):null;
+        if(st&&st.lat!=null){ setLocState('active'); if(opts.cb)opts.cb({coords:{latitude:st.lat,longitude:st.lng,accuracy:st.accuracy},timestamp:Date.now()}); }
+        else { if(opts.cb)opts.cb(null); }
+        return;
+      }
       if(!('geolocation' in navigator)){ setLocState('unavailable'); diag('freshfix','no geolocation'); console.debug('[presence] GPS request rejected: no geolocation API'); if(opts.cb)opts.cb(null); return; }
       const c=myConsent();
       if(!c.enabled||c.paused){ diag('freshfix','no consent'); console.debug('[presence] GPS request rejected: no consent'); if(opts.cb)opts.cb(null); return; }
@@ -11539,16 +11561,9 @@ const FamilyBackend = (function(){
       }catch(e){ diag('freshfix','throw'); console.debug('[presence] GPS request threw', e); setLocState('unavailable'); if(opts.cb)opts.cb(null); }
     }
 
-    /* True when running inside the MBM Life Android companion WebView, which
-       intentionally denies browser geolocation (setGeolocationEnabled(false) +
-       onGeolocationPermissionsShowPrompt -> false) and instead injects real
-       fixes via injectNativeFix(). In this mode navigator.geolocation.watchPosition
-       will ALWAYS fail with PERMISSION_DENIED even though real GPS is flowing in,
-       so the browser watch/permission path must be skipped entirely — otherwise
-       it stomps the injected 'active' state back to 'denied'. */
-    function isNativeWrapper(){
-      try{ return /MBMLifeNative/.test(navigator.userAgent); }catch(e){ return false; }
-    }
+    // isNativeWrapper() is defined once at global scope near the top of the
+    // file (used by both this module and the auth/sign-in code) — reused
+    // here via normal scope lookup.
     function startWatch(){
       if(isNativeWrapper())return; // native service is the sole location producer
       if(_watchId!=null)return;
@@ -13403,16 +13418,39 @@ function drvDiagnosePipeline(uid){
       evidence:`shouldWatch=false, visibilityState governs this`};
   }
 
-  // Stage 1: is the watcher even receiving callbacks from the device at all?
-  if(loc.watchId==null){
-    return {status:'FAIL',stage:'watcher',
-      rootCause:L==='fa'?'واچر GPS هیچ‌وقت شروع نشده است':'The GPS watcher was never started',
-      evidence:`watchId=null`};
-  }
-  if(!loc.watchCallbackCount||loc.watchCallbackCount===0){
-    return {status:'FAIL',stage:'watcher',
-      rootCause:L==='fa'?'واچر فعال است ولی هنوز هیچ callback واقعی از GPS دریافت نکرده':'Watcher is active but has never received a real GPS callback yet',
-      evidence:`watchCallbackCount=0`};
+  // Native-wrapper path: browser watchPosition is intentionally never
+  // started here (MainActivity.kt disables it) — the native Android
+  // service is the sole GPS source, delivered via injectNativeFix(). The
+  // browser-watcher stages below don't apply and would always show a false
+  // FAIL, so check freshness of the injected fix instead.
+  if(typeof isNativeWrapper==='function' && isNativeWrapper()){
+    const st=uid?fb.location.memberState?.(uid):null;
+    const lastAt=st&&st.capturedAt?Date.parse(st.capturedAt):(st&&st.reportedAt?Date.parse(st.reportedAt):null);
+    const ageMs=lastAt?(Date.now()-lastAt):null;
+    if(!st||st.lat==null){
+      return {status:'FAIL',stage:'native-inject',
+        rootCause:L==='fa'?'هنوز هیچ fix تزریق‌شده‌ای از سرویس native دریافت نشده':'No fix has been injected from the native Android service yet',
+        evidence:'DB.entities.famLocations has no lat/lng for this uid'};
+    }
+    if(ageMs!=null && ageMs>5*60*1000){
+      return {status:'FAIL',stage:'native-inject',
+        rootCause:L==='fa'?'آخرین fix تزریق‌شده قدیمی است — سرویس native ممکن است متوقف شده باشد':'Last injected fix is stale — the native service may have stopped',
+        evidence:`lastFixAgeMs=${ageMs}`};
+    }
+    // Fix is fresh — fall through to Stage 2 (ingestFix) below, which is
+    // still valid: injected fixes go through writeMyFix -> ingestFix the
+    // same as browser fixes do.
+  } else {
+    if(loc.watchId==null){
+      return {status:'FAIL',stage:'watcher',
+        rootCause:L==='fa'?'واچر GPS هیچ‌وقت شروع نشده است':'The GPS watcher was never started',
+        evidence:`watchId=null`};
+    }
+    if(!loc.watchCallbackCount||loc.watchCallbackCount===0){
+      return {status:'FAIL',stage:'watcher',
+        rootCause:L==='fa'?'واچر فعال است ولی هنوز هیچ callback واقعی از GPS دریافت نکرده':'Watcher is active but has never received a real GPS callback yet',
+        evidence:`watchCallbackCount=0`};
+    }
   }
 
   // Stage 2: do fixes reach FamilyDriving.ingestFix at all?
@@ -13715,24 +13753,24 @@ function DrivingDashboard(){
     h+=`<div class="hub-ph" style="margin-top:16px"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc;font-size:28px">${famIcon('car')}</div>
       <div class="hub-ph-t">${L==='fa'?'هنوز سفری ثبت نشده':'No drives recorded yet'}</div>
       <div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'وقتی رانندگی شروع شود، سفرها اینجا نمایش داده می‌شوند.':'Start driving and your trips will appear here.'}</div></div>`;
-    // SELF-DIAGNOSING summary — always visible (no gesture required)
-    // whenever the Dashboard has zero trips. Shows a plain-language
-    // PASS/FAIL verdict with root cause, not raw counters — nothing here
-    // needs to be read back or reported manually. Also offers an Export
-    // button producing the complete diagnostic JSON as a downloadable
-    // text block, per explicit requirement.
-    try{
-      const diag=drvDiagnosePipeline(selUid);
-      const statusColor=diag.status==='PASS'?'#2fce6b':'#e0447a';
-      h+=`<div style="margin-top:10px;padding:12px 14px;background:${statusColor}14;border:1px solid ${statusColor}44;border-radius:12px">
-        <div style="font-size:13px;font-weight:800;color:${statusColor};margin-bottom:6px">${L==='fa'?'وضعیت خط لوله رانندگی':'Driving pipeline'}: ${diag.status}</div>
-        <div style="font-size:12px;color:var(--ink);margin-bottom:3px"><b>${L==='fa'?'مرحله':'Stage reached'}:</b> ${esc(diag.stage)}</div>
-        <div style="font-size:12px;color:var(--ink);margin-bottom:3px"><b>${L==='fa'?'علت احتمالی':'Root cause'}:</b> ${esc(diag.rootCause)}</div>
-        <div style="font-size:11px;color:var(--ink3)"><b>${L==='fa'?'شواهد':'Evidence'}:</b> ${esc(diag.evidence)}</div>
-        <button data-fam="drv-export-diag" data-arg="${esc(selUid)}" style="margin-top:10px;width:100%;background:var(--ink);color:#fff;border:none;border-radius:10px;padding:9px;font-size:12px;font-weight:700;cursor:pointer">${L==='fa'?'خروجی تشخیصی کامل':'Export diagnostics'}</button>
-      </div>`;
-    }catch(e){
-      h+=`<div style="margin-top:10px;padding:10px 12px;background:#e0447a14;border:1px solid #e0447a44;border-radius:10px;font-size:12px;color:var(--ink)">${L==='fa'?'خطا در اجرای تشخیص':'Diagnosis failed to run'}: ${esc(e&&e.message||String(e))}</div>`;
+    // SELF-DIAGNOSING summary — developer-mode only (famDevMode(), toggled by
+    // 5 taps on the Family title). Ordinary users just see the clean empty
+    // state above; the raw pipeline stage/root-cause/evidence panel is a
+    // debugging tool and was never meant to be production-facing UI.
+    if(famDevMode()){
+      try{
+        const diag=drvDiagnosePipeline(selUid);
+        const statusColor=diag.status==='PASS'?'#2fce6b':'#e0447a';
+        h+=`<div style="margin-top:10px;padding:12px 14px;background:${statusColor}14;border:1px solid ${statusColor}44;border-radius:12px">
+          <div style="font-size:13px;font-weight:800;color:${statusColor};margin-bottom:6px">${L==='fa'?'وضعیت خط لوله رانندگی':'Driving pipeline'}: ${diag.status}</div>
+          <div style="font-size:12px;color:var(--ink);margin-bottom:3px"><b>${L==='fa'?'مرحله':'Stage reached'}:</b> ${esc(diag.stage)}</div>
+          <div style="font-size:12px;color:var(--ink);margin-bottom:3px"><b>${L==='fa'?'علت احتمالی':'Root cause'}:</b> ${esc(diag.rootCause)}</div>
+          <div style="font-size:11px;color:var(--ink3)"><b>${L==='fa'?'شواهد':'Evidence'}:</b> ${esc(diag.evidence)}</div>
+          <button data-fam="drv-export-diag" data-arg="${esc(selUid)}" style="margin-top:10px;width:100%;background:var(--ink);color:#fff;border:none;border-radius:10px;padding:9px;font-size:12px;font-weight:700;cursor:pointer">${L==='fa'?'خروجی تشخیصی کامل':'Export diagnostics'}</button>
+        </div>`;
+      }catch(e){
+        h+=`<div style="margin-top:10px;padding:10px 12px;background:#e0447a14;border:1px solid #e0447a44;border-radius:10px;font-size:12px;color:var(--ink)">${L==='fa'?'خطا در اجرای تشخیص':'Diagnosis failed to run'}: ${esc(e&&e.message||String(e))}</div>`;
+      }
     }
   }
 
@@ -15821,7 +15859,12 @@ function famLiveMemberDetail(m, isMe){
       idle:{fa:'آماده',en:'Idle',c:'#9aa1ad'}
     };
     const info=map[ls]||map.idle;
-    const accTxt=(li&&li.accuracy!=null)?`±${li.accuracy}m`:'';
+    // Raw accuracy figure (±Nm) is diagnostic detail, not something a
+    // Life360-style end user needs to see — dev-mode only. The plain-
+    // language state (active/stale/unavailable/denied) and friendly
+    // "updated Xm ago" age are kept for everyone: that's the honest,
+    // non-fabricated status this banner exists to guarantee.
+    const accTxt=(famDevMode()&&li&&li.accuracy!=null)?`±${li.accuracy}m`:'';
     const ageTxt=(li&&li.at)?famRelTime(li.at):'';
     h+=`<div class="fam-locstate" style="--sc:${info.c}">
       <span class="fam-locstate-dot"></span>
@@ -19249,6 +19292,14 @@ function authClearError(){
   if(el){el.textContent='';el.style.display='none';}
 }
 function signInWithGoogle(){
+  if(isNativeWrapper() && window.MbmNativeAuth && typeof window.MbmNativeAuth.requestGoogleSignIn==='function'){
+    // Inside the Android companion, let the native layer drive Google
+    // sign-in (CredentialManager) instead of a browser popup, which is
+    // unreliable/unsupported inside a WebView. The native side calls back
+    // into Firebase auth in the PWA once it has a credential.
+    window.MbmNativeAuth.requestGoogleSignIn();
+    return;
+  }
   if(!FB.ready){authError(L==='fa'?'سرویس ورود در دسترس نیست':'Sign-in service unavailable');return;}
   authClearError();
   const btn=document.getElementById('auth-google');
