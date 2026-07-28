@@ -106,14 +106,44 @@ class MainActivity : AppCompatActivity() {
         binding.batteryButton.setOnClickListener { openBatterySettings() }
         binding.hideButton.setOnClickListener {
             binding.setupCard.isVisible = false
-            binding.trackingChip.isVisible = true
+            binding.trackingChip.isVisible = isDeveloperMode()
         }
         binding.trackingChip.setOnClickListener {
             binding.setupCard.isVisible = true
             binding.trackingChip.isVisible = false
             refreshSetupUi()
         }
+        // Production users never see the setup card or the "Native tracking"
+        // chip — permissions and service start/stop happen silently. The
+        // full diagnostic UI (card, chip, status text, buttons) is still
+        // available in debug builds for development/testing.
+        binding.setupCard.isVisible = isDeveloperMode()
+        binding.trackingChip.isVisible = false
         refreshSetupUi()
+        autoAdvanceSetupSilently()
+    }
+
+    /** True only in debug builds. Gates all developer/diagnostic UI. */
+    private fun isDeveloperMode(): Boolean = BuildConfig.DEBUG
+
+    /**
+     * Drives sign-in, permission requests, family linking and service start
+     * automatically, without requiring the user to see or tap the setup
+     * card. Each step still shows the normal Android system permission
+     * dialogs (those cannot be silent, by OS design) but no MBM Life
+     * diagnostic panel is shown around them. Re-invoked from refreshSetupUi()
+     * after each async step completes, so it naturally stops once tracking
+     * is enabled.
+     */
+    private fun autoAdvanceSetupSilently() {
+        if (isDeveloperMode()) return // developer drives it manually via the visible card
+        when {
+            auth.currentUser == null -> return // cannot silently sign in; wait for user to open Family screen in the PWA, which triggers signInWithGoogle via the JS bridge
+            !hasForegroundLocation() || missingSecondaryPermissions().isNotEmpty() || !hasBackgroundLocation() ->
+                performNextSetupAction()
+            app.preferences.familyId.isNullOrBlank() -> return // needs the PWA Family screen; nothing to silently advance
+            !app.preferences.trackingEnabled -> performNextSetupAction()
+        }
     }
 
     override fun onStart() {
@@ -451,7 +481,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Allow background location")
             .setMessage(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    "Choose Location, then select “Allow all the time”. This is required for family tracking with the screen locked."
+                    "Choose Location, then select "Allow all the time". This is required for family tracking with the screen locked."
                 else
                     "Allow location all the time so trips continue with the screen locked."
             )
@@ -505,6 +535,11 @@ class MainActivity : AppCompatActivity() {
             !family -> "Link Family from PWA"
             tracking -> getString(R.string.stop_tracking)
             else -> getString(R.string.start_tracking)
+        }
+        if (!isDeveloperMode()) {
+            binding.setupCard.isVisible = false
+            binding.trackingChip.isVisible = false
+            autoAdvanceSetupSilently()
         }
     }
 
