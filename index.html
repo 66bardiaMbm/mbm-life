@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v381';
+const APP_VERSION='v382';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -10899,7 +10899,7 @@ const FamilyBackend = (function(){
         return {
           moving:false,
           stayStart:null, placeArrivedAt:null,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:null, priorFixGapMs:null,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:null, lastDepartureAt:null, priorFixGapMs:null,
           _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'confirming',
                      confirmSince:nowAt,reconfirmAccumMs:0}
         };
@@ -10922,7 +10922,7 @@ const FamilyBackend = (function(){
           // credit — restart the confirmation candidate at THIS fix.
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
             _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'confirming',
                        confirmSince:nowAt,reconfirmAccumMs:0}
           };
@@ -10935,14 +10935,14 @@ const FamilyBackend = (function(){
           // (presence0.confirmSince), never "now" and never fabricated.
           return {
             moving:false, stayStart:presence0.confirmSince, placeArrivedAt:presence0.confirmSince,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:null, priorFixGapMs,
             _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence0.confirmSince}
           };
         }
         // Still accumulating proof — remain unconfirmed.
         return {
           moving:false, stayStart:null, placeArrivedAt:null,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
           _presence:Object.assign({},presence0,{reconfirmAccumMs:newAccum0})
         };
       }
@@ -10981,7 +10981,7 @@ const FamilyBackend = (function(){
         console.debug('[presence] gap exceeded threshold — marking uncertain (sticky) and starting re-confirmation window',{priorFixGapMs,anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng}});
         return {
           moving:isAwayNow, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence.since,
                      uncertainSince:nowAt, reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:0}
         };
@@ -11007,7 +11007,7 @@ const FamilyBackend = (function(){
           console.debug('[presence] departure while uncertain — falling through to real leaving/away detection',{anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng},distanceM:dFromAnchor});
           return {
             moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
           };
         }
@@ -11029,7 +11029,7 @@ const FamilyBackend = (function(){
           // detect a real departure on a future fix).
           return {
             moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:Object.assign({},presence,{reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:0})
           };
         }
@@ -11051,7 +11051,7 @@ const FamilyBackend = (function(){
             console.debug('[presence] uncertainty cleared — still within original anchor radius, preserving TRUE original stayStart (this was a foreground hiccup, not a real departure)',{oldStayStart:prev.stayStart,distanceFromOriginalAnchorM:dFromAnchor,accumulatedMs:newAccum});
             return {
               moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-              lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+              lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
               _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
             };
           }
@@ -11063,14 +11063,14 @@ const FamilyBackend = (function(){
           console.debug('[presence] uncertainty cleared — continuity reconfirmed via accumulated close-together fixes, AWAY from original anchor (real relocation)',{oldStayStart:prev.stayStart,newStayStart:presence.uncertainSince,accumulatedMs:newAccum});
           return {
             moving:false, stayStart:presence.uncertainSince, placeArrivedAt:presence.uncertainSince,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence.uncertainSince}
           };
         }
         // Still accumulating — stay flagged uncertain, keep the running total.
         return {
           moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:Object.assign({},presence,{reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:newAccum})
         };
       }
@@ -11080,7 +11080,7 @@ const FamilyBackend = (function(){
           // Still near the known anchor — ordinary fix, stay untouched.
           return {
             moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:presence
           };
         }
@@ -11090,7 +11090,7 @@ const FamilyBackend = (function(){
         // accepted fixes keep reporting "away" for AWAY_CONFIRM_MS.
         return {
           moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
         };
       }
@@ -11102,7 +11102,7 @@ const FamilyBackend = (function(){
           // steady at the SAME anchor/stayStart, nothing changes.
           return {
             moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
           };
         }
@@ -11121,7 +11121,7 @@ const FamilyBackend = (function(){
           });
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
-            lastAcceptedFixAt:nowAt, lastDepartureAt:presence.since, priorFixGapMs,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.since, priorFixGapMs,
             _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'away',since:nowAt,departedAt:presence.since}
           };
         }
@@ -11129,7 +11129,7 @@ const FamilyBackend = (function(){
         // (and its real stayStart) is still technically intact.
         return {
           moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:presence
         };
       }
@@ -11145,7 +11145,7 @@ const FamilyBackend = (function(){
       if(!presence.candidateLat){
         return {
           moving:true, stayStart:null, placeArrivedAt:null,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
           _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt})
         };
       }
@@ -11155,7 +11155,7 @@ const FamilyBackend = (function(){
         // this newest point and keep waiting for a genuinely steady spell.
         return {
           moving:true, stayStart:null, placeArrivedAt:null,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
           _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt})
         };
       }
@@ -11173,14 +11173,14 @@ const FamilyBackend = (function(){
         });
         return {
           moving:false, stayStart:presence.candidateSince, placeArrivedAt:presence.candidateSince,
-          lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
+          lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:presence.candidateLat,anchorLng:presence.candidateLng,state:'steady',since:presence.candidateSince}
         };
       }
       // Still confirming the new steady spell — not there yet.
       return {
         moving:true, stayStart:null, placeArrivedAt:null,
-        lastAcceptedFixAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
+        lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
         _presence:presence
       };
     }
@@ -11214,6 +11214,7 @@ const FamilyBackend = (function(){
     /* ── WRITE a fix for myself (called by the Stage-3 foreground watcher).
        Applies consent (approx vs precise), movement/stay, route append. ── */
     let _lastGpsRequestAt=null; // set the MOMENT any GPS request is made (pending or not) — distinct from lastAcceptedFixAt, never implies a fix was received
+    const _appLaunchedAt=nowISO(); // APP LIFECYCLE ONLY — set once when this module first runs. Never read by classifyMovement, never influences stayStart/lastPresenceConfirmedAt/lastAcceptedFixAt. Exists purely so lastOpenedAt can be persisted as its own independent fact.
     async function writeMyFix(raw){
       if(!ready()||!isMember())return;
       const c=myConsent();
@@ -11236,12 +11237,14 @@ const FamilyBackend = (function(){
         capturedAt, source:raw.source||'gps',
         heading:raw.heading!=null?raw.heading:null, speed:raw.speed!=null?raw.speed:null,
         moving:mv.moving, stayStart:mv.stayStart, placeArrivedAt:mv.placeArrivedAt,
-        lastAcceptedFixAt:mv.lastAcceptedFixAt, lastDepartureAt:mv.lastDepartureAt,
+        lastAcceptedFixAt:mv.lastAcceptedFixAt, lastPresenceConfirmedAt:mv.lastPresenceConfirmedAt!=null?mv.lastPresenceConfirmedAt:null,
+        lastDepartureAt:mv.lastDepartureAt,
         priorFixGapMs:mv.priorFixGapMs!=null?mv.priorFixGapMs:null,
         _presence:mv._presence||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
         permission:'granted', reportedAt:nowISO(),
-        lastGpsRequestAt:_lastGpsRequestAt||null };
+        lastGpsRequestAt:_lastGpsRequestAt||null,
+        lastOpenedAt:(prev&&prev.lastOpenedAt)||_appLaunchedAt||null };
       locMap()[uid]=state;                                     // LOCAL MIRROR — updated on EVERY fix
       // route breadcrumb (only on meaningful movement, precise mode only)
       if(c.precise!==false){ appendRouteLocal(uid,{lat,lng,at:capturedAt,speedMps:state.speed}); }
@@ -15481,8 +15484,15 @@ function famComposeStatusText(m){
   const hasUnconfirmedGap=priorGapMs!=null && priorGapMs>UNCERTAIN_GAP_MS;
   if(hasUnconfirmedGap && since2){
     const unconfirmedLabel=L==='fa'?'حضور تأیید نشده':'Presence unconfirmed';
-    const lastConfirmedGap=L==='fa'?`آخرین تأیید: ${famAbsTime(since2)}`:`Last confirmed: ${famAbsTime(since2)}`;
-    console.debug('[presence] display: showing uncertainty, not a confirmed duration', {uid:m.uid, priorFixGapMs:priorGapMs, since2, stayStartUnchanged:s.stayStart});
+    // FIX: "Last confirmed" must read lastPresenceConfirmedAt specifically,
+    // never since2 (stayStart) directly — these are conceptually distinct
+    // (stayStart = when the stay BEGAN; lastPresenceConfirmedAt = when
+    // continuity was LAST verified). They happen to share a value at the
+    // moment of confirmation, but the field read here must be the correct
+    // one by name, not by coincidence.
+    const confirmedAt=s.lastPresenceConfirmedAt;
+    const lastConfirmedGap=confirmedAt?(L==='fa'?`آخرین تأیید: ${famAbsTime(confirmedAt)}`:`Last confirmed: ${famAbsTime(confirmedAt)}`):unconfirmedLabel;
+    console.debug('[presence] display: showing uncertainty, not a confirmed duration', {uid:m.uid, priorFixGapMs:priorGapMs, since2, lastPresenceConfirmedAt:confirmedAt, stayStartUnchanged:s.stayStart});
     return { l1:lines.line1, region:lines.line2||'', l2:unconfirmedLabel, calloutL2:lastConfirmedGap, since:since2, activityType:'stationary', place:!!d.currentPlaceId, uncertain:true };
   }
   if(!since2){
@@ -15490,11 +15500,16 @@ function famComposeStatusText(m){
     // (e.g. right after the app opens, before the confirmation window
     // completes — see classifyMovement's 'confirming' state). Show this
     // honestly instead of silently rendering an empty Since/Here-for line.
-    // "Last confirmed" falls back to the last accepted fix's own time if
-    // no prior confirmed arrival exists at all (nothing else to show).
+    // FIX: "Last confirmed" must NEVER fall back to the last accepted
+    // fix's own time (s.reportedAt/s.capturedAt) — a bare accepted fix,
+    // including the very first fix right after app launch, is an
+    // OBSERVATIONAL event, not a confirmation event. If presence has
+    // genuinely never been confirmed, the correct display is the
+    // unconfirmed label with NO timestamp at all — never a fabricated
+    // "confirmed" time from an event that was never a confirmation.
     const unconfirmedLabel=L==='fa'?'حضور تأیید نشده':'Presence unconfirmed';
-    const lastFixTime=s.reportedAt||s.capturedAt;
-    const lastConfirmedNone=lastFixTime?(L==='fa'?`آخرین تأیید: ${famAbsTime(lastFixTime)}`:`Last confirmed: ${famAbsTime(lastFixTime)}`):unconfirmedLabel;
+    const confirmedAt=s.lastPresenceConfirmedAt;
+    const lastConfirmedNone=confirmedAt?(L==='fa'?`آخرین تأیید: ${famAbsTime(confirmedAt)}`:`Last confirmed: ${famAbsTime(confirmedAt)}`):unconfirmedLabel;
     return { l1:lines.line1, region:lines.line2||'', l2:unconfirmedLabel, calloutL2:lastConfirmedNone, since:null, activityType:'stationary', place:!!d.currentPlaceId, uncertain:true };
   }
   return {
