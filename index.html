@@ -1356,6 +1356,15 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-cta:active{transform:scale(.96)}
 /* ── Life360 bottom navigation ── */
 .fam-bottomnav{position:absolute;left:0;right:0;bottom:0;z-index:1450;display:flex;background:var(--s1);border-top:1px solid var(--b1);padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px))}
+/* True clearance for content scrolling behind .fam-bottomnav: its own
+   vertical padding (8px top + 8px bottom) + nav button content height
+   (~44px: 24px icon + 3px gap + 11px label + ~4px vertical button padding)
+   + the safe-area inset the bar itself already reserves. Previously every
+   Family screen used a flat 90px with no safe-area term, so on any device
+   with a non-zero gesture-nav inset the actual bar (60px + inset) exceeded
+   the fixed 90px assumption once other spacing was accounted for, clipping
+   the last row of content (e.g. the Members list's last card) behind it. */
+:root{--fam-navclear:calc(60px + env(safe-area-inset-bottom,0px))}
 .fam-navbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border:none;background:transparent;color:var(--ink3);cursor:pointer;font-size:11px;font-weight:700;padding:4px 0}
 .fam-navbtn svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-navbtn.on{color:var(--fam-purple,#8652FF)}
@@ -1764,7 +1773,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v385';
+const APP_VERSION='v386';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13085,7 +13094,7 @@ async function famRunDiagnostics(){
   _famDiagRunning=false; render();
 }
 function famDiagView(){
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   // ── Live-location diagnostics (permission / provider / lat / lng / accuracy /
   //    timestamp / errors) — real values from the location backend. ──
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -13176,7 +13185,7 @@ function renderFamily(){
 
 /* ── Later-phase placeholder screen ── */
 function famLaterView(title,phase,icon){
-  return `<div style="padding:0 16px 90px">
+  return `<div style="padding:0 16px var(--fam-navclear)">
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:40px 20px;border:1px dashed var(--b2);border-radius:18px;background:var(--s1);margin-top:8px">
       <div style="width:72px;height:72px;border-radius:20px;background:var(--b1);display:flex;align-items:center;justify-content:center;font-size:34px;margin-bottom:16px">${icon}</div>
       <div style="font-size:19px;font-weight:800;margin-bottom:6px">${esc(title)}</div>
@@ -13719,13 +13728,13 @@ function drvAlwaysVisibleStatusHtml(){
 function DrivingDashboard(){
   const eng=drvEngine();
   if(!eng){
-    return `<div id="drv-fixed-wrap"><div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'گزارش رانندگی برای اعضای خانواده نمایش داده می‌شود.':'Driving reports are shown for family members.'}</div></div></div>${famBottomNavHtml()}</div>`;
+    return `<div id="drv-fixed-wrap"><div style="padding:0 16px var(--fam-navclear)"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'گزارش رانندگی برای اعضای خانواده نمایش داده می‌شود.':'Driving reports are shown for family members.'}</div></div></div>${famBottomNavHtml()}</div>`;
   }
   const members=famLiveMembers();
   const selUid=drvUid();
   const wk=drvWeekBounds(_drvWeekOffset);
 
-  let h=`<div id="drv-fixed-wrap"><div style="padding:0 16px 90px">`;
+  let h=`<div id="drv-fixed-wrap"><div style="padding:0 16px var(--fam-navclear)">`;
   h+=`<div style="display:flex;gap:8px;margin-bottom:16px;overflow-x:auto">
     <button class="btn ${_drvWeekOffset===0?'':'btn-ghost'}" data-fam="drv-week" data-arg="0" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'این هفته':'This week'}</button>
     <button class="btn ${_drvWeekOffset===1?'':'btn-ghost'}" data-fam="drv-week" data-arg="1" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'هفته قبل':'Last week'}</button>
@@ -13872,7 +13881,7 @@ function LiveDriving(){
   const uid=drvUid();
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(!eng||!uid||!fb){
-    return `<div id="drv-fixed-wrap"><div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>${famBottomNavHtml()}</div>`;
+    return `<div id="drv-fixed-wrap"><div style="padding:0 16px var(--fam-navclear)"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>${famBottomNavHtml()}</div>`;
   }
   const active=eng.activeSession(uid);
   let h=`<div id="drv-live-wrap" style="display:flex;flex-direction:column;height:100%">`;
@@ -14128,10 +14137,10 @@ function TripHistoryList(){
   const eng=drvEngine();
   const uid=drvUid();
   if(!eng||!uid){
-    return `<div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>`;
+    return `<div style="padding:0 16px var(--fam-navclear)"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا به خانواده بپیوندید':'Join a family first'}</div></div></div>`;
   }
   const sessions=eng.memberSessions(uid).slice().reverse(); // newest first
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   h+=DriverHeader(uid,{showSwitcher:true});
   h+=`<div style="height:14px"></div>`;
   if(!sessions.length){
@@ -14245,11 +14254,11 @@ function TripDetail(){
   const uid=drvUid();
   const sessionId=_drvActiveTripId;
   if(!eng||!uid||!sessionId){
-    return `<div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'سفری انتخاب نشده':'No trip selected'}</div></div></div>`;
+    return `<div style="padding:0 16px var(--fam-navclear)"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'سفری انتخاب نشده':'No trip selected'}</div></div></div>`;
   }
   const sess=eng.session(uid,sessionId);
   if(!sess){
-    return `<div style="padding:0 16px 90px"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'سفر یافت نشد':'Trip not found'}</div></div></div>`;
+    return `<div style="padding:0 16px var(--fam-navclear)"><div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('car')}</div><div class="hub-ph-t">${L==='fa'?'سفر یافت نشد':'Trip not found'}</div></div></div>`;
   }
   drvLoadTimelineIfNeeded(uid,sessionId,sess.status);
   const timeline=_drvTimelineCache[sessionId];
@@ -16314,7 +16323,7 @@ function famHistoryView(){
   const pts=allPts.filter(p=>inDay(p.at));
   const evs=(fb&&fb.location&&fb.location.memberEvents)?fb.location.memberEvents(uid).filter(e=>inDay(e.at)):[];
   const dayLabel=day.label.toLocaleDateString(L==='fa'?'fa-IR':undefined,{weekday:'short',month:'short',day:'numeric'});
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   // date navigation
   h+=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost" data-fam="hist-prev" style="width:auto;padding:8px 12px">${L==='fa'?'‹ قبل':'‹ Prev'}</button>
@@ -16421,7 +16430,7 @@ function famHistMount(){
 /* ── Check-in from Live (genuine: real fix → writes a location sample) ── */
 let _famCheckinPending=false, _famCheckinError=null, _famCheckinWatchId=null;
 function famCheckinLiveView(){
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1)">
     <div style="font-size:15px;font-weight:800;margin-bottom:4px">${L==='fa'?'ثبت ورود با موقعیت این دستگاه':'Check in with this device location'}</div>
     <div style="font-size:12px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'از GPS واقعی این دستگاه استفاده می‌کند.':'Uses this device’s real GPS.'}</div>
@@ -16446,7 +16455,7 @@ function famWhen(at){ const d=new Date(at); return isNaN(d)?'':d.toLocaleString(
 function famMembersView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const inCloud=fb&&fb.ready()&&fb.isMember();
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
 
   if(inCloud){
     // ── Authoritative cloud roster (real accounts only) ──
@@ -16514,7 +16523,7 @@ function famNoShowView(){
   // default deadline = now + 1 hour, local HH:MM
   if(!_famNoShowDraft){ const d=new Date(Date.now()+3600000); _famNoShowDraft={ placeId:places[0]?places[0].id:null, hh:('0'+d.getHours()).slice(-2), mm:('0'+d.getMinutes()).slice(-2) }; }
   const dr=_famNoShowDraft;
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   h+=`<div style="font-size:13px;color:var(--ink3);margin-bottom:14px">${L==='fa'?`اگر ${esc(member.name)} تا زمان تعیین‌شده در مکان انتخابی نباشد، یک رویداد ثبت و به شما اطلاع داده می‌شود.`:`If ${esc(member.name)} is not at the chosen place by the set time, an event is recorded and you’re notified.`}</div>`;
   if(!places.length){
     h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('pin')}</div><div class="hub-ph-t">${L==='fa'?'ابتدا یک مکان بسازید':'Add a place first'}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${L==='fa'?'هشدار عدم حضور به یک مکان ذخیره‌شده نیاز دارد.':'A No-Show alert needs a saved place to check against.'}</div></div>`;
@@ -16543,7 +16552,7 @@ function famPlacesView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const list=Object.values(famPlacesMap()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
   const members=(fb&&fb.ready&&fb.ready()&&fb.isMember())?famLiveMembers():[];
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   if(famCan('managePlaces'))h+=`<button class="btn" data-fam="place-new" style="width:100%;margin-bottom:12px;background:var(--fam-purple,#8652FF);color:#fff">${famIcon('pin')} ${L==='fa'?'افزودن مکان':'Add place'}</button>`;
   if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">${famIcon('pin')}</div><div class="hub-ph-t">${L==='fa'?'هنوز مکانی نیست':'No places yet'}</div><div class="hub-ph-d">${L==='fa'?'مکان‌های مهم مثل خانه و مدرسه را اضافه کنید.':'Add key places like Home and School.'}</div></div>`;
   list.forEach(p=>{ const meta=famPlaceMeta(p.type);
@@ -16572,7 +16581,7 @@ function famPlaceDetailView(){
     const st=fb.getState(); Object.keys(st.members||{}).forEach(u=>{ fb.location.memberEvents(u).forEach(e=>{ if(e.placeId===p.id&&(e.type==='arrival'||e.type==='departure'))evs.push(Object.assign({memberName:(st.members[u].name||'Member')},e)); }); });
     evs.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
   }
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   h+=`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
     <div style="width:52px;height:52px;border-radius:14px;background:#ec489918;color:#ec4899;display:flex;align-items:center;justify-content:center;font-size:24px">${meta[2]}</div>
     <div style="flex:1;min-width:0"><div style="font-weight:800;font-size:18px">${esc(p.name)}</div><div style="font-size:12px;color:var(--ink3)">${(L==='fa'?meta[1].fa:meta[1].en)} · ${p.radius||150}m</div></div>
@@ -16595,7 +16604,7 @@ function famPlaceDetailView(){
 }
 function famPlaceEditView(){
   const isNew=!famActivePlaceId; if(isNew&&!_famPlaceDraft)_famPlaceDraft={type:'home',name:'',radius:150,alerts:{enter:true,exit:true},quietHours:{enabled:false,start:'22:00',end:'07:00'}}; const p=isNew?_famPlaceDraft:(famPlacesMap()[famActivePlaceId]||{});
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   h+=`<label class="fl">${L==='fa'?'نوع':'Type'}</label><div class="pay-chips" style="flex-wrap:wrap">${FAM_PLACE_TYPES.map(t=>`<button class="pay-chip${(p.type||'home')===t[0]?' on':''}" data-fam="place-type" data-arg="${t[0]}">${t[2]} ${L==='fa'?t[1].fa:t[1].en}</button>`).join('')}</div>`;
   if(!isNew && p._legacyDefaultName){
     h+=`<div style="margin-top:12px;padding:12px;border-radius:12px;background:#f5a62318;border:1px solid #f5a62340;font-size:12.5px;color:var(--ink2)">${L==='fa'?'این نام هنگام ذخیره‌سازی به‌طور خودکار پیشنهاد شده بود. لطفاً بررسی کنید و در صورت نیاز آن را تغییر دهید — با ذخیره دوباره، این یادآوری حذف می‌شود.':'This name was auto-suggested when the place was first saved. Please review it and change it if needed — saving again will clear this reminder.'}</div>`;
@@ -16625,7 +16634,7 @@ function famCloudMemberEditView(){
   if(!m)return `<div style="padding:20px;color:var(--ink3)">${L==='fa'?'عضو یافت نشد':'Member not found'}</div>`;
   const isOwnerMe=st.role==='owner';
   const av={color:m.color||'#8652FF',name:m.name||'?',avatarId:null};
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   h+=`<div style="display:flex;justify-content:center;padding:8px 0 16px">${famAvatar(av,72)}</div>`;
   h+=`<div style="text-align:center;font-weight:800;font-size:18px">${esc(m.name||'Member')}</div>`;
   h+=`<div style="text-align:center;font-size:12px;color:var(--ink3);margin-bottom:16px">${famRoleLabel(m.role)}${famActiveCloudUid===st.ownerUid?' · '+(L==='fa'?'مالک':'owner'):''}</div>`;
@@ -16639,7 +16648,7 @@ function famCloudMemberEditView(){
 /* ── In-app join-by-code entry (replaces raw browser prompt) ── */
 function famJoinCodeView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   if(!fb||!fb.ready()){
     return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">☁️</div><div class="hub-ph-t">${L==='fa'?'برای پیوستن باید آنلاین باشید':'You must be online to join'}</div></div></div>`;
   }
@@ -16657,7 +16666,7 @@ let _famInvitePreview=null;   // {code,familyName,role,status,createdByName,...}
 function famJoinInviteView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const code=fb?fb.pendingCode():null;
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   if(!fb||!fb.ready()){
     return h+`<div class="hub-ph"><div class="hub-ph-ic" style="background:#ec489918;color:#ec4899">☁️</div><div class="hub-ph-t">${L==='fa'?'برای پیوستن باید آنلاین باشید':'You must be online to join'}</div><div class="hub-ph-d">${L==='fa'?'اتصال اینترنت را بررسی کنید و دوباره باز کنید.':'Check your connection and reopen.'}</div></div></div>`;
   }
@@ -16725,7 +16734,7 @@ function famInvitesView(){
   const inCloud=online&&fb.isMember();
   // Show ONLY server-backed invites (invites created against a cloud family).
   const list=Object.values(famInvitesMap()).filter(i=>i&&i.server).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
 
   // Join-by-code entry (always available online)
   if(online){
@@ -16769,7 +16778,7 @@ function famSettingsView(){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   const inCloud=fb&&fb.ready()&&fb.isMember();
   const tabs=[['family',L==='fa'?'خانواده':'Family'],['members',L==='fa'?'اعضا':'Members'],['places',L==='fa'?'مکان‌ها':'Places'],['invitations',L==='fa'?'دعوت':'Invites'],['roles',L==='fa'?'نقش‌ها':'Roles']];
-  let h=`<div style="padding:0 16px 90px">`;
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   const _p1tabs=['family','members','places','invitations','roles'];
   if(_p1tabs.indexOf(famSettingsTab)<0)famSettingsTab='family';
   h+=`<div class="pay-chips" style="flex-wrap:wrap;margin-bottom:12px">${tabs.map(([k,l])=>`<button class="pay-chip${famSettingsTab===k?' on':''}" data-fam="set-tab" data-arg="${k}">${l}</button>`).join('')}</div>`;
