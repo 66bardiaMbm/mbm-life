@@ -1764,7 +1764,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v382';
+const APP_VERSION='v383';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 
@@ -11539,7 +11539,18 @@ const FamilyBackend = (function(){
       }catch(e){ diag('freshfix','throw'); console.debug('[presence] GPS request threw', e); setLocState('unavailable'); if(opts.cb)opts.cb(null); }
     }
 
+    /* True when running inside the MBM Life Android companion WebView, which
+       intentionally denies browser geolocation (setGeolocationEnabled(false) +
+       onGeolocationPermissionsShowPrompt -> false) and instead injects real
+       fixes via injectNativeFix(). In this mode navigator.geolocation.watchPosition
+       will ALWAYS fail with PERMISSION_DENIED even though real GPS is flowing in,
+       so the browser watch/permission path must be skipped entirely — otherwise
+       it stomps the injected 'active' state back to 'denied'. */
+    function isNativeWrapper(){
+      try{ return /MBMLifeNative/.test(navigator.userAgent); }catch(e){ return false; }
+    }
     function startWatch(){
+      if(isNativeWrapper())return; // native service is the sole location producer
       if(_watchId!=null)return;
       if(!('geolocation' in navigator)){ setLocState('unavailable'); return; }
       if(!shouldWatch())return;
@@ -11565,6 +11576,7 @@ const FamilyBackend = (function(){
 
     /* Permissions API (best-effort) for honest denied/prompt state. */
     function refreshPermission(){
+      if(isNativeWrapper())return; // browser permission API is meaningless here; native fixes drive state instead
       try{
         if(navigator.permissions&&navigator.permissions.query){
           navigator.permissions.query({name:'geolocation'}).then(p=>{
