@@ -1773,7 +1773,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v387';
+const APP_VERSION='v388';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11762,6 +11762,38 @@ const FamilyBackend = (function(){
     const MAX_VALID_SPEED_MPS = 55;     // 198 km/h: reject impossible/isolated GPS speed spikes
     const SPEED_FILTER_ALPHA = 0.55;     // responsive EMA; does not freeze a real speed at zero
 
+    /* v388 stale driving helpers:start
+       A Firestore document can remain status:"active" after a browser/app
+       interruption. Status alone is therefore not live-driving evidence.
+       The session must also have a recent provider/sample update. */
+    const ACTIVE_SESSION_FRESH_MS = 2*60*1000;
+    const ACTIVE_SESSION_FUTURE_TOLERANCE_MS = 60*1000;
+    function sessionTimeMs(value){
+      if(value==null)return 0;
+      if(typeof value.toMillis==='function')return value.toMillis();
+      if(typeof value.seconds==='number')return value.seconds*1000;
+      const parsed=Date.parse(value);
+      return Number.isFinite(parsed)?parsed:0;
+    }
+    function sessionEvidenceAtMs(session,queue){
+      const lastQueued=queue&&queue.samples&&queue.samples.length
+        ? queue.samples[queue.samples.length-1] : null;
+      return Math.max(
+        sessionTimeMs(lastQueued&&(lastQueued.t||lastQueued.capturedAt||lastQueued.at)),
+        sessionTimeMs(session&&session.updatedAt),
+        sessionTimeMs(session&&session.lastSampleAt),
+        sessionTimeMs(session&&session.startedAt)
+      );
+    }
+    function sessionIsLive(session,queue,atMs){
+      if(!session||session.status!=='active')return false;
+      const nowMs=Number.isFinite(atMs)?atMs:Date.now();
+      const evidenceAt=sessionEvidenceAtMs(session,queue);
+      if(!evidenceAt||evidenceAt>nowMs+ACTIVE_SESSION_FUTURE_TOLERANCE_MS)return false;
+      return nowMs-evidenceAt<=ACTIVE_SESSION_FRESH_MS;
+    }
+    /* v388 stale driving helpers:end */
+
     // ── Debug overlay counters (real, not simulated) ──
     let _ingestFixCallCount=0;
     let _acceptedFixCount=0;
@@ -12477,7 +12509,11 @@ const FamilyBackend = (function(){
     function session(uid,sessionId){ return sessionById(uid,sessionId); }
     function activeSession(uid){
       const q=queueMap()[uid];
-      return (q&&q.sessionId)?sessionById(uid,q.sessionId):(sessionsFor(uid).find(s=>s.status==='active')||null);
+      const queued=(q&&q.sessionId)?sessionById(uid,q.sessionId):null;
+      if(sessionIsLive(queued,q))return queued;
+      return sessionsFor(uid)
+        .filter(s=>sessionIsLive(s,null))
+        .sort((a,b)=>sessionEvidenceAtMs(b,null)-sessionEvidenceAtMs(a,null))[0]||null;
     }
     function currentSpeed(uid){
       const q=queueMap()[uid];
@@ -14170,7 +14206,7 @@ function drvHistMount(){
   if(_drvHistTickTimer){ clearInterval(_drvHistTickTimer); _drvHistTickTimer=null; }
   const eng=drvEngine(); const uid=drvUid();
   if(!eng||!uid) return;
-  const hasActive=eng.memberSessions(uid).some(s=>s.status==='active');
+  const hasActive=!!eng.activeSession(uid);
   if(!hasActive) return; // nothing changing — no timer needed
   _drvHistTickTimer=setInterval(()=>{
     if(!(screen==='module'&&currentModule==='family'&&famView==='drivingHistory')){ clearInterval(_drvHistTickTimer); _drvHistTickTimer=null; return; }
@@ -15315,19 +15351,19 @@ function famClassifyRawActivity(m,currentState){
   if(m.consent.paused) return 'paused';
   if(!m.state||m.state.lat==null) return 'offline';
   if(m.status==='offline') return 'offline';
-  // An active verified trip is authoritative. A traffic light, congestion,
-  // or one slow GPS fix must not downgrade Driving to Walking.
-  try{
-    const eng=FamilyBackend&&FamilyBackend.driving;
-    const active=eng&&(eng.activeSession(m.uid)||eng.memberSessions(m.uid).find(s=>s.status==='active'));
-    if(active) return 'driving';
-  }catch(e){}
   const s=m.state;
   // The Android companion publishes an already-confirmed, persisted state.
   // It is the single authority for native users; do not reinterpret one of
   // its speed samples in the WebView and create a competing state machine.
   const nativeState=(s.source==='companion')?(s.movementState||s.activityType):null;
   if(['stationary','walking','driving'].indexOf(nativeState)>=0) return nativeState;
+  // For non-native/PWA members, only a RECENT active session is authoritative.
+  // A stale Firestore document with status:"active" must never resurrect
+  // Driving Now after reinstall/reload.
+  try{
+    const eng=FamilyBackend&&FamilyBackend.driving;
+    if(eng&&eng.activeSession(m.uid)) return 'driving';
+  }catch(e){}
   const speed=(s.speed!=null && !isNaN(s.speed))?s.speed:null;
   if(speed!=null){
     if(speed>=FAM_DRIVE_MIN_MS) return 'driving';
@@ -16120,7 +16156,7 @@ function famLivePaintMarkers(members, sel){
   const mineForDrive=myForDrive?members.find(m=>m.uid===myForDrive):null;
   if(mineForDrive&&mineForDrive.state&&mineForDrive.state.lat!=null){
     const engForDrive=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
-    const activeForDrive=engForDrive&&(engForDrive.activeSession(myForDrive)||engForDrive.memberSessions(myForDrive).find(s=>s.status==='active'));
+    const activeForDrive=engForDrive&&engForDrive.activeSession(myForDrive);
     FamilyMapCamera.drivingState(activeForDrive,[mineForDrive.state.lat,mineForDrive.state.lng]);
   }
   // ── Live-follow: when enabled, keep the map centred on ME as my fix moves ──
@@ -16129,7 +16165,7 @@ function famLivePaintMarkers(members, sel){
     const mine=my?members.find(m=>m.uid===my):null;
     if(mine&&mine.state&&mine.state.lat!=null){
       const eng=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
-      const active=eng&&(eng.activeSession(my)||eng.memberSessions(my).find(s=>s.status==='active'));
+      const active=eng&&eng.activeSession(my);
       FamilyMapCamera.drivingState(active,[mine.state.lat,mine.state.lng]);
       if(!active)FamilyMapCamera.request([mine.state.lat,mine.state.lng],{follow:true});
     }
