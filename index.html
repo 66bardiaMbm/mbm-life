@@ -1783,7 +1783,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v395';
+const APP_VERSION='v396';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11500,8 +11500,17 @@ const FamilyBackend = (function(){
     function lastFixInfo(){
       const uid=myUid(); const st=uid?memberState(uid):null;
       if(!st||st.lat==null)return { lat:null, lng:null, accuracy:null, at:null, source:null, state:_locState, lastCallbackAt:_lastCallbackAt, callbackAgeMs:_lastCallbackAt?Date.now()-_lastCallbackAt:null };
+      const fixAt=Date.parse(st.capturedAt||st.reportedAt||'');
+      // Native-wrapper fixes arrive through the Android bridge, not through
+      // watchPosition, so _lastCallbackAt is intentionally empty.  Use the
+      // real captured timestamp as the callback-age equivalent; otherwise an
+      // old cached native sample can keep a green "Live location active"
+      // banner indefinitely.
+      const effectiveCallbackAge=_lastCallbackAt
+        ? Date.now()-_lastCallbackAt
+        : (st.source==='companion'&&Number.isFinite(fixAt)?Math.max(0,Date.now()-fixAt):null);
       return { lat:st.lat, lng:st.lng, accuracy:st.accuracy, at:st.capturedAt||st.reportedAt, source:st.source||'gps', state:_locState,
-               lastCallbackAt:_lastCallbackAt, callbackAgeMs:_lastCallbackAt?Date.now()-_lastCallbackAt:null,
+               lastCallbackAt:_lastCallbackAt, callbackAgeMs:effectiveCallbackAge,
                markerPos:(typeof MBMMap!=='undefined'&&MBMMap.markerLatLng)?MBMMap.markerLatLng(uid):null };
     }
 
@@ -11572,10 +11581,18 @@ const FamilyBackend = (function(){
         // native service is delivering real fixes via injectNativeFix().
         // Treat the latest injected fix as the answer instead of asking the
         // browser again.
-        diag('freshfix','native wrapper — using last injected fix');
+        diag('freshfix','native wrapper — validating last injected fix');
         const uid=myUid(); const st=uid?memberState(uid):null;
-        if(st&&st.lat!=null){ setLocState('active'); if(opts.cb)opts.cb({coords:{latitude:st.lat,longitude:st.lng,accuracy:st.accuracy},timestamp:Date.now()}); }
-        else { if(opts.cb)opts.cb(null); }
+        const fixAt=st?Date.parse(st.capturedAt||st.reportedAt||''):NaN;
+        const fresh=st&&st.lat!=null&&Number.isFinite(fixAt)&&Date.now()-fixAt<=45000&&st.nativeTrackingActive!==false;
+        if(fresh){
+          setLocState('active');
+          if(opts.cb)opts.cb({coords:{latitude:st.lat,longitude:st.lng,accuracy:st.accuracy},timestamp:fixAt});
+        }else{
+          setLocState(st&&st.lat!=null?'stale':'unavailable');
+          diag('freshfix','native injected fix missing or stale');
+          if(opts.cb)opts.cb(null);
+        }
         return;
       }
       if(!('geolocation' in navigator)){ setLocState('unavailable'); diag('freshfix','no geolocation'); console.debug('[presence] GPS request rejected: no geolocation API'); if(opts.cb)opts.cb(null); return; }
@@ -12544,7 +12561,28 @@ const FamilyBackend = (function(){
           closeReason:sess.closeReason||'stale_recovered'
         });
       }
-      if(_staleRecoveryIds.has(sess.id))return sess;
+      if(_staleRecoveryIds.has(sess.id)){
+        // A late Firestore snapshot can re-apply the old status:"active"
+        // document after this session was already recovered locally.  The old
+        // guard returned that stale object unchanged, resurrecting an
+        // "In progress" row for hours.  Do not repeat the network write, but
+        // always re-normalize the presentation/local record to ended.
+        sess.status='ended';
+        sess.endedAt=sess.endedAt||endedAt;
+        sess.durationSec=Math.max(
+          0,
+          Math.round((Date.parse(sess.endedAt)-Date.parse(sess.startedAt||sess.endedAt))/1000)
+        );
+        sess.closeReason=sess.closeReason||'stale_recovered';
+        saveSession(uid,sess);
+        if(matchingQ){
+          matchingQ.sessionId=null;
+          matchingQ.samples=[];
+          matchingQ.lastFlushIdx=0;
+          try{persistDB();}catch(e){}
+        }
+        return sess;
+      }
       _staleRecoveryIds.add(sess.id);
       pipelineLog('stale-session-recovery',{uid,sessionId:sess.id,evidenceAt:endedAt});
       if(matchingQ&&matchingQ.samples&&matchingQ.samples.length){
@@ -14362,10 +14400,41 @@ function TripDetail(){
 /* Mount the Trip Detail route map — draws the FULL trip polyline (from the
    sample store, same source deriveTimeline used), not just the live queue. */
 let _drvTripSamplesCache={};
+function drvSanitizeRouteSamples(samples){
+  const rows=(Array.isArray(samples)?samples:[])
+    .filter(s=>s&&s.accepted!==false&&Number.isFinite(+s.lat)&&Number.isFinite(+s.lng)
+      && +s.lat>=-90&&+s.lat<=90&&+s.lng>=-180&&+s.lng<=180
+      && (s.accuracyM==null||(+s.accuracyM>=0&&+s.accuracyM<=150)))
+    .map(s=>Object.assign({},s,{lat:+s.lat,lng:+s.lng}))
+    .sort((a,b)=>{
+      const ta=Date.parse(a.t||a.capturedAt||a.at||'');
+      const tb=Date.parse(b.t||b.capturedAt||b.at||'');
+      return (Number.isFinite(ta)?ta:0)-(Number.isFinite(tb)?tb:0);
+    });
+  const out=[];
+  rows.forEach(s=>{
+    const prev=out[out.length-1];
+    if(!prev){out.push(s);return;}
+    const pt=Date.parse(prev.t||prev.capturedAt||prev.at||'');
+    const st=Date.parse(s.t||s.capturedAt||s.at||'');
+    const dt=(Number.isFinite(pt)&&Number.isFinite(st))?(st-pt)/1000:null;
+    const dist=famHaversineM(prev.lat,prev.lng,s.lat,s.lng);
+    const accuracyEnvelope=(+prev.accuracyM||0)+(+s.accuracyM||0)+30;
+    // A route-fit point must be physically plausible relative to the last
+    // accepted point.  This is display validation only; it never fabricates
+    // or snaps coordinates.  It prevents one corrupted/ocean coordinate from
+    // zooming Trip Detail out to an entire state or continent.
+    if(dt!=null&&dt>0&&dist>Math.max(500,accuracyEnvelope*3)&&(dist/dt)>70)return;
+    if(dt!=null&&dt<=0&&dist>Math.max(500,accuracyEnvelope*3))return;
+    out.push(s);
+  });
+  return out;
+}
 function drvTripPaintRoute(){
   const sessionId=_drvActiveTripId;
-  const samples=_drvTripSamplesCache[sessionId];
-  if(!sessionId||samples===undefined||!MBMMap.mounted('drv-trip-map'))return;
+  const rawSamples=_drvTripSamplesCache[sessionId];
+  if(!sessionId||rawSamples===undefined||!MBMMap.mounted('drv-trip-map'))return;
+  const samples=drvSanitizeRouteSamples(rawSamples);
   const state=document.getElementById('drv-trip-map-state');
   if(samples.length>=2){
     MBMMap.drawRoute(samples);
@@ -14910,6 +14979,7 @@ const MBMMap = (function(){
     const changed = prev.pinCls!==pinCls || prev.moving!==meta.moving || prev.heading!==meta.heading
       || prev.photo!==meta.photo || prev.initial!==meta.initial || prev.color!==meta.color
       || prev.activityType!==meta.activityType || prev.battery!==meta.battery
+      || prev.speedKph!==meta.speedKph
       || prev.calloutL1!==meta.calloutL1 || prev.calloutL2!==meta.calloutL2;
     function applyHtml(el){
       el.innerHTML=pinHtml(meta);
@@ -14927,7 +14997,8 @@ const MBMMap = (function(){
       _markers[uid]=mk; _markerPos[uid]=latlng;
     }
     _markerMeta[uid]={pinCls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color,
-      activityType:meta.activityType,battery:meta.battery,calloutL1:meta.calloutL1,calloutL2:meta.calloutL2};
+      activityType:meta.activityType,battery:meta.battery,speedKph:meta.speedKph,
+      calloutL1:meta.calloutL1,calloutL2:meta.calloutL2};
   }
   function clearMarkersExcept(uids){
     Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
@@ -15530,7 +15601,7 @@ function famClassifyRawActivity(m,currentState){
   // It is the single authority for native users; do not reinterpret one of
   // its speed samples in the WebView and create a competing state machine.
   const nativeState=(s.source==='companion')?(s.movementState||s.activityType):null;
-  if(['stationary','walking','driving'].indexOf(nativeState)>=0) return nativeState;
+  if(['stationary','walking','bicycling','motorcycle','driving'].indexOf(nativeState)>=0) return nativeState;
   // For non-native/PWA members, only a RECENT active session is authoritative.
   // A stale Firestore document with status:"active" must never resurrect
   // Driving Now after reinstall/reload.
@@ -15584,7 +15655,7 @@ function famDeriveMemberDisplay(m){
   const s=m.state||{};
   const sampleAt=Date.parse(s.movementDecisionAt||s.capturedAt||s.reportedAt||'')||0;
   const nativeState=(s.source==='companion')?(s.movementState||s.activityType):null;
-  const nativePersisted=['stationary','walking','driving'].indexOf(nativeState)>=0;
+  const nativePersisted=['stationary','walking','bicycling','motorcycle','driving'].indexOf(nativeState)>=0;
   let raw=famClassifyRawActivity(m,c.activityType);
   // Cumulative-movement override: even when instantaneous speed says
   // "stationary" or is unavailable, real distance covered over the last
@@ -15592,7 +15663,7 @@ function famDeriveMemberDisplay(m){
   // actually driving — fixes the case where coords.speed is null/unreliable
   // but the GPS fix positions themselves clearly show a car moving.
   if(!nativePersisted && raw!=='offline' && raw!=='paused' && famCumulativeIsDriving(c,m)) raw='driving';
-  if(raw==='driving'||raw==='walking') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
+  if(raw==='driving'||raw==='walking'||raw==='bicycling'||raw==='motorcycle') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
   // offline/paused are never debounced — these are honest device/consent
   // facts, not noisy motion signals, so they apply immediately.
   if(raw==='offline'||raw==='paused'){
@@ -15751,6 +15822,19 @@ function famComposeStatusText(m){
     const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
     const l2=speedKph!=null?`${speedKph} km/h`:'';
     return { l1, l2, since:null, activityType:'walking', speedKph };
+  }
+  if(d.activityType==='bicycling'||d.activityType==='motorcycle'){
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
+    const isBike=d.activityType==='bicycling';
+    const base=isBike
+      ? (L==='fa'?'در حال دوچرخه‌سواری':'Cycling')
+      : (L==='fa'?'در حال موتورسواری':'Motorcycling');
+    const l1=road
+      ? (L==='fa'?`${base} نزدیک ${road}`:`${base} near ${road}`)
+      : base;
+    const speedKph=(s.speed!=null&&!isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
+    const l2=speedKph!=null?`${speedKph} km/h`:'';
+    return {l1,l2,since:null,activityType:d.activityType,speedKph};
   }
   // stationary — ALWAYS show the real geocoded address, never a saved
   // place's name/label. The user has repeatedly and explicitly rejected
@@ -16203,6 +16287,8 @@ function famLiveMemberDetail(m, isMe){
     h+=`<div class="fam-stat-grid">`;
     if(txt2.activityType==='driving') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال رانندگی':'Driving'}</div></div>`;
     else if(txt2.activityType==='walking') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال پیاده‌روی':'Walking'}</div></div>`;
+    else if(txt2.activityType==='bicycling') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'دوچرخه‌سواری':'Cycling'}</div></div>`;
+    else if(txt2.activityType==='motorcycle') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'موتورسواری':'Motorcycling'}</div></div>`;
     h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
     if(acc.level==='good') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">${esc(acc.text)}</div></div>`;
     if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">${s.battery}%</div></div>`;

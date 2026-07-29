@@ -157,9 +157,19 @@ class MainActivity : AppCompatActivity() {
                 requestBackgroundLocation()
             }
             app.preferences.familyId.isNullOrBlank() -> resolveFamilyNatively()
-            app.preferences.trackingEnabled -> return
             else -> {
-                ContextCompat.startForegroundService(this, TrackingService.startIntent(this))
+                // Installing/updating an APK stops the old process and its
+                // foreground service, but SharedPreferences survives.  The
+                // previous code treated trackingEnabled=true as proof that
+                // the service was still alive and returned here, leaving the
+                // app on a hours-old fix until Android happened to restart it.
+                //
+                // Starting an already-running service is safe: TrackingService
+                // rejects duplicate starts itself.  Always reconcile the real
+                // service on app launch instead of trusting a persisted flag.
+                if (!TrackingService.isRunning) {
+                    ContextCompat.startForegroundService(this, TrackingService.startIntent(this))
+                }
                 app.preferences.trackingEnabled = true
             }
         }
@@ -279,7 +289,14 @@ class MainActivity : AppCompatActivity() {
                                     ?.let { java.time.Instant.ofEpochMilli(it).toString() }
                                     ?: JSONObject.NULL
                             )
-                            .put("reportedAt", java.time.Instant.now().toString())
+                            // This is a replay of Room's last accepted sample,
+                            // not a new GPS callback.  Giving it "now" made an
+                            // hours-old coordinate look live after every page
+                            // load.  Freshness must remain tied to the sample.
+                            .put(
+                                "reportedAt",
+                                java.time.Instant.ofEpochMilli(sample.capturedAtMs).toString()
+                            )
                             .put("source", "companion")
                             .put("moving", app.preferences.movementState != "stationary")
                             .put("activityType", app.preferences.movementState)

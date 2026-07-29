@@ -141,6 +141,25 @@ class MovementStateDetectorTest {
         assertEquals(MovementState.WALKING, decision?.state)
     }
 
+    @Test
+    fun confidentBicycleActivityPublishesCyclingNotDriving() {
+        val detector = MovementStateDetector()
+        var decision: MovementDecision? = null
+        listOf(1_000L, 5_000L, 10_000L).forEach { at ->
+            decision = detector.ingest(
+                sample(
+                    atMs = at,
+                    speed = 5.0,
+                    activityType = "ON_BICYCLE",
+                    activityConfidence = 90
+                ),
+                verifiedTripActive = false
+            )
+        }
+
+        assertEquals(MovementState.CYCLING, decision?.state)
+    }
+
     private fun sample(
         atMs: Long,
         speed: Double,
@@ -148,7 +167,9 @@ class MovementStateDetectorTest {
         accepted: Boolean = true,
         rawSpeed: Double? = speed,
         lat: Double = -42.7,
-        lng: Double = 147.25
+        lng: Double = 147.25,
+        activityType: String = "UNKNOWN",
+        activityConfidence: Int = 0
     ) = LocationSampleEntity(
         id = "sample-$atMs",
         sessionId = null,
@@ -165,8 +186,8 @@ class MovementStateDetectorTest {
         altitudeM = null,
         capturedAtMs = atMs,
         elapsedRealtimeNanos = atMs * 1_000_000,
-        activityType = "UNKNOWN",
-        activityConfidence = 0,
+        activityType = activityType,
+        activityConfidence = activityConfidence,
         isMock = false,
         accepted = accepted,
         rejectionReason = if (accepted) null else "test"
