@@ -62,13 +62,13 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Name v394 APK
-        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk android-app/app/build/outputs/apk/debug/MBM-Life-v394-debug.apk
+      - name: Name v395 APK
+        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk android-app/app/build/outputs/apk/debug/MBM-Life-v395-debug.apk
 
-      - name: Upload v394 APK
+      - name: Upload v395 APK
         uses: actions/upload-artifact@v4
         with:
-          name: MBM-Life-v394-debug
-          path: android-app/app/build/outputs/apk/debug/MBM-Life-v394-debug.apk
+          name: MBM-Life-v395-debug
+          path: android-app/app/build/outputs/apk/debug/MBM-Life-v395-debug.apk
           if-no-files-found: error
           retention-days: 14
