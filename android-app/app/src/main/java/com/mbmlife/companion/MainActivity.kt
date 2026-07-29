@@ -107,6 +107,9 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun isNativeApp(): Boolean = true
+
+        @JavascriptInterface
+        fun appVersionName(): String = BuildConfig.VERSION_NAME
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -23,6 +23,28 @@ class DrivingDetectorTest {
     }
 
     @Test
+    fun providerSpeedMissingStationaryAccuracyNoiseStaysAtZero() {
+        val detector = DrivingDetector()
+        var output: DrivingOutput? = null
+        for (seconds in 0..120 step 5) {
+            val jitter = if ((seconds / 5) % 2 == 0) 0.000025 else -0.000025
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7 + jitter,
+                    lng = 147.25,
+                    speed = null,
+                    activity = "STILL"
+                )
+            )
+        }
+
+        assertEquals(0, output?.sample?.displayedSpeedKph)
+        assertEquals(null, output?.trip)
+        assertEquals(TripTransition.NONE, output?.transition)
+    }
+
+    @Test
     fun impossiblePositionSpikeIsRejected() {
         val detector = DrivingDetector()
         detector.ingest(fix(timeMs = 1_000L, lat = -42.7, lng = 147.25, speed = 0f))
