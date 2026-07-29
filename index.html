@@ -1773,7 +1773,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v388';
+const APP_VERSION='v389';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13838,8 +13838,7 @@ function DrivingDashboard(){
       const initial=esc((m.name||'?').trim().charAt(0).toUpperCase());
       const avatar=m.photo?`<img src="${esc(m.photo)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
         :`<div style="width:44px;height:44px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800">${initial}</div>`;
-      h+=`<div style="width:100%;display:flex;align-items:center;gap:12px;border:1px solid var(--b1);background:var(--s1);border-radius:16px;padding:14px;margin-bottom:10px">
-        <button data-fam="drv-open-member-history" data-arg="${esc(m.uid)}" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:12px;flex:1;min-width:0;color:var(--ink)">
+      h+=`<button type="button" data-fam="drv-open-member-history" data-arg="${esc(m.uid)}" aria-label="${esc((L==='fa'?'مشاهده رانندگی‌های ':'View drives for ')+m.name)}" style="width:100%;display:flex;align-items:center;gap:12px;border:1px solid var(--b1);background:var(--s1);border-radius:16px;padding:14px;margin-bottom:10px;cursor:pointer;color:var(--ink);text-align:start">
         ${avatar}
         <div style="flex:1;min-width:0">
           <div style="font-weight:800;font-size:15px">${esc(m.name)}${isLive?` <span style="font-size:10px;font-weight:800;color:#2FCE6B;background:#2FCE6B18;border-radius:8px;padding:2px 7px;vertical-align:middle">${L==='fa'?'در حال رانندگی':'DRIVING NOW'}</span>`:''}</div>
@@ -13847,10 +13846,10 @@ function DrivingDashboard(){
           <div style="font-size:11px;color:var(--ink3);margin-top:3px">${lastDriveLabel}</div>
           ${evs.length?`<div style="display:inline-flex;align-items:center;gap:4px;background:#F5A62318;color:#B8791A;border-radius:8px;padding:3px 9px;margin-top:6px;font-size:11px;font-weight:700">${famIcon('shield')} ${evs.length} ${L==='fa'?'رویداد پرخطر':'Risky Events'}</div>`:''}
         </div>
-        <span style="color:var(--ink3);opacity:.4">›</span>
-        </button>
-        ${isLive?`<button data-fam="drv-open-member" data-arg="${esc(m.uid)}" style="flex:none;background:#2FCE6B;color:#fff;border:none;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;cursor:pointer">${L==='fa'?'مشاهده زنده':'View Live'}</button>`:''}
-      </div>`;
+        <span style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;color:var(--fam-purple,#8652FF);font-size:11px;font-weight:800;flex:none">
+          ${L==='fa'?'مشاهده سفرها':'View drives'}<span style="font-size:22px;line-height:1">›</span>
+        </span>
+      </button>`;
     });
   }
   h+=`</div>`;
@@ -14299,7 +14298,9 @@ function TripDetail(){
   const timeline=_drvTimelineCache[sessionId];
 
   let h=`<div id="drv-trip-wrap">`;
-  h+=`<div id="drv-trip-map" style="height:32vh;position:relative;background:#dfe3ea"></div>`;
+  h+=`<div id="drv-trip-map" style="height:38vh;position:relative;background:#dfe3ea">
+    <div id="drv-trip-map-state" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;background:var(--s1);color:var(--ink2);border:1px solid var(--b1);border-radius:14px;padding:10px 14px;font-size:12px;font-weight:700;box-shadow:0 4px 18px #0002">${L==='fa'?'در حال بارگذاری مسیر…':'Loading route…'}</div>
+  </div>`;
   h+=`<div style="padding:16px 20px 90px">`;
   h+=`<div style="font-size:18px;font-weight:800;margin-bottom:2px">${famAbsTime(sess.startedAt)} – ${sess.endedAt?famAbsTime(sess.endedAt):(L==='fa'?'در حال انجام':'In progress')}</div>`;
   h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:16px">${esc(drvDayLabel(sess.startedAt))}</div>`;
@@ -14324,6 +14325,24 @@ function TripDetail(){
 }
 /* Mount the Trip Detail route map — draws the FULL trip polyline (from the
    sample store, same source deriveTimeline used), not just the live queue. */
+let _drvTripSamplesCache={};
+function drvTripPaintRoute(){
+  const sessionId=_drvActiveTripId;
+  const samples=_drvTripSamplesCache[sessionId];
+  if(!sessionId||samples===undefined||!MBMMap.mounted('drv-trip-map'))return;
+  const state=document.getElementById('drv-trip-map-state');
+  if(samples.length>=2){
+    MBMMap.drawRoute(samples);
+    FamilyMapCamera.fit(samples.map(s=>[s.lat,s.lng]));
+    if(state)state.remove();
+    return;
+  }
+  if(state){
+    state.textContent=L==='fa'
+      ? 'جزئیات مسیر برای این سفر قدیمی ذخیره نشده است'
+      : 'Detailed route was not stored for this older trip';
+  }
+}
 function drvTripMount(){
   const el=document.getElementById('drv-trip-map'); if(!el) return;
   const eng=drvEngine(); const uid=drvUid(); const sessionId=_drvActiveTripId;
@@ -14334,11 +14353,12 @@ function drvTripMount(){
   MBMMap.invalidate();
   eng.sessionSamples(uid,sessionId).then(samples=>{
     if(screen!=='module'||currentModule!=='family'||famView!=='drivingTrip'||_drvActiveTripId!==sessionId) return;
-    if(samples&&samples.length>=2){
-      MBMMap.drawRoute(samples);
-      FamilyMapCamera.fit(samples.map(s=>[s.lat,s.lng]));
-    }
-  }).catch(()=>{});
+    _drvTripSamplesCache[sessionId]=Array.isArray(samples)?samples:[];
+    drvTripPaintRoute();
+  }).catch(()=>{
+    _drvTripSamplesCache[sessionId]=[];
+    drvTripPaintRoute();
+  });
 }
 
 function famLaterTile(icon,label,phase){ return `<button class="ul-row" data-fam="later" data-arg="${esc(label)}" style="width:100%;text-align:start;border:1px dashed var(--b2);background:transparent;border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;opacity:.72">
@@ -14616,13 +14636,13 @@ const MBMMap = (function(){
     {featureType:'poi',stylers:[{visibility:'off'}]},
     {featureType:'poi.park',elementType:'labels',stylers:[{visibility:'off'}]},
     {featureType:'transit',stylers:[{visibility:'off'}]},
-    {featureType:'road',elementType:'geometry',stylers:[{color:'#ffffff'}]},
-    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#cfc9b8'}]},
+    {featureType:'road',elementType:'geometry',stylers:[{color:'#e9eef4'}]},
+    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#b9c5d1'}]},
     {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#ffe4a8'}]},
     {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#e0b95f'}]},
-    {featureType:'road.arterial',elementType:'geometry',stylers:[{color:'#ffffff'}]},
-    {featureType:'road.local',elementType:'geometry',stylers:[{color:'#ffffff'}]},
-    {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#6b6f77'}]},
+    {featureType:'road.arterial',elementType:'geometry',stylers:[{color:'#dce6ef'}]},
+    {featureType:'road.local',elementType:'geometry',stylers:[{color:'#edf2f6'}]},
+    {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#4e5a66'}]},
     {featureType:'road.highway',elementType:'labels.text.fill',stylers:[{color:'#8a6a1f'}]},
     {featureType:'landscape',elementType:'geometry',stylers:[{color:'#f4f0e5'}]},
     {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#d2f8e1'}]},
@@ -15123,7 +15143,7 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     <div class="av" style="background:var(--s2);display:flex;align-items:center;justify-content:center;color:var(--fam-purple,#8652FF);font-size:20px;font-weight:800">+</div>
     <div class="nm">${L==='fa'?'افزودن فرد':'Add a person'}</div>
   </div>`;
-  if(members.length>1){
+  if(members.length){
     h+=`<div class="fam-presence">`;
     members.forEach(m=>{
       const av=m.photo?`<div class="av" style="background-image:url('${(''+m.photo).replace(/'/g,'')}')"></div>`
@@ -15136,11 +15156,6 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     });
     h+=addPersonCard;
     h+=`</div>`;
-  } else if(members.length===1){
-    // Life360 always keeps a real "Add a person" entry point visible next
-    // to your own card, not buried in Settings — joining/inviting should
-    // never require leaving the app or hunting through menus.
-    h+=`<div class="fam-presence">${addPersonCard}</div>`;
   }
   if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
   return h;
@@ -16239,6 +16254,13 @@ function famLiveMount(){
    enough. */
 function famMapLoaded(){
   const ld=document.getElementById('fam-map-load'); if(ld&&!ld.classList.contains('gone')){ ld.classList.add('gone'); setTimeout(()=>{try{ld.remove();}catch(e){}},400); }
+  // Trip samples can resolve before the asynchronous Google Maps SDK. Paint
+  // again when the map itself becomes ready; otherwise the promise's earlier
+  // drawRoute call is a no-op and the trip page looks non-functional.
+  if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'){
+    try{ drvTripPaintRoute(); }catch(e){}
+    return;
+  }
   if(!(screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard'))) return;
   const members=(typeof famLiveMembers==='function')?famLiveMembers():[];
   const sel=members.find(m=>m.uid===_famSelUid);
