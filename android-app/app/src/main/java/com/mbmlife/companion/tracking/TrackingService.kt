@@ -118,15 +118,6 @@ class TrackingService : Service() {
         return START_STICKY
     }
 
-    override fun onDestroy() {
-        isRunning = false
-        stopReevaluationJob?.cancel()
-        try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
-        try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
-        serviceScope.cancel()
-        super.onDestroy()
-    }
-
     private fun startTracking() {
         if (trackingStartRequested) {
             repository.logger().info("Service", "Duplicate start ignored")
@@ -553,9 +544,11 @@ class TrackingService : Service() {
             PackageManager.PERMISSION_GRANTED
 
     override fun onDestroy() {
+        isRunning = false
         stopReevaluationJob?.cancel()
         stopReevaluationJob = null
         try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+        try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
         locationUpdatesRequested = false
         locationRequestForActiveTrip = null
         activityUpdatesRequested = false
