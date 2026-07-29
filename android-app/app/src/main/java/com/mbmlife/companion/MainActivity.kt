@@ -16,6 +16,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -64,6 +65,26 @@ class MainActivity : AppCompatActivity() {
     private val backgroundPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             refreshSetupUi()
+        }
+
+    // Holds the WebView's callback while the system photo/file picker is
+    // open; resolved with the chosen file (or null on cancel) when the
+    // picker activity returns. Required for <input type="file"> inside the
+    // WebView to work at all — without a WebChromeClient.onShowFileChooser
+    // override paired with this launcher, WebView silently drops the click.
+    private var pendingFileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private val fileChooserLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = pendingFileChooserCallback
+            pendingFileChooserCallback = null
+            if (callback == null) return@registerForActivityResult
+            val data = result.data
+            if (result.resultCode != RESULT_OK || data == null) {
+                callback.onReceiveValue(null) // cancelled: current image must remain unchanged
+                return@registerForActivityResult
+            }
+            val uri = data.data
+            callback.onReceiveValue(if (uri != null) arrayOf(uri) else null)
         }
 
     private val nativeFixReceiver = object : BroadcastReceiver() {
@@ -123,8 +144,18 @@ class MainActivity : AppCompatActivity() {
         autoAdvanceSetupSilently()
     }
 
-    /** True only in debug builds. Gates all developer/diagnostic UI. */
-    private fun isDeveloperMode(): Boolean = BuildConfig.DEBUG
+    /**
+     * Gates all developer/diagnostic UI (setup card, tracking chip, status
+     * text, Start/Stop/Battery/Hide buttons). Deliberately NOT tied to
+     * BuildConfig.DEBUG: the CI pipeline currently ships a debug-variant
+     * APK for internal testing (app-debug-auth-fixed), where DEBUG=true is
+     * fixed at compile time by the Android Gradle Plugin and cannot be
+     * toggled at runtime. Using a hardcoded constant here means the same
+     * debug-signed build used for testing shows the production (no
+     * diagnostic UI) experience. Flip to true only for local development
+     * when the diagnostic card is needed again.
+     */
+    private fun isDeveloperMode(): Boolean = false
 
     /**
      * Drives sign-in, permission requests, family linking and service start
@@ -194,6 +225,36 @@ class MainActivity : AppCompatActivity() {
                 // The native foreground service is the sole location producer.
                 callback?.invoke(origin, false, false)
                 logger.info("WebView", "PWA geolocation request denied; native service is authoritative")
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                // Cancel any prior pending chooser rather than leaking it —
+                // only one file input can be actively awaiting a result.
+                pendingFileChooserCallback?.onReceiveValue(null)
+                pendingFileChooserCallback = filePathCallback
+                val mimeTypes = fileChooserParams?.acceptTypes
+                    ?.filter { it.isNotBlank() }
+                    ?.toTypedArray()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: arrayOf("image/*")
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = mimeTypes.firstOrNull() ?: "image/*"
+                    if (mimeTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+                }
+                return try {
+                    fileChooserLauncher.launch(Intent.createChooser(intent, "Select image"))
+                    true
+                } catch (e: Exception) {
+                    logger.error("WebView", "File chooser launch failed", e.toString())
+                    pendingFileChooserCallback = null
+                    filePathCallback?.onReceiveValue(null)
+                    false
+                }
             }
         }
         binding.webView.webViewClient = object : WebViewClient() {
@@ -481,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Allow background location")
             .setMessage(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    "Choose Location, then select "Allow all the time". This is required for family tracking with the screen locked."
+                    "Choose Location, then select “Allow all the time”. This is required for family tracking with the screen locked."
                 else
                     "Allow location all the time so trips continue with the screen locked."
             )
