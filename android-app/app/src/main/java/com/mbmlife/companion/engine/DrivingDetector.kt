@@ -363,14 +363,20 @@ class DrivingDetector(
         val cutoff = sample.capturedAtMs - STOP_WINDOW_MS
         val recent = tail.filter { it.capturedAtMs >= cutoff && it.accepted }
         if (recent.size < STOP_MIN_SAMPLES) return false
-        val first = recent.first()
-        if (sample.capturedAtMs - first.capturedAtMs < STOP_MIN_WINDOW_MS) return false
-        val speeds = recent.mapNotNull {
-            it.rawSpeedMps?.toDouble() ?: it.filteredSpeedMps
+        val samplesWithSpeed = recent.mapNotNull { candidate ->
+            (candidate.rawSpeedMps?.toDouble() ?: candidate.filteredSpeedMps)
+                ?.let { speed -> candidate to speed }
         }
+        val speeds = samplesWithSpeed.map { it.second }
         if (speeds.size < STOP_MIN_SAMPLES) return false
         val lowSpeedRatio = speeds.count { it <= STOP_LOW_SPEED_MPS }.toDouble() / speeds.size
         if (lowSpeedRatio < STOP_LOW_SPEED_RATIO) return false
+        val lowSpeedSamples = samplesWithSpeed
+            .filter { it.second <= STOP_LOW_SPEED_MPS }
+            .map { it.first }
+        if (lowSpeedSamples.size < STOP_MIN_SAMPLES) return false
+        val first = lowSpeedSamples.first()
+        if (sample.capturedAtMs - first.capturedAtMs < STOP_MIN_WINDOW_MS) return false
         val distance = Geo.distanceM(
             first.latitude,
             first.longitude,
