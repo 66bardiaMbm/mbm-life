@@ -1783,7 +1783,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v396';
+const APP_VERSION='v397';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11780,6 +11780,10 @@ const FamilyBackend = (function(){
          is NOT "Speeding" — no legal speed-limit source exists yet.
      ═══════════════════════════════════════════════════════════════════ */
   const FamilyDriving = (function(){
+    // FamilyDriving is a separate closure from FamilyLocation. Keep its clock
+    // helper local: calling FamilyLocation's private nowISO() crashed the
+    // complete Driving dashboard during stale-session recovery.
+    function nowISO(){ return new Date().toISOString(); }
     const SCHEMA_VERSION = 1;
     const DRIVE_MIN_MS   = 2.8;
     const WALK_MAX_MS    = 2.3;
@@ -14400,7 +14404,7 @@ function TripDetail(){
 /* Mount the Trip Detail route map — draws the FULL trip polyline (from the
    sample store, same source deriveTimeline used), not just the live queue. */
 let _drvTripSamplesCache={};
-function drvSanitizeRouteSamples(samples){
+function drvSanitizeRouteSamples(samples,routeContext){
   const rows=(Array.isArray(samples)?samples:[])
     .filter(s=>s&&s.accepted!==false&&Number.isFinite(+s.lat)&&Number.isFinite(+s.lng)
       && +s.lat>=-90&&+s.lat<=90&&+s.lng>=-180&&+s.lng<=180
@@ -14411,8 +14415,39 @@ function drvSanitizeRouteSamples(samples){
       const tb=Date.parse(b.t||b.capturedAt||b.at||'');
       return (Number.isFinite(ta)?ta:0)-(Number.isFinite(tb)?tb:0);
     });
+  // Reject geographically isolated bad coordinates before the sequential
+  // plausibility pass. Previously a corrupted first point (commonly 0,0)
+  // became the route anchor, causing every real Tasmania point to be rejected
+  // and Trip Detail to zoom to the ocean. Coordinate-wise medians are robust
+  // to isolated outliers; the radius scales with the recorded trip distance.
+  let working=rows;
+  if(rows.length>=2){
+    const median=values=>{
+      const sorted=values.slice().sort((a,b)=>a-b);
+      const mid=Math.floor(sorted.length/2);
+      return sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;
+    };
+    const medianCenter={lat:median(rows.map(s=>s.lat)),lng:median(rows.map(s=>s.lng))};
+    const expectedM=Math.max(0,+((routeContext&&routeContext.distanceM)||0));
+    const radiusM=Math.max(100000,Math.min(2000000,expectedM*3+50000));
+    const validContextPoint=(lat,lng)=>Number.isFinite(+lat)&&Number.isFinite(+lng)
+      && !(Math.abs(+lat)<0.0001&&Math.abs(+lng)<0.0001);
+    const centers=[medianCenter];
+    if(validContextPoint(routeContext&&routeContext.startLat,routeContext&&routeContext.startLng)){
+      centers.push({lat:+routeContext.startLat,lng:+routeContext.startLng});
+    }
+    if(validContextPoint(routeContext&&routeContext.endLat,routeContext&&routeContext.endLng)){
+      centers.push({lat:+routeContext.endLat,lng:+routeContext.endLng});
+    }
+    let bestCluster=[];
+    centers.forEach(center=>{
+      const cluster=rows.filter(s=>famHaversineM(center.lat,center.lng,s.lat,s.lng)<=radiusM);
+      if(cluster.length>=bestCluster.length)bestCluster=cluster;
+    });
+    if(bestCluster.length&&bestCluster.length<rows.length)working=bestCluster;
+  }
   const out=[];
-  rows.forEach(s=>{
+  working.forEach(s=>{
     const prev=out[out.length-1];
     if(!prev){out.push(s);return;}
     const pt=Date.parse(prev.t||prev.capturedAt||prev.at||'');
@@ -14434,7 +14469,9 @@ function drvTripPaintRoute(){
   const sessionId=_drvActiveTripId;
   const rawSamples=_drvTripSamplesCache[sessionId];
   if(!sessionId||rawSamples===undefined||!MBMMap.mounted('drv-trip-map'))return;
-  const samples=drvSanitizeRouteSamples(rawSamples);
+  const eng=drvEngine(),uid=drvUid();
+  const sess=(eng&&uid)?eng.session(uid,sessionId):null;
+  const samples=drvSanitizeRouteSamples(rawSamples,sess||{});
   const state=document.getElementById('drv-trip-map-state');
   if(samples.length>=2){
     MBMMap.drawRoute(samples);
@@ -14453,7 +14490,12 @@ function drvTripMount(){
   const eng=drvEngine(); const uid=drvUid(); const sessionId=_drvActiveTripId;
   if(!eng||!uid||!sessionId) return;
   const sess=eng.session(uid,sessionId); if(!sess) return;
-  const center=sess.startLat!=null?[sess.startLat,sess.startLng]:[-42.88,147.32];
+  const startValid=Number.isFinite(+sess.startLat)&&Number.isFinite(+sess.startLng)
+    && !(Math.abs(+sess.startLat)<0.0001&&Math.abs(+sess.startLng)<0.0001);
+  const endValid=Number.isFinite(+sess.endLat)&&Number.isFinite(+sess.endLng)
+    && !(Math.abs(+sess.endLat)<0.0001&&Math.abs(+sess.endLng)<0.0001);
+  const center=startValid?[+sess.startLat,+sess.startLng]
+              :(endValid?[+sess.endLat,+sess.endLng]:[-42.88,147.32]);
   MBMMap.init('drv-trip-map', center);
   MBMMap.invalidate();
   eng.sessionSamples(uid,sessionId).then(samples=>{
@@ -15248,7 +15290,9 @@ function famRelTime(iso){
 function famAbsTime(iso){
   const t=Date.parse(iso||''); if(isNaN(t))return '';
   const d=new Date(t);
-  return d.toLocaleTimeString(L==='fa'?'fa-IR':undefined,{hour:'2-digit',minute:'2-digit'});
+  return d.toLocaleTimeString(L==='fa'?'fa-IR':'en-AU',{
+    hour:'2-digit',minute:'2-digit',hour12:false,hourCycle:'h23'
+  });
 }
 /* Honest accuracy classification. A raw ±2000m must NEVER be shown as if it
    were a normal precise value — instead it's labelled "Approximate" and, when
@@ -15434,7 +15478,12 @@ function famLiveView(){
     </div></div>`;
   }
   const members=famLiveMembers();
-  const sel = members.find(m=>m.uid===_famSelUid) || members.find(m=>m.hasFix) || members[0];
+  const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+  const sel = members.find(m=>m.uid===_famSelUid)
+           || members.find(m=>m.uid===localUid&&m.hasFix)
+           || members.find(m=>m.hasFix)
+           || members.find(m=>m.uid===localUid)
+           || members[0];
   _famSelUid = sel?sel.uid:null;
   _famRosterSig = famRosterSig(members);
   const myUid=FB.user&&FB.user.uid;
@@ -15528,7 +15577,7 @@ function famLiveView(){
 }
 let _famMapTypeOpen=false;
 let _famCat='people';   // active category row selection (people is the live one)
-let _famFollow=false;   // live-follow: keep map centred on me as I move
+let _famFollow=true;    // live-follow is the production default; gestures pause it temporarily
 let _famLiveFixKicked=false;  // one-shot fresh fix when opening live
 let _famDurTickTimer=null;    // interval that refreshes "Here for"/"Since" text only
 
@@ -15545,7 +15594,12 @@ function famLiveApply(){
   const members=famLiveMembers();
   const sig=famRosterSig(members);
   if(sig!==_famRosterSig){ render(); return; }  // structure changed → full render
-  const sel = members.find(m=>m.uid===_famSelUid) || members.find(m=>m.hasFix) || members[0];
+  const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+  const sel = members.find(m=>m.uid===_famSelUid)
+           || members.find(m=>m.uid===localUid&&m.hasFix)
+           || members.find(m=>m.hasFix)
+           || members.find(m=>m.uid===localUid)
+           || members[0];
   _famSelUid = sel?sel.uid:null;
   const myUid=FB.user&&FB.user.uid;
   // 1) header
@@ -16516,7 +16570,10 @@ function famMapLoaded(){
     const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
     const center=(sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
                 :(withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:null);
-    if(center) FamilyMapCamera.request(center,{zoom:16,force:true});
+    // A freshly-created map must enter follow mode immediately. request()
+    // alone can force one centre while leaving follow disabled, which made the
+    // marker disappear again until the member card was tapped.
+    if(center) FamilyMapCamera.resume(center,16);
   }catch(e){}
 }
 function famMapUnavailable(msg){
@@ -17317,7 +17374,15 @@ function famAction(act,arg,ev){
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
     case 'live-sos': famView='sos'; render(); window.scrollTo(0,0); return;
     // Bottom navigation — Location and Driving are live; others are honest later-phase screens
-    case 'nav-location': famView='live'; render(); return;
+    case 'nav-location':{
+      const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+      if(my)_famSelUid=my;
+      _famLastCentredUid=null;
+      _famFollow=true;
+      famView='live';
+      render();
+      return;
+    }
     case 'nav-driving': _drvSelUid=null; famView='drivingDash'; render(); window.scrollTo(0,0); return;
     case 'nav-safety': famView='sos'; render(); window.scrollTo(0,0); return;
     case 'nav-membership': toast(L==='fa'?'عضویت در فاز بعدی فعال می‌شود':'Membership is coming in a later phase'); return;
