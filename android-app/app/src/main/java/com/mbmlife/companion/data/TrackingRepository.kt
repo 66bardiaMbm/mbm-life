@@ -52,6 +52,27 @@ class TrackingRepository(private val context: Context) {
         scheduleSync()
     }
 
+    suspend fun persistTimedStop(
+        trip: TripEntity,
+        lastAcceptedSample: LocationSampleEntity
+    ) {
+        val stationaryLocation = lastAcceptedSample.copy(
+            rawSpeedMps = 0f,
+            fallbackSpeedMps = 0.0,
+            filteredSpeedMps = 0.0,
+            displayedSpeedKph = 0,
+            activityType = "stationary",
+            activityConfidence = 100
+        )
+        db.withTransaction {
+            dao.upsertTrip(trip)
+            dao.upsertOutbox(outboxForTrip(trip))
+            dao.upsertOutbox(outboxForLocation(stationaryLocation, trip, true))
+        }
+        queueSampleChunks(trip.id)
+        scheduleSync()
+    }
+
     private fun outboxForLocation(
         sample: LocationSampleEntity,
         trip: TripEntity?,
