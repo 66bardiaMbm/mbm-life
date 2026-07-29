@@ -29,6 +29,8 @@ import com.mbmlife.companion.MbmApplication
 import com.mbmlife.companion.R
 import com.mbmlife.companion.data.TrackingRepository
 import com.mbmlife.companion.engine.DrivingDetector
+import com.mbmlife.companion.engine.MovementState
+import com.mbmlife.companion.engine.MovementStateDetector
 import com.mbmlife.companion.engine.RawLocationFix
 import com.mbmlife.companion.engine.TripTransition
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +67,7 @@ class TrackingService : Service() {
     private lateinit var repository: TrackingRepository
     private lateinit var app: MbmApplication
     private var detector: DrivingDetector? = null
+    private var movementDetector: MovementStateDetector? = null
     private var currentSpeedKph = 0
     private var currentTripActive = false
     private var trackingStartRequested = false
@@ -129,6 +132,10 @@ class TrackingService : Service() {
             val active = repository.activeTrip(uid)
             val recent = repository.recentSamples(uid)
             detector = DrivingDetector(active, recent)
+            movementDetector = MovementStateDetector(
+                MovementState.fromWireValue(app.preferences.movementState),
+                app.preferences.movementStateStartedAtMs
+            )
             currentTripActive = active != null
             repository.logger().info(
                 "Service",
@@ -209,6 +216,9 @@ class TrackingService : Service() {
             DrivingDetector(active, repository.recentSamples(uid)).also { detector = it }
         }
         val capturedAt = if (location.time > 0) location.time else System.currentTimeMillis()
+        val activityIsFresh =
+            app.preferences.lastActivityAtMs > 0L &&
+                System.currentTimeMillis() - app.preferences.lastActivityAtMs <= 30_000L
         val fix = RawLocationFix(
             uid = uid,
             familyId = familyId,
@@ -221,23 +231,50 @@ class TrackingService : Service() {
             capturedAtMs = capturedAt,
             elapsedRealtimeNanos = location.elapsedRealtimeNanos,
             isMock = LocationCompat.isMock(location),
-            activityType = app.preferences.lastActivityType,
-            activityConfidence = app.preferences.lastActivityConfidence
+            activityType = if (activityIsFresh) app.preferences.lastActivityType else "UNKNOWN",
+            activityConfidence = if (activityIsFresh) app.preferences.lastActivityConfidence else 0
         )
         val output = engine.ingest(fix)
         val nativeDriving = output.trip?.status == "active"
-        if (nativeDriving) {
+        val movementEngine = movementDetector ?: MovementStateDetector(
+            MovementState.fromWireValue(app.preferences.movementState),
+            app.preferences.movementStateStartedAtMs
+        ).also { movementDetector = it }
+        val movement = movementEngine.ingest(
+            output.sample,
+            verifiedTripActive = nativeDriving,
+            verifiedTripEnded = output.transition == TripTransition.ENDED
+        )
+        app.preferences.movementState = movement.state.wireValue
+        app.preferences.movementStateStartedAtMs = movement.stateStartedAtMs
+        if (output.sample.accepted) app.preferences.movementDecisionAtMs = capturedAt
+        val stableOutput = output.copy(
+            sample = output.sample.copy(activityType = movement.state.wireValue)
+        )
+        if (movement.state != MovementState.STATIONARY) {
             app.preferences.stayStartAtMs = 0
         } else if (app.preferences.stayStartAtMs == 0L) {
             app.preferences.stayStartAtMs = capturedAt
         }
-        repository.logSpeed(output.sample)
-        repository.persist(output)
+        repository.logSpeed(stableOutput.sample)
+        repository.logger().info(
+            "Movement",
+            "Movement state decision",
+            JSONObject()
+                .put("state", movement.state.wireValue)
+                .put("stateStartedAtMs", movement.stateStartedAtMs)
+                .put("changed", movement.changed)
+                .put("evidenceAccepted", movement.evidenceAccepted)
+                .put("reason", movement.reason)
+                .put("sampleAtMs", capturedAt)
+                .toString()
+        )
+        repository.persist(stableOutput)
         app.preferences.lastFixAtMs = capturedAt
-        currentSpeedKph = output.sample.displayedSpeedKph
+        currentSpeedKph = stableOutput.sample.displayedSpeedKph
         currentTripActive = nativeDriving
         updateNotification()
-        broadcastForWebView(output)
+        broadcastForWebView(stableOutput)
         if (output.transition != TripTransition.NONE) {
             repository.logger().info(
                 "Trip",
@@ -271,8 +308,21 @@ class TrackingService : Service() {
             )
             .put("reportedAt", java.time.Instant.now().toString())
             .put("source", "companion")
-            .put("moving", currentTripActive || (sample.filteredSpeedMps ?: 0.0) >= 1.0)
-            .put("activityType", if (currentTripActive) "driving" else sample.activityType.lowercase())
+            .put("moving", sample.activityType != MovementState.STATIONARY.wireValue)
+            .put("activityType", sample.activityType)
+            .put("movementState", sample.activityType)
+            .put(
+                "activityStartedAt",
+                app.preferences.movementStateStartedAtMs.takeIf { it > 0L }
+                    ?.let { java.time.Instant.ofEpochMilli(it).toString() }
+                    ?: JSONObject.NULL
+            )
+            .put(
+                "movementDecisionAt",
+                app.preferences.movementDecisionAtMs.takeIf { it > 0L }
+                    ?.let { java.time.Instant.ofEpochMilli(it).toString() }
+                    ?: JSONObject.NULL
+            )
             .put("nativeTrackingActive", true)
         sendBroadcast(
             Intent(ACTION_NATIVE_FIX)

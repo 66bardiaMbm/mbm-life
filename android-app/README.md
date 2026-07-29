@@ -153,7 +153,8 @@ that file source.
 7. Return to MBM Life.
 8. Open the Family screen long enough to link its active family, or let the
    native single-family query resolve it.
-9. Tap **Start native tracking**.
+9. Open the Family screen. Tracking starts automatically after the required
+   Android permissions are granted and the family is linked.
 10. Confirm the persistent tracking notification before leaving the app.
 
 The app never asks for a password, security code, or two-factor code in a chat.

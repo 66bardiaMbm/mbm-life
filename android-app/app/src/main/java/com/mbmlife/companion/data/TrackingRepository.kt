@@ -58,7 +58,9 @@ class TrackingRepository(private val context: Context) {
         trackingActive: Boolean
     ): OutboxEntity {
         val now = System.currentTimeMillis()
-        val moving = trip?.status == "active" || (sample.filteredSpeedMps ?: 0.0) >= 1.0
+        val movementState =
+            if (trip?.status == "active") "driving" else sample.activityType.lowercase()
+        val moving = movementState == "walking" || movementState == "driving"
         val payload = JSONObject()
             .put("uid", sample.uid)
             .put("lat", sample.latitude)
@@ -74,7 +76,18 @@ class TrackingRepository(private val context: Context) {
             .putNullable("heading", sample.bearingDeg)
             .putNullable("speed", sample.filteredSpeedMps)
             .put("moving", moving)
-            .put("activityType", if (trip?.status == "active") "driving" else sample.activityType.lowercase())
+            .put("activityType", movementState)
+            .put("movementState", movementState)
+            .putNullable(
+                "activityStartedAt",
+                app.preferences.movementStateStartedAtMs.takeIf { it > 0L }
+                    ?.let { Instant.ofEpochMilli(it).toString() }
+            )
+            .putNullable(
+                "movementDecisionAt",
+                app.preferences.movementDecisionAtMs.takeIf { it > 0L }
+                    ?.let { Instant.ofEpochMilli(it).toString() }
+            )
             .put("nativeTrackingActive", trackingActive)
             .put("nativeProducerUid", sample.uid)
             .put("nativeHeartbeatAt", Instant.ofEpochMilli(now).toString())

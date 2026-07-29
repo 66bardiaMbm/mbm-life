@@ -9,8 +9,8 @@ UID, and family ID before starting.
 - [ ] Grant precise foreground location.
 - [ ] Grant activity recognition and notifications.
 - [ ] In Android app settings, select **Location → Allow all the time**.
-- [ ] Open battery settings and record whether MBM Life is restricted.
-- [ ] Start Native Tracking from the visible activity.
+- [ ] Grant the Android runtime permissions when the system requests them.
+- [ ] Confirm the foreground-service notification appears after Family linking.
 - [ ] Confirm the persistent “MBM Life tracking is active” notification.
 - [ ] Lock the screen for at least five minutes.
 - [ ] Confirm `adb logcat -s MBM/Service MBM/Location MBM/Speed` continues.

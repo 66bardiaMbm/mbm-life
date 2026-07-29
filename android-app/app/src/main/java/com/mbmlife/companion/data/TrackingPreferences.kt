@@ -27,6 +27,22 @@ class TrackingPreferences(context: Context) {
         get() = prefs.getInt("activity_confidence", 0)
         set(value) = prefs.edit().putInt("activity_confidence", value).apply()
 
+    var lastActivityAtMs: Long
+        get() = prefs.getLong("activity_at", 0L)
+        set(value) = prefs.edit().putLong("activity_at", value).apply()
+
+    var movementState: String
+        get() = prefs.getString("movement_state", "stationary") ?: "stationary"
+        set(value) = prefs.edit().putString("movement_state", value).apply()
+
+    var movementStateStartedAtMs: Long
+        get() = prefs.getLong("movement_state_started_at", 0L)
+        set(value) = prefs.edit().putLong("movement_state_started_at", value).apply()
+
+    var movementDecisionAtMs: Long
+        get() = prefs.getLong("movement_decision_at", 0L)
+        set(value) = prefs.edit().putLong("movement_decision_at", value).apply()
+
     var serviceStartedAtMs: Long
         get() = prefs.getLong("service_started_at", 0)
         set(value) = prefs.edit().putLong("service_started_at", value).apply()

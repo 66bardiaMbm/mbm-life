@@ -12,19 +12,18 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.view.isVisible
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -48,23 +47,26 @@ class MainActivity : AppCompatActivity() {
     private lateinit var auth: FirebaseAuth
     private lateinit var logger: DiagnosticLogger
     private val handler = Handler(Looper.getMainLooper())
-    private var webContextMessage: String? = null
     private var pendingGoogleIdToken: String? = null
     private var receiverRegistered = false
+    private var foregroundPermissionRequested = false
+    private var secondaryPermissionsRequested = false
+    private var backgroundPermissionRequested = false
+    private var familyResolutionInFlight = false
 
     private val foregroundPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            refreshSetupUi()
+            advanceTrackingSetup()
         }
 
     private val secondaryPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            refreshSetupUi()
+            advanceTrackingSetup()
         }
 
     private val backgroundPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            refreshSetupUi()
+            advanceTrackingSetup()
         }
 
     // Holds the WebView's callback while the system photo/file picker is
@@ -78,13 +80,9 @@ class MainActivity : AppCompatActivity() {
             val callback = pendingFileChooserCallback
             pendingFileChooserCallback = null
             if (callback == null) return@registerForActivityResult
-            val data = result.data
-            if (result.resultCode != RESULT_OK || data == null) {
-                callback.onReceiveValue(null) // cancelled: current image must remain unchanged
-                return@registerForActivityResult
-            }
-            val uri = data.data
-            callback.onReceiveValue(if (uri != null) arrayOf(uri) else null)
+            callback.onReceiveValue(
+                WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            )
         }
 
     private val nativeFixReceiver = object : BroadcastReceiver() {
@@ -123,57 +121,44 @@ class MainActivity : AppCompatActivity() {
         }
 
         configureWebView()
-        binding.primaryButton.setOnClickListener { performNextSetupAction() }
-        binding.batteryButton.setOnClickListener { openBatterySettings() }
-        binding.hideButton.setOnClickListener {
-            binding.setupCard.isVisible = false
-            binding.trackingChip.isVisible = isDeveloperMode()
-        }
-        binding.trackingChip.setOnClickListener {
-            binding.setupCard.isVisible = true
-            binding.trackingChip.isVisible = false
-            refreshSetupUi()
-        }
-        // Production users never see the setup card or the "Native tracking"
-        // chip — permissions and service start/stop happen silently. The
-        // full diagnostic UI (card, chip, status text, buttons) is still
-        // available in debug builds for development/testing.
-        binding.setupCard.isVisible = isDeveloperMode()
-        binding.trackingChip.isVisible = false
-        refreshSetupUi()
-        autoAdvanceSetupSilently()
+        advanceTrackingSetup()
     }
 
     /**
-     * Gates all developer/diagnostic UI (setup card, tracking chip, status
-     * text, Start/Stop/Battery/Hide buttons). Deliberately NOT tied to
-     * BuildConfig.DEBUG: the CI pipeline currently ships a debug-variant
-     * APK for internal testing (app-debug-auth-fixed), where DEBUG=true is
-     * fixed at compile time by the Android Gradle Plugin and cannot be
-     * toggled at runtime. Using a hardcoded constant here means the same
-     * debug-signed build used for testing shows the production (no
-     * diagnostic UI) experience. Flip to true only for local development
-     * when the diagnostic card is needed again.
+     * Production setup coordinator. There is deliberately no corresponding
+     * Android view: the WebView remains the complete app UI and Android shows
+     * only its own runtime-permission dialogs. Each permission is requested at
+     * most once per activity lifetime so a denial never creates a prompt loop.
      */
-    private fun isDeveloperMode(): Boolean = false
-
-    /**
-     * Drives sign-in, permission requests, family linking and service start
-     * automatically, without requiring the user to see or tap the setup
-     * card. Each step still shows the normal Android system permission
-     * dialogs (those cannot be silent, by OS design) but no MBM Life
-     * diagnostic panel is shown around them. Re-invoked from refreshSetupUi()
-     * after each async step completes, so it naturally stops once tracking
-     * is enabled.
-     */
-    private fun autoAdvanceSetupSilently() {
-        if (isDeveloperMode()) return // developer drives it manually via the visible card
+    private fun advanceTrackingSetup() {
         when {
-            auth.currentUser == null -> return // cannot silently sign in; wait for user to open Family screen in the PWA, which triggers signInWithGoogle via the JS bridge
-            !hasForegroundLocation() || missingSecondaryPermissions().isNotEmpty() || !hasBackgroundLocation() ->
-                performNextSetupAction()
-            app.preferences.familyId.isNullOrBlank() -> return // needs the PWA Family screen; nothing to silently advance
-            !app.preferences.trackingEnabled -> performNextSetupAction()
+            auth.currentUser == null -> return
+            !hasForegroundLocation() -> {
+                if (foregroundPermissionRequested) return
+                foregroundPermissionRequested = true
+                foregroundPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            }
+            missingSecondaryPermissions().isNotEmpty() -> {
+                if (secondaryPermissionsRequested) return
+                secondaryPermissionsRequested = true
+                secondaryPermissionLauncher.launch(missingSecondaryPermissions().toTypedArray())
+            }
+            !hasBackgroundLocation() -> {
+                if (backgroundPermissionRequested) return
+                backgroundPermissionRequested = true
+                requestBackgroundLocation()
+            }
+            app.preferences.familyId.isNullOrBlank() -> resolveFamilyNatively()
+            app.preferences.trackingEnabled -> return
+            else -> {
+                ContextCompat.startForegroundService(this, TrackingService.startIntent(this))
+                app.preferences.trackingEnabled = true
+            }
         }
     }
 
@@ -202,7 +187,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshSetupUi()
+        advanceTrackingSetup()
     }
 
     @Suppress("SetJavaScriptEnabled")
@@ -215,6 +200,7 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = true
             allowFileAccess = false
             allowContentAccess = true
+            cacheMode = WebSettings.LOAD_NO_CACHE
             userAgentString = "$userAgentString MBMLifeNative/${BuildConfig.VERSION_NAME}"
         }
         binding.webView.webChromeClient = object : WebChromeClient() {
@@ -232,22 +218,18 @@ class MainActivity : AppCompatActivity() {
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
+                if (filePathCallback == null) return false
                 // Cancel any prior pending chooser rather than leaking it —
                 // only one file input can be actively awaiting a result.
                 pendingFileChooserCallback?.onReceiveValue(null)
                 pendingFileChooserCallback = filePathCallback
-                val mimeTypes = fileChooserParams?.acceptTypes
-                    ?.filter { it.isNotBlank() }
-                    ?.toTypedArray()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: arrayOf("image/*")
-                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = mimeTypes.firstOrNull() ?: "image/*"
-                    if (mimeTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-                }
                 return try {
-                    fileChooserLauncher.launch(Intent.createChooser(intent, "Select image"))
+                    val chooserIntent = fileChooserParams?.createIntent()
+                        ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "image/*"
+                        }
+                    fileChooserLauncher.launch(chooserIntent)
                     true
                 } catch (e: Exception) {
                     logger.error("WebView", "File chooser launch failed", e.toString())
@@ -295,7 +277,21 @@ class MainActivity : AppCompatActivity() {
                             )
                             .put("reportedAt", java.time.Instant.now().toString())
                             .put("source", "companion")
-                            .put("moving", app.preferences.trackingEnabled)
+                            .put("moving", app.preferences.movementState != "stationary")
+                            .put("activityType", app.preferences.movementState)
+                            .put("movementState", app.preferences.movementState)
+                            .put(
+                                "activityStartedAt",
+                                app.preferences.movementStateStartedAtMs.takeIf { it > 0L }
+                                    ?.let { java.time.Instant.ofEpochMilli(it).toString() }
+                                    ?: JSONObject.NULL
+                            )
+                            .put(
+                                "movementDecisionAt",
+                                app.preferences.movementDecisionAtMs.takeIf { it > 0L }
+                                    ?.let { java.time.Instant.ofEpochMilli(it).toString() }
+                                    ?: JSONObject.NULL
+                            )
                             .put("nativeTrackingActive", app.preferences.trackingEnabled)
                         injectNativeFix(json.toString())
                     }
@@ -304,6 +300,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.webView.addJavascriptInterface(NativeAuthBridge(), "MbmNativeAuth")
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        binding.webView.clearCache(true)
         binding.webView.loadUrl(BuildConfig.PWA_URL)
     }
 
@@ -406,13 +403,12 @@ class MainActivity : AppCompatActivity() {
                 val nativeUid = auth.currentUser?.uid
                 when {
                     webUid == null || familyId == null -> {
-                        webContextMessage = "Open/sign in to the Family screen so the native service can link the family."
+                        return@evaluateJavascript
                     }
                     nativeUid == null -> {
-                        webContextMessage = "Sign in natively with the same Google account used in the PWA."
+                        return@evaluateJavascript
                     }
                     nativeUid != webUid -> {
-                        webContextMessage = "UID mismatch: native and PWA accounts must be the same."
                         logger.error(
                             "Auth",
                             "Native/PWA UID mismatch",
@@ -423,7 +419,6 @@ class MainActivity : AppCompatActivity() {
                         val changed = app.preferences.familyId != familyId
                         app.preferences.familyId = familyId
                         app.preferences.webUid = webUid
-                        webContextMessage = null
                         if (changed) logger.info(
                             "Family",
                             "Family context linked from WebView",
@@ -431,10 +426,9 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                refreshSetupUi()
+                advanceTrackingSetup()
             } catch (error: Exception) {
-                webContextMessage = "Waiting for Family context: ${error.message}"
-                refreshSetupUi()
+                logger.warn("Family", "Waiting for valid WebView family context", error.toString())
             }
         }
     }
@@ -448,6 +442,9 @@ class MainActivity : AppCompatActivity() {
                 DB.entities=DB.entities||{};
                 DB.entities.famLocations=DB.entities.famLocations||{};
                 var previous=DB.entities.famLocations[uid]||{};
+                var nextAt=Date.parse(nativeFix.capturedAt||nativeFix.reportedAt||'');
+                var previousAt=Date.parse(previous.capturedAt||previous.reportedAt||'');
+                if(!isNaN(previousAt) && !isNaN(nextAt) && nextAt<=previousAt) return false;
                 var next=Object.assign({},previous,nativeFix);
                 if(!Object.prototype.hasOwnProperty.call(nativeFix,'stayStart') && !next.stayStart)
                   next.stayStart=nativeFix.capturedAt;
@@ -462,36 +459,6 @@ class MainActivity : AppCompatActivity() {
             })($json)
         """.trimIndent()
         binding.webView.evaluateJavascript(js, null)
-    }
-
-    private fun performNextSetupAction() {
-        when {
-            auth.currentUser == null -> signInWithGoogle()
-            !hasForegroundLocation() -> foregroundPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
-            missingSecondaryPermissions().isNotEmpty() ->
-                secondaryPermissionLauncher.launch(missingSecondaryPermissions().toTypedArray())
-            !hasBackgroundLocation() -> requestBackgroundLocation()
-            app.preferences.familyId.isNullOrBlank() -> {
-                binding.webView.loadUrl(BuildConfig.PWA_URL)
-                webContextMessage = "Open the Family screen and wait for linking."
-                refreshSetupUi()
-            }
-            app.preferences.trackingEnabled -> {
-                startService(TrackingService.stopIntent(this))
-                app.preferences.trackingEnabled = false
-                refreshSetupUi()
-            }
-            else -> {
-                ContextCompat.startForegroundService(this, TrackingService.startIntent(this))
-                app.preferences.trackingEnabled = true
-                refreshSetupUi()
-            }
-        }
     }
 
     private fun signInWithGoogle() {
@@ -520,7 +487,7 @@ class MainActivity : AppCompatActivity() {
                 deliverGoogleCredentialToPwa(googleCredential.idToken)
                 resolveFamilyNatively()
                 readFamilyContextFromPwa()
-                refreshSetupUi()
+                advanceTrackingSetup()
             } catch (error: Exception) {
                 logger.error("Auth", "Google/Firebase sign-in failed", error.toString())
                 notifyPwaGoogleSignInFailed(error.message ?: "Native Google sign-in failed")
@@ -535,72 +502,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestBackgroundLocation() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            refreshSetupUi()
+            advanceTrackingSetup()
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("Allow background location")
-            .setMessage(
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    "Choose Location, then select “Allow all the time”. This is required for family tracking with the screen locked."
-                else
-                    "Allow location all the time so trips continue with the screen locked."
-            )
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton("Continue") { _, _ ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    openAppSettings()
-                } else {
-                    backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                }
-            }
-            .show()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            openAppSettings()
+        } else {
+            backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
     }
 
     private fun resolveFamilyNatively() {
         val uid = auth.currentUser?.uid ?: return
+        if (familyResolutionInFlight) return
+        familyResolutionInFlight = true
         lifecycleScope.launch {
-            val familyId = FamilyResolver(
-                com.google.firebase.firestore.FirebaseFirestore.getInstance(),
-                logger
-            ).resolveSingleFamily(uid)
-            if (familyId != null) {
-                app.preferences.familyId = familyId
-                refreshSetupUi()
+            try {
+                val familyId = FamilyResolver(
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance(),
+                    logger
+                ).resolveSingleFamily(uid)
+                if (familyId != null) {
+                    app.preferences.familyId = familyId
+                    advanceTrackingSetup()
+                }
+            } finally {
+                familyResolutionInFlight = false
             }
-        }
-    }
-
-    private fun refreshSetupUi() {
-        val signedIn = auth.currentUser != null
-        val foreground = hasForegroundLocation()
-        val background = hasBackgroundLocation()
-        val secondary = missingSecondaryPermissions().isEmpty()
-        val family = !app.preferences.familyId.isNullOrBlank()
-        val tracking = app.preferences.trackingEnabled
-        val batteryExempt = isIgnoringBatteryOptimizations()
-
-        binding.statusText.text = buildString {
-            append("Firebase: ${if (signedIn) "signed in" else "not signed in"}")
-            append(" · foreground GPS: ${if (foreground) "granted" else "missing"}")
-            append(" · background GPS: ${if (background) "granted" else "missing"}")
-            append(" · activity/notification: ${if (secondary) "granted" else "missing"}")
-            append("\nFamily: ${app.preferences.familyId ?: "not linked"}")
-            append(" · tracking: ${if (tracking) "ACTIVE" else "stopped"}")
-            append(" · battery unrestricted: ${if (batteryExempt) "yes" else "no"}")
-            webContextMessage?.let { append("\n$it") }
-        }
-        binding.primaryButton.text = when {
-            !signedIn -> getString(R.string.sign_in_google)
-            !foreground || !secondary || !background -> getString(R.string.grant_permissions)
-            !family -> "Link Family from PWA"
-            tracking -> getString(R.string.stop_tracking)
-            else -> getString(R.string.start_tracking)
-        }
-        if (!isDeveloperMode()) {
-            binding.setupCard.isVisible = false
-            binding.trackingChip.isVisible = false
-            autoAdvanceSetupSilently()
         }
     }
 
@@ -628,13 +556,6 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) add(Manifest.permission.POST_NOTIFICATIONS)
-    }
-
-    private fun isIgnoringBatteryOptimizations(): Boolean =
-        getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
-
-    private fun openBatterySettings() {
-        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
     }
 
     private fun openAppSettings() {

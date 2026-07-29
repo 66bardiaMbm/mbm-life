@@ -15,8 +15,20 @@ class ActivityRecognitionReceiver : BroadcastReceiver() {
         val result = ActivityRecognitionResult.extractResult(intent) ?: return
         val probable = result.probableActivities.maxByOrNull { it.confidence } ?: return
         val app = context.applicationContext as MbmApplication
+        if (result.time <= app.preferences.lastActivityAtMs) {
+            DiagnosticLogger(app.database.trackingDao()).warn(
+                "Activity",
+                "Out-of-order activity update ignored",
+                JSONObject()
+                    .put("eventTimeMs", result.time)
+                    .put("lastAcceptedEventTimeMs", app.preferences.lastActivityAtMs)
+                    .toString()
+            )
+            return
+        }
         app.preferences.lastActivityType = probable.type.asLabel()
         app.preferences.lastActivityConfidence = probable.confidence
+        app.preferences.lastActivityAtMs = result.time
         DiagnosticLogger(app.database.trackingDao()).info(
             "Activity",
             "Activity recognition update",
