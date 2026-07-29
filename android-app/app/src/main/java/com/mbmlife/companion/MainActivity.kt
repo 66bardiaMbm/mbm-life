@@ -267,6 +267,7 @@ class MainActivity : AppCompatActivity() {
                             .put("lng", sample.longitude)
                             .put("accuracy", sample.accuracyM ?: JSONObject.NULL)
                             .put("speed", sample.filteredSpeedMps ?: JSONObject.NULL)
+                            .put("battery", app.preferences.batteryPct ?: JSONObject.NULL)
                             .put("heading", sample.bearingDeg ?: JSONObject.NULL)
                             .put("capturedAt", java.time.Instant.ofEpochMilli(sample.capturedAtMs).toString())
                             .put(

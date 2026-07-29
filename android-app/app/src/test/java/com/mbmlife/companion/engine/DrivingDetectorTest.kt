@@ -117,6 +117,45 @@ class DrivingDetectorTest {
         assertEquals("sustained_stop", ended?.trip?.closeReason)
     }
 
+    @Test
+    fun oneNoisySpeedFixDoesNotKeepStoppedTripActiveForever() {
+        val detector = DrivingDetector()
+        var output: DrivingOutput? = null
+        for (seconds in listOf(0, 5, 10, 15)) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7 + seconds * 0.0001,
+                    lng = 147.25,
+                    speed = 10f,
+                    activity = "IN_VEHICLE"
+                )
+            )
+        }
+        assertEquals(TripTransition.STARTED, output?.transition)
+
+        var ended: DrivingOutput? = null
+        for (seconds in 25..200 step 5) {
+            val noisyFix = seconds == 80
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.698 + if (noisyFix) 0.00002 else 0.0,
+                    lng = 147.25,
+                    speed = if (noisyFix) 3.2f else 0f,
+                    activity = "STILL"
+                )
+            )
+            if (output?.transition == TripTransition.ENDED) {
+                ended = output
+                break
+            }
+        }
+
+        assertNotNull(ended)
+        assertEquals("sustained_stop", ended?.trip?.closeReason)
+    }
+
     private fun fix(
         timeMs: Long,
         lat: Double,

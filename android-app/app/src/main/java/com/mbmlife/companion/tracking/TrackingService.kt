@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
+import android.os.BatteryManager
 import android.os.IBinder
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -235,6 +236,7 @@ class TrackingService : Service() {
             activityConfidence = if (activityIsFresh) app.preferences.lastActivityConfidence else 0
         )
         val output = engine.ingest(fix)
+        readBatteryPercentage()?.let { app.preferences.batteryPct = it }
         val nativeDriving = output.trip?.status == "active"
         val movementEngine = movementDetector ?: MovementStateDetector(
             MovementState.fromWireValue(app.preferences.movementState),
@@ -298,6 +300,7 @@ class TrackingService : Service() {
             .put("lng", sample.longitude)
             .put("accuracy", sample.accuracyM ?: JSONObject.NULL)
             .put("speed", sample.filteredSpeedMps ?: JSONObject.NULL)
+            .put("battery", app.preferences.batteryPct ?: JSONObject.NULL)
             .put("heading", sample.bearingDeg ?: JSONObject.NULL)
             .put("capturedAt", java.time.Instant.ofEpochMilli(sample.capturedAtMs).toString())
             .put(
@@ -329,6 +332,12 @@ class TrackingService : Service() {
                 .setPackage(packageName)
                 .putExtra(EXTRA_FIX_JSON, payload.toString())
         )
+    }
+
+    private fun readBatteryPercentage(): Int? {
+        val manager = getSystemService(BatteryManager::class.java) ?: return null
+        return manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            .takeIf { it in 0..100 }
     }
 
     private fun stopTracking() {
