@@ -1773,7 +1773,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v391';
+const APP_VERSION='v394';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13834,41 +13834,8 @@ function DrivingDashboard(){
       <span>${L==='fa'?'تاریخچه سفرها':'Trip history'}</span><span style="color:var(--fam-purple,#8652FF);font-size:22px">›</span>
     </button>`;
   }
-  // Member/profile browsing belongs to Location. Keep the Driving dashboard
-  // focused on weekly safety metrics and the signed-in driver's trip history.
-  if(false){
-    h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#6e56f822;color:#8b7dfc">${famIcon('people')}</div><div class="hub-ph-t">${L==='fa'?'عضوی یافت نشد':'No members found'}</div></div>`;
-  } else {
-    members.forEach(m=>{
-      const sess=eng.memberSessionsInRange(m.uid,wk.startISO,wk.endISO);
-      const dist=sess.reduce((s,x)=>s+(x.distanceM||0),0);
-      const evs=eng.memberEventsInRange(m.uid,wk.startISO,wk.endISO);
-      const isLive=!!eng.activeSession(m.uid);
-      // Last drive: real, ALL-TIME (not bounded to the selected week) so the
-      // member card stays informative even when "This week" has no trips
-      // but the person drove yesterday, last week, etc.
-      const allSessions=eng.memberSessions(m.uid);
-      const lastEnded=allSessions.slice().reverse().find(s=>s.status==='ended');
-      const lastDriveLabel=lastEnded
-        ? (L==='fa'?`آخرین رانندگی: ${esc(drvDayLabel(lastEnded.startedAt))} ${famAbsTime(lastEnded.startedAt)}`:`Last drive: ${esc(drvDayLabel(lastEnded.startedAt))} ${famAbsTime(lastEnded.startedAt)}`)
-        : (L==='fa'?'هنوز رانندگی ثبت نشده':'No drives recorded yet');
-      const initial=esc((m.name||'?').trim().charAt(0).toUpperCase());
-      const avatar=m.photo?`<img src="${esc(m.photo)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
-        :`<div style="width:44px;height:44px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800">${initial}</div>`;
-      h+=`<button type="button" data-fam="drv-open-member-history" data-arg="${esc(m.uid)}" aria-label="${esc((L==='fa'?'مشاهده رانندگی‌های ':'View drives for ')+m.name)}" style="width:100%;display:flex;align-items:center;gap:12px;border:1px solid var(--b1);background:var(--s1);border-radius:16px;padding:14px;margin-bottom:10px;cursor:pointer;color:var(--ink);text-align:start">
-        ${avatar}
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:800;font-size:15px">${esc(m.name)}${isLive?` <span style="font-size:10px;font-weight:800;color:#2FCE6B;background:#2FCE6B18;border-radius:8px;padding:2px 7px;vertical-align:middle">${L==='fa'?'در حال رانندگی':'DRIVING NOW'}</span>`:''}</div>
-          <div style="font-size:13px;color:var(--ink3);margin-top:2px">${sess.length?`${sess.length} ${L==='fa'?'سفر این هفته':'drives this week'} · ${drvFmtDistanceKm(dist)} ${L==='fa'?'کیلومتر':'km'}`:(L==='fa'?'بدون سفر در این هفته':'No drives this week')}</div>
-          <div style="font-size:11px;color:var(--ink3);margin-top:3px">${lastDriveLabel}</div>
-          ${evs.length?`<div style="display:inline-flex;align-items:center;gap:4px;background:#F5A62318;color:#B8791A;border-radius:8px;padding:3px 9px;margin-top:6px;font-size:11px;font-weight:700">${famIcon('shield')} ${evs.length} ${L==='fa'?'رویداد پرخطر':'Risky Events'}</div>`:''}
-        </div>
-        <span style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;color:var(--fam-purple,#8652FF);font-size:11px;font-weight:800;flex:none">
-          ${L==='fa'?'مشاهده سفرها':'View drives'}<span style="font-size:22px;line-height:1">›</span>
-        </span>
-      </button>`;
-    });
-  }
+  // Member/profile browsing belongs to Location. The Driving dashboard
+  // stays focused on weekly safety metrics and the signed-in driver's trip history.
   h+=`</div>`;
   if(_drvDebugOverlayOn) h+=drvDebugOverlayHtml(selUid);
   h+=famBottomNavHtml();
@@ -14087,7 +14054,6 @@ function drvLiveMount(){
       _drvLiveMapSessionId=active.id;
     }
     if(samples.length>=2) MBMMap.drawRoute(samples);
-    if(last) FamilyMapCamera.request([last.lat,last.lng],{follow:true});
   } else {
     _drvLiveMapSessionId=null; // no active session — next time one starts, mount fresh
     // Seed the health-status baseline NOW (at mount time) so drvLiveApply's
@@ -14158,7 +14124,7 @@ function drvLiveApply(){
   const samples=live||[];
   const last=samples.length?samples[samples.length-1]:null;
   if(samples.length>=2) MBMMap.drawRoute(samples);
-  if(last) FamilyMapCamera.request([last.lat,last.lng],{follow:true});
+  if(last) FamilyMapCamera.requestDriving([last.lat,last.lng],last.speedMps,last.accuracyM);
 }
 let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
 
@@ -14700,6 +14666,71 @@ const MBMMap = (function(){
   }
   function invalidate(){ if(_map)try{ window.google.maps.event.trigger(_map,'resize'); }catch(e){} }
 
+  let _camAnim=null;
+  const CAM_ANIM_MS=650;
+  function _lerp(a,b,t){ return a+(b-a)*t; }
+  function cancelCameraAnimation(){
+    if(_camAnim){
+      cancelAnimationFrame(_camAnim.raf);
+      _camAnim=null;
+    }
+  }
+  function _moveCameraFrame(lat,lng,zoom){
+    if(typeof _map.moveCamera==='function'){
+      _map.moveCamera({center:{lat,lng},zoom});
+      return;
+    }
+    // Older raster-map runtimes do not expose moveCamera(). Keep the same
+    // single camera owner and animation semantics using the stable primitives.
+    _map.setCenter({lat,lng});
+    if(zoom!=null)_map.setZoom(zoom);
+  }
+  /* One animated camera primitive for driving follow. A newer accepted fix
+     replaces the unfinished animation; padding is applied after the eased
+     centre/zoom move so the selected marker finishes in the safe viewport. */
+  function setCamera(opts){
+    if(!_map||!available()) return;
+    cancelCameraAnimation();
+    const center=_map.getCenter&&_map.getCenter();
+    const from={
+      lat:center?center.lat():opts.center[0],
+      lng:center?center.lng():opts.center[1],
+      zoom:_map.getZoom&&_map.getZoom()!=null?_map.getZoom():opts.zoom
+    };
+    const to={
+      lat:opts.center?opts.center[0]:from.lat,
+      lng:opts.center?opts.center[1]:from.lng,
+      zoom:opts.zoom!=null?opts.zoom:from.zoom
+    };
+    const finishPadding=()=>{
+      const dy=(_pad.bottom-_pad.top)/2;
+      const dx=(_pad.right-_pad.left)/2;
+      if(dy||dx){ try{_map.panBy(dx,dy);}catch(e){} }
+    };
+    if(opts.instant||CAM_ANIM_MS<=0){
+      _moveCameraFrame(to.lat,to.lng,to.zoom);
+      finishPadding();
+      return;
+    }
+    const startedAt=performance.now();
+    const step=(now)=>{
+      const t=Math.min(1,(now-startedAt)/CAM_ANIM_MS);
+      const eased=1-Math.pow(1-t,3);
+      _moveCameraFrame(
+        _lerp(from.lat,to.lat,eased),
+        _lerp(from.lng,to.lng,eased),
+        _lerp(from.zoom,to.zoom,eased)
+      );
+      if(t<1){
+        _camAnim={raf:requestAnimationFrame(step)};
+      }else{
+        _camAnim=null;
+        finishPadding();
+      }
+    };
+    _camAnim={raf:requestAnimationFrame(step)};
+  }
+
   function hasMarker(uid){ return !!_markers[uid]; }
   function markerLatLng(uid){ const p=_markerPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
 
@@ -14903,6 +14934,7 @@ const MBMMap = (function(){
     }catch(e){}
   }
   function destroy(){
+    cancelCameraAnimation();
     Object.keys(_animTimers).forEach(k=>{try{clearInterval(_animTimers[k]);}catch(e){}}); _animTimers={};
     Object.keys(_markers).forEach(u=>{try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){}});
     clearArrivedBubble();
@@ -14913,6 +14945,7 @@ const MBMMap = (function(){
     _map=null; _elId=null; _mapEl=null;
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
+           setCamera, cancelCameraAnimation,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding };
 })();
@@ -14925,11 +14958,23 @@ const FamilyMapCamera=(function(){
   let lastTarget=null, lastZoom=null, follow=false, pausedByGesture=false;
   let timer=null, lastMoveAt=0, activeDriveId=null;
   const MIN_MOVE_MS=450;
+  let drivingMode=false;
+  function drivingZoomFor(speedMps,accuracyM){
+    let zoom;
+    if(speedMps==null) zoom=17;
+    else if(speedMps<3) zoom=18;
+    else if(speedMps<11) zoom=17;
+    else if(speedMps<22) zoom=16;
+    else zoom=15;
+    if(accuracyM!=null&&accuracyM>30) zoom=Math.min(zoom,15);
+    return zoom;
+  }
   function apply(force){
     if(!lastTarget||!MBMMap.get()||(!follow&&!force))return;
     const run=()=>{
       timer=null; lastMoveAt=Date.now();
-      MBMMap.setView(lastTarget,lastZoom);
+      if(drivingMode) MBMMap.setCamera({center:lastTarget,zoom:lastZoom});
+      else MBMMap.setView(lastTarget,lastZoom);
     };
     const wait=force?0:Math.max(0,MIN_MOVE_MS-(Date.now()-lastMoveAt));
     if(timer)clearTimeout(timer);
@@ -14942,27 +14987,60 @@ const FamilyMapCamera=(function(){
     if(opts.follow===true){follow=true;pausedByGesture=false;}
     apply(!!opts.force);
   }
+  function requestDriving(pos,speedMps,accuracyM){
+    if(!pos||pos[0]==null||pos[1]==null||!follow||pausedByGesture)return;
+    const nextZoom=drivingZoomFor(speedMps,accuracyM);
+    const unchanged=!!lastTarget &&
+      Math.abs(lastTarget[0]-pos[0])<1e-7 &&
+      Math.abs(lastTarget[1]-pos[1])<1e-7 &&
+      lastZoom===nextZoom;
+    drivingMode=true;
+    lastTarget=[pos[0],pos[1]];
+    lastZoom=nextZoom;
+    if(!unchanged) apply(false);
+  }
   function fit(points){
     if(!points||!points.length)return;
-    follow=false; pausedByGesture=true;
+    follow=false; pausedByGesture=true; drivingMode=false;
+    MBMMap.cancelCameraAnimation();
     if(timer){clearTimeout(timer);timer=null;}
     MBMMap.fitAll(points);
   }
-  function pauseByGesture(){ follow=false; pausedByGesture=true; _famFollow=false; }
+  function pauseByGesture(){
+    MBMMap.cancelCameraAnimation();
+    follow=false;
+    pausedByGesture=true;
+    _famFollow=false;
+  }
   function resume(pos,zoom){ follow=true;pausedByGesture=false;_famFollow=true;request(pos,{zoom,force:true}); }
   function setPadding(pad){
     MBMMap.setPadding(pad);
     if(follow&&lastTarget)apply(true);
   }
-  function drivingState(session,pos){
+  function drivingState(session,pos,speedMps,accuracyM){
     const id=session&&session.id||null;
-    if(id&&id!==activeDriveId){activeDriveId=id;resume(pos,null);}
-    else if(id&&follow&&!pausedByGesture)request(pos,{follow:true});
-    else if(!id)activeDriveId=null;
+    if(id&&id!==activeDriveId){
+      activeDriveId=id;
+      drivingMode=true;
+      follow=true;
+      pausedByGesture=false;
+      _famFollow=true;
+      lastZoom=drivingZoomFor(speedMps,accuracyM);
+      request(pos,{force:true});
+    }else if(id&&follow&&!pausedByGesture){
+      requestDriving(pos,speedMps,accuracyM);
+    }else if(!id){
+      activeDriveId=null;
+      drivingMode=false;
+    }
   }
-  function reset(){if(timer)clearTimeout(timer);timer=null;lastTarget=null;lastZoom=null;follow=false;pausedByGesture=false;activeDriveId=null;}
-  function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),activeDriveId};}
-  return {request,fit,pauseByGesture,resume,setPadding,drivingState,reset,state};
+  function reset(){
+    if(timer)clearTimeout(timer);
+    timer=null;lastTarget=null;lastZoom=null;follow=false;pausedByGesture=false;activeDriveId=null;drivingMode=false;
+    MBMMap.cancelCameraAnimation();
+  }
+  function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),lastZoom,activeDriveId,drivingMode};}
+  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor};
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -16149,35 +16227,32 @@ function famLivePaintMarkers(members, sel){
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
-  if(sel&&sel.state&&sel.state.lat!=null && _famLastCentredUid!==sel.uid){
-    const isViewingSelf=(typeof FB!=='undefined'&&FB.user&&FB.user.uid===sel.uid);
-    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true, follow:isViewingSelf});
+  // Exactly one camera decision per paint. A fresh member selection wins
+  // once; otherwise the local active drive uses the speed-aware controller,
+  // or ordinary self-follow uses the stationary controller.
+  const myUidForCam=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+  const mineForCam=myUidForCam?members.find(m=>m.uid===myUidForCam):null;
+  const freshSelection=!!(sel&&sel.state&&sel.state.lat!=null&&_famLastCentredUid!==sel.uid);
+  if(freshSelection){
+    const isViewingSelf=sel.uid===myUidForCam;
+    if(!isViewingSelf) FamilyMapCamera.pauseByGesture();
+    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true,follow:isViewingSelf});
     _famLastCentredUid=sel.uid;
-  } else if(sel&&sel.state&&sel.state.lat!=null && typeof FB!=='undefined'&&FB.user&&FB.user.uid===sel.uid){
-    // Already centred once on the local user — keep FOLLOWING as their
-    // position keeps updating (every live fix), instead of leaving the
-    // camera fixed at wherever it happened to be when first selected. This
-    // is what makes the visible map background actually track a live
-    // drive, matching the marker/address text (which already update on
-    // every fix) instead of drifting apart from a stale pan position.
-    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{follow:true});
-  }
-  const myForDrive=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-  const mineForDrive=myForDrive?members.find(m=>m.uid===myForDrive):null;
-  if(mineForDrive&&mineForDrive.state&&mineForDrive.state.lat!=null){
-    const engForDrive=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
-    const activeForDrive=engForDrive&&engForDrive.activeSession(myForDrive);
-    FamilyMapCamera.drivingState(activeForDrive,[mineForDrive.state.lat,mineForDrive.state.lng]);
-  }
-  // ── Live-follow: when enabled, keep the map centred on ME as my fix moves ──
-  if(_famFollow){
-    const my=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-    const mine=my?members.find(m=>m.uid===my):null;
-    if(mine&&mine.state&&mine.state.lat!=null){
-      const eng=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
-      const active=eng&&eng.activeSession(my);
-      FamilyMapCamera.drivingState(active,[mine.state.lat,mine.state.lng]);
-      if(!active)FamilyMapCamera.request([mine.state.lat,mine.state.lng],{follow:true});
+  }else{
+    const engForCam=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
+    const activeForCam=(mineForCam&&myUidForCam&&engForCam)?engForCam.activeSession(myUidForCam):null;
+    if(activeForCam&&mineForCam.state&&mineForCam.state.lat!=null){
+      FamilyMapCamera.drivingState(
+        activeForCam,
+        [mineForCam.state.lat,mineForCam.state.lng],
+        mineForCam.state.speed,
+        mineForCam.state.accuracy
+      );
+    }else if(_famFollow&&mineForCam&&mineForCam.state&&mineForCam.state.lat!=null){
+      FamilyMapCamera.drivingState(null,null);
+      FamilyMapCamera.request([mineForCam.state.lat,mineForCam.state.lng],{follow:true});
+    }else{
+      FamilyMapCamera.drivingState(null,null);
     }
   }
 }

@@ -137,6 +137,57 @@ class DrivingDetectorTest {
         assertNotNull(ended)
         assertEquals("ended", ended?.trip?.status)
         assertEquals("sustained_stop", ended?.trip?.closeReason)
+        assertNotNull(ended?.arrivalAtMs)
+        assertEquals(ended?.arrivalAtMs, ended?.trip?.endedAtMs)
+    }
+
+    @Test
+    fun activityTimerEndsOnlyAnEstablishedStopCandidateWithoutNewGps() {
+        val detector = DrivingDetector()
+        var output: DrivingOutput? = null
+        for (seconds in listOf(0, 5, 10, 15)) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7 + seconds * 0.0001,
+                    lng = 147.25,
+                    speed = 10f,
+                    activity = "IN_VEHICLE"
+                )
+            )
+        }
+        assertEquals(TripTransition.STARTED, output?.transition)
+
+        for (seconds in listOf(25, 30, 35, 40)) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.698,
+                    lng = 147.25,
+                    speed = 0f,
+                    activity = "STILL"
+                )
+            )
+        }
+        assertEquals("active", output?.trip?.status)
+
+        assertEquals(
+            null,
+            detector.reevaluateStop(
+                nowMs = 115_000L,
+                activityType = "IN_VEHICLE",
+                activityConfidence = 95
+            )
+        )
+        val closed = detector.reevaluateStop(
+            nowMs = 116_000L,
+            activityType = "STILL",
+            activityConfidence = 95
+        )
+        assertNotNull(closed)
+        assertEquals("ended", closed?.trip?.status)
+        assertEquals("sustained_stop_activity_timer", closed?.trip?.closeReason)
+        assertEquals(closed?.arrivalAtMs, closed?.trip?.endedAtMs)
     }
 
     @Test

@@ -139,6 +139,13 @@ class MovementStateDetector(
         }
     }
 
+    fun confirmVerifiedTripEnded(arrivalAtMs: Long): MovementDecision =
+        commit(
+            MovementState.STATIONARY,
+            arrivalAtMs.coerceAtLeast(0L),
+            "verified_trip_ended_by_activity_timer"
+        )
+
     private fun commit(
         next: MovementState,
         atMs: Long,

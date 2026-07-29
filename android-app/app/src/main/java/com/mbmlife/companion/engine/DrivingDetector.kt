@@ -28,7 +28,14 @@ data class DrivingOutput(
     val sample: LocationSampleEntity,
     val transition: TripTransition,
     val trip: TripEntity?,
-    val startWindow: List<LocationSampleEntity> = emptyList()
+    val startWindow: List<LocationSampleEntity> = emptyList(),
+    val arrivalAtMs: Long? = null
+)
+
+data class TimedStopClosure(
+    val trip: TripEntity,
+    val lastSample: LocationSampleEntity,
+    val arrivalAtMs: Long
 )
 
 /**
@@ -55,6 +62,8 @@ class DrivingDetector(
         const val STOP_LOW_SPEED_RATIO = 0.75
         const val STOP_MIN_SAMPLES = 4
         const val STOP_MIN_WINDOW_MS = 15_000L
+        const val TIMED_STOP_ACTIVITY_CONFIDENCE = 75
+        const val TIMED_STOP_MAX_FIX_AGE_MS = 10 * 60_000L
         const val FILTER_ALPHA = 0.45
     }
 
@@ -181,7 +190,12 @@ class DrivingDetector(
         active = current
         val stopped = isSustainedStopEvidence(sample)
         if (stopped) {
-            if (stopCandidateSince == null) stopCandidateSince = fix.capturedAtMs
+            if (stopCandidateSince == null) {
+                stopCandidateSince = max(
+                    current.startedAtMs,
+                    fix.capturedAtMs - STOP_MIN_WINDOW_MS
+                )
+            }
             lastStopEvidenceAt = fix.capturedAtMs
         } else if (
             lastStopEvidenceAt == null ||
@@ -196,10 +210,11 @@ class DrivingDetector(
             stopCandidateSince != null &&
             fix.capturedAtMs - stopCandidateSince!! >= END_HYSTERESIS_MS
         ) {
+            val arrivalAt = stopCandidateSince!!
             val ended = current.copy(
-                endedAtMs = fix.capturedAtMs,
+                endedAtMs = arrivalAt,
                 status = "ended",
-                durationSec = max(0, (fix.capturedAtMs - current.startedAtMs) / 1000),
+                durationSec = max(0, (arrivalAt - current.startedAtMs) / 1000),
                 closeReason = "sustained_stop",
                 updatedAtMs = System.currentTimeMillis()
             )
@@ -207,9 +222,53 @@ class DrivingDetector(
             stopCandidateSince = null
             lastStopEvidenceAt = null
             preWindow.clear()
-            return DrivingOutput(sample, TripTransition.ENDED, ended)
+            return DrivingOutput(
+                sample = sample,
+                transition = TripTransition.ENDED,
+                trip = ended,
+                arrivalAtMs = arrivalAt
+            )
         }
         return DrivingOutput(sample, TripTransition.UPDATED, current)
+    }
+
+    /**
+     * Advances an already-established stop candidate using monotonic wall-clock
+     * evidence from Activity Recognition when Fused Location pauses callbacks.
+     * It never creates a coordinate or treats missing GPS as proof of stopping:
+     * accepted low-speed location samples must have established the candidate
+     * first, and a fresh high-confidence STILL activity must confirm it.
+     */
+    fun reevaluateStop(
+        nowMs: Long,
+        activityType: String,
+        activityConfidence: Int
+    ): TimedStopClosure? {
+        val current = active ?: return null
+        val candidateAt = stopCandidateSince ?: return null
+        val lastEvidenceAt = lastStopEvidenceAt ?: return null
+        val last = lastAccepted ?: return null
+        if (activityType != "STILL" || activityConfidence < TIMED_STOP_ACTIVITY_CONFIDENCE) {
+            return null
+        }
+        if (nowMs < candidateAt || nowMs - candidateAt < END_HYSTERESIS_MS) return null
+        if (nowMs < lastEvidenceAt || nowMs - lastEvidenceAt > TIMED_STOP_MAX_FIX_AGE_MS) {
+            return null
+        }
+        val ended = current.copy(
+            endedAtMs = candidateAt,
+            status = "ended",
+            endLat = last.latitude,
+            endLng = last.longitude,
+            durationSec = max(0, (candidateAt - current.startedAtMs) / 1000),
+            closeReason = "sustained_stop_activity_timer",
+            updatedAtMs = nowMs
+        )
+        active = null
+        stopCandidateSince = null
+        lastStopEvidenceAt = null
+        preWindow.clear()
+        return TimedStopClosure(ended, last, candidateAt)
     }
 
     private fun rejectionReason(fix: RawLocationFix): String? {

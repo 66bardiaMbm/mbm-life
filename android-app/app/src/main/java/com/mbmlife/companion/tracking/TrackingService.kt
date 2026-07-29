@@ -36,12 +36,16 @@ import com.mbmlife.companion.engine.RawLocationFix
 import com.mbmlife.companion.engine.TripTransition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 class TrackingService : Service() {
@@ -53,6 +57,8 @@ class TrackingService : Service() {
         private const val CHANNEL_ID = "mbm_native_tracking"
         private const val NOTIFICATION_ID = 4101
         private const val ACTIVITY_REQUEST_CODE = 4102
+        private const val STOP_REEVALUATION_INTERVAL_MS = 10_000L
+        private const val ACTIVITY_FRESH_MS = 30_000L
 
         fun startIntent(context: android.content.Context) =
             Intent(context, TrackingService::class.java).setAction(ACTION_START)
@@ -73,7 +79,10 @@ class TrackingService : Service() {
     private var currentTripActive = false
     private var trackingStartRequested = false
     private var locationUpdatesRequested = false
+    private var locationRequestForActiveTrip: Boolean? = null
     private var activityUpdatesRequested = false
+    private var stopReevaluationJob: Job? = null
+    private val detectorMutex = Mutex()
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -151,24 +160,38 @@ class TrackingService : Service() {
                 requestLocationUpdates()
                 requestActivityUpdates()
             }
+            startStopReevaluation()
         }
     }
 
     private fun requestLocationUpdates() {
-        if (locationUpdatesRequested || !hasForegroundLocationPermission()) return
-        locationUpdatesRequested = true
-        val request = LocationRequest.Builder(
+        if (!hasForegroundLocationPermission()) return
+        if (
+            locationUpdatesRequested &&
+            locationRequestForActiveTrip == currentTripActive
+        ) return
+        if (locationUpdatesRequested) {
+            try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+            locationUpdatesRequested = false
+        }
+        val builder = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
             5_000L
         )
             .setMinUpdateIntervalMillis(2_000L)
-            .setMinUpdateDistanceMeters(3f)
             .setMaxUpdateDelayMillis(10_000L)
-            .build()
+        // Idle tracking keeps the movement-triggered battery saving. Once a
+        // trip is active, interval-based callbacks remain enabled so the stop
+        // state machine cannot be starved while the parked phone is motionless.
+        if (!currentTripActive) builder.setMinUpdateDistanceMeters(3f)
+        val request = builder.build()
+        locationUpdatesRequested = true
+        locationRequestForActiveTrip = currentTripActive
         try {
             fused.requestLocationUpdates(request, locationCallback, mainLooper)
                 .addOnFailureListener { error ->
                     locationUpdatesRequested = false
+                    locationRequestForActiveTrip = null
                     repository.logger().error(
                         "Location",
                         "requestLocationUpdates failed",
@@ -177,6 +200,7 @@ class TrackingService : Service() {
                 }
         } catch (error: SecurityException) {
             locationUpdatesRequested = false
+            locationRequestForActiveTrip = null
             repository.logger().error("Location", "SecurityException", error.toString())
             stopTracking()
         }
@@ -209,6 +233,74 @@ class TrackingService : Service() {
         }
     }
 
+    private fun startStopReevaluation() {
+        stopReevaluationJob?.cancel()
+        stopReevaluationJob = serviceScope.launch {
+            while (true) {
+                delay(STOP_REEVALUATION_INTERVAL_MS)
+                reevaluateActiveTripStop()
+            }
+        }
+    }
+
+    private suspend fun reevaluateActiveTripStop() {
+        if (!currentTripActive) return
+        val now = System.currentTimeMillis()
+        val activityAt = app.preferences.lastActivityAtMs
+        if (activityAt <= 0L || now - activityAt !in 0..ACTIVITY_FRESH_MS) return
+        val closure = detectorMutex.withLock {
+            detector?.reevaluateStop(
+                nowMs = now,
+                activityType = app.preferences.lastActivityType,
+                activityConfidence = app.preferences.lastActivityConfidence
+            )
+        } ?: return
+
+        val movementEngine = movementDetector ?: MovementStateDetector(
+            MovementState.fromWireValue(app.preferences.movementState),
+            app.preferences.movementStateStartedAtMs
+        ).also { movementDetector = it }
+        val movement = movementEngine.confirmVerifiedTripEnded(closure.arrivalAtMs)
+        app.preferences.movementState = movement.state.wireValue
+        app.preferences.movementStateStartedAtMs = closure.arrivalAtMs
+        app.preferences.movementDecisionAtMs = now
+        app.preferences.stayStartAtMs = closure.arrivalAtMs
+
+        val stationarySample = closure.lastSample.copy(
+            rawSpeedMps = 0f,
+            fallbackSpeedMps = 0.0,
+            filteredSpeedMps = 0.0,
+            displayedSpeedKph = 0,
+            activityType = MovementState.STATIONARY.wireValue,
+            activityConfidence = 100
+        )
+        repository.persistTimedStop(closure.trip, stationarySample)
+        currentTripActive = false
+        currentSpeedKph = 0
+        updateNotification()
+        withContext(Dispatchers.Main) { requestLocationUpdates() }
+        broadcastForWebView(
+            com.mbmlife.companion.engine.DrivingOutput(
+                sample = stationarySample,
+                transition = TripTransition.ENDED,
+                trip = closure.trip,
+                arrivalAtMs = closure.arrivalAtMs
+            ),
+            reportedAtMs = closure.lastSample.capturedAtMs
+        )
+        repository.logger().info(
+            "Trip",
+            "Trip ended by sustained stop activity timer",
+            JSONObject()
+                .put("sessionId", closure.trip.id)
+                .put("arrivalAtMs", closure.arrivalAtMs)
+                .put("lastAcceptedFixAtMs", closure.lastSample.capturedAtMs)
+                .put("activityType", app.preferences.lastActivityType)
+                .put("activityConfidence", app.preferences.lastActivityConfidence)
+                .toString()
+        )
+    }
+
     private suspend fun processLocation(location: Location) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val familyId = app.preferences.familyId ?: return
@@ -235,7 +327,7 @@ class TrackingService : Service() {
             activityType = if (activityIsFresh) app.preferences.lastActivityType else "UNKNOWN",
             activityConfidence = if (activityIsFresh) app.preferences.lastActivityConfidence else 0
         )
-        val output = engine.ingest(fix)
+        val output = detectorMutex.withLock { engine.ingest(fix) }
         readBatteryPercentage()?.let { app.preferences.batteryPct = it }
         val nativeDriving = output.trip?.status == "active"
         val movementEngine = movementDetector ?: MovementStateDetector(
@@ -247,16 +339,22 @@ class TrackingService : Service() {
             verifiedTripActive = nativeDriving,
             verifiedTripEnded = output.transition == TripTransition.ENDED
         )
+        val movementStartedAt =
+            output.arrivalAtMs?.takeIf { movement.state == MovementState.STATIONARY }
+                ?: movement.stateStartedAtMs
         app.preferences.movementState = movement.state.wireValue
-        app.preferences.movementStateStartedAtMs = movement.stateStartedAtMs
+        app.preferences.movementStateStartedAtMs = movementStartedAt
         if (output.sample.accepted) app.preferences.movementDecisionAtMs = capturedAt
         val stableOutput = output.copy(
             sample = output.sample.copy(activityType = movement.state.wireValue)
         )
         if (movement.state != MovementState.STATIONARY) {
             app.preferences.stayStartAtMs = 0
+        } else if (output.arrivalAtMs != null) {
+            app.preferences.stayStartAtMs = output.arrivalAtMs
         } else if (app.preferences.stayStartAtMs == 0L) {
-            app.preferences.stayStartAtMs = capturedAt
+            app.preferences.stayStartAtMs =
+                movementStartedAt.takeIf { it > 0L } ?: capturedAt
         }
         repository.logSpeed(stableOutput.sample)
         repository.logger().info(
@@ -274,7 +372,11 @@ class TrackingService : Service() {
         repository.persist(stableOutput)
         app.preferences.lastFixAtMs = capturedAt
         currentSpeedKph = stableOutput.sample.displayedSpeedKph
+        val tripModeChanged = currentTripActive != nativeDriving
         currentTripActive = nativeDriving
+        if (tripModeChanged) {
+            withContext(Dispatchers.Main) { requestLocationUpdates() }
+        }
         updateNotification()
         broadcastForWebView(stableOutput)
         if (output.transition != TripTransition.NONE) {
@@ -291,7 +393,10 @@ class TrackingService : Service() {
         }
     }
 
-    private fun broadcastForWebView(output: com.mbmlife.companion.engine.DrivingOutput) {
+    private fun broadcastForWebView(
+        output: com.mbmlife.companion.engine.DrivingOutput,
+        reportedAtMs: Long = System.currentTimeMillis()
+    ) {
         if (!output.sample.accepted) return
         val sample = output.sample
         val payload = JSONObject()
@@ -309,7 +414,7 @@ class TrackingService : Service() {
                     ?.let { java.time.Instant.ofEpochMilli(it).toString() }
                     ?: JSONObject.NULL
             )
-            .put("reportedAt", java.time.Instant.now().toString())
+            .put("reportedAt", java.time.Instant.ofEpochMilli(reportedAtMs).toString())
             .put("source", "companion")
             .put("moving", sample.activityType != MovementState.STATIONARY.wireValue)
             .put("activityType", sample.activityType)
@@ -341,9 +446,12 @@ class TrackingService : Service() {
     }
 
     private fun stopTracking() {
+        stopReevaluationJob?.cancel()
+        stopReevaluationJob = null
         try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
         locationUpdatesRequested = false
+        locationRequestForActiveTrip = null
         activityUpdatesRequested = false
         trackingStartRequested = false
         app.preferences.trackingEnabled = false
@@ -431,8 +539,11 @@ class TrackingService : Service() {
             PackageManager.PERMISSION_GRANTED
 
     override fun onDestroy() {
+        stopReevaluationJob?.cancel()
+        stopReevaluationJob = null
         try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         locationUpdatesRequested = false
+        locationRequestForActiveTrip = null
         activityUpdatesRequested = false
         trackingStartRequested = false
         locationChannel.close()
