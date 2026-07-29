@@ -56,5 +56,20 @@ assert.ok(
   !/activeSession\([^)]*\)\s*\|\|[\s\S]{0,100}status\s*===?\s*['\"]active['\"]/.test(html),
   "no UI path may bypass the central active-session freshness check"
 );
+assert.match(
+  html,
+  /function memberSessions\(uid\)\s*\{\s*return sessionsFor\(uid\)\.map\(sess=>recoverStaleSession\(uid,sess\)\)/,
+  "Trip History must normalize stale active sessions before rendering"
+);
+assert.match(
+  html,
+  /uid!==myUid\(\)[\s\S]{0,500}status:'ended'[\s\S]{0,500}closeReason:sess\.closeReason\|\|'stale_recovered'/,
+  "remote stale sessions must be presentation-only ended copies"
+);
+assert.match(
+  html,
+  /pipelineLog\('stale-session-recovery'[\s\S]{0,1600}pushSessionRemote\(sess\)/,
+  "the signed-in user's stale session must be finalized and synced"
+);
 
 console.log("stale-driving-session tests passed");
