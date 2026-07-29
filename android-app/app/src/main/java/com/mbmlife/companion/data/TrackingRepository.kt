@@ -75,6 +75,7 @@ class TrackingRepository(private val context: Context) {
             .put("source", "companion")
             .putNullable("heading", sample.bearingDeg)
             .putNullable("speed", sample.filteredSpeedMps)
+            .putNullable("battery", app.preferences.batteryPct)
             .put("moving", moving)
             .put("activityType", movementState)
             .put("movementState", movementState)

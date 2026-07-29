@@ -58,4 +58,12 @@ class TrackingPreferences(context: Context) {
     var stayStartAtMs: Long
         get() = prefs.getLong("stay_start_at", 0)
         set(value) = prefs.edit().putLong("stay_start_at", value).apply()
+
+    var batteryPct: Int?
+        get() = if (prefs.contains("battery_pct")) prefs.getInt("battery_pct", -1)
+            .takeIf { it in 0..100 } else null
+        set(value) {
+            if (value == null) prefs.edit().remove("battery_pct").apply()
+            else prefs.edit().putInt("battery_pct", value.coerceIn(0, 100)).apply()
+        }
 }

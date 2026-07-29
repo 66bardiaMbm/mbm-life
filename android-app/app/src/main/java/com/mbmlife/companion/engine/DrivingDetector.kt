@@ -50,6 +50,11 @@ class DrivingDetector(
         const val PRE_WINDOW_MS = 30_000L
         const val STOP_WINDOW_MS = 30_000L
         const val STOP_NET_DISTANCE_M = 25.0
+        const val STOP_EVIDENCE_GAP_TOLERANCE_MS = 20_000L
+        const val STOP_LOW_SPEED_MPS = 1.5
+        const val STOP_LOW_SPEED_RATIO = 0.75
+        const val STOP_MIN_SAMPLES = 4
+        const val STOP_MIN_WINDOW_MS = 15_000L
         const val FILTER_ALPHA = 0.45
     }
 
@@ -63,6 +68,7 @@ class DrivingDetector(
     private var driveCandidateSince: Long? = null
     private var lastDriveEvidenceAt: Long? = null
     private var stopCandidateSince: Long? = null
+    private var lastStopEvidenceAt: Long? = null
 
     fun ingest(fix: RawLocationFix): DrivingOutput {
         val rejection = rejectionReason(fix)
@@ -168,11 +174,17 @@ class DrivingDetector(
         val stopped = isSustainedStopEvidence(sample)
         if (stopped) {
             if (stopCandidateSince == null) stopCandidateSince = fix.capturedAtMs
-        } else {
+            lastStopEvidenceAt = fix.capturedAtMs
+        } else if (
+            lastStopEvidenceAt == null ||
+            fix.capturedAtMs - lastStopEvidenceAt!! > STOP_EVIDENCE_GAP_TOLERANCE_MS
+        ) {
             stopCandidateSince = null
+            lastStopEvidenceAt = null
         }
 
         if (
+            stopped &&
             stopCandidateSince != null &&
             fix.capturedAtMs - stopCandidateSince!! >= END_HYSTERESIS_MS
         ) {
@@ -185,6 +197,7 @@ class DrivingDetector(
             )
             active = null
             stopCandidateSince = null
+            lastStopEvidenceAt = null
             preWindow.clear()
             return DrivingOutput(sample, TripTransition.ENDED, ended)
         }
@@ -269,19 +282,28 @@ class DrivingDetector(
     }
 
     private fun isSustainedStopEvidence(sample: LocationSampleEntity): Boolean {
-        val speed = sample.filteredSpeedMps ?: return false
-        if (speed > DRIVE_EXIT_MPS) return false
+        if ((sample.rawSpeedMps?.toDouble() ?: 0.0) >= DRIVE_ENTER_MPS) return false
         val cutoff = sample.capturedAtMs - STOP_WINDOW_MS
         val recent = tail.filter { it.capturedAtMs >= cutoff && it.accepted }
-        if (recent.size < 2) return false
+        if (recent.size < STOP_MIN_SAMPLES) return false
         val first = recent.first()
+        if (sample.capturedAtMs - first.capturedAtMs < STOP_MIN_WINDOW_MS) return false
+        val speeds = recent.mapNotNull {
+            it.rawSpeedMps?.toDouble() ?: it.filteredSpeedMps
+        }
+        if (speeds.size < STOP_MIN_SAMPLES) return false
+        val lowSpeedRatio = speeds.count { it <= STOP_LOW_SPEED_MPS }.toDouble() / speeds.size
+        if (lowSpeedRatio < STOP_LOW_SPEED_RATIO) return false
         val distance = Geo.distanceM(
             first.latitude,
             first.longitude,
             sample.latitude,
             sample.longitude
         )
-        return distance <= STOP_NET_DISTANCE_M
+        val accuracyAllowance =
+            (first.accuracyM?.toDouble() ?: 0.0) +
+                (sample.accuracyM?.toDouble() ?: 0.0) + 8.0
+        return distance <= max(STOP_NET_DISTANCE_M, accuracyAllowance)
     }
 
     private fun updateTrip(

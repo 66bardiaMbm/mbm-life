@@ -1500,7 +1500,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 #fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
 #fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);pointer-events:none}
 .fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
-.fam-presence{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
+.fam-presence{display:flex;direction:ltr;gap:10px;overflow-x:auto;padding:6px 2px 14px}
 .fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
 .fam-pcard-add .av{border:2px dashed var(--b1)!important;background-image:none!important}
 .fam-pcard.sel{background:var(--s2)}
@@ -1773,7 +1773,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v389';
+const APP_VERSION='v390';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14630,27 +14630,27 @@ const MBMMap = (function(){
   /* Life360-like Google Maps JSON style (same palette used by the previous
      vector restyle): warm land, mint parks, light water, muted labels, few POIs. */
   const LIFE_STYLE=[
-    {elementType:'geometry',stylers:[{color:'#f4f0e5'}]},
+    {elementType:'geometry',stylers:[{color:'#eef2f5'}]},
     {elementType:'labels.text.fill',stylers:[{color:'#5b5f66'}]},
     {elementType:'labels.text.stroke',stylers:[{color:'#ffffff'}]},
     {featureType:'poi',stylers:[{visibility:'off'}]},
     {featureType:'poi.park',elementType:'labels',stylers:[{visibility:'off'}]},
     {featureType:'transit',stylers:[{visibility:'off'}]},
-    {featureType:'road',elementType:'geometry',stylers:[{color:'#e9eef4'}]},
-    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#b9c5d1'}]},
+    {featureType:'road',elementType:'geometry',stylers:[{color:'#ffffff'}]},
+    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#b6c4d0'}]},
     {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#ffe4a8'}]},
     {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#e0b95f'}]},
-    {featureType:'road.arterial',elementType:'geometry',stylers:[{color:'#dce6ef'}]},
-    {featureType:'road.local',elementType:'geometry',stylers:[{color:'#edf2f6'}]},
-    {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#4e5a66'}]},
+    {featureType:'road.arterial',elementType:'geometry',stylers:[{color:'#f7fbff'}]},
+    {featureType:'road.local',elementType:'geometry',stylers:[{color:'#ffffff'}]},
+    {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#354454'}]},
     {featureType:'road.highway',elementType:'labels.text.fill',stylers:[{color:'#8a6a1f'}]},
-    {featureType:'landscape',elementType:'geometry',stylers:[{color:'#f4f0e5'}]},
+    {featureType:'landscape',elementType:'geometry',stylers:[{color:'#eef2f5'}]},
     {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#d2f8e1'}]},
     {featureType:'water',elementType:'geometry',stylers:[{color:'#8fdaed'}]},
     {featureType:'water',elementType:'labels.text.fill',stylers:[{color:'#4a8fa8'}]},
     {featureType:'administrative',elementType:'geometry',stylers:[{visibility:'off'}]},
     {featureType:'administrative.locality',elementType:'labels.text.fill',stylers:[{color:'#3d3f45'},{visibility:'on'}]},
-    {featureType:'building',elementType:'geometry',stylers:[{color:'#eae7dc'}]}
+    {featureType:'building',elementType:'geometry',stylers:[{color:'#dfe5eb'}]}
   ];
 
   function applyLifeStyle(){ if(_map){ try{ _map.setOptions({styles:LIFE_STYLE}); }catch(e){} } }
@@ -15145,7 +15145,7 @@ function famLiveSheetBodyHtml(members, sel, myUid){
   </div>`;
   if(members.length){
     h+=`<div class="fam-presence">`;
-    members.forEach(m=>{
+    members.slice().sort((a,b)=>(a.uid===_famSelUid?-1:0)-(b.uid===_famSelUid?-1:0)).forEach(m=>{
       const av=m.photo?`<div class="av" style="background-image:url('${(''+m.photo).replace(/'/g,'')}')"></div>`
                       :`<div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>`;
       h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
@@ -16273,7 +16273,7 @@ function famMapLoaded(){
     const withFix=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
     const center=(sel&&sel.state&&sel.state.lat!=null)?[sel.state.lat,sel.state.lng]
                 :(withFix[0]?[withFix[0].state.lat,withFix[0].state.lng]:null);
-    if(center) FamilyMapCamera.request(center,{zoom:15,force:true});
+    if(center) FamilyMapCamera.request(center,{zoom:16,force:true});
   }catch(e){}
 }
 function famMapUnavailable(msg){
