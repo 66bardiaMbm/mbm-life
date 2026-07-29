@@ -59,7 +59,6 @@ class DrivingDetector(
         const val STOP_NET_DISTANCE_M = 25.0
         const val STOP_EVIDENCE_GAP_TOLERANCE_MS = 45_000L
         const val STOP_LOW_SPEED_MPS = 1.5
-        const val STOP_LOW_SPEED_RATIO = 0.75
         const val STOP_MIN_SAMPLES = 4
         const val STOP_MIN_WINDOW_MS = 15_000L
         const val TIMED_STOP_ACTIVITY_CONFIDENCE = 75
@@ -367,12 +366,8 @@ class DrivingDetector(
             (candidate.rawSpeedMps?.toDouble() ?: candidate.filteredSpeedMps)
                 ?.let { speed -> candidate to speed }
         }
-        val speeds = samplesWithSpeed.map { it.second }
-        if (speeds.size < STOP_MIN_SAMPLES) return false
-        val lowSpeedRatio = speeds.count { it <= STOP_LOW_SPEED_MPS }.toDouble() / speeds.size
-        if (lowSpeedRatio < STOP_LOW_SPEED_RATIO) return false
         val lowSpeedSamples = samplesWithSpeed
-            .filter { it.second <= STOP_LOW_SPEED_MPS }
+            .takeLastWhile { it.second <= STOP_LOW_SPEED_MPS }
             .map { it.first }
         if (lowSpeedSamples.size < STOP_MIN_SAMPLES) return false
         val first = lowSpeedSamples.first()
