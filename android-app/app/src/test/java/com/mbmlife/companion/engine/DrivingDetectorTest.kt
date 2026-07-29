@@ -229,6 +229,26 @@ class DrivingDetectorTest {
         assertEquals("sustained_stop", ended?.trip?.closeReason)
     }
 
+    @Test
+    fun bicycleActivityDoesNotOpenCarTripAtDrivingSpeed() {
+        val detector = DrivingDetector()
+        var output: DrivingOutput? = null
+        for (seconds in listOf(0, 5, 10, 15, 20, 25)) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7 + seconds * 0.00005,
+                    lng = 147.25,
+                    speed = 6f,
+                    activity = "ON_BICYCLE"
+                )
+            )
+        }
+
+        assertEquals(null, output?.trip)
+        assertEquals(TripTransition.NONE, output?.transition)
+    }
+
     private fun fix(
         timeMs: Long,
         lat: Double,

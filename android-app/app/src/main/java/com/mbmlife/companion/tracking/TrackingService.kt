@@ -50,6 +50,10 @@ import org.json.JSONObject
 
 class TrackingService : Service() {
     companion object {
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
         const val ACTION_START = "com.mbmlife.companion.action.START_TRACKING"
         const val ACTION_STOP = "com.mbmlife.companion.action.STOP_TRACKING"
         const val ACTION_NATIVE_FIX = "com.mbmlife.companion.action.NATIVE_FIX"
@@ -92,6 +96,7 @@ class TrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         app = application as MbmApplication
         repository = TrackingRepository(this)
         fused = LocationServices.getFusedLocationProviderClient(this)
@@ -111,6 +116,15 @@ class TrackingService : Service() {
             ACTION_START, null -> startTracking()
         }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        isRunning = false
+        stopReevaluationJob?.cancel()
+        try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+        try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     private fun startTracking() {

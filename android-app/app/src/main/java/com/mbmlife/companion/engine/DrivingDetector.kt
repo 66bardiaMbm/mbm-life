@@ -353,6 +353,12 @@ class DrivingDetector(
 
     private fun isDrivingEvidence(sample: LocationSampleEntity): Boolean {
         val speed = sample.filteredSpeedMps ?: return false
+        // Android can distinguish ON_BICYCLE from IN_VEHICLE.  A fast bicycle
+        // must not open a car-driving session merely because it crosses the
+        // generic speed threshold.
+        if (sample.activityType == "ON_BICYCLE" && sample.activityConfidence >= 60) {
+            return false
+        }
         val vehicleHint = sample.activityType == "IN_VEHICLE" && sample.activityConfidence >= 60
         return speed >= DRIVE_ENTER_MPS || (vehicleHint && speed >= 1.5)
     }

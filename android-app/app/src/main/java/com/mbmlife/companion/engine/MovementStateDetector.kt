@@ -5,6 +5,7 @@ import com.mbmlife.companion.data.LocationSampleEntity
 enum class MovementState(val wireValue: String) {
     STATIONARY("stationary"),
     WALKING("walking"),
+    CYCLING("bicycling"),
     DRIVING("driving");
 
     companion object {
@@ -90,6 +91,8 @@ class MovementStateDetector(
             ?: return unchanged(false, "speed_unavailable")
         val walkingHint = sample.activityConfidence >= ACTIVITY_HINT_CONFIDENCE &&
             sample.activityType in setOf("WALKING", "ON_FOOT", "RUNNING")
+        val cyclingHint = sample.activityConfidence >= ACTIVITY_HINT_CONFIDENCE &&
+            sample.activityType == "ON_BICYCLE"
         val stillHint = sample.activityConfidence >= ACTIVITY_HINT_CONFIDENCE &&
             sample.activityType == "STILL"
         val rawSpeedAvailable = sample.rawSpeedMps != null
@@ -104,7 +107,8 @@ class MovementStateDetector(
             observedSpeed >= DRIVE_SPEED_MPS ->
                 // Speed alone does not start a trip or publish Driving. The
                 // DrivingDetector must first verify and open a real trip.
-                null
+                if (cyclingHint) MovementState.CYCLING else null
+            cyclingHint && observedSpeed >= WALK_KEEP_SPEED_MPS -> MovementState.CYCLING
             walkingSpeedEvidence -> MovementState.WALKING
             walkingHint && observedSpeed >= WALK_KEEP_SPEED_MPS -> MovementState.WALKING
             stationaryEvidence && !walkingHint -> MovementState.STATIONARY
@@ -125,10 +129,12 @@ class MovementStateDetector(
         }
         candidateSamples += 1
 
+        val movingHumanPowered =
+            proposed == MovementState.WALKING || proposed == MovementState.CYCLING
         val requiredSamples =
-            if (proposed == MovementState.WALKING) WALK_CONFIRM_SAMPLES else STATIONARY_CONFIRM_SAMPLES
+            if (movingHumanPowered) WALK_CONFIRM_SAMPLES else STATIONARY_CONFIRM_SAMPLES
         val requiredMs =
-            if (proposed == MovementState.WALKING) WALK_CONFIRM_MS else STATIONARY_CONFIRM_MS
+            if (movingHumanPowered) WALK_CONFIRM_MS else STATIONARY_CONFIRM_MS
         return if (
             candidateSamples >= requiredSamples &&
             sample.capturedAtMs - candidateSinceMs >= requiredMs
