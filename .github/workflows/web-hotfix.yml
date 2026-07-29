@@ -27,4 +27,6 @@ jobs:
           node-version: "24"
 
       - name: Check regression tests
-        run: node tests/stale-driving-session.test.mjs
+        run: |
+          node tests/stale-driving-session.test.mjs
+          node tests/family-driving-ui.test.mjs
