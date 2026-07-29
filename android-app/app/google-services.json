@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "541048775101",
+    "project_id": "mbm-life",
+    "storage_bucket": "mbm-life.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:541048775101:android:155b8c6ef2078fb61c32d4",
+        "android_client_info": {
+          "package_name": "com.mbmlife.companion"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "541048775101-f64t5cuodgr8onglmnpi0nckorifvqvk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mbmlife.companion",
+            "certificate_hash": "36e10d777711dfa5f6f41b72fbf51741130d9886"
+          }
+        },
+        {
+          "client_id": "541048775101-orc34a5f1biim2vtc0nivul08l45ggjn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyFWRwX2B5vamR9alUZutMk90EJNG6FU0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "541048775101-orc34a5f1biim2vtc0nivul08l45ggjn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

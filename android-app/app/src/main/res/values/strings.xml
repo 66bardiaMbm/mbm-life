@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">MBM Life</string>
+    <string name="tracking_channel_name">Family location tracking</string>
+    <string name="tracking_channel_description">Keeps family location and driving trips updated</string>
+    <string name="tracking_notification_title">MBM Life tracking is active</string>
+    <string name="tracking_notification_idle">Checking for movement</string>
+    <string name="tracking_notification_driving">Driving · %1$d km/h</string>
+    <string name="tracking_stop">Stop tracking</string>
+</resources>

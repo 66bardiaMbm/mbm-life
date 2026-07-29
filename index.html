@@ -1773,7 +1773,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v386';
+const APP_VERSION='v387';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12929,13 +12929,12 @@ function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const
    project id, auth uid or raw error codes. Dev mode is off by default and is
    only toggled by a deliberate hidden gesture (5 quick taps on the Family
    settings title) — never surfaced in the normal UI. */
-function famDevMode(){ return !!(DB.meta && DB.meta._devMode); }
+function famDevMode(){ return false; }
 let _famTitleTaps=0, _famTitleTapT=0;
 let _drvDebugTaps=0, _drvDebugTapT=0, _drvDebugOverlayOn=false;
 function famDevTap(){
-  const t=Date.now(); if(t-_famTitleTapT>600)_famTitleTaps=0; _famTitleTapT=t; _famTitleTaps++;
-  if(_famTitleTaps>=5){ _famTitleTaps=0; DB.meta._devMode=!DB.meta._devMode; try{saveDB();}catch(e){}
-    toast(DB.meta._devMode?(L==='fa'?'حالت توسعه‌دهنده روشن شد':'Developer mode ON'):(L==='fa'?'حالت توسعه‌دهنده خاموش شد':'Developer mode OFF')); render(); }
+  _famTitleTaps=0;
+  if(DB.meta&&DB.meta._devMode){ DB.meta._devMode=false; try{saveDB();}catch(e){} }
 }
 /* Debug overlay for the Driving pipeline (watch callback -> ingestFix ->
    session), per review request. 5 taps on the Weekly Driving Report title
@@ -12944,8 +12943,8 @@ function famDevTap(){
    placeholder. Meant to stay available while Driving is still being
    verified on real devices; can be hidden behind a permanent flag later. */
 function drvDebugTap(){
-  const t=Date.now(); if(t-_drvDebugTapT>1000)_drvDebugTaps=0; _drvDebugTapT=t; _drvDebugTaps++;
-  if(_drvDebugTaps>=5){ _drvDebugTaps=0; _drvDebugOverlayOn=!_drvDebugOverlayOn; render(); }
+  _drvDebugTaps=0;
+  _drvDebugOverlayOn=false;
 }
 /* Friendly, non-technical failure message for normal users. The raw Firestore
    detail (code/message/uid/project) is only shown when dev mode is on. */
@@ -15299,14 +15298,19 @@ function famLiveApply(){
    HYST_MIN_SAMPLES consecutive fixes (or HYST_MIN_MS of elapsed time)
    before we commit to it, so a single noisy GPS speed reading can't flip
    the badge between walking/driving/stationary. ═══════════════════════ */
-const _famActivityCache={}; // uid -> {activityType, activityStartedAt, currentPlaceId, placeEnteredAt, lastMovementAt, _candidate, _candidateSince}
+const _famActivityCache={}; // uid -> persisted/native state + distinct-fix transition candidate
+const FAM_WALK_ENTER_MS=0.65;
+const FAM_WALK_EXIT_MS=0.35;
 const FAM_WALK_MAX_MS=2.3;   // m/s — ~8.3 km/h ceiling for "walking"
-const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving" (small gap vs walk ceiling = hysteresis band)
-const FAM_HYST_MS=15000;     // candidate activity must hold for 15s before committing
+const FAM_DRIVE_MIN_MS=2.8;  // m/s — ~10 km/h floor for "driving"
+const FAM_MOVE_CONFIRM_MS=8000;
+const FAM_MOVE_CONFIRM_SAMPLES=3;
+const FAM_STOP_CONFIRM_MS=20000;
+const FAM_STOP_CONFIRM_SAMPLES=4;
 const STALE_PRESENCE_MS=45*60*1000; // beyond this fix age, "Since"/"Here for" is shown as "Last confirmed" instead of an unqualified live claim
 const UNCERTAIN_GAP_MS=20*60*1000;  // if the PRIOR fix was more than this long ago, we cannot honestly claim continuous presence through that gap — even though the CURRENT fix is fresh. Distinct from STALE_PRESENCE_MS (which is about the current fix being old, not a past gap).
 
-function famClassifyRawActivity(m){
+function famClassifyRawActivity(m,currentState){
   if(!m.consent||!m.consent.enabled) return 'offline';
   if(m.consent.paused) return 'paused';
   if(!m.state||m.state.lat==null) return 'offline';
@@ -15319,17 +15323,24 @@ function famClassifyRawActivity(m){
     if(active) return 'driving';
   }catch(e){}
   const s=m.state;
+  // The Android companion publishes an already-confirmed, persisted state.
+  // It is the single authority for native users; do not reinterpret one of
+  // its speed samples in the WebView and create a competing state machine.
+  const nativeState=(s.source==='companion')?(s.movementState||s.activityType):null;
+  if(['stationary','walking','driving'].indexOf(nativeState)>=0) return nativeState;
   const speed=(s.speed!=null && !isNaN(s.speed))?s.speed:null;
   if(speed!=null){
     if(speed>=FAM_DRIVE_MIN_MS) return 'driving';
-    if(speed>0.3 && speed<=FAM_WALK_MAX_MS) return 'walking';
+    if(currentState==='walking' && speed>=FAM_WALK_EXIT_MS && speed<=FAM_WALK_MAX_MS) return 'walking';
+    if(speed>=FAM_WALK_ENTER_MS && speed<=FAM_WALK_MAX_MS) return 'walking';
     if(speed>FAM_WALK_MAX_MS && speed<FAM_DRIVE_MIN_MS){
       // ambiguous band between walk/drive thresholds — fall back to the
       // coarse moving flag so we still commit to SOMETHING sane rather than
       // stationary while genuinely in transit.
       return s.moving?'driving':'walking';
     }
-    return 'stationary';
+    if(speed<FAM_WALK_EXIT_MS) return 'stationary';
+    return currentState||'stationary';
   }
   // No speed reported by the device: fall back to the existing distance-based
   // moving flag — still real GPS-derived signal, just coarser.
@@ -15343,9 +15354,12 @@ const FAM_CUM_WINDOW_MS=25000;   // rolling window for cumulative-distance drivi
 const FAM_CUM_DRIVE_M=55;        // verified net movement within the window — matches the Engine
 function famCumulativeIsDriving(c,m){
   const s=m.state; if(!s||s.lat==null) return false;
+  if(s.accuracy!=null && +s.accuracy>35) return false;
   const t=Date.parse(s.reportedAt||s.capturedAt||'')||Date.now();
   if(!c._cumHist) c._cumHist=[];
   const hist=c._cumHist;
+  const last=hist[hist.length-1];
+  if(last && t<=last.t) return false;
   hist.push({lat:s.lat,lng:s.lng,t});
   while(hist.length && t-hist[0].t>FAM_CUM_WINDOW_MS) hist.shift();
   if(hist.length<2) return false;
@@ -15355,29 +15369,56 @@ function famCumulativeIsDriving(c,m){
 }
 function famDeriveMemberDisplay(m){
   const uid=m.uid;
-  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0,_cumHist:[]});
+  const c=_famActivityCache[uid]||(_famActivityCache[uid]={activityType:'stationary',activityStartedAt:nowISOSafe(),currentPlaceId:null,placeEnteredAt:null,lastMovementAt:null,_candidate:null,_candidateSince:0,_candidateSamples:0,_lastSampleAt:0,_cumHist:[]});
   const nowMs=Date.now();
-  let raw=famClassifyRawActivity(m);
+  const s=m.state||{};
+  const sampleAt=Date.parse(s.movementDecisionAt||s.capturedAt||s.reportedAt||'')||0;
+  const nativeState=(s.source==='companion')?(s.movementState||s.activityType):null;
+  const nativePersisted=['stationary','walking','driving'].indexOf(nativeState)>=0;
+  let raw=famClassifyRawActivity(m,c.activityType);
   // Cumulative-movement override: even when instantaneous speed says
   // "stationary" or is unavailable, real distance covered over the last
   // 20 seconds is an independent, more reliable signal that the person is
   // actually driving — fixes the case where coords.speed is null/unreliable
   // but the GPS fix positions themselves clearly show a car moving.
-  if(raw!=='offline' && raw!=='paused' && famCumulativeIsDriving(c,m)) raw='driving';
+  if(!nativePersisted && raw!=='offline' && raw!=='paused' && famCumulativeIsDriving(c,m)) raw='driving';
   if(raw==='driving'||raw==='walking') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
   // offline/paused are never debounced — these are honest device/consent
   // facts, not noisy motion signals, so they apply immediately.
   if(raw==='offline'||raw==='paused'){
     if(c.activityType!==raw){ c.activityType=raw; c.activityStartedAt=new Date(nowMs).toISOString(); }
-    c._candidate=null; c._candidateSince=0;
+    c._candidate=null; c._candidateSince=0; c._candidateSamples=0;
+  } else if(nativePersisted){
+    // Native decisions are already confirmed using distinct accepted GPS
+    // samples. Accept only a newer persisted decision; a stale bridge or
+    // Firestore callback can never roll the UI state backward.
+    if(sampleAt>c._lastSampleAt){
+      c._lastSampleAt=sampleAt;
+      if(c.activityType!==raw){
+        c.activityType=raw;
+        c.activityStartedAt=s.activityStartedAt||new Date(sampleAt).toISOString();
+      }
+      c._candidate=null; c._candidateSince=0; c._candidateSamples=0;
+    }
+  } else if(sampleAt && sampleAt<=c._lastSampleAt){
+    // A render of the same fix is not another movement sample.
   } else if(raw!==c.activityType){
-    if(c._candidate!==raw){ c._candidate=raw; c._candidateSince=nowMs; }
-    else if(nowMs-c._candidateSince>=FAM_HYST_MS){
+    if(sampleAt)c._lastSampleAt=sampleAt;
+    if(c._candidate!==raw){
+      c._candidate=raw; c._candidateSince=sampleAt||nowMs; c._candidateSamples=1;
+    } else {
+      c._candidateSamples=(c._candidateSamples||0)+1;
+    }
+    const stopCandidate=raw==='stationary';
+    const requiredMs=stopCandidate?FAM_STOP_CONFIRM_MS:FAM_MOVE_CONFIRM_MS;
+    const requiredSamples=stopCandidate?FAM_STOP_CONFIRM_SAMPLES:FAM_MOVE_CONFIRM_SAMPLES;
+    if(c._candidateSamples>=requiredSamples && (sampleAt||nowMs)-c._candidateSince>=requiredMs){
       c.activityType=raw; c.activityStartedAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
-      c._candidate=null; c._candidateSince=0;
+      c._candidate=null; c._candidateSince=0; c._candidateSamples=0;
     }
   } else {
-    c._candidate=null; c._candidateSince=0;
+    if(sampleAt)c._lastSampleAt=Math.max(c._lastSampleAt||0,sampleAt);
+    c._candidate=null; c._candidateSince=0; c._candidateSamples=0;
   }
   // Saved-place tracking (independent of activity type): entering/leaving a
   // real family-saved geofence, using the member's real fix.
@@ -16785,6 +16826,18 @@ function famSettingsView(){
   if(famSettingsTab==='family'){
     // Hidden dev-mode gesture target (5 quick taps). Looks like a plain label.
     h+=`<div data-fam="dev-tap" style="font-size:11px;color:var(--ink3);margin:0 2px 10px;cursor:default;user-select:none">${L==='fa'?'فضای خانواده':'Family space'}</div>`;
+    if(inCloud){
+      const sharing=fb.location.myConsent();
+      const selfUid=FB.user&&FB.user.uid;
+      const selfState=selfUid?fb.location.memberState(selfUid):null;
+      const sharingOn=!!sharing.enabled&&!sharing.paused;
+      const nativeBackground=sharingOn&&selfState&&selfState.source==='companion'&&selfState.nativeTrackingActive===true;
+      h+=`<button data-fam="live-share-toggle" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;margin:0 0 18px;border:1px solid var(--b1);border-radius:16px;background:var(--s1);color:var(--ink);text-align:start;cursor:pointer">
+        <span style="width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:${sharingOn?'#2fce6b20':'var(--s2)'};color:${sharingOn?'#2fce6b':'var(--ink3)'}">${famIcon('pin')}</span>
+        <span style="flex:1;min-width:0"><b style="display:block;font-size:15px">${L==='fa'?'اشتراک موقعیت':'Location sharing'}</b><span style="display:block;margin-top:2px;font-size:12px;color:var(--ink3)">${nativeBackground?(L==='fa'?'در پس‌زمینه فعال است':'Active in background'):(sharingOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off'))}</span></span>
+        <span style="font-size:13px;font-weight:800;color:${sharingOn?'#2fce6b':'var(--ink3)'}">${sharingOn?(L==='fa'?'روشن':'On'):(L==='fa'?'خاموش':'Off')}</span>
+      </button>`;
+    }
     // Your own display photo/name — the ONLY place these could previously
     // be set was the one-time profile gate shown before first family setup,
     // with no way back to it afterward. This makes both real, always-
