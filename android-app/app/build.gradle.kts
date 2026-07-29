@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0-v391-driving-state-ui"
+        versionCode = 5
+        versionName = "0.5.0-v394-controlled-fixes"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v391\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v394\""
         )
     }
 

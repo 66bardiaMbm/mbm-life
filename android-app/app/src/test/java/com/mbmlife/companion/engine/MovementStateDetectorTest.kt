@@ -78,6 +78,18 @@ class MovementStateDetectorTest {
     }
 
     @Test
+    fun activityTimerVerifiedEndUsesPersistedArrivalTime() {
+        val detector = MovementStateDetector()
+        detector.ingest(sample(5_000L, speed = 8.0), verifiedTripActive = true)
+
+        val ended = detector.confirmVerifiedTripEnded(arrivalAtMs = 25_000L)
+
+        assertEquals(MovementState.STATIONARY, ended.state)
+        assertEquals(25_000L, ended.stateStartedAtMs)
+        assertEquals("verified_trip_ended_by_activity_timer", ended.reason)
+    }
+
+    @Test
     fun missingOrRejectedFixDoesNotResetCandidate() {
         val detector = MovementStateDetector()
         detector.ingest(sample(1_000L, speed = 1.0), false)
