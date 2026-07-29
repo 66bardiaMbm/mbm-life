@@ -50,7 +50,7 @@ class DrivingDetector(
         const val PRE_WINDOW_MS = 30_000L
         const val STOP_WINDOW_MS = 30_000L
         const val STOP_NET_DISTANCE_M = 25.0
-        const val STOP_EVIDENCE_GAP_TOLERANCE_MS = 20_000L
+        const val STOP_EVIDENCE_GAP_TOLERANCE_MS = 45_000L
         const val STOP_LOW_SPEED_MPS = 1.5
         const val STOP_LOW_SPEED_RATIO = 0.75
         const val STOP_MIN_SAMPLES = 4
@@ -69,6 +69,14 @@ class DrivingDetector(
     private var lastDriveEvidenceAt: Long? = null
     private var stopCandidateSince: Long? = null
     private var lastStopEvidenceAt: Long? = null
+
+    init {
+        val latest = tail.lastOrNull()
+        if (active != null && latest != null && isSustainedStopEvidence(latest)) {
+            stopCandidateSince = max(active!!.startedAtMs, latest.capturedAtMs - STOP_WINDOW_MS)
+            lastStopEvidenceAt = latest.capturedAtMs
+        }
+    }
 
     fun ingest(fix: RawLocationFix): DrivingOutput {
         val rejection = rejectionReason(fix)
@@ -236,12 +244,22 @@ class DrivingDetector(
         if (previous == null) return null
         val dt = (fix.capturedAtMs - previous.capturedAtMs) / 1000.0
         if (dt <= 0 || dt > 30) return null
-        val implied = Geo.distanceM(
+        val measuredDistance = Geo.distanceM(
             previous.latitude,
             previous.longitude,
             fix.latitude,
             fix.longitude
-        ) / dt
+        )
+        // When the provider has no speed, ordinary movement inside the two
+        // fixes' accuracy envelope is GPS uncertainty, not real motion.
+        // Subtract that uncertainty before deriving distance/time speed so a
+        // stationary phone cannot keep or start a trip from coordinate noise.
+        val accuracyEnvelope = max(
+            5.0,
+            ((previous.accuracyM?.toDouble() ?: 0.0) +
+                (fix.accuracyM?.toDouble() ?: 0.0)) / 2.0
+        )
+        val implied = (measuredDistance - accuracyEnvelope).coerceAtLeast(0.0) / dt
         return implied.takeIf { it in 0.0..MAX_SPEED_MPS }
     }
 

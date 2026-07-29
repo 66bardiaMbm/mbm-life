@@ -13,10 +13,25 @@ assert.doesNotMatch(
   /else if\(members\.length===1\)/,
   "a one-person family must not be replaced by only the Add person card"
 );
+assert.doesNotMatch(
+  html,
+  /h\+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">\$\{L==='fa'\?'اعضا':'Members'\}/,
+  "Driving must not render a Members section"
+);
 assert.match(
   html,
-  /type="button" data-fam="drv-open-member-history"/,
-  "each Driving member report must be a single explicit button"
+  /Member\/profile browsing belongs to Location/,
+  "Driving must explicitly keep member browsing on Location"
+);
+assert.match(
+  html,
+  /const LIFE_STYLE=\[\];/,
+  "the live map must keep Google's complete road-map context"
+);
+assert.match(
+  html,
+  /Android \$\{nativeVersion\}/,
+  "Settings must show the actual native Android build separately"
 );
 assert.match(
   html,

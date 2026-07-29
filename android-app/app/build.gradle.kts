@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0-stop-battery-map"
+        versionCode = 4
+        versionName = "0.4.0-v391-driving-state-ui"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v390\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v391\""
         )
     }
 
