@@ -64,23 +64,22 @@ function makeMap() {
   };
 }
 
-function harness() {
+function harness({ uid = "me", viewerUid = "me" } = {}) {
   const MBMMap = makeMap();
   const camFactory = new Function(
     "MBMMap", "Date", "setTimeout", "clearTimeout",
     `let _famFollow=false; ${camSrc}; return FamilyMapCamera;`
   );
   const FamilyMapCamera = camFactory(MBMMap, Date, setTimeout, clearTimeout);
-  const uid = "me";
   const active = { id: "trip_1" };
-  const FB = { user: { uid } };
+  const FB = { user: { uid: viewerUid } };
   const FamilyBackend = { driving: { activeSession: (id) => id === uid ? active : null } };
   const buildPaint = (lastCentredUid, follow) => new Function(
     "MBMMap", "FamilyMapCamera", "FB", "FamilyBackend",
     "esc", "famHaversineM", "famComposeStatusText", "famAccuracyInfo",
     "famLiveApply", "famEnsureSheetVisible",
     `
-      let _famSelUid="me";
+      let _famSelUid=${JSON.stringify(uid)};
       let _famLastCentredUid=${JSON.stringify(lastCentredUid)};
       let _famFollow=${follow ? "true" : "false"};
       ${paintSrc}
@@ -97,6 +96,17 @@ function harness() {
     state: { lat, lng, moving: true, heading: 90, speed, accuracy: 8, battery: 90 }
   });
   return { MBMMap, FamilyMapCamera, active, buildPaint, member };
+}
+
+// A selected remote family member is followed too. The camera authority is
+// the selected profile, not permanently the signed-in local user.
+{
+  const h = harness({ uid: "family_member", viewerUid: "me" });
+  const remote = h.member(3.1, 4.2, 9);
+  h.buildPaint(null, false)([remote], remote);
+  const camera = h.MBMMap.calls.filter((c) => c.type === "setCamera" || c.type === "setView");
+  assert.equal(camera.length, 1, "selecting a remote member must start follow with one camera command");
+  assert.deepEqual(camera[0].opts?.center || camera[0].center, [3.1, 4.2]);
 }
 
 // Establish the active drive, then test a later accepted fix. This is the
@@ -145,6 +155,25 @@ function harness() {
     1,
     "recenter must resume with one camera command"
   );
+}
+
+// A gesture pause is temporary. Accepted fixes keep replacing lastTarget and
+// the controller automatically resumes on the newest coordinate.
+{
+  const h = harness();
+  h.FamilyMapCamera.drivingState(h.active, [1, 2], 12, 8);
+  h.FamilyMapCamera.pauseByGesture();
+  h.MBMMap.calls.length = 0;
+  h.FamilyMapCamera.drivingState(h.active, [1.004, 2.004], 14, 7);
+  assert.equal(
+    h.MBMMap.calls.filter((c) => c.type === "setCamera" || c.type === "setView").length,
+    0,
+    "accepted fixes must not move the camera during the short gesture pause"
+  );
+  await new Promise((resolve) => setTimeout(resolve, 8200));
+  const camera = h.MBMMap.calls.filter((c) => c.type === "setCamera" || c.type === "setView");
+  assert.equal(camera.length, 1, "follow must automatically resume once after the gesture pause");
+  assert.deepEqual(camera[0].opts?.center || camera[0].center, [1.004, 2.004]);
 }
 
 // Padding is submitted before the controller reframes its retained target.

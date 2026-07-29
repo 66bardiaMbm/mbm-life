@@ -1349,7 +1349,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-cat.on{background:var(--fam-purple,#8652FF);color:#fff}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
-.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + 64px + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
+.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + var(--fam-navclear) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
 .fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cta-sos{color:#e0447a}
@@ -1364,7 +1364,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    with a non-zero gesture-nav inset the actual bar (60px + inset) exceeded
    the fixed 90px assumption once other spacing was accounted for, clipping
    the last row of content (e.g. the Members list's last card) behind it. */
-:root{--fam-navclear:calc(60px + env(safe-area-inset-bottom,0px))}
+:root{--fam-navclear:calc(82px + env(safe-area-inset-bottom,0px))}
 .fam-navbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border:none;background:transparent;color:var(--ink3);cursor:pointer;font-size:11px;font-weight:700;padding:4px 0}
 .fam-navbtn svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-navbtn.on{color:var(--fam-purple,#8652FF)}
@@ -1464,6 +1464,16 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   border:2.5px solid #fff;z-index:4}
 .dark .fam-pin-activity{border-color:#1b1c22}
 .fam-pin-activity svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2.4}
+.fam-pin-activity-pill{position:absolute;left:48px;top:-10px;min-height:32px;border-radius:17px;padding:5px 10px 5px 7px;
+  display:flex;align-items:center;gap:5px;background:#fff;color:#27232f;box-shadow:0 3px 12px rgba(0,0,0,.24);
+  border:1px solid rgba(20,20,30,.08);z-index:6;white-space:nowrap;pointer-events:none;font-size:12px;font-weight:800}
+.dark .fam-pin-activity-pill{background:#262733;color:#f2f3f7;border-color:rgba(255,255,255,.08)}
+.fam-pin-activity-pill .motion-ic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:#fff;background:var(--fam-purple,#8652FF);flex:none}
+.fam-pin-activity-pill svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2.2}
+.fam-pin-activity-pill.walking .motion-ic{background:#2f9e72}
+.fam-pin-activity-pill.bicycling .motion-ic{background:#3478d4}
+.fam-pin-activity-pill.motorcycle .motion-ic{background:#d47724}
 .fam-pin-activity.tone-offline{background:#9aa1ad}
 .fam-pin-activity.tone-paused{background:#f5a623}
 .fam-pin-activity.tone-motion{animation:fambadgepulse 1.6s ease-in-out infinite}
@@ -1490,7 +1500,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    draggable behaviour is a progressive enhancement layered on top — if drag
    JS never runs, the panel still renders at its default (partial) height. ── */
 #fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:28px 28px 0 0;
-  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:64px;
+  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:var(--fam-navclear);
   height:42vh;max-height:calc(100% - 150px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
@@ -1499,7 +1509,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   flex:none;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 #fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
 #fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);pointer-events:none}
-.fam-sheet-body{padding:0 20px 24px;flex:1;overflow-y:auto;min-height:0}
+.fam-sheet-body{padding:0 20px calc(28px + env(safe-area-inset-bottom,0px));flex:1;overflow-y:auto;min-height:0}
 .fam-presence{display:flex;direction:ltr;gap:10px;overflow-x:auto;padding:6px 2px 14px}
 .fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
 .fam-pcard-add .av{border:2px dashed var(--b1)!important;background-image:none!important}
@@ -1773,7 +1783,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v394';
+const APP_VERSION='v395';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12516,8 +12526,49 @@ const FamilyBackend = (function(){
       return sess;
     }
 
-    function memberSessions(uid){ return sessionsFor(uid).sort((a,b)=>(a.startedAt||'').localeCompare(b.startedAt||'')); }
-    function session(uid,sessionId){ return sessionById(uid,sessionId); }
+    const _staleRecoveryIds=new Set();
+    function recoverStaleSession(uid,sess){
+      if(!sess||sess.status!=='active')return sess;
+      const q=queueMap()[uid];
+      const matchingQ=(q&&q.sessionId===sess.id)?q:null;
+      if(sessionIsLive(sess,matchingQ))return sess;
+      const evidenceMs=sessionEvidenceAtMs(sess,matchingQ);
+      const endedAt=new Date(evidenceMs||sessionTimeMs(sess.startedAt)||Date.now()).toISOString();
+      // Never write another family member's history. For remote members this
+      // is a presentation-only normalized copy; their own device remains the
+      // only authority allowed to finalize their trip.
+      if(uid!==myUid()){
+        return Object.assign({},sess,{
+          status:'ended',endedAt,
+          durationSec:Math.max(0,Math.round((Date.parse(endedAt)-Date.parse(sess.startedAt||endedAt))/1000)),
+          closeReason:sess.closeReason||'stale_recovered'
+        });
+      }
+      if(_staleRecoveryIds.has(sess.id))return sess;
+      _staleRecoveryIds.add(sess.id);
+      pipelineLog('stale-session-recovery',{uid,sessionId:sess.id,evidenceAt:endedAt});
+      if(matchingQ&&matchingQ.samples&&matchingQ.samples.length){
+        const last=matchingQ.samples[matchingQ.samples.length-1];
+        endSession(uid,sess,Object.assign({},last,{t:last.t||last.capturedAt||last.at||endedAt}));
+        sess.closeReason='stale_recovered';
+        saveSession(uid,sess);
+        pushSessionRemote(sess).catch(()=>{});
+      }else{
+        sess.status='ended';
+        sess.endedAt=endedAt;
+        sess.durationSec=Math.max(0,Math.round((Date.parse(endedAt)-Date.parse(sess.startedAt||endedAt))/1000));
+        sess.closeReason='stale_recovered';
+        saveSession(uid,sess);
+        if(matchingQ){ matchingQ.sessionId=null;matchingQ.samples=[];matchingQ.lastFlushIdx=0;try{persistDB();}catch(e){} }
+        pushSessionRemote(sess).catch(()=>{});
+      }
+      return sess;
+    }
+    function memberSessions(uid){
+      return sessionsFor(uid).map(sess=>recoverStaleSession(uid,sess))
+        .sort((a,b)=>(a.startedAt||'').localeCompare(b.startedAt||''));
+    }
+    function session(uid,sessionId){ return recoverStaleSession(uid,sessionById(uid,sessionId)); }
     function activeSession(uid){
       const q=queueMap()[uid];
       const queued=(q&&q.sessionId)?sessionById(uid,q.sessionId):null;
@@ -14131,7 +14182,9 @@ let _drvLiveWasHealthy=null; // tracks the not-driving health status across tick
 /* ── TripCard: one trip row in the History list — real distance/duration/
    time, top speed if notable, tap opens Trip Detail. ── */
 function TripCard(sess){
-  const isActive=sess.status==='active';
+  const cardUid=sess.memberUid||sess.memberId||drvUid();
+  const liveSession=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving.activeSession(cardUid):null;
+  const isActive=sess.status==='active' && !!liveSession && liveSession.id===sess.id;
   const startTime=famAbsTime(sess.startedAt);
   const endTime=sess.endedAt?famAbsTime(sess.endedAt):(L==='fa'?'در حال انجام':'In progress');
   const topKph=drvFmtSpeedKph(sess.maxSpeedMps);
@@ -14757,6 +14810,8 @@ const MBMMap = (function(){
     const I={
       driving:'<path d="M5 17h14M5 17a2 2 0 104 0M15 17a2 2 0 104 0M5 17l1.5-5.5A2 2 0 018.4 10h7.2a2 2 0 011.9 1.5L19 17M7 13h10"/>',
       walking:'<circle cx="13" cy="4" r="2"/><path d="M13 6l-2 4 3 2-1 6M11 10l-4 2 1 6M9 12l-3 1"/>',
+      bicycling:'<circle cx="6" cy="17" r="4"/><circle cx="18" cy="17" r="4"/><path d="M6 17l4-8h4l4 8M10 9l4 8M9 6h3"/>',
+      motorcycle:'<circle cx="6" cy="17" r="3"/><circle cx="18" cy="17" r="3"/><path d="M6 17l4-6h4l4 6M10 11h5l2-3h2"/>',
       place:'<path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
       offline:'<path d="M1 1l22 22M16.7 16.7A10 10 0 003 12M8.5 8.5a10 10 0 0111.9 3.2M12 20h.01"/>',
       paused:'<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>'
@@ -14777,7 +14832,17 @@ const MBMMap = (function(){
       const tone = (meta.activityType==='offline')?' tone-offline':(meta.activityType==='paused')?' tone-paused'
         :(meta.activityType==='driving'||meta.activityType==='walking')?' tone-motion':'';
       const icon=famActivityIcon(meta.activityType);
-      if(icon) activityBadge=`<div class="fam-pin-activity${tone}"><svg viewBox="0 0 24 24">${icon}</svg></div>`;
+      if(icon){
+        if(meta.activityType==='driving'||meta.activityType==='walking'||meta.activityType==='bicycling'||meta.activityType==='motorcycle'){
+          const label=meta.activityType==='driving'
+            ? (meta.speedKph!=null?`${meta.speedKph} km/h`:(L==='fa'?'رانندگی':'Driving'))
+            : (meta.activityType==='walking'?(L==='fa'?'پیاده':'Walking')
+              :(meta.activityType==='bicycling'?(L==='fa'?'دوچرخه':'Bicycle'):(L==='fa'?'موتور':'Motorcycle')));
+          activityBadge=`<div class="fam-pin-activity-pill ${meta.activityType}"><span class="motion-ic"><svg viewBox="0 0 24 24">${icon}</svg></span><span>${esc(label)}</span></div>`;
+        }else{
+          activityBadge=`<div class="fam-pin-activity${tone}"><svg viewBox="0 0 24 24">${icon}</svg></div>`;
+        }
+      }
     }
     // Battery badge: only rendered when we have a real reported value —
     // never fabricated. Colour reflects the live percentage.
@@ -14956,8 +15021,9 @@ const MBMMap = (function(){
    reframe the same target without creating another controller. */
 const FamilyMapCamera=(function(){
   let lastTarget=null, lastZoom=null, follow=false, pausedByGesture=false;
-  let timer=null, lastMoveAt=0, activeDriveId=null;
+  let timer=null, gestureResumeTimer=null, lastMoveAt=0, activeDriveId=null;
   const MIN_MOVE_MS=450;
+  const GESTURE_PAUSE_MS=8000;
   let drivingMode=false;
   function drivingZoomFor(speedMps,accuracyM){
     let zoom;
@@ -14988,7 +15054,7 @@ const FamilyMapCamera=(function(){
     apply(!!opts.force);
   }
   function requestDriving(pos,speedMps,accuracyM){
-    if(!pos||pos[0]==null||pos[1]==null||!follow||pausedByGesture)return;
+    if(!pos||pos[0]==null||pos[1]==null)return;
     const nextZoom=drivingZoomFor(speedMps,accuracyM);
     const unchanged=!!lastTarget &&
       Math.abs(lastTarget[0]-pos[0])<1e-7 &&
@@ -14997,6 +15063,11 @@ const FamilyMapCamera=(function(){
     drivingMode=true;
     lastTarget=[pos[0],pos[1]];
     lastZoom=nextZoom;
+    // Keep the latest accepted coordinate while a finger gesture has paused
+    // the camera. The marker may continue moving, but when the short pause
+    // expires the camera resumes on THIS latest point, not the old drag-start
+    // point.
+    if(!follow||pausedByGesture)return;
     if(!unchanged) apply(false);
   }
   function fit(points){
@@ -15011,8 +15082,20 @@ const FamilyMapCamera=(function(){
     follow=false;
     pausedByGesture=true;
     _famFollow=false;
+    if(gestureResumeTimer)clearTimeout(gestureResumeTimer);
+    gestureResumeTimer=setTimeout(()=>{
+      gestureResumeTimer=null;
+      if(!lastTarget)return;
+      follow=true;
+      pausedByGesture=false;
+      _famFollow=true;
+      apply(true);
+    },GESTURE_PAUSE_MS);
   }
-  function resume(pos,zoom){ follow=true;pausedByGesture=false;_famFollow=true;request(pos,{zoom,force:true}); }
+  function resume(pos,zoom){
+    if(gestureResumeTimer){clearTimeout(gestureResumeTimer);gestureResumeTimer=null;}
+    follow=true;pausedByGesture=false;_famFollow=true;request(pos,{zoom,force:true});
+  }
   function setPadding(pad){
     MBMMap.setPadding(pad);
     if(follow&&lastTarget)apply(true);
@@ -15027,7 +15110,9 @@ const FamilyMapCamera=(function(){
       _famFollow=true;
       lastZoom=drivingZoomFor(speedMps,accuracyM);
       request(pos,{force:true});
-    }else if(id&&follow&&!pausedByGesture){
+    }else if(id){
+      // requestDriving updates lastTarget even during the temporary
+      // gesture-pause, but only moves the camera when follow is active.
       requestDriving(pos,speedMps,accuracyM);
     }else if(!id){
       activeDriveId=null;
@@ -15036,7 +15121,8 @@ const FamilyMapCamera=(function(){
   }
   function reset(){
     if(timer)clearTimeout(timer);
-    timer=null;lastTarget=null;lastZoom=null;follow=false;pausedByGesture=false;activeDriveId=null;drivingMode=false;
+    if(gestureResumeTimer)clearTimeout(gestureResumeTimer);
+    timer=null;gestureResumeTimer=null;lastTarget=null;lastZoom=null;follow=false;pausedByGesture=false;activeDriveId=null;drivingMode=false;
     MBMMap.cancelCameraAnimation();
   }
   function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),lastZoom,activeDriveId,drivingMode};}
@@ -15654,7 +15740,7 @@ function famComposeStatusText(m){
     // Status text must remain plain text. The car icon is rendered by the
     // marker's dedicated safe SVG badge, never embedded into a text string.
     const l2=speedKph!=null?`${speedKph} km/h`:'';
-    return { l1, l2, region, since:null, activityType:'driving' };
+    return { l1, l2, region, since:null, activityType:'driving', speedKph };
   }
   if(d.activityType==='walking'){
     const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
@@ -16192,6 +16278,7 @@ function famLivePaintMarkers(members, sel){
       MBMMap.setMarker(key,[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
+         speedKph:txt.speedKph,
          calloutL1:esc(txt.l1), calloutL2:(txt.calloutL2||txt.l2)?esc(txt.calloutL2||txt.l2):''},
         m.uid===_famSelUid, m.meta.tone,
         ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
@@ -16227,33 +16314,33 @@ function famLivePaintMarkers(members, sel){
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
-  // Exactly one camera decision per paint. A fresh member selection wins
-  // once; otherwise the local active drive uses the speed-aware controller,
-  // or ordinary self-follow uses the stationary controller.
-  const myUidForCam=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-  const mineForCam=myUidForCam?members.find(m=>m.uid===myUidForCam):null;
+  // Exactly one camera decision per paint. The SELECTED member is the camera
+  // authority (not always the signed-in user): selecting somebody resumes
+  // follow immediately; a real active drive uses speed-aware framing; a
+  // manual drag pauses briefly while accepted fixes keep updating the
+  // controller's target, then follow resumes automatically.
   const freshSelection=!!(sel&&sel.state&&sel.state.lat!=null&&_famLastCentredUid!==sel.uid);
   if(freshSelection){
-    const isViewingSelf=sel.uid===myUidForCam;
-    if(!isViewingSelf) FamilyMapCamera.pauseByGesture();
-    FamilyMapCamera.request([sel.state.lat,sel.state.lng],{force:true,follow:isViewingSelf});
+    FamilyMapCamera.resume([sel.state.lat,sel.state.lng],16);
     _famLastCentredUid=sel.uid;
-  }else{
+  }else if(sel&&sel.state&&sel.state.lat!=null){
     const engForCam=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
-    const activeForCam=(mineForCam&&myUidForCam&&engForCam)?engForCam.activeSession(myUidForCam):null;
-    if(activeForCam&&mineForCam.state&&mineForCam.state.lat!=null){
+    const activeForCam=engForCam?engForCam.activeSession(sel.uid):null;
+    if(activeForCam){
       FamilyMapCamera.drivingState(
         activeForCam,
-        [mineForCam.state.lat,mineForCam.state.lng],
-        mineForCam.state.speed,
-        mineForCam.state.accuracy
+        [sel.state.lat,sel.state.lng],
+        sel.state.speed,
+        sel.state.accuracy
       );
-    }else if(_famFollow&&mineForCam&&mineForCam.state&&mineForCam.state.lat!=null){
-      FamilyMapCamera.drivingState(null,null);
-      FamilyMapCamera.request([mineForCam.state.lat,mineForCam.state.lng],{follow:true});
     }else{
       FamilyMapCamera.drivingState(null,null);
+      // Always refresh lastTarget. request() only moves the camera when
+      // follow is active, so a temporary gesture pause is respected.
+      FamilyMapCamera.request([sel.state.lat,sel.state.lng],{});
     }
+  }else{
+    FamilyMapCamera.drivingState(null,null);
   }
 }
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
@@ -16368,7 +16455,8 @@ function famUpdateCameraPadding(sheetPx){
     const RIGHT_CONTROLS_W=64; // recenter/person/fullscreen/layers column
     const CTA_H=56;         // Check in / SOS row height
     const CTA_GAP=14;
-    const SHEET_BOTTOM_MARGIN=64; // #fam-sheet's own margin-bottom, reserved for the bottom nav — must be included or the sheet's true top edge is undercounted
+    const navClear=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fam-navclear'))||82;
+    const SHEET_BOTTOM_MARGIN=navClear;
     const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
     if(typeof FamilyMapCamera!=='undefined'){
       FamilyMapCamera.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
@@ -17125,7 +17213,7 @@ function famAction(act,arg,ev){
       const cut=arg.lastIndexOf(':'),id=arg.slice(0,cut),value=arg.slice(cut+1);
       FamilyBackend.roadReports.vote(id,value).then(()=>{toast(L==='fa'?'ثبت شد':'Recorded');if(typeof famLiveApply==='function')famLiveApply();}).catch(()=>toast(L==='fa'?'ارسال ناموفق بود':'Could not send confirmation'));return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const my=FB.user&&FB.user.uid; const st=fb.location.memberState(my); if(st&&st.lat!=null)FamilyMapCamera.resume([st.lat,st.lng],16); fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)FamilyMapCamera.request([s2.lat,s2.lng],{follow:true,force:true}); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(st&&st.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-me':{ const fb=FamilyBackend; const members=famLiveMembers(); const selected=members.find(m=>m.uid===_famSelUid); const my=FB.user&&FB.user.uid; const target=(selected&&selected.state&&selected.state.lat!=null)?selected.state:fb.location.memberState(my); if(target&&target.lat!=null)FamilyMapCamera.resume([target.lat,target.lng],16); if(selected&&selected.uid!==my){ if(!(target&&target.lat!=null))toast(L==='fa'?'موقعیت عضو هنوز در دسترس نیست':'Member location is not available yet'); return; } fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)FamilyMapCamera.request([s2.lat,s2.lng],{follow:true,force:true}); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(target&&target.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
     case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=false; FamilyMapCamera.pauseByGesture(); const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)FamilyMapCamera.request([st.lat,st.lng],{zoom:16,force:true}); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
     case 'live-fit':{ const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)FamilyMapCamera.fit(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
