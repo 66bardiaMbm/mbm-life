@@ -1810,7 +1810,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v403';
+const APP_VERSION='v404';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -18037,7 +18037,25 @@ function famAction(act,arg,ev){
     case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch((err)=>{ console.error('[cloud-rename]',err&&err.message,err); toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
     case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='live'; render(); }).catch((err)=>{ console.error('[cloud-leave]',err&&err.message,err); toast(L==='fa'?'خروج ناموفق بود':'Could not leave family'); }); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
-    case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code; if(navigator.share){ navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>{}); } else famCopy(link); return; }
+    case 'inv-share':{
+      const inv=I[arg]; if(!inv)return;
+      const link=famInviteLink(inv.code);
+      const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code;
+      // Android WebView can expose navigator.share yet reject every call.
+      // Prefer the real native chooser when the companion bridge is present.
+      try{
+        if(window.MbmNativeAuth&&typeof window.MbmNativeAuth.shareText==='function'){
+          window.MbmNativeAuth.shareText('MBM Family',msg,link);
+          return;
+        }
+      }catch(_){}
+      // In a normal browser/PWA use Web Share, but never swallow rejection:
+      // copying the link is the honest fallback and gives visible feedback.
+      if(navigator.share){
+        navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>famCopy(link));
+      }else famCopy(link);
+      return;
+    }
     case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!confirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?'))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch((err)=>{ console.error('[inv-revoke]',err&&err.message,err); toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
     case 'inv-del':{ delete I[arg]; saveDB(); render(); return; }
     // ── Cloud member management (owner/admin) ──

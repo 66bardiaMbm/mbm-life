@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.7.3-v403-low-battery-alerts"
+        versionCode = 13
+        versionName = "0.7.4-v404-native-invite-share"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v403\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v404\""
         )
     }
 
