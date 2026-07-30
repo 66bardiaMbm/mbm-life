@@ -30,8 +30,8 @@ assert.match(
 );
 assert.match(
   html,
-  /Android \$\{nativeVersion\}/,
-  "Settings must show the actual native Android build separately"
+  /function appVersionDisplay\(\)\s*\{\s*return APP_VERSION;\s*\}/,
+  "Settings must show only the short product version"
 );
 assert.match(
   html,

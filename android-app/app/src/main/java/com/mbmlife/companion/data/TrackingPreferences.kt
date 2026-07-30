@@ -66,4 +66,8 @@ class TrackingPreferences(context: Context) {
             if (value == null) prefs.edit().remove("battery_pct").apply()
             else prefs.edit().putInt("battery_pct", value.coerceIn(0, 100)).apply()
         }
+
+    var batteryCharging: Boolean
+        get() = prefs.getBoolean("battery_charging", false)
+        set(value) = prefs.edit().putBoolean("battery_charging", value).apply()
 }

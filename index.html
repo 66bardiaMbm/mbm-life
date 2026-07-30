@@ -1505,6 +1505,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-pin-batt.lvl-mid .ic i{background:#f5a623}
 .fam-pin-batt.lvl-low .ic i{background:#e5484d}
 .fam-pin-batt .txt{font-size:9px;font-weight:700;color:#fff}
+.fam-battery-bolt{font-size:10px;font-weight:900;line-height:1;color:#fff;text-shadow:0 1px 2px #000}
 @keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(47,206,107,.5)}70%{box-shadow:0 0 0 12px rgba(47,206,107,0)}100%{box-shadow:0 0 0 0 rgba(47,206,107,0)}}
 @keyframes famspin{to{transform:rotate(360deg)}}
 .fam-pin-tip{position:absolute;left:50%;bottom:8px;width:12px;height:12px;background:#fff;transform:translateX(-50%) rotate(45deg);box-shadow:2px 2px 3px rgba(0,0,0,.2)}
@@ -1624,7 +1625,10 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   background:var(--s1);border:1px solid var(--b1);border-radius:9px;padding:1px 5px;font-size:10px;font-weight:800;color:var(--ink2);white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .fam-mrow-batt-ic{position:relative;width:14px;height:8px;border:1.5px solid var(--ink3);border-radius:2px}
 .fam-mrow-batt-ic::after{content:"";position:absolute;right:-3px;top:1.5px;width:1.5px;height:3px;background:var(--ink3);border-radius:0 1px 1px 0}
-.fam-mrow-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:#3fbf6a;border-radius:1px}
+.fam-mrow-batt.lvl-high{color:#2fce6b}.fam-mrow-batt.lvl-mid{color:#f5a623}.fam-mrow-batt.lvl-low{color:#e5484d}
+.fam-mrow-batt-ic{border-color:currentColor}
+.fam-mrow-batt-ic::after{background:currentColor}
+.fam-mrow-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:currentColor;border-radius:1px}
 .fam-mrow-fav{flex:none;border:none;background:transparent;color:var(--ink3);cursor:pointer;padding:6px}
 .fam-mrow-fav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-mrow-fav.on svg{fill:#f5476b;stroke:#f5476b}
@@ -1639,6 +1643,32 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-cluster-more{width:46px;height:46px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;background:var(--fam-purple,#8652FF);color:#fff;
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
 .fam-cluster-tip{position:absolute;left:50%;bottom:-8px;width:16px;height:16px;background:#fff;transform:translateX(-50%) rotate(45deg)}
+/* Circle chooser + future Safety/Membership surfaces. These are original MBM
+   components that follow the same information hierarchy as the references
+   without copying Life360 branding or artwork. */
+.fam-circle-page,.fam-future-page{padding:8px 20px var(--fam-navclear);min-height:100%;background:var(--s0);color:var(--ink)}
+.fam-circle-list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.fam-circle-row{display:flex;align-items:center;gap:14px;width:100%;border:1px solid var(--b1);background:var(--s1);color:var(--ink);border-radius:18px;padding:14px;text-align:start}
+.fam-circle-row.on{border-color:var(--fam-purple,#8652FF);box-shadow:0 0 0 2px color-mix(in srgb,var(--fam-purple,#8652FF) 20%,transparent)}
+.fam-circle-avatars{display:flex;width:62px;flex:none;padding-inline-start:8px}
+.fam-circle-avatars span{width:34px;height:34px;border-radius:50%;margin-inline-start:-9px;border:2px solid var(--s1);background:var(--fam-purple,#8652FF);background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800}
+.fam-circle-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.fam-circle-actions button{min-height:52px;border-radius:26px;border:0;background:var(--fam-purple,#8652FF);color:#fff;font-weight:800;font-size:15px}
+.fam-future-section{font-size:22px;font-weight:900;margin:22px 4px 12px}
+.fam-future-card{border:1px solid var(--b1);background:var(--s1);border-radius:18px;overflow:hidden;margin-bottom:12px}
+.fam-future-row{display:flex;align-items:center;gap:14px;padding:18px;color:var(--ink)}
+.fam-future-icon{width:46px;height:46px;border-radius:14px;background:#8652ff16;color:var(--fam-purple,#8652FF);display:flex;align-items:center;justify-content:center;font-size:25px;flex:none}
+.fam-tier{display:inline-flex;align-items:center;border-radius:12px;padding:3px 9px;font-size:11px;font-weight:900;margin-top:4px;background:#d9c0ff;color:#fff}
+.fam-tier.gold{background:#ff9d00}.fam-tier.platinum{background:#07566f}
+.fam-future-desc{padding:14px 18px;background:#8652ff0e;color:var(--ink2);font-size:13px;line-height:1.4;border-top:1px solid var(--b1)}
+.fam-lock-toggle{margin-inline-start:auto;width:42px;height:24px;border-radius:14px;background:var(--b2);position:relative;flex:none}
+.fam-lock-toggle:after{content:"";position:absolute;width:20px;height:20px;left:2px;top:2px;border-radius:50%;background:var(--s1);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.fam-plan-tabs{display:grid;grid-template-columns:repeat(3,1fr);background:#ffffff35;border-radius:24px;padding:4px;margin:12px 0 20px}
+.fam-plan-tab{border:0;background:transparent;color:#fff;border-radius:20px;padding:11px;font-weight:800}
+.fam-plan-tab.on{background:#36005e}
+.fam-membership-hero{margin:-8px -20px 0;padding:22px 20px 32px;background:linear-gradient(145deg,#7137ee,#a752ff);color:#fff;text-align:center}
+.fam-plan-card{background:#fff;color:#25172f;border-radius:24px;padding:24px 18px;min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 8px 26px rgba(40,0,80,.22)}
+.fam-plan-cta{width:100%;border:0;border-radius:24px;padding:15px;background:#ffef00;color:#6b32e8;font-size:17px;font-weight:900;margin-top:18px}
 /* ── "arrived X ago" map bubble above a pin/cluster (Life360-style) ── */
 .fam-arrived{position:relative;background:#fff;border-radius:16px;padding:8px 14px 8px 12px;
   display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;pointer-events:none}
@@ -1810,7 +1840,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v403';
+const APP_VERSION='v405';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -1830,8 +1860,7 @@ function nativeBuildVersion(){
   }catch(e){ return ''; }
 }
 function appVersionDisplay(){
-  const nativeVersion=nativeBuildVersion();
-  return APP_VERSION+(nativeVersion?` · Android ${nativeVersion}`:'');
+  return APP_VERSION;
 }
 
 /* ═══ Back-button navigation — gesture-only history guards ═══
@@ -10529,16 +10558,16 @@ function famCfg(){ if(!DB.meta.family)famInit(); return DB.meta.family; }
      families/{familyId}/settings/consent        (shared consent defaults)
      familyInvites/{CODE}                         (redeemable by any user)
        { familyId, role, name, status, createdBy, createdAt, expiresAt }
-     workspaces/user_{uid}/familyLink/current     (per-user pointer →
-                                                    recovers membership on
-                                                    any device / reinstall)
+     workspaces/user_{uid}/familyLink/current     (active Circle pointer)
+     workspaces/user_{uid}/familyLinks/{familyId} (all Circle memberships)
 
    This layer is ADDITIVE. The existing local fam* functions and all other
    modules are untouched. When a user has NO server family yet, the local
    family (DB.meta.family) is migrated up on first sign-in.
    ══════════════════════════════════════════════════════════════════════ */
 const FamilyBackend = (function(){
-  let _famUnsub=null, _linkUnsub=null, _current=null, _pendingCode=null;
+  let _famUnsub=null, _linkUnsub=null, _linksUnsub=null, _inviteUnsub=null, _current=null, _pendingCode=null;
+  let _circles={};
 
   function ready(){ return !!(FB && FB.ready && FB.user && sessionCap('shared')); }
   function db(){ return FB.db; }
@@ -10548,6 +10577,8 @@ const FamilyBackend = (function(){
 
   /* ── per-user pointer to the family the user belongs to ── */
   function linkRef(){ return db().collection('workspaces').doc(wsId(myUid())).collection('familyLink').doc('current'); }
+  function linksRef(){ return db().collection('workspaces').doc(wsId(myUid())).collection('familyLinks'); }
+  function circleLinkRef(fid){ return linksRef().doc(fid); }
   function famRef(fid){ return db().collection('families').doc(fid); }
   function inviteRef(code){ return db().collection('familyInvites').doc(code); }
   /* ── Phase 2 location refs (canonical store) ── */
@@ -10564,25 +10595,76 @@ const FamilyBackend = (function(){
   function familyId(){ return _current ? _current.id : null; }
   function isMember(){ return !!(_current && _current.members && _current.members[myUid()]); }
   function myServerRole(){ return isMember() ? (_current.members[myUid()].role||'adult') : null; }
+  function circles(){ return Object.values(_circles).sort((a,b)=>((a.name||'')+'').localeCompare((b.name||'')+'')); }
+
+  function setActivePointer(fid,role){
+    if(!fid)return Promise.resolve();
+    return linkRef().set({familyId:fid,role:role||'adult',selectedAt:new Date().toISOString()},{merge:true});
+  }
+
+  async function switchFamily(fid){
+    if(!ready()||!fid)throw new Error('offline');
+    let link=_circles[fid]||null;
+    if(!link){
+      const snap=await circleLinkRef(fid).get();
+      if(!snap.exists)throw new Error('not-member');
+      link=Object.assign({familyId:fid},snap.data()||{});
+    }
+    await setActivePointer(fid,link.role);
+    watchFamily(fid);
+    return fid;
+  }
+
+  async function chooseFallbackCircle(excludeFid){
+    const next=circles().find(c=>(c.familyId||c.id)!==excludeFid);
+    if(next){
+      await setActivePointer(next.familyId||next.id,next.role);
+      return next.familyId||next.id;
+    }
+    await linkRef().delete().catch(()=>{});
+    return null;
+  }
 
   /* ── start / stop realtime membership recovery ── */
   function start(){
     if(!ready())return;
     stop();
-    // 1) Watch this user's family pointer. Survives reinstall/new device (§19).
+    // Watch every Circle membership. The legacy current pointer remains the
+    // active-Circle selector, so existing installs migrate without losing data.
+    _linksUnsub=linksRef().onSnapshot(snap=>{
+      const next={};
+      snap.forEach(doc=>{next[doc.id]=Object.assign({familyId:doc.id},doc.data()||{});});
+      _circles=next;
+      afterChange();
+    },err=>console.error('[FamilyBackend.familyLinks]',err&&err.code,err&&err.message));
+    // Watch this user's active Circle pointer. Survives reinstall/new device.
     _linkUnsub = linkRef().onSnapshot(snap=>{
       const fid = snap.exists ? (snap.data()||{}).familyId : null;
-      if(fid) watchFamily(fid);
-      else { _current=null; detachFamily(); afterChange(); }
+      if(fid){
+        // One-time migration from the former single-pointer model.
+        if(!_circles[fid]){
+          circleLinkRef(fid).set({
+            familyId:fid,role:(snap.data()||{}).role||'adult',
+            joinedAt:(snap.data()||{}).joinedAt||new Date().toISOString()
+          },{merge:true}).catch(()=>{});
+        }
+        watchFamily(fid);
+      }else if(circles().length){
+        const first=circles()[0];
+        setActivePointer(first.familyId||first.id,first.role).catch(()=>{});
+      }else { _current=null; detachFamily(); afterChange(); }
     }, ()=>{});
   }
   function stop(){
     if(_linkUnsub){try{_linkUnsub();}catch(e){} _linkUnsub=null;}
+    if(_linksUnsub){try{_linksUnsub();}catch(e){} _linksUnsub=null;}
+    if(_inviteUnsub){try{_inviteUnsub();}catch(e){} _inviteUnsub=null;}
     detachFamily();
     try{ FamilyLocation.stopListening(); }catch(e){}
     try{ FamilyDriving.stopCloudListening(); }catch(e){}
     try{ FamilyRoadReports.stopListening(); }catch(e){}
     _current=null;
+    _circles={};
   }
   function detachFamily(){ if(_famUnsub){try{_famUnsub();}catch(e){} _famUnsub=null;} }
   /* Force a fresh, one-time read of the family document — NOT reliant on
@@ -10607,12 +10689,26 @@ const FamilyBackend = (function(){
 
   function watchFamily(fid){
     detachFamily();
+    if(_inviteUnsub){try{_inviteUnsub();}catch(e){} _inviteUnsub=null;}
+    _inviteUnsub=db().collection('familyInvites').where('familyId','==',fid).onSnapshot(qs=>{
+      const cache=famInvitesMap(),seen={};
+      qs.forEach(doc=>{
+        const x=doc.data()||{},id='cloud_'+doc.id; seen[id]=true;
+        cache[id]=Object.assign({},cache[id]||{},x,{id,code:doc.id,server:true});
+      });
+      Object.keys(cache).forEach(id=>{if(cache[id]&&cache[id].server&&cache[id].familyId===fid&&!seen[id])delete cache[id];});
+      try{persistDB();}catch(e){}
+      afterChange();
+    },err=>console.error('[FamilyBackend.invites]',err&&err.code,err&&err.message));
     _famUnsub = famRef(fid).onSnapshot(snap=>{
       if(!snap.exists){ _current=null; try{FamilyLocation.stopListening();}catch(e){} afterChange(); return; }
       _current = Object.assign({id:snap.id}, snap.data());
       // If I was removed server-side, clear my pointer so UI reflects reality.
       if(_current.members && !_current.members[myUid()]){
-        linkRef().delete().catch(()=>{});
+        const removedFid=fid;
+        circleLinkRef(removedFid).delete().catch(()=>{});
+        chooseFallbackCircle(removedFid).catch(()=>{});
+        return;
       }
       // Attach location listeners for the (possibly changed) member set.
       try{ FamilyLocation.startListening(); }catch(e){}
@@ -10633,8 +10729,23 @@ const FamilyBackend = (function(){
       name: _current ? _current.name : null,
       memberCount: _current && _current.members ? Object.keys(_current.members).length : 0,
       members: _current ? (_current.members||{}) : {},
+      circles: circles(),
       _syncedAt: new Date().toISOString()
     };
+    if(_current&&isMember()){
+      const mine=_current.members[myUid()]||{};
+      const photos=Object.values(_current.members||{}).map(m=>m&&m.photo).filter(Boolean).slice(0,3);
+      const nextCircle={
+        familyId:_current.id,name:_current.name||'Family',role:mine.role||'adult',
+        memberCount:Object.keys(_current.members||{}).length,photos
+      };
+      const oldCircle=_circles[_current.id]||{};
+      const changed=oldCircle.name!==nextCircle.name||oldCircle.role!==nextCircle.role||
+        Number(oldCircle.memberCount)!==nextCircle.memberCount||
+        JSON.stringify(oldCircle.photos||[])!==JSON.stringify(nextCircle.photos);
+      if(changed)circleLinkRef(_current.id).set(Object.assign({},nextCircle,{updatedAt:new Date().toISOString()}),{merge:true}).catch(()=>{});
+      _circles[_current.id]=Object.assign({},oldCircle,nextCircle);
+    }
     try{ persistDB(); }catch(e){}
     // Live map screen: update markers + sheet IN PLACE so a routine Firestore
     // snapshot never tears down and rebuilds the map (the reset-on-every-update
@@ -10653,9 +10764,9 @@ const FamilyBackend = (function(){
   }
 
   /* ── CREATE a family (promotes local family → server) ── */
-  async function createFamily(name){
+  async function createFamily(name, forceNew){
     if(!ready()) throw new Error('offline');
-    if(isMember()) return familyId(); // already in one
+    if(isMember()&&!forceNew) return familyId(); // implicit creation only
     if(!myUid()) throw new Error('no-auth-uid');
     // Re-assert the LIVE Firebase Auth user (not just our cached FB.user), so
     // request.auth.uid server-side is guaranteed to equal the uid we write.
@@ -10703,6 +10814,10 @@ const FamilyBackend = (function(){
     // family doc itself; the pointer is a convenience for fast recovery).
     try{
       await linkRef().set({ familyId:fid, role:'owner', joinedAt:t });
+      await circleLinkRef(fid).set({
+        familyId:fid,name:famName,role:'owner',memberCount:1,
+        photos:selfPhoto()?[selfPhoto()]:[],joinedAt:t,updatedAt:t
+      },{merge:true});
     }catch(err){
       console.error('[FamilyBackend.createFamily] familyLink write failed (family exists, non-fatal)', err&&err.message);
     }
@@ -10719,6 +10834,7 @@ const FamilyBackend = (function(){
     const exp=new Date(Date.now()+7*864e5).toISOString();
     await inviteRef(code).set({
       familyId: familyId(), role: role||'adult', name:(name||'').trim(),
+      familyName:(_current&&_current.name)||'Family',
       status:'pending', createdBy:myUid(), createdByName:selfName(),
       createdAt:t, expiresAt:exp
     });
@@ -10728,6 +10844,10 @@ const FamilyBackend = (function(){
   async function revokeInvite(code){
     if(!ready())return;
     await inviteRef(code).set({status:'revoked', revokedAt:new Date().toISOString()},{merge:true}).catch(()=>{});
+  }
+  async function deleteInvite(code){
+    if(!ready()||!code)return;
+    await inviteRef(code).delete();
   }
 
   /* ── REDEEM: accept an invite by code. Idempotent; §5.1 duplicate-safe ── */
@@ -10741,21 +10861,27 @@ const FamilyBackend = (function(){
     const st = (inv.status==='pending' && inv.expiresAt && Date.parse(inv.expiresAt)<Date.now()) ? 'expired' : inv.status;
     if(st==='expired') throw new Error('expired');
     if(st==='revoked') throw new Error('revoked');
+    if(st==='accepted'&&inv.acceptedBy!==myUid()) throw new Error('accepted');
     const fid=inv.familyId;
     if(!fid) throw new Error('notfound');
     // Already a member of THIS family? just re-point (idempotent, no dup).
-    const fsnap=await famRef(fid).get();
-    if(!fsnap.exists) throw new Error('notfound');
-    const fam=fsnap.data()||{};
     const t=new Date().toISOString();
-    if(fam.ownerUid===myUid()) throw new Error('own-invite');
-    if(!(fam.members && fam.members[myUid()])){
-      // join: add my membership on the family doc
-      const patch={}; patch['members.'+myUid()]={ role:inv.role||'adult', name:selfName(), photo:selfPhoto()||null, joinedAt:t };
-      patch['updatedAt']=t;
+    const existingCircle=_circles[fid]||null;
+    if(!existingCircle){
       try{
-        await famRef(fid).update(patch);
+        // A joiner is not allowed to read the target family document before
+        // becoming a member. Commit the accepted invite and the one-member
+        // family patch atomically; Rules validate both final states with
+        // getAfter(), so no privileged pre-read or race is required.
+        const patch={};
+        patch['members.'+myUid()]={ role:inv.role||'adult', name:selfName(), photo:selfPhoto()||null, joinedAt:t, inviteCode:code };
+        patch.updatedAt=t;
+        const batch=db().batch();
+        batch.update(famRef(fid),patch);
+        batch.update(inviteRef(code),{status:'accepted',acceptedBy:myUid(),acceptedAt:t});
+        await batch.commit();
       }catch(err){
+        if(['notfound','expired','revoked','accepted'].includes(err&&err.message))throw err;
         const detail={ code:err&&err.code, message:err&&err.message, fid, authUid:myUid(), inviteRole:inv.role };
         console.error('[FamilyBackend.redeemInvite] join update rejected', detail);
         const e=new Error(err&&err.code==='permission-denied'?'permission-denied':err&&err.code==='unavailable'?'network-unavailable':'join-failed');
@@ -10763,9 +10889,16 @@ const FamilyBackend = (function(){
         throw e;
       }
     }
-    await linkRef().set({ familyId:fid, role:(fam.members&&fam.members[myUid()]?fam.members[myUid()].role:(inv.role||'adult')), joinedAt:t });
-    // mark single-use invite consumed (multi-use variants can be added later)
-    await inviteRef(code).set({status:'accepted', acceptedBy:myUid(), acceptedAt:t},{merge:true}).catch(()=>{});
+    const joinedRole=existingCircle?(existingCircle.role||inv.role||'adult'):(inv.role||'adult');
+    await circleLinkRef(fid).set({
+      familyId:fid,name:inv.familyName||'Family',role:joinedRole,
+      memberCount:Math.max(1,Number(inv.memberCount)||1),
+      joinedAt:t,updatedAt:t
+    },{merge:true});
+    await setActivePointer(fid,joinedRole);
+    if(existingCircle){
+      await inviteRef(code).set({status:'accepted', acceptedBy:myUid(), acceptedAt:t},{merge:true}).catch(()=>{});
+    }
     _pendingCode=null;
     return fid;
   }
@@ -10791,7 +10924,8 @@ const FamilyBackend = (function(){
       patch['updatedAt']=new Date().toISOString();
       await famRef(fid).update(patch);
     }
-    await linkRef().delete().catch(()=>{});
+    await circleLinkRef(fid).delete().catch(()=>{});
+    await chooseFallbackCircle(fid);
     _current=null; afterChange();
   }
 
@@ -10847,7 +10981,7 @@ const FamilyBackend = (function(){
     let famName=null;
     try{ const f=await famRef(inv.familyId).get(); if(f.exists){ famName=(f.data()||{}).name||null; } }catch(e){ /* expected for a non-member; fall back to no name */ }
     return { code, familyId:inv.familyId, role:inv.role||'adult', status:st,
-             createdByName:inv.createdByName||null, familyName:famName, expiresAt:inv.expiresAt };
+             createdByName:inv.createdByName||null, familyName:famName||inv.familyName||null, expiresAt:inv.expiresAt };
   }
 
   /* ── pending invite from deep link (#fi=CODE) ──
@@ -10864,6 +10998,7 @@ const FamilyBackend = (function(){
              role:myServerRole(), name:_current?_current.name:null,
              ownerUid:_current?_current.ownerUid:null,
              members:_current?(_current.members||{}):{},
+             circles:circles(),
              memberCount:_current&&_current.members?Object.keys(_current.members).length:0 };
   }
 
@@ -11349,6 +11484,7 @@ const FamilyBackend = (function(){
         priorFixGapMs:mv.priorFixGapMs!=null?mv.priorFixGapMs:null,
         _presence:mv._presence||null,
         battery:(raw.battery!=null?raw.battery:(prev?prev.battery:null)),
+        batteryCharging:(raw.batteryCharging!=null?!!raw.batteryCharging:(prev?!!prev.batteryCharging:false)),
         permission:'granted', reportedAt:nowISO(),
         lastGpsRequestAt:_lastGpsRequestAt||null,
         lastOpenedAt:(prev&&prev.lastOpenedAt)||_appLaunchedAt||null };
@@ -11629,6 +11765,7 @@ const FamilyBackend = (function(){
         heading:(cr.heading!=null&&!isNaN(cr.heading))?cr.heading:null,
         speed:(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null,
         battery:batteryPct(),
+        batteryCharging:!!(_battery&&_battery.charging),
         capturedAt:new Date(pos.timestamp||Date.now()).toISOString(),
         source:provider
       });
@@ -13120,7 +13257,8 @@ const FamilyBackend = (function(){
   })();
 
   return { start, stop, ready, current, familyId, isMember, myServerRole, getState,
-           createFamily, createInvite, revokeInvite, redeemInvite, previewInvite,
+           circles, switchFamily,
+           createFamily, createInvite, revokeInvite, deleteInvite, redeemInvite, previewInvite,
            leaveFamily, removeMember, setRole, renameFamily, updateSelfProfile,
            setPending, pendingCode, clearPending, refreshRoster,
            location:FamilyLocation, driving:FamilyDriving, roadReports:FamilyRoadReports };
@@ -13447,6 +13585,7 @@ function renderFamily(){
   if(famView==='joinCode') return head(L==='fa'?'پیوستن با کد':'Join with code','fam-back-dash')+famJoinCodeView();
   if(famView==='joinInvite') return head(L==='fa'?'دعوت به خانواده':'Family Invitation','fam-back-dash')+famJoinInviteView();
   if(famView==='invites') return head(L==='fa'?'دعوت‌نامه‌ها':'Invitations')+famInvitesView();
+  if(famView==='circles') return head(L==='fa'?'خانواده‌ها':'Circles','fam-back-live')+famCircleSwitcherView();
   if(famView==='history') return head(L==='fa'?'تاریخچه روزانه':'Daily History','fam-back-live')+famHistoryView();
   // ── Driving (Phase 2A) ──
   if(famView==='drivingDash') return DrivingDashboard();
@@ -13454,12 +13593,79 @@ function renderFamily(){
   if(famView==='drivingHistory') return head(L==='fa'?'تاریخچه سفرها':'Trip History','fam-back-drivingDash')+TripHistoryList();
   if(famView==='drivingTrip') return head(L==='fa'?'جزئیات سفر':'Trip Detail','fam-back-drivingHistory')+TripDetail();
   if(famView==='checkin') return head(L==='fa'?'ثبت ورود':'Check-in','fam-back-live')+famCheckinLiveView();
-  // ── Later-phase features: clear placeholder, not a functional screen ──
-  if(famView==='sos') return head('SOS','fam-back-dash')+famLaterView('SOS',L==='fa'?'فاز ۵ — ایمنی پیشرفته':'Phase 5 — Advanced Safety','🆘');
+  if(famView==='sos') return famSafetyView();
+  if(famView==='membership') return famMembershipView();
   if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famLaterView(L==='fa'?'تایم‌لاین':'Timeline',L==='fa'?'فاز ۲':'Phase 2','🕘');
   if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-live')+famSettingsView();
   if(famView==='diag') return famDevMode()?(head(L==='fa'?'تشخیص':'Diagnostics','fam-back-settings')+famDiagView()):(head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-live')+famSettingsView());
   return famLiveView();
+}
+
+function famCircleAvatarStack(circle){
+  const photos=(circle&&Array.isArray(circle.photos)?circle.photos:[]).slice(0,3);
+  if(!photos.length)return `<div class="fam-circle-avatars"><span>F</span></div>`;
+  return `<div class="fam-circle-avatars">${photos.map((p,i)=>`<span style="background-image:url('${esc(p)}')">${p?'':String(i+1)}</span>`).join('')}</div>`;
+}
+function famCircleSwitcherView(){
+  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+  const state=fb&&fb.getState?fb.getState():{circles:[]};
+  const circles=state.circles||[];
+  let h=`<div class="fam-circle-page"><div style="font-size:13px;color:var(--ink3)">${L==='fa'?'بین خانواده‌های خود جابه‌جا شوید یا یک خانواده جدید بسازید.':'Switch between your Circles or create a new one.'}</div><div class="fam-circle-list">`;
+  circles.forEach(c=>{
+    const fid=c.familyId||c.id;
+    h+=`<button class="fam-circle-row${fid===state.familyId?' on':''}" data-fam="circle-select" data-arg="${esc(fid)}">
+      ${famCircleAvatarStack(c)}
+      <span style="flex:1;min-width:0"><b style="display:block;font-size:17px">${esc(c.name||'Family')}</b><small style="color:var(--ink3)">${Math.max(1,Number(c.memberCount)||1)} ${L==='fa'?'عضو':'members'}</small></span>
+      ${fid===state.familyId?'<span style="color:var(--fam-purple,#8652FF);font-size:24px">✓</span>':'<span style="color:var(--ink3)">›</span>'}
+    </button>`;
+  });
+  if(!circles.length)h+=`<div class="hub-ph" style="padding:24px 12px"><div class="hub-ph-t">${L==='fa'?'هنوز خانواده‌ای ندارید':'No Circles yet'}</div></div>`;
+  h+=`</div><div class="fam-circle-actions">
+    <button data-fam="circle-create">${L==='fa'?'ساخت خانواده':'Create a Circle'}</button>
+    <button data-fam="circle-join">${L==='fa'?'پیوستن':'Join a Circle'}</button>
+  </div></div>`;
+  return h;
+}
+
+function famFutureCard(icon,title,tier,desc){
+  const tierHtml=tier?`<span class="fam-tier ${tier.toLowerCase()}">🔒 ${esc(tier)}</span>`:`<span class="fam-tier">Free</span>`;
+  return `<div class="fam-future-card" data-fam="future-locked">
+    <div class="fam-future-row"><div class="fam-future-icon">${icon}</div><div style="flex:1"><b style="font-size:17px">${esc(title)}</b><div>${tierHtml}</div></div><span class="fam-lock-toggle"></span></div>
+    <div class="fam-future-desc">${esc(desc)} <b style="float:inline-end">›</b></div>
+  </div>`;
+}
+function famSafetyView(){
+  let h=`<div id="drv-fixed-wrap"><div class="fam-future-page">
+    <div class="fam-future-section">${L==='fa'?'ایمنی دیجیتال':'Digital Safety'}</div>
+    ${famFutureCard('▣',L==='fa'?'هشدار نشت اطلاعات':'Data Breach Alerts','',L==='fa'?'هشدارهای امنیتی برای اعضای خانواده.':'Security alerts for family members.')}
+    ${famFutureCard('◉',L==='fa'?'محافظت هویت':'ID Theft Protection','Gold',L==='fa'?'محافظت پیشرفته هویت در نسخه آینده.':'Advanced identity protection in a future release.')}
+    <div class="fam-future-section">${L==='fa'?'ایمنی رانندگی':'Driving Safety'}</div>
+    ${famFutureCard('🚗',L==='fa'?'هشدار تصادف':'Crash Alerts','',L==='fa'?'هشدار تصادف برای اعضای خانواده در نسخه آینده.':'Family crash notifications in a future release.')}
+    ${famFutureCard('🚑',L==='fa'?'اعزام اضطراری':'Emergency Dispatch','Gold',L==='fa'?'کمک فوری پس از برخورد.':'Immediate help after a collision.')}
+    <div class="fam-future-section">${L==='fa'?'کمک ایمنی خانواده':'Family Safety Assist'}</div>
+    ${famFutureCard('🛻',L==='fa'?'امداد جاده‌ای':'Roadside Assistance','Gold',L==='fa'?'امداد جاده‌ای در پلن آینده.':'Roadside help in a future plan.')}
+    ${famFutureCard('📱',L==='fa'?'محافظت تلفن سرقت‌شده':'Stolen Phone Protection','Gold',L==='fa'?'ابزارهای محافظت و بازیابی تلفن.':'Phone protection and recovery tools.')}
+    ${famFutureCard('✚',L==='fa'?'کمک پزشکی':'Medical Assistance','Platinum',L==='fa'?'دسترسی به کمک پزشکی در پلن آینده.':'Medical support in a future plan.')}
+    <div class="fam-future-card" data-fam="future-emergency"><div class="fam-future-row"><div class="fam-future-icon">☎</div><div style="flex:1"><b>${L==='fa'?'مخاطبان اضطراری':'Emergency Contacts'}</b><div style="font-size:12px;color:var(--ink3)">0 ${L==='fa'?'مخاطب':'contacts added'}</div></div><span>›</span></div></div>
+  </div>${famBottomNavHtml()}</div>`;
+  return h;
+}
+let _famMembershipPlan='gold';
+function famMembershipView(){
+  const labels={silver:'Silver',gold:'Gold',platinum:'Platinum'};
+  const copy={
+    silver:[L==='fa'?'هشدارهای ضروری خانواده':'Essential family alerts',L==='fa'?'شروع ساده برای امکانات ایمنی آینده.':'A simple start for future safety features.'],
+    gold:[L==='fa'?'هشدار نامحدود مکان':'Unlimited Place Alerts',L==='fa'?'ورود و خروج اعضا از مکان‌های ذخیره‌شده.':'Arrival and departure alerts for saved places.'],
+    platinum:[L==='fa'?'پشتیبانی کامل خانواده':'Complete Family Support',L==='fa'?'همه قابلیت‌های برنامه‌ریزی‌شده در یک پلن آینده.':'All planned assistance features in a future plan.']
+  };
+  const c=copy[_famMembershipPlan];
+  return `<div id="drv-fixed-wrap"><div class="fam-future-page"><div class="fam-membership-hero">
+    <div style="font-size:13px;color:#ffe765;font-weight:800">${L==='fa'?'برای آینده آماده شده':'Future membership preview'}</div>
+    <div class="fam-plan-tabs">${Object.keys(labels).map(k=>`<button class="fam-plan-tab${k===_famMembershipPlan?' on':''}" data-fam="membership-plan" data-arg="${k}">${labels[k]}</button>`).join('')}</div>
+    <div class="fam-plan-card"><div style="font-size:48px">🔔</div><h2 style="margin:12px 0 6px">${esc(c[0])}</h2><div style="font-size:14px;line-height:1.45">${esc(c[1])}</div></div>
+    <div style="margin-top:18px;font-size:14px;font-weight:800">${L==='fa'?'قیمت و پرداخت هنوز فعال نیست':'Pricing and payments are not active yet'}</div>
+    <button class="fam-plan-cta" data-fam="future-locked">${L==='fa'?'به‌زودی':'Coming soon'}</button>
+  </div></div>${famBottomNavHtml()}</div>`;
 }
 
 /* ── Later-phase placeholder screen ── */
@@ -14914,6 +15120,7 @@ function famBattLevel(pct){
   if(Number(pct)<=60)return 'mid';
   return 'high';
 }
+function famBatteryBolt(charging){ return charging?'<span class="fam-battery-bolt" aria-label="Charging">⚡</span>':''; }
 function famLowBatteryState(){
   try{
     const raw=localStorage.getItem(FAM_LOW_BATTERY_STATE_KEY);
@@ -14929,6 +15136,7 @@ function famMaybeAlertLowBattery(member){
   if(member.consent&&(!member.consent.enabled||member.consent.paused))return;
   const pct=Math.max(0,Math.min(100,Math.round(Number(member.state.battery))));
   if(!Number.isFinite(pct))return;
+  if(member.state.batteryCharging)return;
   const state=famLowBatteryState();
   const previous=state[member.uid];
   if(pct>FAM_LOW_BATTERY_PCT){
@@ -15360,7 +15568,7 @@ const MBMMap = (function(){
     let battBadge='';
     if(meta.battery!=null){
       const lvl=famBattLevel(meta.battery);
-      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="ic"><i style="width:${Math.max(8,Math.round(meta.battery))}%"></i></span><span class="txt">${Math.round(meta.battery)}%</span></div>`;
+      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="ic"><i style="width:${Math.max(2,Math.round(meta.battery))}%"></i></span>${famBatteryBolt(meta.batteryCharging)}<span class="txt">${Math.round(meta.battery)}%</span></div>`;
     }
     // Callout: same element as the avatar/pin, so it can never visually
     // detach — this replaces the old separate __arrived map marker that
@@ -15439,7 +15647,7 @@ const MBMMap = (function(){
       _markers[uid]=mk; _markerPos[uid]=latlng; _markerRenderPos[uid]=latlng;
     }
     _markerMeta[uid]={pinCls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color,
-      activityType:meta.activityType,battery:meta.battery,speedKph:meta.speedKph,
+      activityType:meta.activityType,battery:meta.battery,batteryCharging:meta.batteryCharging,speedKph:meta.speedKph,
       calloutL1:meta.calloutL1,calloutL2:meta.calloutL2};
   }
   function clearMarkersExcept(uids){
@@ -15798,7 +16006,8 @@ function famLiveHeaderHtml(sel){
   // refresh + invites/manage on the right. The circular white buttons match the
   // reference. Badges are shown ONLY when there is real pending data.
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  const famName = (DB.meta && DB.meta.family && DB.meta.family.name) || (L==='fa'?'خانواده':'Family');
+  const liveState=fb&&fb.getState?fb.getState():null;
+  const famName = (liveState&&liveState.name) || (DB.meta && DB.meta.family && DB.meta.family.name) || (L==='fa'?'خانواده':'Family');
   // Invite badge only if there are REAL server-backed invites for this family.
   let pending=0; try{ pending=(typeof famServerInvites==='function')?(famServerInvites().length||0):0; }catch(e){}
   const inviteBadge = pending>0?`<span class="fam-hbadge">${pending}</span>`:'';
@@ -15854,11 +16063,12 @@ function famBottomNavHtml(){
   const isLocation = (famView==='live'||famView==='dashboard');
   const isDriving = FAM_DRIVING_VIEWS.indexOf(famView)>=0;
   const isSafety = (famView==='sos');
+  const isMembership = (famView==='membership');
   return `<div class="fam-bottomnav">
     <button class="fam-navbtn${isLocation?' on':''}" data-fam="nav-location">${famIcon('pin')}<span>${L==='fa'?'موقعیت':'Location'}</span></button>
     <button class="fam-navbtn${isDriving?' on':''}" data-fam="nav-driving">${famIcon('car')}<span>${L==='fa'?'رانندگی':'Driving'}</span></button>
     <button class="fam-navbtn${isSafety?' on':''}" data-fam="nav-safety">${famIcon('shield')}<span>${L==='fa'?'ایمنی':'Safety'}</span></button>
-    <button class="fam-navbtn" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
+    <button class="fam-navbtn${isMembership?' on':''}" data-fam="nav-membership">${famIcon('badge')}<span>${L==='fa'?'عضویت':'Membership'}</span></button>
   </div>`;
 }
 let _famRoadReportMenuOpen=false;
@@ -16685,7 +16895,7 @@ function famLiveMemberDetail(m, isMe){
   let h=`<div style="margin-top:2px;padding-top:12px">`;
   // Name row: big bold name + green status dot on the left, battery pill on the right
   const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
-    ? `<div class="fam-batt-pill lvl-${famBattLevel(s.battery)}"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
+    ? `<div class="fam-batt-pill lvl-${famBattLevel(s.battery)}"><span class="fam-batt-ic" style="--lvl:${Math.max(2,Math.min(100,s.battery))}%"></span>${famBatteryBolt(s.batteryCharging)}${s.battery}%</div>` : '';
   h+=`<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-fam="live-sel-open" data-arg="${m.uid}">
     <div style="flex:1;min-width:0;display:flex;align-items:center;gap:12px">
       <div style="font-weight:800;font-size:32px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
@@ -16863,6 +17073,7 @@ function famLivePaintMarkers(members, sel){
       MBMMap.setMarker(key,[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
+         batteryCharging:(m.consent&&m.consent.enabled&&!m.consent.paused)?!!m.state.batteryCharging:false,
          speedKph:txt.speedKph,
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
          calloutL2:markerCallout.l2?esc(markerCallout.l2):''},
@@ -17375,7 +17586,7 @@ function famMembersView(){
         }
       } else { line1=famRoleLabel(m.role); }
       const photoStyle=av.photo?`background-image:url('${(''+av.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${av.color}`;
-      const battBadge = batt!=null ? `<span class="fam-mrow-batt"><span class="fam-mrow-batt-ic" style="--lvl:${Math.max(8,Math.min(100,batt))}%"></span>${batt}%</span>` : '';
+      const battBadge = batt!=null ? `<span class="fam-mrow-batt lvl-${famBattLevel(batt)}"><span class="fam-mrow-batt-ic" style="--lvl:${Math.max(2,Math.min(100,batt))}%"></span>${famBatteryBolt(!!(lm&&lm.state&&lm.state.batteryCharging))}${batt}%</span>` : '';
       h+=`<div class="fam-mrow" data-fam="live-sel-open" data-arg="${m.uid}">
         <div class="fam-mrow-av" style="${photoStyle}">${av.photo?'':esc((av.name).slice(0,1).toUpperCase())}${battBadge}</div>
         <div class="mmeta">
@@ -17594,7 +17805,7 @@ function famJoinInviteView(){
       ${!known?`<button class="btn" data-fam="join-retry" style="width:100%;margin-top:12px;background:var(--fam-purple,#8652FF);color:#fff">${L==='fa'?'تلاش دوباره':'Try again'}</button>`:''}
       <button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'بستن':'Close'}</button></div>`;
   }
-  const already=fb.isMember();
+  const alreadyThis=(fb.getState().circles||[]).some(c=>(c.familyId||c.id)===p.familyId);
   h+=`<div style="border:1px solid var(--b1);border-radius:16px;padding:18px;background:var(--s1);text-align:center">
     <div style="font-size:34px;margin-bottom:6px">👨‍👩‍👧‍👦</div>
     <div style="font-size:20px;font-weight:800">${esc(p.familyName||(L==='fa'?'خانواده':'Family'))}</div>
@@ -17602,13 +17813,11 @@ function famJoinInviteView(){
     <div style="margin-top:10px"><span class="chip" style="background:#6e56f822;color:#8b7dfc">${famRoleLabel(p.role)}</span></div>
   </div>`;
   h+=`<div style="font-size:13px;color:var(--ink2);margin:14px 2px;line-height:1.7">${L==='fa'?'با پیوستن، فقط به فضای خانواده (اعضا، مکان‌ها، ثبت‌ورود و هشدارها) متصل می‌شوید. یادداشت‌ها، اسناد، ولت و سایر داده‌های خصوصی شما به اشتراک گذاشته نمی‌شود.':'By joining you connect only to the Family Space (members, places, check-ins and alerts). Your Notes, Documents, Vault and other private data are never shared.'}</div>`;
-  if(already && fb.getState().familyId!==p.familyId){
-    h+=`<div style="font-size:12px;color:#f59e0b;margin:8px 2px">${L==='fa'?'شما در حال حاضر عضو یک خانواده دیگر هستید. برای پیوستن به این خانواده ابتدا باید از خانواده فعلی خارج شوید.':'You are already in another family. Leave your current family first to join this one.'}</div>`;
-    h+=`<button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'بستن':'Close'}</button>`;
-  } else if(already){
+  if(alreadyThis){
     h+=`<div style="font-size:13px;color:#22c55e;margin:8px 2px">${L==='fa'?'شما هم‌اکنون عضو این خانواده هستید.':'You are already a member of this family.'}</div>`;
     h+=`<button class="btn" data-fam="join-cancel" style="width:100%;margin-top:8px;background:var(--s2);color:var(--ink);border:1px solid var(--b1)">${L==='fa'?'باز کردن خانواده':'Open family'}</button>`;
   } else {
+    if(fb.isMember())h+=`<div style="font-size:12px;color:var(--ink3);margin:8px 2px">${L==='fa'?'این خانواده به فهرست Circleهای شما اضافه و فعال می‌شود؛ خانواده فعلی حذف نمی‌شود.':'This Circle will be added and selected; your current Circle is kept.'}</div>`;
     h+=`<button class="btn" data-fam="join-accept" style="width:100%;margin-top:8px;background:#6e56f8;color:#fff">${L==='fa'?'پیوستن به خانواده':'Join family'}</button>`;
     h+=`<button class="btn btn-ghost" data-fam="join-cancel" style="width:100%;margin-top:8px">${L==='fa'?'انصراف':'Decline'}</button>`;
   }
@@ -17790,7 +17999,7 @@ function bindFamily(){
   if(qt){/* visibility handled on save/re-render */}
 }
 
-function famAction(act,arg,ev){
+async function famAction(act,arg,ev){
   const P=famPlacesMap(), I=famInvitesMap(), cfg=famCfg();
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
   switch(act){
@@ -17877,7 +18086,7 @@ function famAction(act,arg,ev){
     }
     case 'nav-driving': _drvSelUid=null; famView='drivingDash'; render(); window.scrollTo(0,0); return;
     case 'nav-safety': famView='sos'; render(); window.scrollTo(0,0); return;
-    case 'nav-membership': toast(L==='fa'?'عضویت در فاز بعدی فعال می‌شود':'Membership is coming in a later phase'); return;
+    case 'nav-membership': famView='membership'; render(); window.scrollTo(0,0); return;
     // ── Driving (Phase 2A) ──
     case 'drv-week': _drvWeekOffset=parseInt(arg,10)||0; render(); return;
     case 'drv-debug-tap': drvDebugTap(); return;
@@ -17901,7 +18110,30 @@ function famAction(act,arg,ev){
     case 'cat-places': go('places'); return;
     case 'cat-pets': toast(L==='fa'?'حیوانات خانگی در فاز بعدی فعال می‌شود':'Pets is coming in a later phase'); return;
     case 'cat-keys': toast(L==='fa'?'کلیدها در فاز بعدی فعال می‌شود':'Keys is coming in a later phase'); return;
-    case 'fam-switch': go('settings'); return;
+    case 'fam-switch': famView='circles'; render(); window.scrollTo(0,0); return;
+    case 'circle-select':{
+      try{
+        await FamilyBackend.switchFamily(arg);
+        _famSelUid=(FB&&FB.user)?FB.user.uid:null;
+        _famLastCentredUid=null; _famFollow=true; famView='live'; render();
+      }catch(e){ toast(L==='fa'?'تعویض خانواده انجام نشد':'Could not switch Circle'); }
+      return;
+    }
+    case 'circle-create':{
+      const name=prompt(L==='fa'?'نام خانواده جدید':'New Circle name',L==='fa'?'خانواده':'Family');
+      if(name==null)return;
+      try{
+        const fid=await FamilyBackend.createFamily(name,true);
+        await FamilyBackend.switchFamily(fid);
+        _famSelUid=(FB&&FB.user)?FB.user.uid:null;
+        _famLastCentredUid=null; _famFollow=true; famView='live'; render();
+      }catch(e){ toast(L==='fa'?'ساخت خانواده انجام نشد':'Could not create Circle'); }
+      return;
+    }
+    case 'circle-join': famView='joinCode'; render(); window.scrollTo(0,0); return;
+    case 'membership-plan': _famMembershipPlan=['silver','gold','platinum'].includes(arg)?arg:'gold'; render(); return;
+    case 'future-locked': toast(L==='fa'?'این قابلیت در نسخه آینده فعال می‌شود':'This feature is planned for a future release'); return;
+    case 'future-emergency': toast(L==='fa'?'مخاطبان اضطراری در نسخه آینده فعال می‌شوند':'Emergency contacts are planned for a future release'); return;
     case 'fam-invites': go('invites'); return;
     case 'live-checkin-send':{
       if(!navigator.geolocation){ _famCheckinError=(L==='fa'?'موقعیت‌یاب در این دستگاه در دسترس نیست':'Geolocation is not available on this device'); render(); return; }
@@ -18037,9 +18269,36 @@ function famAction(act,arg,ev){
     case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch((err)=>{ console.error('[cloud-rename]',err&&err.message,err); toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
     case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='live'; render(); }).catch((err)=>{ console.error('[cloud-leave]',err&&err.message,err); toast(L==='fa'?'خروج ناموفق بود':'Could not leave family'); }); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
-    case 'inv-share':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code; if(navigator.share){ navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>{}); } else famCopy(link); return; }
+    case 'inv-share':{
+      const inv=I[arg]; if(!inv)return;
+      const link=famInviteLink(inv.code);
+      const msg=(L==='fa'?'به خانواده بپیوند':'Join my family')+' · '+(L==='fa'?'کد':'code')+': '+inv.code;
+      // Android WebView can expose navigator.share yet reject every call.
+      // Prefer the real native chooser when the companion bridge is present.
+      try{
+        if(window.MbmNativeAuth&&typeof window.MbmNativeAuth.shareText==='function'){
+          window.MbmNativeAuth.shareText('MBM Family',msg,link);
+          return;
+        }
+      }catch(_){}
+      // In a normal browser/PWA use Web Share, but never swallow rejection:
+      // copying the link is the honest fallback and gives visible feedback.
+      if(navigator.share){
+        navigator.share({title:'MBM Family',text:msg,url:link}).catch(()=>famCopy(link));
+      }else famCopy(link);
+      return;
+    }
     case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!confirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?'))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch((err)=>{ console.error('[inv-revoke]',err&&err.message,err); toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
-    case 'inv-del':{ delete I[arg]; saveDB(); render(); return; }
+    case 'inv-del':{
+      const inv=I[arg]; if(!inv)return;
+      if(!confirm(L==='fa'?'دعوت حذف شود؟':'Delete this invitation?'))return;
+      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+      if(inv.server&&fb&&fb.ready()){
+        fb.deleteInvite(inv.code).then(()=>{delete I[arg];saveDB();render();})
+          .catch(e=>famFriendlyError('Delete invitation',e));
+      }else{delete I[arg];saveDB();render();}
+      return;
+    }
     // ── Cloud member management (owner/admin) ──
     case 'cmember-open':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const m=(st.members||{})[arg]; if(!m)return; famActiveCloudUid=arg; go('cmemberEdit'); return; }
     case 'cmember-role':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; if(fb.myServerRole()!=='owner'){ toast(L==='fa'?'تغییر نقش فقط توسط مالک':'Only the owner can change roles'); return; } fb.setRole(famActiveCloudUid,arg).then(()=>{ toast(L==='fa'?'نقش تغییر کرد':'Role updated'); render(); }).catch((err)=>{ console.error('[cmember-role]',err&&err.message,err); toast(L==='fa'?'تغییر نقش ناموفق بود':'Could not update role'); }); return; }
@@ -21193,6 +21452,8 @@ function attachLocationAutocomplete(inputEl,onSelect){
 const UPD_DISMISS_KEY='mbmlife_update_dismissed';
 var _updDismissedSession=null;   // session-only 'Later' dismissal (resets each launch)
 let _latestRemoteVer=null;
+let _lastAutomaticUpdateCheckAt=0;
+const UPDATE_RESUME_THROTTLE_MS=5*60*1000;
 
 async function fetchRemoteVersion(){
   const base=location.href.split('?')[0].split('#')[0];
@@ -21291,12 +21552,17 @@ function applyUpdate(){
 
 // Automatic background check
 async function checkForUpdate(){
+  _lastAutomaticUpdateCheckAt=Date.now();
   try{
     const ver=await fetchRemoteVersion();
     if(!ver||ver===APP_VERSION)return;          // already on the latest version
     if(_updDismissedSession===ver)return;        // "Later" hides it for THIS session only
     showUpdateBanner(ver);                        // otherwise show it (every launch until updated)
   }catch(e){}
+}
+function scheduleAutomaticUpdateCheck(force){
+  if(!force && Date.now()-_lastAutomaticUpdateCheckAt<UPDATE_RESUME_THROTTLE_MS)return;
+  setTimeout(checkForUpdate,700);
 }
 
 // Manual check from More > About
@@ -21370,6 +21636,9 @@ try{
 }catch(e){}
 // Boot Firebase (popup-only; no redirect handler)
 initAuth();
+// Check once on every real launch. A later foreground resume re-checks after
+// a short throttle so users do not have to wait a day for an available build.
+scheduleAutomaticUpdateCheck(true);
 // Apply saved theme immediately so the auth screen matches (light/dark/system).
 applyTheme();
 
@@ -21567,7 +21836,7 @@ if('serviceWorker' in navigator){
 
 // Re-check for updates when user returns to app
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible')setTimeout(checkForUpdate,1000);
+  if(document.visibilityState==='visible')scheduleAutomaticUpdateCheck(false);
 });
 
 // Pre-fetch GPS so location autocomplete is ready

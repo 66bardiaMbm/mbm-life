@@ -14,11 +14,11 @@ const gradle = fs.readFileSync(
   "utf8"
 );
 
-assert.match(html, /const APP_VERSION='v403'/);
+assert.match(html, /const APP_VERSION='v405'/);
 assert.match(html, /viewport-fit=cover/);
 assert.match(html, /height:30vh/);
-assert.match(gradle, /versionName = "0\.7\.3-v403-low-battery-alerts"/);
-assert.match(gradle, /asset=v403/);
+assert.match(gradle, /versionName = "0\.7\.5-v405-family-circles"/);
+assert.match(gradle, /asset=v405/);
 
 assert.match(
   html,

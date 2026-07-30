@@ -110,6 +110,28 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun appVersionName(): String = BuildConfig.VERSION_NAME
+
+        /**
+         * Opens Android's real share sheet for WebView actions such as Family
+         * invitations. WebView may expose navigator.share but reject the call,
+         * so the PWA cannot treat the browser API as proof that sharing works.
+         */
+        @JavascriptInterface
+        fun shareText(title: String?, text: String?, url: String?) {
+            runOnUiThread {
+                val payload = listOfNotNull(
+                    text?.trim()?.takeIf { it.isNotEmpty() },
+                    url?.trim()?.takeIf { it.isNotEmpty() }
+                ).joinToString("\n")
+                if (payload.isEmpty()) return@runOnUiThread
+                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "MBM Life")
+                    putExtra(Intent.EXTRA_TEXT, payload)
+                }
+                startActivity(Intent.createChooser(sendIntent, title ?: "Share"))
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -281,6 +303,7 @@ class MainActivity : AppCompatActivity() {
                             .put("accuracy", sample.accuracyM ?: JSONObject.NULL)
                             .put("speed", sample.filteredSpeedMps ?: JSONObject.NULL)
                             .put("battery", app.preferences.batteryPct ?: JSONObject.NULL)
+                            .put("batteryCharging", app.preferences.batteryCharging)
                             .put("heading", sample.bearingDeg ?: JSONObject.NULL)
                             .put("capturedAt", java.time.Instant.ofEpochMilli(sample.capturedAtMs).toString())
                             .put(
