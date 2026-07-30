@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.6.1-v397-critical-map-hotfix"
+        versionCode = 9
+        versionName = "0.7.0-v400-life360-route-final"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v397\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v400\""
         )
     }
 

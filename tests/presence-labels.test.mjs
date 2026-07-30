@@ -37,8 +37,8 @@ assert.match(
 
 assert.match(
   html,
-  /const sinceTxt = txt\.l2 \|\|/,
-  'The detail panel must consume the dedicated Since value.'
+  /const sinceTxt = movingActivity[\s\S]{0,300}: \(txt\.l2 \|\|/,
+  'The detail panel must consume the dedicated Since value only while stationary.'
 );
 
 assert.doesNotMatch(
