@@ -28,5 +28,6 @@ jobs:
 
       - name: Check regression tests
         run: |
-          node tests/stale-driving-session.test.mjs
-          node tests/family-driving-ui.test.mjs
+          for test_file in tests/*.test.mjs tests/v401.test.js; do
+            node "$test_file"
+          done
