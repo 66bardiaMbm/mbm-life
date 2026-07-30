@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -1349,7 +1349,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-cat.on{background:var(--fam-purple,#8652FF);color:#fff}
 .fam-cat:active{transform:scale(.96)}
 /* ── Check in / SOS floating pills on the map ── */
-.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 42vh) + var(--fam-navclear) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
+.fam-map-cta{position:absolute;left:0;right:0;z-index:1350;display:flex;gap:14px;justify-content:center;bottom:calc(var(--fam-sheet-h, 30vh) + var(--fam-navclear) + 14px);pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1)}
 .fam-map-cta .fam-cta{pointer-events:auto;display:flex;align-items:center;gap:8px;background:#fff;color:#3d2f8f;border:none;border-radius:26px;padding:13px 22px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22)}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cta-sos{color:#e0447a}
@@ -1369,7 +1369,8 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-navbtn svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-navbtn.on{color:var(--fam-purple,#8652FF)}
 .fam-navbtn:active{transform:scale(.95)}
-.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:12px;padding:14px 16px;
+.fam-live-top{position:absolute;top:0;left:0;right:0;z-index:1400;display:flex;align-items:center;gap:12px;
+  padding:calc(14px + env(safe-area-inset-top,0px)) 16px 14px;
   background:linear-gradient(180deg,var(--s0) 55%,transparent);pointer-events:none}
 .fam-live-top>*{pointer-events:auto}
 .fam-live-title{flex:1;min-width:0}
@@ -1501,7 +1502,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    JS never runs, the panel still renders at its default (partial) height. ── */
 #fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:28px 28px 0 0;
   box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:var(--fam-navclear);
-  height:42vh;max-height:calc(100% - 150px);
+  height:30vh;max-height:calc(100% - 150px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
 #fam-sheet.detent-2{height:calc(100% - 150px)}
@@ -1783,7 +1784,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v397';
+const APP_VERSION='v400';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12637,12 +12638,48 @@ const FamilyBackend = (function(){
        Async because IndexedDB reads are inherently async — callers building
        Trip Detail/Timeline screens are already async-friendly (data fetch
        before render), so this doesn't block the live-driving hot path. */
+    function normalizeSessionSample(sample,index){
+      if(!sample||typeof sample!=='object')return null;
+      const lat=Number(sample.lat!=null?sample.lat:sample.latitude);
+      const lng=Number(sample.lng!=null?sample.lng:sample.longitude);
+      if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
+      let t=sample.t||sample.capturedAt||sample.at||null;
+      if(!t&&sample.capturedAtMs!=null){
+        const ms=Number(sample.capturedAtMs);
+        if(Number.isFinite(ms))t=new Date(ms).toISOString();
+      }
+      return Object.assign({},sample,{
+        lat,lng,t,
+        seq:Number.isFinite(+sample.seq)?+sample.seq:index,
+        accuracyM:sample.accuracyM!=null?+sample.accuracyM:(sample.accuracy!=null?+sample.accuracy:null),
+        speedMps:sample.speedMps!=null?+sample.speedMps:(sample.filteredSpeedMps!=null?+sample.filteredSpeedMps:null)
+      });
+    }
+    function normalizeSessionSamples(samples){
+      return (Array.isArray(samples)?samples:[])
+        .map(normalizeSessionSample)
+        .filter(Boolean)
+        .sort((a,b)=>{
+          const ta=Date.parse(a.t||''),tb=Date.parse(b.t||'');
+          if(Number.isFinite(ta)&&Number.isFinite(tb)&&ta!==tb)return ta-tb;
+          return (+a.seq||0)-(+b.seq||0);
+        });
+    }
     async function sessionSamples(uid,sessionId){
       const live=sessionSamplesLive(uid,sessionId);
-      if(live!==null) return live;
-      const stored=await readSamplesStore(sessionId);
-      if(stored) return stored;
-      return await sessionSamplesRemote(uid,sessionId);
+      if(live!==null) return normalizeSessionSamples(live);
+      const stored=normalizeSessionSamples(await readSamplesStore(sessionId));
+      // A stale/empty IndexedDB record must never suppress the authoritative
+      // Firestore chunks written by the Android tracking service.
+      const remote=normalizeSessionSamples(await sessionSamplesRemote(uid,sessionId));
+      if(remote.length<2)return stored;
+      if(stored.length<2)return remote;
+      const merged=new Map();
+      stored.concat(remote).forEach((point,i)=>{
+        const key=(point.t||'')+'|'+point.lat.toFixed(6)+'|'+point.lng.toFixed(6);
+        if(!merged.has(key))merged.set(key,Object.assign({seq:i},point));
+      });
+      return normalizeSessionSamples(Array.from(merged.values()));
     }
     async function sessionSamplesRemote(uid,sessionId){
       if(!ready()) return [];
@@ -12652,7 +12689,10 @@ const FamilyBackend = (function(){
         let out=[];
         qs.forEach(d=>{ const data=d.data(); if(Array.isArray(data.points)) out=out.concat(data.points); });
         return out;
-      }catch(e){ return []; }
+      }catch(e){
+        cloudDiag('drivingSamples.read',e,{sessionId});
+        return [];
+      }
     }
     function sessionEvents(uid,sessionId){ return eventsForSession(uid,sessionId).sort((a,b)=>(a.at||'').localeCompare(b.at||'')); }
 
@@ -14406,6 +14446,14 @@ function TripDetail(){
 let _drvTripSamplesCache={};
 function drvSanitizeRouteSamples(samples,routeContext){
   const rows=(Array.isArray(samples)?samples:[])
+    .map((s,i)=>{
+      if(!s||typeof s!=='object')return s;
+      const lat=s.lat!=null?s.lat:s.latitude;
+      const lng=s.lng!=null?s.lng:s.longitude;
+      let t=s.t||s.capturedAt||s.at||null;
+      if(!t&&s.capturedAtMs!=null&&Number.isFinite(+s.capturedAtMs))t=new Date(+s.capturedAtMs).toISOString();
+      return Object.assign({},s,{lat:+lat,lng:+lng,t,seq:Number.isFinite(+s.seq)?+s.seq:i});
+    })
     .filter(s=>s&&s.accepted!==false&&Number.isFinite(+s.lat)&&Number.isFinite(+s.lng)
       && +s.lat>=-90&&+s.lat<=90&&+s.lng>=-180&&+s.lng<=180
       && (s.accuracyM==null||(+s.accuracyM>=0&&+s.accuracyM<=150)))
@@ -14468,14 +14516,20 @@ function drvSanitizeRouteSamples(samples,routeContext){
 function drvTripPaintRoute(){
   const sessionId=_drvActiveTripId;
   const rawSamples=_drvTripSamplesCache[sessionId];
-  if(!sessionId||rawSamples===undefined||!MBMMap.mounted('drv-trip-map'))return;
+  if(!sessionId||rawSamples===undefined)return;
   const eng=drvEngine(),uid=drvUid();
   const sess=(eng&&uid)?eng.session(uid,sessionId):null;
   const samples=drvSanitizeRouteSamples(rawSamples,sess||{});
   const state=document.getElementById('drv-trip-map-state');
   if(samples.length>=2){
+    if(!MBMMap.mounted('drv-trip-map')){
+      MBMMap.init('drv-trip-map',[samples[0].lat,samples[0].lng]);
+      MBMMap.invalidate();
+    }
     MBMMap.drawRoute(samples);
-    FamilyMapCamera.fit(samples.map(s=>[s.lat,s.lng]));
+    // Trip Detail owns this camera while mounted. Do not mutate the live
+    // Family follow controller, which must resume unchanged on return.
+    MBMMap.fitAll(samples.map(s=>[s.lat,s.lng]));
     if(state)state.remove();
     return;
   }
@@ -14490,14 +14544,8 @@ function drvTripMount(){
   const eng=drvEngine(); const uid=drvUid(); const sessionId=_drvActiveTripId;
   if(!eng||!uid||!sessionId) return;
   const sess=eng.session(uid,sessionId); if(!sess) return;
-  const startValid=Number.isFinite(+sess.startLat)&&Number.isFinite(+sess.startLng)
-    && !(Math.abs(+sess.startLat)<0.0001&&Math.abs(+sess.startLng)<0.0001);
-  const endValid=Number.isFinite(+sess.endLat)&&Number.isFinite(+sess.endLng)
-    && !(Math.abs(+sess.endLat)<0.0001&&Math.abs(+sess.endLng)<0.0001);
-  const center=startValid?[+sess.startLat,+sess.startLng]
-              :(endValid?[+sess.endLat,+sess.endLng]:[-42.88,147.32]);
-  MBMMap.init('drv-trip-map', center);
-  MBMMap.invalidate();
+  // Do not initialize at a fabricated/default coordinate. Wait for genuine
+  // stored route points; otherwise retain the honest unavailable message.
   eng.sessionSamples(uid,sessionId).then(samples=>{
     if(screen!=='module'||currentModule!=='family'||famView!=='drivingTrip'||_drvActiveTripId!==sessionId) return;
     _drvTripSamplesCache[sessionId]=Array.isArray(samples)?samples:[];
@@ -15498,7 +15546,7 @@ function famLiveView(){
   // top bar
   h+=`<div class="fam-live-top" id="fam-live-top">${famLiveHeaderHtml(sel)}</div>`;
   // map controls
-  h+=`<div class="fam-live-ctrls" style="top:88px">
+  h+=`<div class="fam-live-ctrls" style="top:calc(88px + env(safe-area-inset-top,0px))">
     <button class="fam-mapbtn${_famFollow?' on':''}" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
     <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
@@ -15864,8 +15912,7 @@ function famComposeStatusText(m){
     const region=cachedGeo?cachedGeo.line2:'';
     // Status text must remain plain text. The car icon is rendered by the
     // marker's dedicated safe SVG badge, never embedded into a text string.
-    const l2=speedKph!=null?`${speedKph} km/h`:'';
-    return { l1, l2, region, since:null, activityType:'driving', speedKph };
+    return { l1, l2:'', region, since:null, activityType:'driving', speedKph };
   }
   if(d.activityType==='walking'){
     const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
@@ -15874,8 +15921,7 @@ function famComposeStatusText(m){
     // "Since" timestamp (matches the reference app's 9th screenshot:
     // "Walking near Menin Drive" shows "0 km/h", not a start time).
     const speedKph=(s.speed!=null && !isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
-    const l2=speedKph!=null?`${speedKph} km/h`:'';
-    return { l1, l2, since:null, activityType:'walking', speedKph };
+    return { l1, l2:'', since:null, activityType:'walking', speedKph };
   }
   if(d.activityType==='bicycling'||d.activityType==='motorcycle'){
     const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
@@ -15887,8 +15933,7 @@ function famComposeStatusText(m){
       ? (L==='fa'?`${base} نزدیک ${road}`:`${base} near ${road}`)
       : base;
     const speedKph=(s.speed!=null&&!isNaN(s.speed))?drvFmtSpeedKph(s.speed):null;
-    const l2=speedKph!=null?`${speedKph} km/h`:'';
-    return {l1,l2,since:null,activityType:d.activityType,speedKph};
+    return {l1,l2:'',since:null,activityType:d.activityType,speedKph};
   }
   // stationary — ALWAYS show the real geocoded address, never a saved
   // place's name/label. The user has repeatedly and explicitly rejected
@@ -16315,7 +16360,10 @@ function famLiveMemberDetail(m, isMe){
     // ever broken by a future edit.
     const line1 = esc(txt.l1 && txt.l1.trim() ? txt.l1 : (L==='fa'?'موقعیت زنده':'Live location'));
     const regionTxt = txt.region?esc(txt.region):'';
-    const sinceTxt = txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`);
+    const movingActivity=['driving','walking','bicycling','motorcycle'].includes(txt.activityType);
+    const sinceTxt = movingActivity
+      ? `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`
+      : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`));
     h+=`<div class="fam-loc-block" data-fam-debug="loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
@@ -16339,10 +16387,6 @@ function famLiveMemberDetail(m, isMe){
   if(showLoc){
     const txt2=famComposeStatusText(m);
     h+=`<div class="fam-stat-grid">`;
-    if(txt2.activityType==='driving') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال رانندگی':'Driving'}</div></div>`;
-    else if(txt2.activityType==='walking') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'در حال پیاده‌روی':'Walking'}</div></div>`;
-    else if(txt2.activityType==='bicycling') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'دوچرخه‌سواری':'Cycling'}</div></div>`;
-    else if(txt2.activityType==='motorcycle') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'وضعیت':'Status'}</div><div class="val">${L==='fa'?'موتورسواری':'Motorcycling'}</div></div>`;
     h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
     if(acc.level==='good') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">${esc(acc.text)}</div></div>`;
     if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">${s.battery}%</div></div>`;
@@ -16594,15 +16638,18 @@ function famMapTileError(){
    height. Recomputed on every sheet height change (drag + detent snap). ── */
 function famUpdateCameraPadding(sheetPx){
   try{
-    const HEADER_H=96;      // header row + safe area
+    const HEADER_H=110;
+    const CALLOUT_CLEARANCE=76;
     const RIGHT_CONTROLS_W=64; // recenter/person/fullscreen/layers column
     const CTA_H=56;         // Check in / SOS row height
     const CTA_GAP=14;
     const navClear=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fam-navclear'))||82;
     const SHEET_BOTTOM_MARGIN=navClear;
     const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
+    const winH=(typeof window!=='undefined'&&window.innerHeight)||780;
+    const top=Math.min(HEADER_H+CALLOUT_CLEARANCE,Math.round(winH*0.24));
     if(typeof FamilyMapCamera!=='undefined'){
-      FamilyMapCamera.setPadding({top:HEADER_H, right:RIGHT_CONTROLS_W, bottom, left:12});
+      FamilyMapCamera.setPadding({top, right:RIGHT_CONTROLS_W, bottom, left:12});
     }
   }catch(e){}
 }
@@ -16618,7 +16665,7 @@ function famEnsureSheetVisible(){
   try{
     const sheet=document.getElementById('fam-sheet'); if(!sheet) return;
     const H=window.innerHeight||780;
-    const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
+    const heights=[130, Math.round(H*0.30), Math.max(200,H-150)];
     if(_famSheetDetent<1){
       _famSheetDetent=1;
       sheet.classList.remove('detent-0','detent-2');
@@ -16653,7 +16700,7 @@ function famSheetInitDrag(){
   // 40vh), 2=full but NEVER covering the 90px header reserved by CSS
   // max-height. Height-based (not transform) so the sheet is ALWAYS visible
   // from its default CSS even if this JS never runs.
-  const heights=[130, Math.round(H*0.40), Math.max(200,H-150)];
+  const heights=[130, Math.round(H*0.30), Math.max(200,H-150)];
   // Single source of truth the buttons + camera padding both read: writes the
   // CURRENT real sheet height (px) as a CSS var on the map wrapper. .fam-map-cta
   // (Check in/SOS) is bound to this via bottom:calc(var(--fam-sheet-h) + 14px),

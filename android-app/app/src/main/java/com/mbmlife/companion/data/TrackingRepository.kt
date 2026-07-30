@@ -44,7 +44,15 @@ class TrackingRepository(private val context: Context) {
         }
 
         tripForStorage?.let { trip ->
-            if (output.transition != TripTransition.NONE) {
+            // Persist route chunks during the drive as well as at completion.
+            // Chunk documents are deterministic and merged, so this safely
+            // replaces the current partial chunk without duplicating points.
+            // A crash/restart therefore loses at most the latest 25 accepted
+            // samples instead of the entire route.
+            if (
+                output.transition != TripTransition.NONE ||
+                (output.sample.accepted && trip.status == "active" && trip.sampleCount % 25 == 0)
+            ) {
                 queueSampleChunks(trip.id)
             }
         }
@@ -182,6 +190,9 @@ class TrackingRepository(private val context: Context) {
                                 .putNullable("accuracyM", p.accuracyM)
                                 .putNullable("headingDeg", p.bearingDeg)
                                 .putNullable("altitudeM", p.altitudeM)
+                                .put("accepted", p.accepted)
+                                .put("activityType", p.activityType)
+                                .put("capturedAtMs", p.capturedAtMs)
                                 .put("source", "companion")
                         )
                     }
