@@ -89,7 +89,12 @@ class TrackingRepository(private val context: Context) {
         val now = System.currentTimeMillis()
         val movementState =
             if (trip?.status == "active") "driving" else sample.activityType.lowercase()
-        val moving = movementState == "walking" || movementState == "driving"
+        val moving = movementState in setOf(
+            "walking",
+            "bicycling",
+            "motorcycle",
+            "driving"
+        )
         val payload = JSONObject()
             .put("uid", sample.uid)
             .put("lat", sample.latitude)

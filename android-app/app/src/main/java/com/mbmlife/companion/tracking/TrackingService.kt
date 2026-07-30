@@ -185,10 +185,10 @@ class TrackingService : Service() {
         )
             .setMinUpdateIntervalMillis(2_000L)
             .setMaxUpdateDelayMillis(10_000L)
-        // Idle tracking keeps the movement-triggered battery saving. Once a
-        // trip is active, interval-based callbacks remain enabled so the stop
-        // state machine cannot be starved while the parked phone is motionless.
-        if (!currentTripActive) builder.setMinUpdateDistanceMeters(3f)
+        // v402: never gate stationary callbacks behind a distance threshold.
+        // That gate could suppress fixes for minutes while the service was
+        // healthy, producing "Location stale" and starving arrival/movement
+        // decisions. Periodic fixes are the authoritative freshness signal.
         val request = builder.build()
         locationUpdatesRequested = true
         locationRequestForActiveTrip = currentTripActive

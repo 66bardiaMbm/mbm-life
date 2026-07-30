@@ -14,11 +14,11 @@ const gradle = fs.readFileSync(
   "utf8"
 );
 
-assert.match(html, /const APP_VERSION='v401'/);
+assert.match(html, /const APP_VERSION='v402'/);
 assert.match(html, /viewport-fit=cover/);
 assert.match(html, /height:30vh/);
-assert.match(gradle, /versionName = "0\.7\.1-v401-map-lifecycle-freshness"/);
-assert.match(gradle, /asset=v401/);
+assert.match(gradle, /versionName = "0\.7\.2-v402-activity-callout-freshness"/);
+assert.match(gradle, /asset=v402/);
 
 assert.match(
   html,
