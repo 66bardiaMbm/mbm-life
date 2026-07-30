@@ -417,15 +417,15 @@ t('Since is rendered in 24-hour clock', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\nT10 Version consistency');
 
-t('web APP_VERSION is v401', () => { ok(contains("const APP_VERSION='v401';")); });
-t('Android versionName carries v401', () => {
+t('web APP_VERSION is v402', () => { ok(contains("const APP_VERSION='v402';")); });
+t('Android versionName carries v402', () => {
   const g = require('fs').readFileSync(
     path.join(__dirname, '..', 'android-app/app/build.gradle.kts'),
     'utf8'
   );
-  ok(g.indexOf('0.7.1-v401') >= 0, 'versionName not bumped');
-  ok(g.indexOf('versionCode = 10') >= 0, 'versionCode not bumped');
-  ok(g.indexOf('asset=v401') >= 0, 'PWA asset marker not bumped');
+  ok(g.indexOf('0.7.2-v402') >= 0, 'versionName not bumped');
+  ok(g.indexOf('versionCode = 11') >= 0, 'versionCode not bumped');
+  ok(g.indexOf('asset=v402') >= 0, 'PWA asset marker not bumped');
 });
 t('no stray v400 markers remain in the web build', () => {
   eq(countOf("APP_VERSION='v400'"), 0);

@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.7.1-v401-map-lifecycle-freshness"
+        versionCode = 11
+        versionName = "0.7.2-v402-activity-callout-freshness"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v401\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v402\""
         )
     }
 

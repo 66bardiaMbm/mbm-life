@@ -31,8 +31,20 @@ assert.match(
 
 assert.match(
   html,
-  /calloutL2:\(txt\.calloutL2\|\|txt\.l2\)\?esc\(txt\.calloutL2\|\|txt\.l2\):''/,
-  'The map marker must consume the dedicated Here-for callout value.'
+  /const markerCallout=famMarkerCalloutText\(txt\)/,
+  'The map marker must use the dedicated compact callout presenter.'
+);
+
+assert.match(
+  html,
+  /if\(txt\.activityType==='stationary'\)\{\s*return \{l1:txt\.calloutL2\|\|txt\.l2\|\|'',l2:''\}/,
+  'A stationary marker must show only the persisted Here-for duration.'
+);
+
+assert.match(
+  html,
+  /function famMarkerCalloutText\(txt\)[\s\S]{0,500}return \{l1:'',l2:''\};/,
+  'Moving markers must leave the duplicate callout empty and use their activity pill.'
 );
 
 assert.match(

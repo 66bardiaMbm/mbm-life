@@ -1484,6 +1484,11 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-pin-activity-pill.walking .motion-ic{background:#2f9e72}
 .fam-pin-activity-pill.bicycling .motion-ic{background:#3478d4}
 .fam-pin-activity-pill.motorcycle .motion-ic{background:#d47724}
+.fam-trip-vehicle-icon{width:40px;height:40px;border-radius:11px;background:#8652ff18;color:#a78bfa;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.fam-trip-vehicle-icon.active{background:#2fce6b18;color:#2fce6b}
+.fam-trip-vehicle-icon svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round}
 .fam-pin-activity.tone-offline{background:#9aa1ad}
 .fam-pin-activity.tone-paused{background:#f5a623}
 .fam-pin-activity.tone-motion{animation:fambadgepulse 1.6s ease-in-out infinite}
@@ -1804,7 +1809,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v401';
+const APP_VERSION='v402';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14365,7 +14370,7 @@ function TripCard(sess){
   const endTime=sess.endedAt?famAbsTime(sess.endedAt):(L==='fa'?'در حال انجام':'In progress');
   const topKph=drvFmtSpeedKph(sess.maxSpeedMps);
   return `<button data-fam="drv-open-trip" data-arg="${esc(sess.id)}" style="width:100%;text-align:start;display:flex;align-items:center;gap:12px;border:1px solid ${isActive?'#2FCE6B55':'var(--b1)'};background:var(--s1);border-radius:14px;padding:14px;margin-bottom:8px;cursor:pointer;color:var(--ink)">
-    <div style="width:40px;height:40px;border-radius:11px;background:${isActive?'#2FCE6B18':'#8652FF18'};color:${isActive?'#2FCE6B':'#8652FF'};display:flex;align-items:center;justify-content:center;font-size:18px;flex:none">${famIcon('car')}</div>
+    <div class="fam-trip-vehicle-icon${isActive?' active':''}" role="img" aria-label="${L==='fa'?'سفر با خودرو':'Car trip'}">${famIcon('car')}</div>
     <div style="flex:1;min-width:0">
       <div style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
         ${isActive?`<span style="width:7px;height:7px;border-radius:50%;background:#2FCE6B;flex:none"></span>`:''}
@@ -16318,6 +16323,19 @@ function famComposeStatusText(m){
     since:since2, activityType:'stationary', place:!!d.currentPlaceId
   };
 }
+/* The marker and the detail sheet intentionally present the same state in
+   different, non-duplicated forms. The marker owns only the compact
+   Life360-style presence/activity signal; the sheet owns address + locality
+   + "Since HH:mm". Both still read the one famComposeStatusText result. */
+function famMarkerCalloutText(txt){
+  if(!txt) return {l1:'',l2:''};
+  if(txt.activityType==='stationary'){
+    return {l1:txt.calloutL2||txt.l2||'',l2:''};
+  }
+  // Moving states are represented by the dedicated icon pill (car + speed,
+  // walking, bicycle, motorcycle), so a second "Driving" bubble is noise.
+  return {l1:'',l2:''};
+}
 /* Honest consent/permission fallback line — used ONLY when a member has no
    live location to show at all (sharing off/paused, or no fix yet). This is
    NOT a location/activity formatter — that is famComposeStatusText's job
@@ -16784,11 +16802,13 @@ function famLivePaintMarkers(members, sel){
     if(g.members.length===1){
       const m=g.members[0]; const key=m.uid; activeKeys.push(key);
       const txt=famComposeStatusText(m);
+      const markerCallout=famMarkerCalloutText(txt);
       MBMMap.setMarker(key,[m.state.lat,m.state.lng],
         {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
          speedKph:txt.speedKph,
-         calloutL1:esc(txt.l1), calloutL2:(txt.calloutL2||txt.l2)?esc(txt.calloutL2||txt.l2):''},
+         calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
+         calloutL2:markerCallout.l2?esc(markerCallout.l2):''},
         m.uid===_famSelUid, m.meta.tone,
         ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
     } else {
