@@ -1575,9 +1575,10 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-locstate-meta{color:var(--ink3);font-weight:600}
 .fam-locstate-meta::before{content:"·";margin-inline-end:6px;color:var(--ink3)}
 .fam-batt-pill{display:inline-flex;align-items:center;gap:7px;background:var(--s2);border-radius:12px;padding:8px 12px;font-weight:800;font-size:14px;flex:none}
-.fam-batt-ic{position:relative;width:22px;height:12px;border:2px solid var(--ink3);border-radius:3px}
-.fam-batt-ic::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:4px;background:var(--ink3);border-radius:0 1px 1px 0}
-.fam-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:linear-gradient(90deg,#f5a623,#f5c451);border-radius:1px}
+.fam-batt-pill.lvl-high{color:#2fce6b}.fam-batt-pill.lvl-mid{color:#f5a623}.fam-batt-pill.lvl-low{color:#e5484d}
+.fam-batt-ic{position:relative;width:22px;height:12px;border:2px solid currentColor;border-radius:3px}
+.fam-batt-ic::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:4px;background:currentColor;border-radius:0 1px 1px 0}
+.fam-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:currentColor;border-radius:1px}
 /* Save Place card (reference: soft rounded card, pin-with-plus icon + label) */
 .fam-saveplace{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
   background:var(--s2);border:none;border-radius:18px;padding:14px 18px;min-width:96px;cursor:pointer;color:var(--ink);font-weight:800;font-size:14px}
@@ -1809,7 +1810,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v402';
+const APP_VERSION='v403';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14905,6 +14906,60 @@ function famMapTypeEnabled(t){ return true; }
 let _famMapType='auto';    // selected map type id (auto/street/satellite)
 let _famMapProvider='auto'; // kept for backward-compat with existing callers
 
+const FAM_LOW_BATTERY_PCT=15;
+const FAM_LOW_BATTERY_STATE_KEY='mbm-family-low-battery-v1';
+function famBattLevel(pct){
+  if(pct==null)return null;
+  if(Number(pct)<=FAM_LOW_BATTERY_PCT)return 'low';
+  if(Number(pct)<=60)return 'mid';
+  return 'high';
+}
+function famLowBatteryState(){
+  try{
+    const raw=localStorage.getItem(FAM_LOW_BATTERY_STATE_KEY);
+    const parsed=raw?JSON.parse(raw):{};
+    return parsed&&typeof parsed==='object'?parsed:{};
+  }catch(_){ return {}; }
+}
+function famSaveLowBatteryState(state){
+  try{ localStorage.setItem(FAM_LOW_BATTERY_STATE_KEY,JSON.stringify(state)); }catch(_){}
+}
+function famMaybeAlertLowBattery(member){
+  if(!member||!member.uid||!member.state||member.state.battery==null)return;
+  if(member.consent&&(!member.consent.enabled||member.consent.paused))return;
+  const pct=Math.max(0,Math.min(100,Math.round(Number(member.state.battery))));
+  if(!Number.isFinite(pct))return;
+  const state=famLowBatteryState();
+  const previous=state[member.uid];
+  if(pct>FAM_LOW_BATTERY_PCT){
+    // Re-arm only after the phone has genuinely risen above the threshold.
+    if(previous&&previous.low){
+      state[member.uid]={low:false,pct,updatedAt:Date.now()};
+      famSaveLowBatteryState(state);
+    }
+    return;
+  }
+  // One warning per low-battery episode, not once per GPS/render update.
+  if(previous&&previous.low)return;
+  state[member.uid]={low:true,pct,alertedAt:Date.now()};
+  famSaveLowBatteryState(state);
+  const name=(member.name||'Member').trim()||'Member';
+  const message=L==='fa'
+    ? `شارژ گوشی ${name} رو به اتمام است — ${pct}٪ باقی مانده`
+    : `${name}'s phone battery is low — ${pct}% remaining`;
+  if(typeof document!=='undefined'&&document.visibilityState==='hidden'&&
+     typeof Notification!=='undefined'&&Notification.permission==='granted'){
+    try{
+      new Notification(L==='fa'?'هشدار باتری':'Low battery',{
+        body:message,icon:'/icon-192.png',tag:`family-low-battery-${member.uid}`
+      });
+      return;
+    }catch(_){}
+  }
+  if(typeof toast==='function')toast(message,5000);
+}
+/* end family low-battery policy */
+
 /* ═══════════════════════════════════════════════════════════════════════
    MBMMap — thin wrapper isolating ALL map-engine usage behind our own API.
    If the engine is swapped, only this object changes. Honest failure:
@@ -15275,7 +15330,6 @@ const MBMMap = (function(){
     };
     return I[kind]||'';
   }
-  function famBattLevel(pct){ if(pct==null)return null; if(pct<=20)return 'low'; if(pct<=50)return 'mid'; return 'high'; }
   function pinHtml(meta){
     const av = meta.photo
       ? `<div class="fam-pin-av" style="background-image:url('${(''+meta.photo).replace(/'/g,'')}')"></div>`
@@ -16631,7 +16685,7 @@ function famLiveMemberDetail(m, isMe){
   let h=`<div style="margin-top:2px;padding-top:12px">`;
   // Name row: big bold name + green status dot on the left, battery pill on the right
   const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
-    ? `<div class="fam-batt-pill"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
+    ? `<div class="fam-batt-pill lvl-${famBattLevel(s.battery)}"><span class="fam-batt-ic" style="--lvl:${Math.max(6,Math.min(100,s.battery))}%"></span>${s.battery}%</div>` : '';
   h+=`<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-fam="live-sel-open" data-arg="${m.uid}">
     <div style="flex:1;min-width:0;display:flex;align-items:center;gap:12px">
       <div style="font-weight:800;font-size:32px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
@@ -16792,6 +16846,9 @@ function famLivePaintMarkers(members, sel){
   const CLUSTER_M=60;
   const groups=[]; // each: {lat,lng,members:[m,...]}
   const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+  // Evaluate the real shared percentage independently of marker movement.
+  // The persistent latch prevents repeated warnings on every render/GPS fix.
+  withFixList.forEach(famMaybeAlertLowBattery);
   withFixList.forEach(m=>{
     const g=m.uid===localUid?null:groups.find(gp=>!gp.local&&famHaversineM(gp.lat,gp.lng,m.state.lat,m.state.lng)<=CLUSTER_M);
     if(g){ g.members.push(m); }

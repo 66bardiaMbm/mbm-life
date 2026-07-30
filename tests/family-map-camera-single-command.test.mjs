@@ -76,7 +76,7 @@ function harness({ uid = "me", viewerUid = "me" } = {}) {
   const FamilyBackend = { driving: { activeSession: (id) => id === uid ? active : null } };
   const buildPaint = (lastCentredUid, follow) => new Function(
     "MBMMap", "FamilyMapCamera", "FB", "FamilyBackend",
-    "esc", "famHaversineM", "famComposeStatusText", "famMarkerCalloutText", "famAccuracyInfo",
+    "esc", "famHaversineM", "famComposeStatusText", "famMarkerCalloutText", "famMaybeAlertLowBattery", "famAccuracyInfo",
     "famLiveApply", "famEnsureSheetVisible",
     `
       let _famSelUid=${JSON.stringify(uid)};
@@ -88,7 +88,7 @@ function harness({ uid = "me", viewerUid = "me" } = {}) {
   )(
     MBMMap, FamilyMapCamera, FB, FamilyBackend,
     (v) => v, () => 999999, () => ({ activityType: "driving", l1: "", l2: "" }),
-    () => ({ l1: "", l2: "" }),
+    () => ({ l1: "", l2: "" }), () => {},
     () => ({ approx: false }), () => {}, () => {}
   );
   const member = (lat, lng, speed = 12) => ({

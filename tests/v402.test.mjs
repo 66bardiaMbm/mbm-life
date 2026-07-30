@@ -17,7 +17,7 @@ const repository = fs.readFileSync(
   "utf8"
 );
 
-assert.match(html, /const APP_VERSION='v402'/);
+assert.match(html, /const APP_VERSION='v403'/);
 
 assert.match(
   html,
