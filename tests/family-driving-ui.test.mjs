@@ -45,7 +45,7 @@ assert.match(
 );
 assert.match(
   html,
-  /Detailed route was not stored for this older trip/,
+  /Detailed route was not recorded for this trip/,
   "older trips without samples must show an honest route-data state"
 );
 

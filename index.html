@@ -1375,7 +1375,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-live-top>*{pointer-events:auto}
 .fam-live-title{flex:1;min-width:0}
 .fam-live-title b{display:block;font-size:19px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fam-live-title span{display:block;font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-live-title span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;color:var(--ink3);overflow:hidden;overflow-wrap:anywhere;line-height:1.3}
 .fam-live-ctrls{position:absolute;right:14px;z-index:1150;display:flex;flex-direction:column;gap:12px}
 /* Reference-matched control buttons: larger dark rounded squares with soft
    shadow, like the Life360 map controls. */
@@ -1394,10 +1394,14 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    subtitle, sitting directly above the pin with a matching pointed tail.
    Part of the SAME marker element as the avatar/pin (never a separate
    overlay), so it can never visually drift apart from what it describes. */
+/* v401 (requirement 11): white-space:nowrap + ellipsis truncated every address
+   to one line, so "…" appeared even when there was room. The callout now wraps
+   to at most two lines and only clamps beyond that. */
 .fam-callout{position:relative;background:#fff;border-radius:16px;padding:9px 16px 10px;margin-bottom:10px;
-  box-shadow:0 4px 16px rgba(0,0,0,.24);white-space:nowrap;max-width:240px;text-align:center;z-index:0}
+  box-shadow:0 4px 16px rgba(0,0,0,.24);white-space:normal;max-width:260px;text-align:center;z-index:0}
 .dark .fam-callout{background:#262733}
-.fam-callout .l1{font-size:13.5px;font-weight:800;color:#1a1a24;line-height:1.28;overflow:hidden;text-overflow:ellipsis}
+.fam-callout .l1{font-size:13.5px;font-weight:800;color:#1a1a24;line-height:1.28;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
 .dark .fam-callout .l1{color:#f2f3f7}
 .fam-callout .l2{font-size:12px;font-weight:600;color:#9297a3;line-height:1.25;margin-top:2px}
 .fam-callout-tip{position:absolute;left:50%;bottom:-6px;width:13px;height:13px;background:#fff;
@@ -1472,6 +1476,11 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-pin-activity-pill .motion-ic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
   color:#fff;background:var(--fam-purple,#8652FF);flex:none}
 .fam-pin-activity-pill svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2.2}
+/* v401 (confirmed bug 2): the driving pill is now the ONLY place speed appears,
+   so its car icon carries the meaning and is sized accordingly. */
+.fam-pin-activity-pill.driving{min-height:38px;border-radius:20px;padding:5px 13px 5px 6px;font-size:13.5px}
+.fam-pin-activity-pill.driving .motion-ic{width:30px;height:30px}
+.fam-pin-activity-pill.driving svg{width:20px;height:20px;stroke-width:2.1}
 .fam-pin-activity-pill.walking .motion-ic{background:#2f9e72}
 .fam-pin-activity-pill.bicycling .motion-ic{background:#3478d4}
 .fam-pin-activity-pill.motorcycle .motion-ic{background:#d47724}
@@ -1500,12 +1509,23 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    bottom of the flex column, never dependent on JS to be visible. The
    draggable behaviour is a progressive enhancement layered on top — if drag
    JS never runs, the panel still renders at its default (partial) height. ── */
+/* v401 FIX (bugs 2+3): margin-bottom was var(--fam-navclear) — an 82px CONTENT
+   scroll-clearance value, not the real height of .fam-bottomnav (~60px + inset).
+   The ~22px difference left #fam-map (inset:0, full height) visible as a thin
+   strip between the sheet and the nav bar. --fam-navh is measured from the real
+   nav element at mount/resize (famSyncChromeMetrics) and falls back to a close
+   static estimate before the first measurement. */
+:root{--fam-navh:calc(60px + env(safe-area-inset-bottom,0px));--fam-headh:calc(74px + env(safe-area-inset-top,0px))}
 #fam-sheet{position:relative;z-index:1300;flex:none;background:var(--s1);border-radius:28px 28px 0 0;
-  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:var(--fam-navclear);
-  height:30vh;max-height:calc(100% - 150px);
+  box-shadow:0 -6px 30px rgba(0,0,0,.35);margin-top:auto;margin-bottom:var(--fam-navh);
+  height:30vh;max-height:calc(100% - var(--fam-navh) - var(--fam-headh) - 8px);
   display:flex;flex-direction:column;transition:height .25s cubic-bezier(.2,.7,.2,1)}
 #fam-sheet.detent-0{height:130px}
-#fam-sheet.detent-2{height:calc(100% - 150px)}
+/* v401 FIX (bug 2): detent-2 was calc(100% - 150px), a magic number that ignored
+   the real nav height and the top safe-area. On a device with a gesture-nav
+   inset this put the sheet's top edge ~20px from the screen top — covering the
+   map entirely. Now it is bounded by the measured header + nav. */
+#fam-sheet.detent-2{height:calc(100% - var(--fam-navh) - var(--fam-headh) - 8px)}
 #fam-sheet .fam-sheet-draghead{width:100%;height:34px;display:flex;align-items:center;justify-content:center;
   flex:none;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 #fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
@@ -1784,7 +1804,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v400';
+const APP_VERSION='v401';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -2678,6 +2698,31 @@ function _renderInner(){
       if(fb&&fb.location){ fb.location.reconcileWatch(); }
     }catch(e){}
   }
+  // ── v401 FIX (requirement 1): _famSheetDetent is a module-level variable that
+  //    survived across screens for the whole page session. Once the user dragged
+  //    the sheet to full, EVERY later entry to Location re-applied detent 2 and
+  //    opened with the sheet covering the map. Track the previously mounted
+  //    Family view and force the safe partial detent on a genuinely fresh entry
+  //    (from another module, another Family view, or a reload). Re-renders while
+  //    already on Location do NOT reset it, so a deliberate expansion is kept.
+  if(!(screen==='module' && currentModule==='family')){
+    _famPrevMountView=null;
+  } else {
+    const _v=(famView==='live'||famView==='dashboard')?'live':famView;
+    if(_v==='live' && _famPrevMountView!=='live'){
+      _famSheetDetent=1;
+      // Requirement 14: the signed-in user is selected and centred on entry
+      // without a manual tap. _famSelUid was also sticky across screens, so a
+      // previously-tapped member stayed selected on re-entry.
+      try{
+        const _me=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+        if(_me){ _famSelUid=_me; }
+      }catch(e){}
+      _famLastCentredUid=null;
+      _famLiveFixKicked=false;   // re-arm the one-shot high-accuracy fix per entry
+    }
+    _famPrevMountView=_v;
+  }
   // Mount the map after the Family Live DOM exists.
   if(screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard') && typeof famLiveMount==='function'){
     famLiveMount();
@@ -2702,6 +2747,22 @@ window.addEventListener('resize',()=>{
   _resizeT=setTimeout(()=>{
     const appEl=document.getElementById('app');
     if(!appEl||appEl.style.display==='none')return;
+    // ── v401: an orientation change alters the real header/nav heights and the
+    //    map viewport, but not the width breakpoint, so the early-return below
+    //    used to skip both. Re-measure the chrome, re-apply the sheet detent
+    //    against the new geometry, and resize whichever map is mounted — none
+    //    of which requires a re-render, so focus and typing are unaffected.
+    if(screen==='module' && currentModule==='family'){
+      try{
+        if(famView==='live'||famView==='dashboard'){
+          famSyncChromeMetrics();
+          famApplySheetDetent(_famSheetDetent);
+        } else {
+          MBMMap.invalidate();
+          if(famView==='drivingTrip') drvTripPaintRoute();
+        }
+      }catch(e){}
+    }
     // Mobile browsers fire 'resize' when the on-screen keyboard opens/closes
     // (the visual viewport HEIGHT shrinks) — a full render() at that moment
     // would destroy and rebuild the very input the person is typing in,
@@ -11502,16 +11563,29 @@ const FamilyBackend = (function(){
       const uid=myUid(); const st=uid?memberState(uid):null;
       if(!st||st.lat==null)return { lat:null, lng:null, accuracy:null, at:null, source:null, state:_locState, lastCallbackAt:_lastCallbackAt, callbackAgeMs:_lastCallbackAt?Date.now()-_lastCallbackAt:null };
       const fixAt=Date.parse(st.capturedAt||st.reportedAt||'');
-      // Native-wrapper fixes arrive through the Android bridge, not through
-      // watchPosition, so _lastCallbackAt is intentionally empty.  Use the
-      // real captured timestamp as the callback-age equivalent; otherwise an
-      // old cached native sample can keep a green "Live location active"
-      // banner indefinitely.
-      const effectiveCallbackAge=_lastCallbackAt
-        ? Date.now()-_lastCallbackAt
-        : (st.source==='companion'&&Number.isFinite(fixAt)?Math.max(0,Date.now()-fixAt):null);
+      // ── v401 FIX (requirements 7 + 8) ──
+      // The old expression PREFERRED _lastCallbackAt whenever it was non-zero:
+      //     _lastCallbackAt ? now-_lastCallbackAt : (companion ? now-fixAt : null)
+      // On Android BOTH producers exist. The WebView's own watchPosition fires
+      // once (setting _lastCallbackAt) and is then throttled in the background,
+      // while the native service keeps injecting fresh fixes. The frozen
+      // watchPosition age therefore won, driving the banner to "Location stale"
+      // — while the age TEXT beside it was rendered from st.capturedAt, which
+      // was fresh. That is the exact source of the impossible
+      // "Location stale · updated 0 min ago".
+      // Correct rule: freshness is the age of the freshest evidence we have from
+      // EITHER producer, so a fresh native fix can never be called stale, and a
+      // genuinely old fix still ages out because fixAge keeps growing.
+      const cbAge=_lastCallbackAt?Math.max(0,Date.now()-_lastCallbackAt):null;
+      const fixAge=Number.isFinite(fixAt)?Math.max(0,Date.now()-fixAt):null;
+      const ages=[cbAge,fixAge].filter(v=>v!=null);
+      const effectiveCallbackAge=ages.length?Math.min.apply(null,ages):null;
+      // freshnessAgeMs is THE single authoritative age. Every consumer (status
+      // banner label, "updated X ago" text, stale/live decision, marker status)
+      // must read this one value so they can never contradict each other.
       return { lat:st.lat, lng:st.lng, accuracy:st.accuracy, at:st.capturedAt||st.reportedAt, source:st.source||'gps', state:_locState,
                lastCallbackAt:_lastCallbackAt, callbackAgeMs:effectiveCallbackAge,
+               watchCallbackAgeMs:cbAge, fixAgeMs:fixAge, freshnessAgeMs:effectiveCallbackAge,
                markerPos:(typeof MBMMap!=='undefined'&&MBMMap.markerLatLng)?MBMMap.markerLatLng(uid):null };
     }
 
@@ -12665,32 +12739,52 @@ const FamilyBackend = (function(){
           return (+a.seq||0)-(+b.seq||0);
         });
     }
+    /* v401: recorded on every sessionSamples() call so Trip Detail can report
+       exactly how many points came from each store instead of guessing. */
+    let _lastSamplesDiag=null;
+    function lastSamplesDiag(){ return _lastSamplesDiag?Object.assign({},_lastSamplesDiag):null; }
     async function sessionSamples(uid,sessionId){
+      _lastSamplesDiag={sessionId, live:null, local:null, remote:null, merged:null, path:null, error:null};
       const live=sessionSamplesLive(uid,sessionId);
-      if(live!==null) return normalizeSessionSamples(live);
+      if(live!==null){
+        const n=normalizeSessionSamples(live);
+        _lastSamplesDiag.live=n.length; _lastSamplesDiag.merged=n.length;
+        return n;
+      }
       const stored=normalizeSessionSamples(await readSamplesStore(sessionId));
       // A stale/empty IndexedDB record must never suppress the authoritative
       // Firestore chunks written by the Android tracking service.
       const remote=normalizeSessionSamples(await sessionSamplesRemote(uid,sessionId));
-      if(remote.length<2)return stored;
-      if(stored.length<2)return remote;
+      _lastSamplesDiag.local=stored.length;
+      _lastSamplesDiag.remote=remote.length;
+      if(remote.length<2){ _lastSamplesDiag.merged=stored.length; return stored; }
+      if(stored.length<2){ _lastSamplesDiag.merged=remote.length; return remote; }
       const merged=new Map();
       stored.concat(remote).forEach((point,i)=>{
         const key=(point.t||'')+'|'+point.lat.toFixed(6)+'|'+point.lng.toFixed(6);
         if(!merged.has(key))merged.set(key,Object.assign({seq:i},point));
       });
-      return normalizeSessionSamples(Array.from(merged.values()));
+      const out=normalizeSessionSamples(Array.from(merged.values()));
+      _lastSamplesDiag.merged=out.length;
+      return out;
     }
     async function sessionSamplesRemote(uid,sessionId){
-      if(!ready()) return [];
-      const fid=familyId(); if(!fid) return [];
+      if(!ready()){ if(_lastSamplesDiag)_lastSamplesDiag.error='offline'; return []; }
+      const fid=familyId();
+      if(!fid){ if(_lastSamplesDiag)_lastSamplesDiag.error='no-family'; return []; }
+      // v401: record the EXACT Firestore path read, so a path/schema mismatch is
+      // reported as a fact rather than assumed. This must stay identical to the
+      // Android writer in TrackingRepository.queueSampleChunks().
+      const path=`families/${fid}/drivingSessions/${sessionId}/samples`;
+      if(_lastSamplesDiag)_lastSamplesDiag.path=path;
       try{
         const qs=await sessionDoc(fid,sessionId).collection('samples').orderBy('chunkIndex').get();
         let out=[];
         qs.forEach(d=>{ const data=d.data(); if(Array.isArray(data.points)) out=out.concat(data.points); });
         return out;
       }catch(e){
-        cloudDiag('drivingSamples.read',e,{sessionId});
+        if(_lastSamplesDiag)_lastSamplesDiag.error=(e&&(e.code||e.message))||'read-failed';
+        cloudDiag('drivingSamples.read',e,{sessionId,path});
         return [];
       }
     }
@@ -12957,7 +13051,7 @@ const FamilyBackend = (function(){
     return {
       ingestFix, recoverOnStart, startCloudListening, stopCloudListening,
       manualStart, manualStop,
-      memberSessions, session, activeSession, currentSpeed, sessionSamples, sessionSamplesLive, sessionSamplesRemote,
+      memberSessions, session, activeSession, currentSpeed, sessionSamples, sessionSamplesLive, sessionSamplesRemote, lastSamplesDiag,
       sessionEvents, memberEventsInRange, memberSessionsInRange, deriveTimeline,
       recomputeMetricsAsync, engineDebugInfo, cloudDiagnostics,
       replay: FamilyDrivingReplay,
@@ -14387,7 +14481,7 @@ function drvLoadTimelineIfNeeded(uid,sessionId,sessStatus){
     eng.deriveTimeline(uid,sessionId).then(tl=>{
       _drvTimelineLoading=null;
       _drvTimelineCache[sessionId]=tl; // still stored so the current render can read it, just never trusted as final
-      if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'&&_drvActiveTripId===sessionId) render();
+      if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'&&_drvActiveTripId===sessionId) drvTripApplyTimeline(sessionId);
     }).catch(()=>{ _drvTimelineLoading=null; });
     return;
   }
@@ -14398,7 +14492,7 @@ function drvLoadTimelineIfNeeded(uid,sessionId,sessStatus){
   eng.deriveTimeline(uid,sessionId).then(tl=>{
     _drvTimelineCache[sessionId]=tl;
     _drvTimelineLoading=null;
-    if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'&&_drvActiveTripId===sessionId) render();
+    if(screen==='module'&&currentModule==='family'&&famView==='drivingTrip'&&_drvActiveTripId===sessionId) drvTripApplyTimeline(sessionId);
   }).catch(()=>{ _drvTimelineLoading=null; });
 }
 function TripDetail(){
@@ -14416,7 +14510,7 @@ function TripDetail(){
   const timeline=_drvTimelineCache[sessionId];
 
   let h=`<div id="drv-trip-wrap">`;
-  h+=`<div id="drv-trip-map" style="height:38vh;position:relative;background:#dfe3ea">
+  h+=`<div id="drv-trip-map" style="height:38vh;min-height:220px;position:relative;background:var(--s2)">
     <div id="drv-trip-map-state" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;background:var(--s1);color:var(--ink2);border:1px solid var(--b1);border-radius:14px;padding:10px 14px;font-size:12px;font-weight:700;box-shadow:0 4px 18px #0002">${L==='fa'?'در حال بارگذاری مسیر…':'Loading route…'}</div>
   </div>`;
   h+=`<div style="padding:16px 20px 90px">`;
@@ -14431,6 +14525,7 @@ function TripDetail(){
   h+=`</div>`;
 
   h+=`<div style="font-size:14px;font-weight:800;margin:20px 2px 10px">${L==='fa'?'زمان‌بندی سفر':'Trip Timeline'}</div>`;
+  h+=`<div id="drv-trip-timeline">`;
   if(timeline===undefined){
     h+=`<div style="text-align:center;padding:24px;color:var(--ink3);font-size:13px">${L==='fa'?'در حال بارگذاری…':'Loading…'}</div>`;
   } else if(!timeline.length){
@@ -14438,14 +14533,37 @@ function TripDetail(){
   } else {
     h+=TripTimeline(timeline);
   }
+  h+=`</div>`; // #drv-trip-timeline
   h+=`</div></div>`;
   return h;
+}
+/* ── v401: patch ONLY the timeline block when it finishes loading.
+   drvLoadTimelineIfNeeded() used to call render(), which reassigns
+   #screen.innerHTML and destroys every node inside it — including
+   #drv-trip-map, the element the Google Map object is bound to. The map then
+   kept drawing into a detached node while the new, visible container stayed
+   empty: the completely grey Trip Detail map. Patching in place keeps the map
+   node alive across timeline arrival. ── */
+function drvTripApplyTimeline(sessionId){
+  const host=document.getElementById('drv-trip-timeline');
+  if(!host){ render(); return; }
+  const timeline=_drvTimelineCache[sessionId];
+  if(timeline===undefined){ return; }
+  if(!timeline.length){
+    host.innerHTML=`<div style="font-size:12px;color:var(--ink3)">${L==='fa'?'داده‌ای برای این سفر یافت نشد':'No timeline data found for this trip'}</div>`;
+  } else {
+    host.innerHTML=TripTimeline(timeline);
+  }
+  try{ if(typeof bindFamily==='function') bindFamily(); }catch(e){}
+  // The map node was deliberately NOT touched; make sure it still lays out
+  // correctly now that the page height below it changed.
+  try{ MBMMap.invalidate(); }catch(e){}
 }
 /* Mount the Trip Detail route map — draws the FULL trip polyline (from the
    sample store, same source deriveTimeline used), not just the live queue. */
 let _drvTripSamplesCache={};
 function drvSanitizeRouteSamples(samples,routeContext){
-  const rows=(Array.isArray(samples)?samples:[])
+  const mapped=(Array.isArray(samples)?samples:[])
     .map((s,i)=>{
       if(!s||typeof s!=='object')return s;
       const lat=s.lat!=null?s.lat:s.latitude;
@@ -14453,9 +14571,41 @@ function drvSanitizeRouteSamples(samples,routeContext){
       let t=s.t||s.capturedAt||s.at||null;
       if(!t&&s.capturedAtMs!=null&&Number.isFinite(+s.capturedAtMs))t=new Date(+s.capturedAtMs).toISOString();
       return Object.assign({},s,{lat:+lat,lng:+lng,t,seq:Number.isFinite(+s.seq)?+s.seq:i});
-    })
+    });
+  // ── v401: reversed lat/lng detection runs BEFORE the validity filter. A
+  //    swapped pair has lat=147.x, which the -90..90 range test would discard
+  //    first, leaving zero points and an empty map instead of a fixable route.
+  //    The correction is NEVER speculative: it is applied only when the trip's
+  //    OWN recorded start coordinate proves it — the rows as written must be
+  //    nowhere near that anchor while the swapped rows land close to it. With
+  //    no trustworthy anchor the data is left exactly as stored.
+  drvSanitizeRouteSamples._lastReversed=false;
+  if(mapped.length>=2){
+    const anchorLat=+((routeContext&&routeContext.startLat)!=null?routeContext.startLat:NaN);
+    const anchorLng=+((routeContext&&routeContext.startLng)!=null?routeContext.startLng:NaN);
+    const anchorOk=Number.isFinite(anchorLat)&&Number.isFinite(anchorLng)
+      && !(Math.abs(anchorLat)<0.0001&&Math.abs(anchorLng)<0.0001)
+      && anchorLat>=-90&&anchorLat<=90&&anchorLng>=-180&&anchorLng<=180;
+    if(anchorOk){
+      const NEAR_M=200000;
+      const near=(la,ln)=>Number.isFinite(la)&&Number.isFinite(ln)
+        && la>=-90&&la<=90&&ln>=-180&&ln<=180
+        && famHaversineM(anchorLat,anchorLng,la,ln)<=NEAR_M;
+      const asIs=mapped.filter(r=>near(r.lat,r.lng)).length;
+      const swapped=mapped.filter(r=>near(r.lng,r.lat)).length;
+      if(asIs===0 && swapped>=Math.max(2,Math.ceil(mapped.length*0.8))){
+        mapped.forEach(r=>{ const tmp=r.lat; r.lat=r.lng; r.lng=tmp; });
+        drvSanitizeRouteSamples._lastReversed=true;
+        console.warn('[trip-route] legacy reversed lat/lng detected and corrected',{rows:mapped.length});
+      }
+    }
+  }
+  const rows=mapped
+    // v401: null-island (0,0) is a corrupted/default fix, never a real one for
+    // this app's users, and it was previously allowed through the range check.
     .filter(s=>s&&s.accepted!==false&&Number.isFinite(+s.lat)&&Number.isFinite(+s.lng)
       && +s.lat>=-90&&+s.lat<=90&&+s.lng>=-180&&+s.lng<=180
+      && !(Math.abs(+s.lat)<0.0001&&Math.abs(+s.lng)<0.0001)
       && (s.accuracyM==null||(+s.accuracyM>=0&&+s.accuracyM<=150)))
     .map(s=>Object.assign({},s,{lat:+s.lat,lng:+s.lng}))
     .sort((a,b)=>{
@@ -14513,44 +14663,150 @@ function drvSanitizeRouteSamples(samples,routeContext){
   });
   return out;
 }
+/* ══ v401: Trip Detail route map — deterministic lifecycle ══
+   Previously this function fired once, immediately after the samples promise
+   resolved, and assumed the map was usable. Three independent things could be
+   untrue at that moment: the Google Maps SDK might still be loading (init()
+   returns null and defers), the container might have been swapped out by a
+   re-render, and the camera padding could still be the Family screen's. Each
+   failure was silent, leaving either the bare container (grey) or a world-zoom
+   camera (ocean). Every one of those is now an explicit, checked state. */
+let _drvTripPaintTimer=null;
+let _drvTripPaintTries=0;
+let _drvTripRouteDiag=null;
+const DRV_TRIP_MAX_TRIES=40;      // ~6s at 150ms
+function drvTripRouteDiag(){ return _drvTripRouteDiag?Object.assign({},_drvTripRouteDiag):null; }
+function drvTripSetState(msg){
+  const el=document.getElementById('drv-trip-map'); if(!el) return;
+  let st=document.getElementById('drv-trip-map-state');
+  if(!msg){ if(st)st.remove(); return; }
+  if(!st){
+    st=document.createElement('div');
+    st.id='drv-trip-map-state';
+    st.setAttribute('style','position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;background:var(--s1);color:var(--ink2);border:1px solid var(--b1);border-radius:14px;padding:10px 14px;font-size:12px;font-weight:700;box-shadow:0 4px 18px #0002;max-width:82%;text-align:center;line-height:1.45');
+    el.appendChild(st);
+  }
+  st.textContent=msg;
+}
+function drvTripCancelPaintRetry(){
+  if(_drvTripPaintTimer){ clearTimeout(_drvTripPaintTimer); _drvTripPaintTimer=null; }
+  _drvTripPaintTries=0;
+}
+function drvTripSchedulePaintRetry(reason){
+  if(_drvTripPaintTimer) return;
+  if(_drvTripPaintTries>=DRV_TRIP_MAX_TRIES){
+    if(_drvTripRouteDiag)_drvTripRouteDiag.failure=reason;
+    console.warn('[trip-route] gave up waiting for the map', {reason, diag:_drvTripRouteDiag});
+    drvTripSetState(L==='fa'
+      ? 'نقشه بارگذاری نشد. اتصال اینترنت را بررسی کنید و دوباره وارد شوید.'
+      : 'The map could not be loaded. Check your connection and reopen this trip.');
+    return;
+  }
+  _drvTripPaintTries++;
+  _drvTripPaintTimer=setTimeout(()=>{ _drvTripPaintTimer=null; drvTripPaintRoute(); },150);
+}
 function drvTripPaintRoute(){
   const sessionId=_drvActiveTripId;
+  // Not on this screen any more — stop; a stale retry must never repaint over
+  // whatever screen the user actually navigated to.
+  if(!(screen==='module'&&currentModule==='family'&&famView==='drivingTrip')){ drvTripCancelPaintRetry(); return; }
   const rawSamples=_drvTripSamplesCache[sessionId];
-  if(!sessionId||rawSamples===undefined)return;
+  if(!sessionId||rawSamples===undefined) return;   // samples still loading; drvTripMount will call back
+  const el=document.getElementById('drv-trip-map');
+  // Container must exist AND still be attached to the live document. An element
+  // detached by a re-render has a valid object reference and a zero rect.
+  if(!el||!document.body.contains(el)){ drvTripSchedulePaintRetry('container-detached'); return; }
+
   const eng=drvEngine(),uid=drvUid();
   const sess=(eng&&uid)?eng.session(uid,sessionId):null;
   const samples=drvSanitizeRouteSamples(rawSamples,sess||{});
-  const state=document.getElementById('drv-trip-map-state');
-  if(samples.length>=2){
-    if(!MBMMap.mounted('drv-trip-map')){
-      MBMMap.init('drv-trip-map',[samples[0].lat,samples[0].lng]);
-      MBMMap.invalidate();
-    }
-    MBMMap.drawRoute(samples);
-    // Trip Detail owns this camera while mounted. Do not mutate the live
-    // Family follow controller, which must resume unchanged on return.
-    MBMMap.fitAll(samples.map(s=>[s.lat,s.lng]));
-    if(state)state.remove();
+  const srcDiag=(eng&&eng.lastSamplesDiag)?eng.lastSamplesDiag():null;
+  _drvTripRouteDiag={
+    sessionId,
+    firestorePath:srcDiag?srcDiag.path:null,
+    liveSamples:srcDiag?srcDiag.live:null,
+    localSamples:srcDiag?srcDiag.local:null,
+    remoteSamples:srcDiag?srcDiag.remote:null,
+    rawSamples:Array.isArray(rawSamples)?rawSamples.length:0,
+    validSamples:samples.length,
+    rejected:(Array.isArray(rawSamples)?rawSamples.length:0)-samples.length,
+    reversedCorrected:!!drvSanitizeRouteSamples._lastReversed,
+    firstPoint:samples.length?[samples[0].lat,samples[0].lng]:null,
+    lastPoint:samples.length?[samples[samples.length-1].lat,samples[samples.length-1].lng]:null,
+    readError:srcDiag?srcDiag.error:null,
+    containerH:Math.round(el.getBoundingClientRect().height),
+    sdkReady:MBMMap.available(),
+    failure:null
+  };
+
+  // Honest terminal state: there is genuinely no route to draw. Never leave the
+  // container bare and never fabricate a camera position for it.
+  if(samples.length<2){
+    drvTripCancelPaintRetry();
+    try{ MBMMap.drawRoute(null); }catch(e){}
+    _drvTripRouteDiag.failure='no-route-samples';
+    drvTripSetState(L==='fa'
+      ? 'مسیر دقیق این سفر ثبت نشده است'
+      : 'Detailed route was not recorded for this trip');
     return;
   }
-  if(state){
-    state.textContent=L==='fa'
-      ? 'جزئیات مسیر برای این سفر قدیمی ذخیره نشده است'
-      : 'Detailed route was not stored for this older trip';
+
+  // Gate 1: the container must have a real, non-zero height before a map is
+  // created in it — Google Maps created in a zero-height box never paints tiles.
+  const h=el.getBoundingClientRect().height;
+  if(h<40){ drvTripSchedulePaintRetry('container-zero-height'); return; }
+
+  // Gate 2: the SDK must actually be ready. init() starts the async loader and
+  // returns null when it is not; calling drawRoute/fitAll in that tick is a
+  // silent no-op, which is what left the container grey.
+  if(!MBMMap.mounted('drv-trip-map')){
+    MBMMap.init('drv-trip-map',[samples[0].lat,samples[0].lng]);
   }
+  if(!MBMMap.available()||!MBMMap.get()){
+    drvTripSetState(L==='fa'?'در حال بارگذاری نقشه…':'Loading map…');
+    drvTripSchedulePaintRetry('sdk-not-ready');
+    return;
+  }
+
+  // The screen has just become visible / the layout changed — resize first, so
+  // the single camera decision below is computed against the real viewport.
+  MBMMap.invalidate();
+
+  // ── Requirements 4 + 6: Trip Detail owns its OWN padding, derived from THIS
+  //    map's real height, and never inherits the Family sheet's padding.
+  const r=el.getBoundingClientRect();
+  const padY=Math.max(16,Math.min(56,Math.round(r.height*0.12)));
+  const padX=Math.max(16,Math.min(56,Math.round(r.width *0.10)));
+  MBMMap.setPadding({top:padY,right:padX,bottom:padY,left:padX});
+
+  MBMMap.drawRoute(samples);
+  // Exactly ONE camera decision. No competing setView/panTo/fitBounds.
+  MBMMap.fitAll(samples.map(s=>[s.lat,s.lng]));
+  drvTripCancelPaintRetry();
+  drvTripSetState(null);
+  console.debug('[trip-route] painted', _drvTripRouteDiag);
 }
 function drvTripMount(){
   const el=document.getElementById('drv-trip-map'); if(!el) return;
   const eng=drvEngine(); const uid=drvUid(); const sessionId=_drvActiveTripId;
   if(!eng||!uid||!sessionId) return;
   const sess=eng.session(uid,sessionId); if(!sess) return;
+  drvTripCancelPaintRetry();
+  // v401: the Family screen's camera padding must not survive into this screen
+  // even if destroy() was not reached on the way here.
+  try{ MBMMap.setPadding({top:0,right:0,bottom:0,left:0}); }catch(e){}
+  // Already have the samples from an earlier mount of the same trip — repaint
+  // straight away instead of waiting on another round-trip.
+  if(_drvTripSamplesCache[sessionId]!==undefined){ drvTripPaintRoute(); return; }
+  drvTripSetState(L==='fa'?'در حال بارگذاری مسیر…':'Loading route…');
   // Do not initialize at a fabricated/default coordinate. Wait for genuine
   // stored route points; otherwise retain the honest unavailable message.
   eng.sessionSamples(uid,sessionId).then(samples=>{
     if(screen!=='module'||currentModule!=='family'||famView!=='drivingTrip'||_drvActiveTripId!==sessionId) return;
     _drvTripSamplesCache[sessionId]=Array.isArray(samples)?samples:[];
     drvTripPaintRoute();
-  }).catch(()=>{
+  }).catch((e)=>{
+    console.warn('[trip-route] sample load failed', e);
     _drvTripSamplesCache[sessionId]=[];
     drvTripPaintRoute();
   });
@@ -14672,6 +14928,9 @@ const MBMMap = (function(){
      ═══════════════════════════════════════════════════════════════════════ */
   let _map=null, _elId=null, _mapEl=null, _loaded=false, _loadErr=null, _apiLoading=false, _apiReady=false;
   let _markers={}, _markerMeta={}, _markerPos={}, _animTimers={};
+  // v401: _markerPos is the last COMMANDED target; _markerRenderPos is where the
+  // marker actually is on screen right now (updated every animation frame).
+  let _markerRenderPos={};
   let _accCircle=null, _coneOverlay=null, _routeLine=null, _arrivedInfo=null, _arrivedAnchorMarker=null;
   let _pendingInit=null; // {elId, center} queued while the SDK is still loading
 
@@ -14873,7 +15132,21 @@ const MBMMap = (function(){
       if(latlngs.length===1){ _panToWithPadding(latlngs[0]); _map.setZoom(16); return; }
       const g=window.google.maps; const b=new g.LatLngBounds();
       latlngs.forEach(p=>b.extend({lat:p[0],lng:p[1]}));
-      _map.fitBounds(b, {top:_pad.top||70, right:_pad.right||70, bottom:_pad.bottom||70, left:_pad.left||70});
+      // ── v401 FIX: clamp padding against the map container's REAL pixel size.
+      //    fitBounds() with padding whose sum exceeds the container dimension
+      //    has no solution, and Google resolves it by zooming all the way out
+      //    to world view (the blue "ocean" screen). Never let the sum of
+      //    opposing paddings exceed 60% of that axis.
+      const r=_mapEl?_mapEl.getBoundingClientRect():null;
+      const w=(r&&r.width)?r.width:320, hgt=(r&&r.height)?r.height:320;
+      const clampAxis=(a,bb,limit)=>{
+        const A=Math.max(0,a||0), B=Math.max(0,bb||0), max=limit*0.6, sum=A+B;
+        if(sum<=max||sum===0) return [A,B];
+        const k=max/sum; return [Math.round(A*k), Math.round(B*k)];
+      };
+      const [pt,pb]=clampAxis(_pad.top||24, _pad.bottom||24, hgt);
+      const [pl,pr]=clampAxis(_pad.left||24, _pad.right||24, w);
+      _map.fitBounds(b, {top:pt, right:pr, bottom:pb, left:pl});
     }catch(e){}
   }
   function invalidate(){ if(_map)try{ window.google.maps.event.trigger(_map,'resize'); }catch(e){} }
@@ -14948,22 +15221,42 @@ const MBMMap = (function(){
 
   /* Smooth eased glide of an existing marker to a new position — GPS drives
      this on every valid callback, never waiting on Firestore. */
+  /* ── v401 FIX (requirement 10): the old implementation ended with
+     `_markerPos[uid]=to;` executed SYNCHRONOUSLY right after starting the
+     interval, not when the tween finished. So the next fix read `from =
+     _markerPos[uid]` and got the PREVIOUS TARGET rather than the position the
+     marker was actually rendered at. Cancelling a running tween therefore
+     teleported the marker from mid-path to the previous target before the new
+     tween began — the visible "jumping" while driving. The animation now
+     always resumes from the real current visual position. ── */
   function animateMarker(uid, to){
     const mk=_markers[uid]; if(!mk) return;
     if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
-    const from=_markerPos[uid]||to;
+    // Resume from where the marker VISUALLY is, not from the last target.
+    const from=_markerRenderPos[uid]||_markerPos[uid]||to;
+    _markerPos[uid]=to;                       // target (what markerLatLng reports as commanded)
     const dLat=to[0]-from[0], dLng=to[1]-from[1];
     const dist=Math.abs(dLat)+Math.abs(dLng);
-    if(dist<1e-8){ return; }
-    if(dist>0.05){ _markerPos[uid]=to; try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){} return; }
+    if(dist<1e-8){ _markerRenderPos[uid]=to; return; }
+    // A jump this large is a genuine relocation (or a bad fix), not motion —
+    // tweening across it would draw a false path, so snap.
+    if(dist>0.05){
+      _markerRenderPos[uid]=to;
+      try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+      return;
+    }
     const steps=18; let i=0;
     _animTimers[uid]=setInterval(()=>{
       i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t;
       const cur=[from[0]+dLat*e, from[1]+dLng*e];
+      _markerRenderPos[uid]=cur;              // keep the visual truth current every frame
       try{ mk.position={lat:cur[0],lng:cur[1]}; }catch(_){}
-      if(i>=steps){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; _markerPos[uid]=to; try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){} }
+      if(i>=steps){
+        clearInterval(_animTimers[uid]); _animTimers[uid]=null;
+        _markerRenderPos[uid]=to;
+        try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+      }
     },16);
-    _markerPos[uid]=to;
   }
   function famActivityIcon(kind){
     const I={
@@ -15084,14 +15377,14 @@ const MBMMap = (function(){
       applyHtml(el);
       const mk=makeMapMarker(uid, latlng, el);
       mk._el=el;
-      _markers[uid]=mk; _markerPos[uid]=latlng;
+      _markers[uid]=mk; _markerPos[uid]=latlng; _markerRenderPos[uid]=latlng;
     }
     _markerMeta[uid]={pinCls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color,
       activityType:meta.activityType,battery:meta.battery,speedKph:meta.speedKph,
       calloutL1:meta.calloutL1,calloutL2:meta.calloutL2};
   }
   function clearMarkersExcept(uids){
-    Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
+    Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; delete _markerRenderPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
   }
 
   function setClusterMarker(key, latlng, members, selected, onClick){
@@ -15105,7 +15398,7 @@ const MBMMap = (function(){
     const cls='fam-cluster'+(selected?' sel':'');
     if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
     else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
-      const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _markerPos[key]=latlng; }
+      const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _markerPos[key]=latlng; _markerRenderPos[key]=latlng; }
     _markerMeta[key]={cls};
   }
 
@@ -15167,8 +15460,18 @@ const MBMMap = (function(){
     if(_accCircle){ try{_accCircle.setMap(null);}catch(e){} _accCircle=null; }
     if(_coneOverlay){ try{_coneOverlay.setMap(null);}catch(e){} _coneOverlay=null; }
     if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
-    _markers={}; _markerMeta={}; _markerPos={}; _loaded=false;
+    _markers={}; _markerMeta={}; _markerPos={}; _markerRenderPos={}; _loaded=false;
     _map=null; _elId=null; _mapEl=null;
+    // ── v401 FIX (requirement 5): _pad is a MODULE-LEVEL singleton shared by
+    //    every screen that mounts this one map object. Only the Family live
+    //    screen ever wrote it (famUpdateCameraPadding), with a bottom value of
+    //    sheetHeight + ~162px — 436px at the partial detent, 927px at full.
+    //    destroy() did not clear it, so Trip Detail's 38vh (~348px) map then
+    //    called fitBounds() with ~622px of vertical padding on a 348px map.
+    //    Google Maps cannot satisfy that and falls back to world zoom, which
+    //    renders as the blue "ocean" map with the route off-screen. Screen
+    //    teardown now resets the padding to neutral.
+    _pad={top:0,right:0,bottom:0,left:0};
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            setCamera, cancelCameraAnimation,
@@ -15882,8 +16185,12 @@ function famComposeStatusText(m){
   }
   const s=m.state||{};
   if(d.activityType==='driving'){
-    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
-    const l1=road?(L==='fa'?`در حال رانندگی نزدیک ${road}`:`Driving near ${road}`):(L==='fa'?'در حال رانندگی':'Driving');
+    // v401 (confirmed bug 2): while driving the callout is the SHORT label only.
+    // The road/address is not appended here — at driving speed it changes every
+    // few seconds, is frequently a full street address, and pushed a long text
+    // block above the marker. The car icon + speed live in the marker's own pill.
+    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt); // keep the geocode warm for the stationary view
+    const l1=(L==='fa'?'در حال رانندگی':'Driving');
     // Live speed: priority 1 = real coords.speed when valid; priority 2 =
     // calculated from real GPS distance/elapsed time between the last two
     // accepted fixes. Never hard-coded, never frozen — if genuinely
@@ -16127,7 +16434,9 @@ const FamGeo = (function(){
       if(named){ line1 = (L==='fa'? `نزدیک ${named}` : `Near ${named}`); full=[named, suburbLine].filter(Boolean).join(', '); }
       else { line1 = suburb || (L==='fa'?'موقعیت زنده':'Live location'); full=suburbLine||line1; }
     }
-    return { line1, line2: suburbLine, full };
+    // v401 (requirement 9): expose the STRUCTURED road component so callers that
+    // want a bare road name never have to string-slice a formatted address.
+    return { line1, line2: suburbLine, full, road: road||null };
   }
   let _lastLookup=null; // exposed diagnostic snapshot — see famGeoDiagnosticInfo()
   function pump(){
@@ -16159,7 +16468,7 @@ const FamGeo = (function(){
           }
           if(res && (res.address || res.display_name)){
             const f=format(res.address, res.display_name);
-            cache[k]={ line1:f.line1, line2:f.line2, full:f.full, ts:Date.now(), lat:job.lat, lng:job.lng };
+            cache[k]={ line1:f.line1, line2:f.line2, full:f.full, road:f.road||null, ts:Date.now(), lat:job.lat, lng:job.lng };
             const addr=res.address||{};
             const selectedField=addr.suburb?'suburb':addr.town?'town':addr.village?'village':addr.hamlet?'hamlet'
               :addr.city_district?'city_district':addr.neighbourhood?'neighbourhood':addr.quarter?'quarter'
@@ -16263,10 +16572,16 @@ function famBareRoadName(lat,lng,fixTimestamp){
   // No saved-place-name shortcut — always the real road name.
   const cached=FamGeo.get(lat,lng);
   if(cached){
-    // cached.line1 may itself be prefixed ("Near <road>") by the geocoder's
-    // own no-house-number case — strip that prefix since we're building our
-    // own "Driving/Walking near X" template around it.
-    return cached.line1.replace(/^(Near |نزدیک )/,'');
+    // ── v401 FIX (requirement 9): this used to return cached.line1 with only a
+    //    "Near " prefix stripped. line1 is the FULL formatted first address
+    //    line — "100 Elizabeth Street, Hobart TAS 7000" whenever a house number
+    //    exists — so, despite the function's name, callers were interpolating a
+    //    complete address into "Driving near <X>", which is the long text seen
+    //    above the marker while driving. Use the structured road component the
+    //    geocoder already parsed; if it genuinely has no road, return null and
+    //    let the caller show the short plain label.
+    if(cached.road) return cached.road;
+    return null;
   }
   FamGeo.request(lat,lng,fixTimestamp); // kick off a lookup for next time; don't block on it
   return null;
@@ -16312,8 +16627,15 @@ function famLiveMemberDetail(m, isMe){
     const li=fb.location.lastFixInfo?fb.location.lastFixInfo():null;
     // #9/#10: only claim "active" if a real watch callback arrived recently.
     // If it's been too long since the last callback, downgrade to "stale".
+    // v401: ONE authoritative age drives BOTH the label and the "updated X ago"
+    // text below, so "Location stale · updated 0 min ago" is now structurally
+    // impossible rather than merely unlikely.
     const STALE_CB_MS=45000;
-    if(ls==='active' && li && li.callbackAgeMs!=null && li.callbackAgeMs>STALE_CB_MS) ls='stale';
+    const freshAge=(li&&li.freshnessAgeMs!=null)?li.freshnessAgeMs
+                  :((li&&li.callbackAgeMs!=null)?li.callbackAgeMs:null);
+    if(ls==='active' && freshAge!=null && freshAge>STALE_CB_MS) ls='stale';
+    // A "stale" verdict paired with a fresh age is a contradiction; trust the age.
+    if(ls==='stale' && freshAge!=null && freshAge<=STALE_CB_MS) ls='active';
     const map={
       requesting:{fa:'در حال درخواست اجازه…',en:'Requesting permission…',c:'#f5a623'},
       obtaining:{fa:'در حال دریافت موقعیت…',en:'Obtaining location…',c:'#f5a623'},
@@ -16331,7 +16653,10 @@ function famLiveMemberDetail(m, isMe){
     // "updated Xm ago" age are kept for everyone: that's the honest,
     // non-fabricated status this banner exists to guarantee.
     const accTxt=(famDevMode()&&li&&li.accuracy!=null)?`±${li.accuracy}m`:'';
-    const ageTxt=(li&&li.at)?famRelTime(li.at):'';
+    // v401: derived from freshAge (the same value the label above used), not
+    // from li.at independently — the two clocks are what used to disagree.
+    const ageTxt=(freshAge!=null)?famRelTime(new Date(Date.now()-freshAge).toISOString())
+                :((li&&li.at)?famRelTime(li.at):'');
     h+=`<div class="fam-locstate" style="--sc:${info.c}">
       <span class="fam-locstate-dot"></span>
       <span class="fam-locstate-txt">${L==='fa'?info.fa:info.en}</span>
@@ -16530,6 +16855,7 @@ function famLivePaintMarkers(members, sel){
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
    already-mounted map (no destroy/re-init on routine refresh). ── */
 let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
+let _famPrevMountView=null; // v401: last mounted Family view, used to detect a FRESH entry to Location
 function famLiveMount(){
   const el=document.getElementById('fam-map');
   if(!el) return;
@@ -16636,6 +16962,39 @@ function famMapTileError(){
    visible map area accounting for header, right-side control column, the
    Check-in/SOS row (which itself tracks the sheet), and the sheet's current
    height. Recomputed on every sheet height change (drag + detent snap). ── */
+/* ── v401: real-chrome measurement. The sheet geometry previously used magic
+   numbers (150px) and --fam-navclear (an 82px CONTENT clearance value, not the
+   nav bar's real height). Both are now measured from the live DOM so the sheet
+   can never overlap the header nor leave a map strip above the nav bar. ── */
+function famSyncChromeMetrics(){
+  try{
+    const root=document.documentElement;
+    const wrap=document.getElementById('fam-live-wrap'); if(!wrap) return;
+    const nav=wrap.querySelector('.fam-bottomnav');
+    const head=wrap.querySelector('#fam-live-top');
+    if(nav){ const h=Math.round(nav.getBoundingClientRect().height); if(h>0) root.style.setProperty('--fam-navh', h+'px'); }
+    if(head){ const h=Math.round(head.getBoundingClientRect().height); if(h>0) root.style.setProperty('--fam-headh', h+'px'); }
+  }catch(e){}
+}
+function famChromePx(varName, fallback){
+  try{
+    const n=parseFloat(getComputedStyle(document.documentElement).getPropertyValue(varName));
+    return Number.isFinite(n)&&n>0?n:fallback;
+  }catch(e){ return fallback; }
+}
+/* THE single source of truth for the three sheet detent heights. Both
+   famEnsureSheetVisible() and famSheetInitDrag() previously kept their own
+   duplicate copy of this array — they could and did disagree. */
+function famSheetHeights(){
+  const wrap=document.getElementById('fam-live-wrap');
+  const H=(wrap?Math.round(wrap.getBoundingClientRect().height):0)||window.innerHeight||780;
+  const navH=famChromePx('--fam-navh',60);
+  const headH=famChromePx('--fam-headh',74);
+  const full=Math.max(200, Math.round(H-navH-headH-8));
+  const partial=Math.max(150, Math.min(full, Math.round(H*0.30)));
+  const collapsed=Math.min(130, partial);
+  return [collapsed, partial, full];
+}
 function famUpdateCameraPadding(sheetPx){
   try{
     const HEADER_H=110;
@@ -16664,16 +17023,9 @@ function famUpdateCameraPadding(sheetPx){
 function famEnsureSheetVisible(){
   try{
     const sheet=document.getElementById('fam-sheet'); if(!sheet) return;
-    const H=window.innerHeight||780;
-    const heights=[130, Math.round(H*0.30), Math.max(200,H-150)];
+    // v401: goes through the one shared applier — no private heights copy.
     if(_famSheetDetent<1){
-      _famSheetDetent=1;
-      sheet.classList.remove('detent-0','detent-2');
-      sheet.style.height=heights[1]+'px';
-      const wrap=document.getElementById('fam-live-wrap');
-      if(wrap) wrap.style.setProperty('--fam-sheet-h', heights[1]+'px');
-      try{ famUpdateCameraPadding(heights[1]); }catch(e){}
-      try{ MBMMap.invalidate(); }catch(e){}
+      famApplySheetDetent(1);
       // Re-pan to the selected member AFTER padding reflects the now-taller
       // sheet — famLiveApply's own pan (which ran before this) used the OLD,
       // shorter padding, so the pin could end up framed for a smaller sheet
@@ -16687,70 +17039,86 @@ function famEnsureSheetVisible(){
     if(body) body.scrollTop=0;
   }catch(e){}
 }
+/* ── v401: detent application lifted to module scope so EVERY caller (mount,
+   drag release, ensure-visible, resize, screen entry) goes through one
+   implementation reading one measured heights array. Previously
+   famEnsureSheetVisible() and famSheetInitDrag() each kept a private copy of
+   the heights array and could disagree. ── */
+function famApplySheetDetent(i){
+  const sheet=document.getElementById('fam-sheet'); if(!sheet) return;
+  famSyncChromeMetrics();
+  const heights=famSheetHeights();
+  _famSheetDetent=Math.max(0,Math.min(2,i));
+  sheet.classList.remove('detent-0','detent-2');
+  if(_famSheetDetent===0)sheet.classList.add('detent-0');
+  if(_famSheetDetent===2)sheet.classList.add('detent-2');
+  sheet.style.height=heights[_famSheetDetent]+'px';
+  const wrap=document.getElementById('fam-live-wrap');
+  if(wrap) wrap.style.setProperty('--fam-sheet-h', heights[_famSheetDetent]+'px');
+  try{ famUpdateCameraPadding(heights[_famSheetDetent]); }catch(e){}
+  try{ MBMMap.invalidate(); }catch(e){}
+}
 function famSheetInitDrag(){
   const sheet=document.getElementById('fam-sheet'); if(!sheet)return;
   const grab=sheet.querySelector('.fam-sheet-draghead'); if(!grab)return;
+  famSyncChromeMetrics();
   // Idempotent: famLiveApply() can re-run this on every snapshot. Bind the
   // grab/window listeners at most once per sheet element so we never leak
-  // duplicate mousemove/mouseup handlers on the window.
-  if(sheet._dragBound){ return; }
+  // duplicate mousemove/mouseup handlers on the window. A re-entry with the
+  // listeners already bound still re-applies the detent, because #screen's
+  // re-render can hand us a sheet element whose inline height was lost.
+  if(sheet._dragBound){ famApplySheetDetent(_famSheetDetent); return; }
   sheet._dragBound=true;
-  const H=window.innerHeight||780;
-  // heights in px per detent — 0=collapsed (peek), 1=partial (CSS default
-  // 40vh), 2=full but NEVER covering the 90px header reserved by CSS
-  // max-height. Height-based (not transform) so the sheet is ALWAYS visible
-  // from its default CSS even if this JS never runs.
-  const heights=[130, Math.round(H*0.30), Math.max(200,H-150)];
-  // Single source of truth the buttons + camera padding both read: writes the
-  // CURRENT real sheet height (px) as a CSS var on the map wrapper. .fam-map-cta
-  // (Check in/SOS) is bound to this via bottom:calc(var(--fam-sheet-h) + 14px),
-  // so it tracks the sheet on every frame — drag, detent snap, or resize —
-  // instead of the old hardcoded 42vh that never matched the live sheet.
-  function syncSheetVar(px, updatePadding){
+  function syncSheetVar(px){
     const wrap=document.getElementById('fam-live-wrap');
     if(wrap) wrap.style.setProperty('--fam-sheet-h', Math.round(px)+'px');
-    // Camera padding recompute calls Google Maps setOptions() internally,
-    // which is NOT free even for a no-op-ish option — calling it on every
-    // drag frame (up to 60/sec) is what made the drag gesture feel heavy
-    // and slow. Only recompute it when explicitly requested (detent apply
-    // / release), never on intermediate touchmove frames.
-    if(updatePadding){ try{ famUpdateCameraPadding(px); }catch(e){} }
   }
-  function apply(i){
-    _famSheetDetent=Math.max(0,Math.min(2,i));
-    sheet.classList.remove('detent-0','detent-2');
-    if(_famSheetDetent===0)sheet.classList.add('detent-0');
-    if(_famSheetDetent===2)sheet.classList.add('detent-2');
-    sheet.style.height=heights[_famSheetDetent]+'px';
-    syncSheetVar(heights[_famSheetDetent], true);
-  }
-  apply(_famSheetDetent);
+  famApplySheetDetent(_famSheetDetent);
   // Belt-and-braces: some Android WebViews only respect touch-action set
-  // directly on the element's inline style (CSS class alone can lose to a
-  // parent's touch-action under some WebView versions), and this is exactly
-  // what let the browser's native scroll gesture "steal" the touch before
-  // our touchmove handler could preventDefault() — the actual cause of the
-  // sheet feeling stuck/unresponsive instead of dragging smoothly.
+  // directly on the element's inline style, which is what let the browser's
+  // native scroll gesture steal the touch before our touchmove handler could
+  // preventDefault().
   grab.style.touchAction='none';
-  let startY=0, startH=heights[_famSheetDetent], dragging=false;
-  const onDown=e=>{ dragging=true; startY=(e.touches?e.touches[0].clientY:e.clientY); startH=sheet.getBoundingClientRect().height; sheet.style.transition='none'; if(e.cancelable)e.preventDefault(); };
+  let startY=0, startH=0, dragging=false, moved=0, heights=famSheetHeights();
+  const onDown=e=>{
+    dragging=true; moved=0; heights=famSheetHeights();
+    startY=(e.touches?e.touches[0].clientY:e.clientY);
+    startH=sheet.getBoundingClientRect().height;
+    sheet.style.transition='none';
+    if(e.cancelable)e.preventDefault();
+  };
   let _dragRaf=null;
   const onMove=e=>{
     if(!dragging)return;
-    if(e.cancelable)e.preventDefault();   // ALWAYS block native scroll during an active drag, not conditionally
-    const y=(e.touches?e.touches[0].clientY:e.clientY); let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt));
+    if(e.cancelable)e.preventDefault();   // ALWAYS block native scroll during an active drag
+    const y=(e.touches?e.touches[0].clientY:e.clientY);
+    moved=Math.max(moved,Math.abs(y-startY));
+    let hgt=startH-(y-startY); hgt=Math.max(heights[0],Math.min(heights[2],hgt));
     sheet.style.height=hgt+'px';
-    // Only the CSS var (cheap, 1:1 with finger movement) updates every
-    // frame — camera padding is deferred to release, see syncSheetVar above.
-    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt, false); }); }
+    // Only the cheap CSS var updates per frame; camera padding waits for release.
+    if(!_dragRaf){ _dragRaf=requestAnimationFrame(()=>{ _dragRaf=null; syncSheetVar(hgt); }); }
   };
-  const onUp=(e)=>{ if(!dragging)return; dragging=false; sheet.style.transition=''; const cur=sheet.getBoundingClientRect().height; let best=0,bd=1e9; heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}}); apply(best); try{ MBMMap.invalidate(); }catch(err){} };
+  const onUp=()=>{
+    if(!dragging)return;
+    dragging=false;
+    sheet.style.transition='';
+    // v401: a TAP (no meaningful travel) steps the sheet DOWN one detent.
+    // This is the escape hatch the sheet never had — if a drag gesture is
+    // swallowed by the WebView for any reason, the user is not trapped with
+    // a sheet covering the map.
+    if(moved<6){ famApplySheetDetent(_famSheetDetent>0?_famSheetDetent-1:1); return; }
+    const cur=sheet.getBoundingClientRect().height;
+    let best=0,bd=1e9;
+    heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}});
+    famApplySheetDetent(best);
+  };
   grab.addEventListener('touchstart',onDown,{passive:false});
   grab.addEventListener('touchmove',onMove,{passive:false});
   grab.addEventListener('touchend',onUp,{passive:true});
   grab.addEventListener('touchcancel',onUp,{passive:true});
   grab.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
 }
+
 /* ── Daily History — real captured route + real arrival/departure/check-in
    events (never fabricated). Day-scoped date navigation. ── */
 let _famHistUid=null;

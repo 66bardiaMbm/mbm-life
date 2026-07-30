@@ -14,11 +14,11 @@ const gradle = fs.readFileSync(
   "utf8"
 );
 
-assert.match(html, /const APP_VERSION='v400'/);
+assert.match(html, /const APP_VERSION='v401'/);
 assert.match(html, /viewport-fit=cover/);
 assert.match(html, /height:30vh/);
-assert.match(gradle, /versionName = "0\.7\.0-v400-life360-route-final"/);
-assert.match(gradle, /asset=v400/);
+assert.match(gradle, /versionName = "0\.7\.1-v401-map-lifecycle-freshness"/);
+assert.match(gradle, /asset=v401/);
 
 assert.match(
   html,
@@ -27,7 +27,7 @@ assert.match(
 );
 assert.match(
   html,
-  /if\(stored\.length<2\)return remote/,
+  /if\(stored\.length<2\)\{[^}]*return remote;\s*\}/,
   "an empty or incomplete local cache must not suppress a valid remote route"
 );
 assert.match(
@@ -81,4 +81,4 @@ assert.doesNotMatch(
   "the bottom sheet must not duplicate the marker's driving state"
 );
 
-console.log("v400 Life360 route tests passed");
+console.log("Life360 route regression tests passed");
