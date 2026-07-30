@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.7.4-v404-native-invite-share"
+        versionCode = 14
+        versionName = "0.7.5-v405-family-circles"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v404\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v405\""
         )
     }
 

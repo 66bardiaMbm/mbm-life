@@ -7,7 +7,7 @@ const kotlin=fs.readFileSync(
   'utf8'
 );
 
-assert.match(html,/const APP_VERSION='v404'/);
+assert.match(html,/const APP_VERSION='v405'/);
 assert.match(kotlin,/@JavascriptInterface\s+fun shareText\(title: String\?, text: String\?, url: String\?\)/);
 assert.match(kotlin,/Intent\(Intent\.ACTION_SEND\)/);
 assert.match(kotlin,/putExtra\(Intent\.EXTRA_TEXT, payload\)/);
@@ -26,4 +26,4 @@ assert.ok(
 );
 assert.doesNotMatch(handler,/navigator\.share[\s\S]*catch\(\(\)=>\{\}\)/);
 
-console.log('v404 native invitation sharing regression tests passed');
+console.log('v405 native invitation sharing regression tests passed');

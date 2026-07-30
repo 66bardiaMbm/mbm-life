@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
@@ -333,7 +334,7 @@ class TrackingService : Service() {
             activityConfidence = if (activityIsFresh) app.preferences.lastActivityConfidence else 0
         )
         val output = detectorMutex.withLock { engine.ingest(fix) }
-        readBatteryPercentage()?.let { app.preferences.batteryPct = it }
+        readBatteryState()
         val nativeDriving = output.trip?.status == "active"
         val movementEngine = movementDetector ?: MovementStateDetector(
             MovementState.fromWireValue(app.preferences.movementState),
@@ -411,6 +412,7 @@ class TrackingService : Service() {
             .put("accuracy", sample.accuracyM ?: JSONObject.NULL)
             .put("speed", sample.filteredSpeedMps ?: JSONObject.NULL)
             .put("battery", app.preferences.batteryPct ?: JSONObject.NULL)
+            .put("batteryCharging", app.preferences.batteryCharging)
             .put("heading", sample.bearingDeg ?: JSONObject.NULL)
             .put("capturedAt", java.time.Instant.ofEpochMilli(sample.capturedAtMs).toString())
             .put(
@@ -448,6 +450,15 @@ class TrackingService : Service() {
         val manager = getSystemService(BatteryManager::class.java) ?: return null
         return manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             .takeIf { it in 0..100 }
+    }
+
+    private fun readBatteryState() {
+        readBatteryPercentage()?.let { app.preferences.batteryPct = it }
+        val status = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        app.preferences.batteryCharging =
+            status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
     }
 
     private fun stopTracking() {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 
-assert.match(html,/const APP_VERSION='v404'/);
+assert.match(html,/const APP_VERSION='v405'/);
 assert.match(html,/const FAM_LOW_BATTERY_PCT=15/);
 assert.match(html,/if\(Number\(pct\)<=FAM_LOW_BATTERY_PCT\)return 'low'/);
 assert.match(html,/if\(Number\(pct\)<=60\)return 'mid'/);

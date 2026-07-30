@@ -1,0 +1,208 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+
+    match /workspaces/{ws}/{document=**} {
+      allow read, write: if signedIn() && ws == 'user_' + me();
+    }
+
+    match /families/{familyId} {
+      function familyPath() {
+        return /databases/$(database)/documents/families/$(familyId);
+      }
+      function familyData() { return get(familyPath()).data; }
+      function isMemberOf() {
+        return signedIn() && familyData().members is map
+          && familyData().members.keys().hasAny([me()]);
+      }
+      function isMemberResource() {
+        return signedIn() && resource.data.members is map
+          && resource.data.members.keys().hasAny([me()]);
+      }
+      function role() {
+        return isMemberOf() ? familyData().members[me()].role : 'none';
+      }
+      function ownerOrAdmin() {
+        return role() in ['owner', 'admin'];
+      }
+      function validInviteJoin() {
+        let member = request.resource.data.members[me()];
+        let code = member.inviteCode;
+        let invitePath = /databases/$(database)/documents/familyInvites/$(code);
+        return member is map
+          && code is string
+          && member.role in ['admin', 'adult', 'child', 'guest']
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['members', 'updatedAt'])
+          && request.resource.data.members.diff(resource.data.members)
+               .affectedKeys().hasOnly([me()])
+          && existsAfter(invitePath)
+          && getAfter(invitePath).data.familyId == familyId
+          && getAfter(invitePath).data.role == member.role
+          && getAfter(invitePath).data.status == 'accepted'
+          && getAfter(invitePath).data.acceptedBy == me();
+      }
+      function validRoadType() {
+        return request.resource.data.type in [
+          'police', 'mobile_speed_camera', 'crash',
+          'congestion', 'roadworks', 'road_closure'
+        ];
+      }
+      function validRoadCreate(reportId) {
+        return isMemberOf()
+          && request.resource.data.id == reportId
+          && request.resource.data.reporterUid == me()
+          && request.resource.data.status == 'active'
+          && validRoadType()
+          && request.resource.data.lat is number
+          && request.resource.data.lat >= -90
+          && request.resource.data.lat <= 90
+          && request.resource.data.lng is number
+          && request.resource.data.lng >= -180
+          && request.resource.data.lng <= 180
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.updatedAt is timestamp
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.expiresAt > request.time
+          && request.resource.data.confirmationCount is int
+          && request.resource.data.confirmationCount >= 0
+          && request.resource.data.rejectionCount is int
+          && request.resource.data.rejectionCount >= 0;
+      }
+
+      allow read: if isMemberResource();
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == me()
+        && request.resource.data.members is map
+        && request.resource.data.members.keys().hasAny([me()])
+        && request.resource.data.members[me()].role == 'owner';
+      allow update: if signedIn() && (
+        (role() == 'owner')
+        || (role() == 'admin'
+          && request.resource.data.ownerUid == resource.data.ownerUid)
+        || (!isMemberOf() && validInviteJoin())
+        || (isMemberOf()
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.members.diff(resource.data.members)
+               .affectedKeys().hasOnly([me()])
+          && (
+            !request.resource.data.members.keys().hasAny([me()])
+            || request.resource.data.members[me()].role == resource.data.members[me()].role
+          ))
+      );
+      allow delete: if signedIn() && resource.data.ownerUid == me();
+
+      match /locations/{uid} {
+        allow read: if isMemberOf();
+        allow write: if isMemberOf() && uid == me();
+      }
+      match /consent/{uid} {
+        allow read: if isMemberOf();
+        allow write: if isMemberOf() && uid == me();
+      }
+      match /routes/{uid} {
+        allow read: if isMemberOf();
+        allow write: if isMemberOf() && uid == me();
+      }
+      match /drivingSessions/{sessionId} {
+        allow read: if isMemberOf();
+        allow create: if isMemberOf()
+          && request.resource.data.id == sessionId
+          && request.resource.data.memberId == me()
+          && request.resource.data.familyId == familyId
+          && request.resource.data.status in ['active', 'ended'];
+        allow update: if isMemberOf()
+          && resource.data.memberId == me()
+          && request.resource.data.memberId == resource.data.memberId
+          && request.resource.data.familyId == resource.data.familyId
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.status in ['active', 'ended'];
+        allow delete: if false;
+        match /samples/{chunkId} {
+          allow read: if isMemberOf();
+          allow create, update: if isMemberOf()
+            && get(/databases/$(database)/documents/families/$(familyId)/drivingSessions/$(sessionId)).data.memberId == me()
+            && request.resource.data.sessionId == sessionId
+            && request.resource.data.chunkIndex is int
+            && request.resource.data.points is list;
+          allow delete: if false;
+        }
+      }
+      match /drivingEvents/{eventId} {
+        allow read: if isMemberOf();
+        allow create: if isMemberOf()
+          && request.resource.data.id == eventId
+          && request.resource.data.memberUid == me();
+        allow update: if isMemberOf()
+          && resource.data.memberUid == me()
+          && request.resource.data.memberUid == resource.data.memberUid
+          && request.resource.data.id == resource.data.id;
+        allow delete: if false;
+      }
+      match /roadReports/{reportId} {
+        allow read: if isMemberOf();
+        allow create: if validRoadCreate(reportId);
+        allow update, delete: if false;
+        match /confirmations/{uid} {
+          allow read: if isMemberOf();
+          allow create: if isMemberOf() && uid == me()
+            && request.resource.data.keys().hasOnly(['uid', 'vote', 'at'])
+            && request.resource.data.uid == me()
+            && request.resource.data.vote in ['still', 'not']
+            && request.resource.data.at == request.time;
+          allow update: if isMemberOf() && uid == me()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['vote', 'at'])
+            && request.resource.data.vote in ['still', 'not']
+            && request.resource.data.at == request.time;
+          allow delete: if false;
+        }
+      }
+      match /{sub}/{docId} {
+        allow read: if isMemberOf();
+        allow write: if sub != 'roadReports'
+          && sub != 'drivingSessions'
+          && sub != 'drivingEvents'
+          && ownerOrAdmin();
+      }
+    }
+
+    match /familyInvites/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && (
+        resource.data.createdBy == me()
+        || (
+          exists(/databases/$(database)/documents/families/$(resource.data.familyId))
+          && get(/databases/$(database)/documents/families/$(resource.data.familyId))
+               .data.members.keys().hasAny([me()])
+        )
+      );
+      allow create: if signedIn()
+        && request.resource.data.createdBy == me()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role in ['admin', 'adult', 'child', 'guest']
+        && exists(/databases/$(database)/documents/families/$(request.resource.data.familyId))
+        && get(/databases/$(database)/documents/families/$(request.resource.data.familyId))
+             .data.members.keys().hasAny([me()]);
+      allow update: if signedIn() && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (
+          (resource.data.createdBy == me()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'revokedAt'])
+            && request.resource.data.status == 'revoked')
+          || (resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'acceptedBy', 'acceptedAt'])
+            && request.resource.data.status == 'accepted'
+            && request.resource.data.acceptedBy == me())
+        );
+      allow delete: if signedIn() && resource.data.createdBy == me();
+    }
+  }
+}
