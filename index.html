@@ -1469,21 +1469,27 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   border:2.5px solid #fff;z-index:4}
 .dark .fam-pin-activity{border-color:#1b1c22}
 .fam-pin-activity svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2.4}
+/* v411 FIX: the marker's activity pill (driving/walking/bicycling badge)
+   now ALWAYS matches Life360's white-pill look, regardless of the app's own
+   dark theme elsewhere — it sits on the light map basemap, not on a dark
+   panel, and Bahman asked specifically for this one element to match the
+   360 reference while the rest of the app's dark theme stays untouched for
+   a later full redesign. The .dark override that used to darken it is gone. */
 .fam-pin-activity-pill{position:absolute;left:48px;top:-10px;min-height:32px;border-radius:17px;padding:5px 10px 5px 7px;
-  display:flex;align-items:center;gap:5px;background:#fff;color:#27232f;box-shadow:0 3px 12px rgba(0,0,0,.24);
+  display:flex;align-items:center;gap:6px;background:#fff;color:#27232f;box-shadow:0 3px 12px rgba(0,0,0,.24);
   border:1px solid rgba(20,20,30,.08);z-index:6;white-space:nowrap;pointer-events:none;font-size:12px;font-weight:800}
-.dark .fam-pin-activity-pill{background:#262733;color:#f2f3f7;border-color:rgba(255,255,255,.08)}
-.fam-pin-activity-pill .motion-ic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  color:#fff;background:var(--fam-purple,#8652FF);flex:none}
-.fam-pin-activity-pill svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2.2}
-/* v401 (confirmed bug 2): the driving pill is now the ONLY place speed appears,
-   so its car icon carries the meaning and is sized accordingly. */
+/* v411: motion-ic is now a plain circular frame behind a colour emoji glyph
+   (🚗/🚴/🚶/🏍️) instead of a flat single-colour SVG on a solid purple disc —
+   closer to Life360's own colourful 3D-style vehicle icon. */
+.fam-pin-activity-pill .motion-ic{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:#f1eefc;flex:none;font-size:16px;line-height:1}
 .fam-pin-activity-pill.driving{min-height:38px;border-radius:20px;padding:5px 13px 5px 6px;font-size:13.5px}
-.fam-pin-activity-pill.driving .motion-ic{width:30px;height:30px}
-.fam-pin-activity-pill.driving svg{width:20px;height:20px;stroke-width:2.1}
-.fam-pin-activity-pill.walking .motion-ic{background:#2f9e72}
-.fam-pin-activity-pill.bicycling .motion-ic{background:#3478d4}
-.fam-pin-activity-pill.motorcycle .motion-ic{background:#d47724}
+.fam-pin-activity-pill.driving .motion-ic{width:32px;height:32px;font-size:20px}
+/* v412: a small side-to-side rock on the walking shoe glyph so it reads as
+   actively moving, not a static icon — matches the reference's animated feel. */
+.fam-pin-activity-pill.walking .motion-ic{animation:fam-walk-shoe 1.1s ease-in-out infinite}
+@keyframes fam-walk-shoe{0%,100%{transform:rotate(-8deg) translateY(0)}50%{transform:rotate(8deg) translateY(-1px)}}
+@media (prefers-reduced-motion: reduce){ .fam-pin-activity-pill.walking .motion-ic{animation:none} }
 .fam-trip-vehicle-icon{width:40px;height:40px;border-radius:11px;background:#8652ff18;color:#a78bfa;
   display:flex;align-items:center;justify-content:center;flex:none}
 .fam-trip-vehicle-icon.active{background:#2fce6b18;color:#2fce6b}
@@ -1860,7 +1866,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v408';
+const APP_VERSION='v413';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -15362,7 +15368,24 @@ const MBMMap = (function(){
         if(typeof famMapLoaded==='function')famMapLoaded();
       });
       _map.addListener('dragstart', ()=>{ try{
-        if(typeof FamilyMapCamera!=='undefined')FamilyMapCamera.pauseByGesture();
+        // ── v410 FIX: while ACTIVELY DRIVING, ignore the map's own dragstart
+        //    entirely. v409 capped the freeze at one 8s window, but on a
+        //    bumpy road the camera still visibly paused/caught-up every 8s —
+        //    unacceptable next to Life360, which never stops following at
+        //    all while driving. A held phone in a car mount registers road
+        //    vibration as spurious touch-drag events; there is no reliable
+        //    way to tell that apart from a deliberate pan by drag distance
+        //    alone at driving zoom levels, so the camera simply keeps
+        //    following live GPS unconditionally for the whole drive — zero
+        //    pauses, matching the reference. The deliberate "view another
+        //    family member" action (case 'live-center-sel') calls
+        //    FamilyMapCamera.pauseByGesture() directly and is NOT gated by
+        //    this dragstart listener, so it is completely unaffected.
+        if(typeof FamilyMapCamera!=='undefined'){
+          const st=FamilyMapCamera.state&&FamilyMapCamera.state();
+          if(st&&st.drivingMode) return;
+          FamilyMapCamera.pauseByGesture();
+        }
       }catch(e){} });
       _apiReady=true;
     }catch(e){ _map=null; _loadErr='load-fail'; showFatal('load-fail'); }
@@ -15577,7 +15600,11 @@ const MBMMap = (function(){
             ? (meta.speedKph!=null?`${meta.speedKph} km/h`:(L==='fa'?'رانندگی':'Driving'))
             : (meta.activityType==='walking'?(L==='fa'?'پیاده':'Walking')
               :(meta.activityType==='bicycling'?(L==='fa'?'دوچرخه':'Bicycle'):(L==='fa'?'موتور':'Motorcycle')));
-          activityBadge=`<div class="fam-pin-activity-pill ${meta.activityType}"><span class="motion-ic"><svg viewBox="0 0 24 24">${icon}</svg></span><span>${esc(label)}</span></div>`;
+          // v412: nicer/more modern glyphs — a proper car for driving, and a
+          // running-shoe for walking (Life360 shows a shoe that appears to be
+          // in motion rather than a walking-person icon).
+          const emojiIcon={driving:'🚙',walking:'👟',bicycling:'🚴',motorcycle:'🏍️'}[meta.activityType]||'';
+          activityBadge=`<div class="fam-pin-activity-pill ${meta.activityType}"><span class="motion-ic">${emojiIcon}</span><span>${esc(label)}</span></div>`;
         }else{
           activityBadge=`<div class="fam-pin-activity${tone}"><svg viewBox="0 0 24 24">${icon}</svg></div>`;
         }
@@ -15856,15 +15883,31 @@ const FamilyMapCamera=(function(){
     follow=false;
     pausedByGesture=true;
     _famFollow=false;
-    if(gestureResumeTimer)clearTimeout(gestureResumeTimer);
-    gestureResumeTimer=setTimeout(()=>{
-      gestureResumeTimer=null;
-      if(!lastTarget)return;
-      follow=true;
-      pausedByGesture=false;
-      _famFollow=true;
-      apply(true);
-    },GESTURE_PAUSE_MS);
+    // ── v409 FIX (root cause of the reported driving freeze): the old code
+    //    unconditionally cleared and restarted the resume timer on EVERY
+    //    dragstart. On a phone mounted in a moving car, road vibration
+    //    triggers spurious dragstart events on the WebView's touch surface —
+    //    each one re-armed a fresh 8-second pause, so on a bumpy stretch the
+    //    camera could stay frozen for minutes, only to snap straight to the
+    //    live GPS position (which kept updating in the background the whole
+    //    time) once vibration finally stopped for one clean 8s window. That
+    //    matches the reported symptom exactly: long freeze, then a jump
+    //    straight to the correct spot.
+    //    Fix: only ARM a new timer if none is already running. A pause that
+    //    is already in flight is left alone, so the freeze is capped at the
+    //    original single GESTURE_PAUSE_MS window no matter how many spurious
+    //    dragstart events fire during it — a genuine single manual pan still
+    //    gets its full intended 8s pause, unchanged.
+    if(!gestureResumeTimer){
+      gestureResumeTimer=setTimeout(()=>{
+        gestureResumeTimer=null;
+        if(!lastTarget)return;
+        follow=true;
+        pausedByGesture=false;
+        _famFollow=true;
+        apply(true);
+      },GESTURE_PAUSE_MS);
+    }
   }
   function resume(pos,zoom){
     if(gestureResumeTimer){clearTimeout(gestureResumeTimer);gestureResumeTimer=null;}
@@ -16066,13 +16109,11 @@ function famLiveHeaderHtml(sel){
    render and the in-place live update so they never diverge. */
 function famLiveSheetBodyHtml(members, sel, myUid){
   let h='';
-  // ── Life360-style category row (People / Pets / Keys / Places). People is the
-  //    active live category; Pets/Keys are honest later-phase placeholders;
-  //    Places opens the real saved-places screen. ──
+  // ── v413: removed the Pets/Keys placeholder tabs (they only showed a
+  //    "coming in a later phase" toast — no function) at Bahman's request.
+  //    People and Places remain, both fully functional. ──
   h+=`<div class="fam-cats">
     <button class="fam-cat on" data-fam="cat-people">${famIcon('people')}</button>
-    <button class="fam-cat" data-fam="cat-pets">${famIcon('paw')}</button>
-    <button class="fam-cat" data-fam="cat-keys">${famIcon('key')}</button>
     <button class="fam-cat" data-fam="cat-places">${famIcon('building')}</button>
   </div>`;
   const addPersonCard=`<div class="fam-pcard fam-pcard-add" data-fam="add-person-open">
@@ -18325,7 +18366,19 @@ async function famAction(act,arg,ev){
       try{saveDB();}catch(e){}
       render(); return;
     }
-    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; famView='live'; render(); window.scrollTo(0,0); return;
+    // ── v413 FIX: this used to call render(), which replaces #screen's
+    //    entire innerHTML — destroying and recreating #fam-map every single
+    //    time a member row is tapped. MBMMap.init() then has to rebuild the
+    //    whole Google Map from scratch in the new container, which briefly
+    //    shows a default/blank projection before re-centering on the real
+    //    target — visible as the photo "jumping to the middle of the screen
+    //    then back". famLiveApply() (used a few lines above by 'live-sel')
+    //    is the correct lightweight path: it patches only the header and
+    //    sheet body, leaving the live map/marker completely undisturbed.
+    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; famView='live';
+      if(screen==='module'&&currentModule==='family'&&typeof famLiveApply==='function'){ famLiveApply(); }
+      else { render(); }
+      window.scrollTo(0,0); return;
     case 'members': go('members'); return;
     case 'places': go('places'); return;
     case 'invites': go('invites'); return;
