@@ -1873,7 +1873,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v415';
+const APP_VERSION='v417';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -2047,7 +2047,7 @@ function loadDB(){
     const d=JSON.parse(raw);
     if(!d||!d.entities)return seedDB(blankDB());
     // ensure all entity collections exist
-    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks','familyMembers','familyPlaces','familyInvites','familyTimeline','famLocations','famRoutes','famConsent']
+    ['tasks','lists','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks','familyMembers','familyPlaces','familyPets','familyKeys','familyInvites','familyTimeline','famLocations','famRoutes','famConsent']
       .forEach(e=>{if(!d.entities[e])d.entities[e]={};});
     // ── Travel data repair (safe, no data loss) ──
     try{
@@ -2779,6 +2779,7 @@ function _renderInner(){
     const _v=(famView==='live'||famView==='dashboard')?'live':famView;
     if(_v==='live' && _famPrevMountView!=='live'){
       _famSheetDetent=1;
+      _famDetailOpen=false;   // v417: a fresh entry to Location always starts on the list, never stuck on a stale detail view
       // Requirement 14: the signed-in user is selected and centred on entry
       // without a manual tap. _famSelUid was also sticky across screens, so a
       // previously-tapped member stayed selected on re-entry.
@@ -10576,6 +10577,78 @@ function famPlaceMeta(t){ return FAM_PLACE_TYPES.find(x=>x[0]===t)||FAM_PLACE_TY
 /* ── Data accessors ── */
 function famMembersMap(){ if(!DB.entities.familyMembers)DB.entities.familyMembers={}; return DB.entities.familyMembers; }
 function famPlacesMap(){ if(!DB.entities.familyPlaces)DB.entities.familyPlaces={}; return DB.entities.familyPlaces; }
+// ── v416: real Pets & Keys tracking (restored per Bahman's explicit request
+// after removing them in v413 — this time actually functional, not a toast).
+// These are simple named/iconed items, saved locally on THIS device via the
+// same saveDB() mechanism Places uses. Honest scope limit: unlike Places,
+// this does NOT yet sync to the other family members' devices through
+// Firestore — that would need a new backend collection + Firestore Rules
+// change deployed outside this file, which is out of reach here. Until that
+// exists, each person's Pets/Keys list is local to their own phone.
+const FAM_PET_ICONS=['🐶','🐱','🐰','🐹','🐦','🐢','🐠','🦜'];
+const FAM_KEY_ICONS=['🔑','🚗','🏠','🚲','🛵','🧳','🚪','🗝️'];
+function famPetsMap(){ if(!DB.entities.familyPets)DB.entities.familyPets={}; return DB.entities.familyPets; }
+function famKeysMap(){ if(!DB.entities.familyKeys)DB.entities.familyKeys={}; return DB.entities.familyKeys; }
+function famTrackedItemsView(kind){
+  const map=kind==='pet'?famPetsMap():famKeysMap();
+  const list=Object.values(map).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+  const addLabel=kind==='pet'?(L==='fa'?'افزودن حیوان خانگی':'Add a pet'):(L==='fa'?'افزودن کلید/وسیله':'Add a key/item');
+  const emptyT=kind==='pet'?(L==='fa'?'هنوز حیوان خانگی نیست':'No pets yet'):(L==='fa'?'هنوز کلید/وسیله‌ای نیست':'No keys yet');
+  const emptyD=kind==='pet'?(L==='fa'?'حیوانات خانگی خانواده را اینجا اضافه کنید.':'Add your family pets here.'):(L==='fa'?'کلیدها یا وسایل مهم را اینجا اضافه کنید.':'Add important keys or items here.');
+  let h=`<div style="padding:0 16px var(--fam-navclear)">`;
+  h+=`<button class="btn" data-fam="${kind}-new" style="width:100%;margin-bottom:12px;background:var(--fam-purple,#8652FF);color:#fff">+ ${addLabel}</button>`;
+  if(!list.length)h+=`<div class="hub-ph"><div class="hub-ph-ic" style="background:#8652ff18;color:var(--fam-purple,#8652FF)">${kind==='pet'?'🐾':'🔑'}</div><div class="hub-ph-t">${emptyT}</div><div class="hub-ph-d">${esc(emptyD)}</div></div>`;
+  list.forEach(it=>{
+    h+=`<div class="ul-row" data-fam="${kind}-open" data-arg="${it.id}" style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--b1);cursor:pointer">
+    <div style="width:40px;height:40px;border-radius:11px;background:#8652ff18;display:flex;align-items:center;justify-content:center;font-size:19px">${esc(it.icon||(kind==='pet'?'🐾':'🔑'))}</div>
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(it.name)}</div>${it.note?`<div style="font-size:12px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.note)}</div>`:''}</div>
+    <span style="color:var(--ink3);opacity:.4">›</span></div>`;
+  });
+  h+=`<div style="font-size:11px;color:var(--ink3);margin-top:14px">${L==='fa'?'یادآوری: این فهرست فعلاً فقط روی همین دستگاه ذخیره می‌شود، هنوز بین اعضای خانواده همگام نمی‌شود.':'Note: this list is currently saved on this device only — it does not yet sync between family members.'}</div>`;
+  h+=`</div>`; return h;
+}
+function famOpenItemEditor(kind,itemId){
+  const map=kind==='pet'?famPetsMap():famKeysMap();
+  const icons=kind==='pet'?FAM_PET_ICONS:FAM_KEY_ICONS;
+  const existing=itemId?map[itemId]:null;
+  let chosenIcon=(existing&&existing.icon)||icons[0];
+  const title=kind==='pet'?(existing?(L==='fa'?'ویرایش حیوان خانگی':'Edit pet'):(L==='fa'?'حیوان خانگی جدید':'New pet'))
+                          :(existing?(L==='fa'?'ویرایش کلید/وسیله':'Edit key/item'):(L==='fa'?'کلید/وسیله جدید':'New key/item'));
+  const namePh=kind==='pet'?(L==='fa'?'مثلاً بارون':'e.g. Rex'):(L==='fa'?'مثلاً کلید ماشین':'e.g. Car keys');
+  const iconRow=icons.map(ic=>`<button type="button" class="fam-icon-pick${ic===chosenIcon?' on':''}" data-icon="${ic}" style="font-size:20px;width:42px;height:42px;border-radius:11px;border:2px solid ${ic===chosenIcon?'var(--fam-purple,#8652FF)':'var(--b1)'};background:var(--s1);margin:3px">${ic}</button>`).join('');
+  openSheet(`
+    <div class="sheet-handle"></div>
+    <div style="padding:18px 22px 22px">
+      <h3 style="margin:0 0 14px">${title}</h3>
+      <div class="fld"><input class="finput" id="fam-item-name" placeholder="${namePh}" value="${existing?esc(existing.name):''}"></div>
+      <div class="fld" style="margin-top:6px"><input class="finput" id="fam-item-note" placeholder="${L==='fa'?'یادداشت (اختیاری)':'Note (optional)'}" value="${existing?esc(existing.note||''):''}"></div>
+      <div id="fam-item-icons" style="display:flex;flex-wrap:wrap;margin-top:10px">${iconRow}</div>
+      <div class="btn-row" style="margin-top:16px">
+        ${existing?`<button class="btn btn-danger" id="fam-item-remove">${L==='fa'?'حذف':'Delete'}</button>`:`<button class="btn btn-ghost" id="fam-item-cancel">${L==='fa'?'انصراف':'Cancel'}</button>`}
+        <button class="btn btn-primary" id="fam-item-save">${L==='fa'?'ذخیره':'Save'}</button>
+      </div>
+    </div>`);
+  document.getElementById('fam-item-icons').querySelectorAll('.fam-icon-pick').forEach(btn=>{
+    btn.onclick=()=>{ chosenIcon=btn.dataset.icon;
+      document.getElementById('fam-item-icons').querySelectorAll('.fam-icon-pick').forEach(b=>{ b.style.borderColor=(b.dataset.icon===chosenIcon)?'var(--fam-purple,#8652FF)':'var(--b1)'; b.classList.toggle('on',b.dataset.icon===chosenIcon); });
+    };
+  });
+  const cancelBtn=document.getElementById('fam-item-cancel'); if(cancelBtn)cancelBtn.onclick=()=>closeSheet();
+  const removeBtn=document.getElementById('fam-item-remove');
+  if(removeBtn)removeBtn.onclick=async()=>{
+    if(!await famConfirm(kind==='pet'?(L==='fa'?'این حیوان خانگی حذف شود؟':'Remove this pet?'):(L==='fa'?'این کلید/وسیله حذف شود؟':'Remove this item?'),{okLabel:L==='fa'?'حذف':'Delete'}))return;
+    delete map[itemId]; saveDB(); closeSheet(); render();
+  };
+  document.getElementById('fam-item-save').onclick=()=>{
+    const nm=(document.getElementById('fam-item-name')||{}).value||'';
+    if(!nm.trim()){ toast(L==='fa'?'نام لازم است':'Name required'); return; }
+    const note=(document.getElementById('fam-item-note')||{}).value||'';
+    let it; if(existing){ it=map[itemId]; } else { const id=uid(); it=map[id]={id,createdAt:now()}; }
+    it.name=nm.trim(); it.note=note.trim(); it.icon=chosenIcon; it.updatedAt=now();
+    saveDB(); closeSheet(); render();
+    toast(kind==='pet'?(L==='fa'?'حیوان خانگی ذخیره شد':'Pet saved'):(L==='fa'?'ذخیره شد':'Saved'));
+  };
+}
 function famInvitesMap(){ if(!DB.entities.familyInvites)DB.entities.familyInvites={}; return DB.entities.familyInvites; }
 function famTimelineMap(){ if(!DB.entities.familyTimeline)DB.entities.familyTimeline={}; return DB.entities.familyTimeline; }
 function famCfg(){ if(!DB.meta.family)famInit(); return DB.meta.family; }
@@ -13611,6 +13684,8 @@ function renderFamily(){
   if(famView==='live'||famView==='dashboard') return famLiveView();
   if(famView==='members') return head(L==='fa'?'اعضای خانواده':'Family Members')+famMembersView();
   if(famView==='places') return head(L==='fa'?'مکان‌ها':'Places','fam-back-live')+famPlacesView();
+  if(famView==='pets') return head(L==='fa'?'حیوانات خانگی':'Pets','fam-back-live')+famTrackedItemsView('pet');
+  if(famView==='keys') return head(L==='fa'?'کلیدها':'Keys','fam-back-live')+famTrackedItemsView('key');
   if(famView==='noshow') return head(L==='fa'?'هشدار عدم حضور':'No-Show Alert','fam-back-live')+famNoShowView();
   if(famView==='placeDetail') return head(L==='fa'?'جزئیات مکان':'Place','fam-back-places')+famPlaceDetailView();
   if(famView==='placeEdit') return head(L==='fa'?'مکان':'Place','fam-back-places')+famPlaceEditView();
@@ -16119,6 +16194,7 @@ function famLiveMembers(){
   });
 }
 let _famSelUid=null;   // selected member on the live map
+let _famDetailOpen=false;   // v417: true = sheet shows the selected member's full detail; false = sheet shows the member list
 
 /* Roster signature = the set of member uids. When this changes between
    snapshots we must full-render (presence strip / sheet structure changes);
@@ -16149,11 +16225,19 @@ function famLiveHeaderHtml(sel){
    render and the in-place live update so they never diverge. */
 function famLiveSheetBodyHtml(members, sel, myUid){
   let h='';
-  // ── v413: removed the Pets/Keys placeholder tabs (they only showed a
-  //    "coming in a later phase" toast — no function) at Bahman's request.
-  //    People and Places remain, both fully functional. ──
+  // ── v417 FIX: Life360 shows the member LIST and a person's DETAIL as two
+  // separate screens — tapping a row navigates away to their detail; it
+  // never stacks the detail directly below the still-visible list (which is
+  // what caused the "duplicate info" complaint). _famDetailOpen toggles
+  // between the two sheet contents; the map/screen underneath is untouched
+  // either way, so this needed no changes to famView routing or the map. ──
+  if(_famDetailOpen && sel){
+    return famLiveMemberDetail(sel, sel.uid===myUid);
+  }
   h+=`<div class="fam-cats">
     <button class="fam-cat on" data-fam="cat-people">${famIcon('people')}</button>
+    <button class="fam-cat" data-fam="cat-pets">${famIcon('paw')}</button>
+    <button class="fam-cat" data-fam="cat-keys">${famIcon('key')}</button>
     <button class="fam-cat" data-fam="cat-places">${famIcon('building')}</button>
   </div>`;
   // v415: "Add a person" restyled as a row matching the new vertical list —
@@ -16167,16 +16251,11 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     members.slice().sort((a,b)=>(a.uid===_famSelUid?-1:0)-(b.uid===_famSelUid?-1:0)).forEach(m=>{
       const av=m.photo?`<div class="av" style="background-image:url('${(''+m.photo).replace(/'/g,'')}')"></div>`
                       :`<div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>`;
-      // ── v414: battery badge on the avatar corner, reusing the exact same
-      // glyph already applied to the detail header — every Life360
-      // reference screenshot shows this on every member row.
       const cardBatt=(m.consent&&m.consent.enabled&&!m.consent.paused&&m.state&&m.state.battery!=null)
         ? `<div class="fam-avatar-batt lvl-${famBattLevel(m.state.battery)}"><span class="fam-pin-batt-ic">${famBatteryGlyphSvg(m.state.battery)}</span>${famBatteryBolt(m.state.batteryCharging)}<span class="txt">${Math.round(m.state.battery)}%</span></div>` : '';
-      // ── v415: address + since/updated line, reusing the EXACT SAME
-      // famComposeStatusText() composer the detail panel uses, so the list
-      // row and the expanded panel can never show contradictory text — just
-      // rendered smaller, matching Life360's compact list typography (the
-      // specific request: small, clean font for this line).
+      // ── v417: list is now ALWAYS list-only (detail never stacks below
+      // it anymore), so every row shows its full two-line address/since
+      // again — matching Life360's own list exactly, no exceptions needed.
       const showLoc=m.consent&&m.consent.enabled&&!m.consent.paused&&m.state&&m.state.lat!=null;
       let rowAddr='';
       if(showLoc){
@@ -16191,7 +16270,7 @@ function famLiveSheetBodyHtml(members, sel, myUid){
       } else {
         rowAddr=`<div class="st"><span class="fam-dot ${m.meta.tone}" style="width:7px;height:7px;margin-inline-end:5px"></span>${esc(famComposeStatusText(m).l1)}</div>`;
       }
-      h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
+      h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel-open" data-arg="${m.uid}">
         <div style="position:relative;flex:none">${av}${cardBatt}</div>
         <div class="info">
           <div class="nm">${esc(m.name)}</div>
@@ -16202,7 +16281,6 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     h+=addPersonCard;
     h+=`</div>`;
   }
-  if(sel) h+=famLiveMemberDetail(sel, sel.uid===myUid);
   return h;
 }
 
@@ -17045,6 +17123,11 @@ function famLiveMemberDetail(m, isMe){
   const acc=famAccuracyInfo(s.accuracy);
   const avPhoto=m.photo?`background-image:url('${(''+m.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${m.color}`;
   let h=`<div style="margin-top:2px;padding-top:12px">`;
+  // ── v417: back button — this screen now replaces the list entirely
+  // (matches Life360's own separate detail screen) instead of stacking
+  // below an always-visible list, so there needs to be an explicit way
+  // back to it.
+  h+=`<button class="fam-hbtn" data-fam="live-detail-back" style="margin-bottom:10px" title="${L==='fa'?'بازگشت':'Back'}">${famIcon('back')}</button>`;
   // ── v408: Life360-style header — photo with the battery badge on its
   // corner (reusing the same glyph as the map pin and member-list rows),
   // instead of a name row with a large detached battery pill far from any
@@ -17233,7 +17316,7 @@ function famLivePaintMarkers(members, sel){
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
          calloutL2:markerCallout.l2?esc(markerCallout.l2):''},
         m.uid===_famSelUid, m.meta.tone,
-        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
+        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famDetailOpen=true; famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} });
     } else {
       // merged cluster bubble at the group's centroid of real fixes
       const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
@@ -17247,7 +17330,7 @@ function famLivePaintMarkers(members, sel){
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; famLiveApply(); famEnsureSheetVisible(); });
+          _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true; famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} });
     }
   });
   MBMMap.clearMarkersExcept(activeKeys);
@@ -18327,8 +18410,12 @@ async function famAction(act,arg,ev){
     // Category row — People is live; Places opens real saved places; Pets/Keys later
     case 'cat-people': _famCat='people'; famView='live'; render(); return;
     case 'cat-places': go('places'); return;
-    case 'cat-pets': toast(L==='fa'?'حیوانات خانگی در فاز بعدی فعال می‌شود':'Pets is coming in a later phase'); return;
-    case 'cat-keys': toast(L==='fa'?'کلیدها در فاز بعدی فعال می‌شود':'Keys is coming in a later phase'); return;
+    case 'cat-pets': go('pets'); return;
+    case 'cat-keys': go('keys'); return;
+    case 'pet-new': famOpenItemEditor('pet',null); return;
+    case 'pet-open': famOpenItemEditor('pet',arg); return;
+    case 'key-new': famOpenItemEditor('key',null); return;
+    case 'key-open': famOpenItemEditor('key',arg); return;
     case 'fam-switch': famView='circles'; render(); window.scrollTo(0,0); return;
     case 'circle-select':{
       try{
@@ -18443,10 +18530,13 @@ async function famAction(act,arg,ev){
     //    then back". famLiveApply() (used a few lines above by 'live-sel')
     //    is the correct lightweight path: it patches only the header and
     //    sheet body, leaving the live map/marker completely undisturbed.
-    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; famView='live';
+    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; _famDetailOpen=true; famView='live';
       if(screen==='module'&&currentModule==='family'&&typeof famLiveApply==='function'){ famLiveApply(); }
       else { render(); }
+      try{ famApplySheetDetent(2); }catch(e){}
       window.scrollTo(0,0); return;
+    // v417: explicit back-out of the detail screen to the member list.
+    case 'live-detail-back': _famDetailOpen=false; famLiveApply(); try{ famApplySheetDetent(1); }catch(e){} return;
     case 'members': go('members'); return;
     case 'places': go('places'); return;
     case 'invites': go('invites'); return;
