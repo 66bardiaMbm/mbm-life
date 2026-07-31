@@ -1496,15 +1496,35 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 @media (prefers-reduced-motion: reduce){ .fam-pin-activity.tone-motion{animation:none} }
 /* Battery badge — small pill tucked at the bottom-left of the avatar,
    matching the reference's compact battery indicator on the pin itself. */
-.fam-pin-batt{position:absolute;left:-2px;bottom:14px;display:flex;align-items:center;gap:2px;
+/* v408 FIX: unified with .fam-batt-ic (bottom panel) and .fam-mrow-batt-ic
+   (member list) — same colored-border + colored-fill + terminal-nub glyph,
+   same --lvl custom property mechanism, just scaled down for the map pin.
+   The old version used a WHITE outline with a separate <i> fill child, a
+   visibly different icon family from the other two contexts — that was the
+   inconsistency Bahman flagged between the marker badge and the panel pill. */
+.fam-pin-batt{position:absolute;left:-2px;bottom:14px;display:flex;align-items:center;gap:3px;
   background:rgba(20,20,28,.9);border-radius:8px;padding:2px 5px 2px 3px;z-index:5;pointer-events:none}
-.fam-pin-batt .ic{width:13px;height:7px;border:1.4px solid #fff;border-radius:2px;position:relative;display:flex;align-items:center;padding:1px}
-.fam-pin-batt .ic:after{content:'';position:absolute;right:-3px;top:1.5px;width:1.6px;height:3px;background:#fff;border-radius:0 1px 1px 0}
-.fam-pin-batt .ic i{display:block;height:100%;border-radius:1px}
-.fam-pin-batt.lvl-high .ic i{background:#2fce6b}
-.fam-pin-batt.lvl-mid .ic i{background:#f5a623}
-.fam-pin-batt.lvl-low .ic i{background:#e5484d}
+.fam-pin-batt-ic{position:relative;width:13px;height:7px;border:1.4px solid currentColor;border-radius:2px;flex:none}
+.fam-pin-batt-ic::after{content:'';position:absolute;right:-3px;top:1.3px;width:1.6px;height:3.4px;background:currentColor;border-radius:0 1px 1px 0}
+.fam-pin-batt-ic::before{content:'';position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:currentColor;border-radius:1px}
+.fam-pin-batt.lvl-high{color:#2fce6b}
+.fam-pin-batt.lvl-mid{color:#f5a623}
+.fam-pin-batt.lvl-low{color:#e5484d}
 .fam-pin-batt .txt{font-size:9px;font-weight:700;color:#fff}
+/* v408: member-detail header avatar + corner battery badge (Life360-style —
+   see reference: battery sits on the photo, not as a separate pill far away
+   from it). Same glyph as .fam-pin-batt, different position/border since
+   this sits on a plain circular avatar rather than a map pin. */
+.fam-detail-av{width:56px;height:56px;border-radius:50%;flex:none;position:relative;
+  background-size:cover;background-position:center;display:flex;align-items:center;
+  justify-content:center;font-weight:800;color:#fff;font-size:20px;border:2px solid var(--b1)}
+.fam-avatar-batt{position:absolute;left:-4px;bottom:-4px;display:flex;align-items:center;gap:2px;
+  background:rgba(20,20,28,.92);border-radius:9px;padding:2px 5px 2px 3px;z-index:2;
+  border:2px solid var(--s1)}
+.fam-avatar-batt.lvl-high{color:#2fce6b}
+.fam-avatar-batt.lvl-mid{color:#f5a623}
+.fam-avatar-batt.lvl-low{color:#e5484d}
+.fam-avatar-batt .txt{font-size:9px;font-weight:700;color:#fff}
 .fam-battery-bolt{font-size:10px;font-weight:900;line-height:1;color:#fff;text-shadow:0 1px 2px #000}
 @keyframes pinpulse{0%{box-shadow:0 0 0 0 rgba(47,206,107,.5)}70%{box-shadow:0 0 0 12px rgba(47,206,107,0)}100%{box-shadow:0 0 0 0 rgba(47,206,107,0)}}
 @keyframes famspin{to{transform:rotate(360deg)}}
@@ -1840,7 +1860,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v405';
+const APP_VERSION='v408';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -15568,7 +15588,7 @@ const MBMMap = (function(){
     let battBadge='';
     if(meta.battery!=null){
       const lvl=famBattLevel(meta.battery);
-      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="ic"><i style="width:${Math.max(2,Math.round(meta.battery))}%"></i></span>${famBatteryBolt(meta.batteryCharging)}<span class="txt">${Math.round(meta.battery)}%</span></div>`;
+      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="fam-pin-batt-ic" style="--lvl:${Math.max(2,Math.round(meta.battery))}%"></span>${famBatteryBolt(meta.batteryCharging)}<span class="txt">${Math.round(meta.battery)}%</span></div>`;
     }
     // Callout: same element as the avatar/pin, so it can never visually
     // detach — this replaces the old separate __arrived map marker that
@@ -15756,13 +15776,34 @@ const FamilyMapCamera=(function(){
   const MIN_MOVE_MS=450;
   const GESTURE_PAUSE_MS=8000;
   let drivingMode=false;
-  function drivingZoomFor(speedMps,accuracyM){
+  /* ── v407 FIX: hysteresis on the zoom threshold ──
+     Real driving speed hovers RIGHT AT a boundary for long stretches (e.g.
+     36-41 km/h straddles the 11 m/s / zoom 17↔16 line exactly). The old
+     function recomputed zoom from scratch on every GPS fix with a single
+     hard cutoff, so it flipped back and forth on every fix that crossed the
+     line either way — and each flip fired a new 650ms eased camera
+     animation. That repeated animation firing is the visible "map jumps"
+     while driving. Each boundary now needs to be cleared by a buffer in the
+     NEW direction before the zoom actually changes; staying near the line
+     keeps whatever zoom is already showing. */
+  function drivingZoomFor(speedMps,accuracyM,currentZoom){
     let zoom;
-    if(speedMps==null) zoom=17;
-    else if(speedMps<3) zoom=18;
-    else if(speedMps<11) zoom=17;
-    else if(speedMps<22) zoom=16;
-    else zoom=15;
+    if(currentZoom==null){
+      // No established zoom yet (new drive session) — plain thresholds.
+      if(speedMps==null) zoom=17;
+      else if(speedMps<3) zoom=18;
+      else if(speedMps<11) zoom=17;
+      else if(speedMps<22) zoom=16;
+      else zoom=15;
+    }else{
+      zoom=currentZoom;
+      if(speedMps!=null){
+        if(zoom>=18){ if(speedMps>=4) zoom=17; }
+        else if(zoom===17){ if(speedMps<2) zoom=18; else if(speedMps>=13) zoom=16; }
+        else if(zoom===16){ if(speedMps<9) zoom=17; else if(speedMps>=24) zoom=15; }
+        else{ if(speedMps<20) zoom=16; }
+      }
+    }
     if(accuracyM!=null&&accuracyM>30) zoom=Math.min(zoom,15);
     return zoom;
   }
@@ -15786,7 +15827,9 @@ const FamilyMapCamera=(function(){
   }
   function requestDriving(pos,speedMps,accuracyM){
     if(!pos||pos[0]==null||pos[1]==null)return;
-    const nextZoom=drivingZoomFor(speedMps,accuracyM);
+    // v407: pass the CURRENT zoom so drivingZoomFor can apply hysteresis
+    // instead of recomputing from a single hard threshold on every fix.
+    const nextZoom=drivingZoomFor(speedMps,accuracyM,lastZoom);
     const unchanged=!!lastTarget &&
       Math.abs(lastTarget[0]-pos[0])<1e-7 &&
       Math.abs(lastTarget[1]-pos[1])<1e-7 &&
@@ -16893,15 +16936,18 @@ function famLiveMemberDetail(m, isMe){
   const acc=famAccuracyInfo(s.accuracy);
   const avPhoto=m.photo?`background-image:url('${(''+m.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${m.color}`;
   let h=`<div style="margin-top:2px;padding-top:12px">`;
-  // Name row: big bold name + green status dot on the left, battery pill on the right
-  const battPill = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
-    ? `<div class="fam-batt-pill lvl-${famBattLevel(s.battery)}"><span class="fam-batt-ic" style="--lvl:${Math.max(2,Math.min(100,s.battery))}%"></span>${famBatteryBolt(s.batteryCharging)}${s.battery}%</div>` : '';
-  h+=`<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-fam="live-sel-open" data-arg="${m.uid}">
-    <div style="flex:1;min-width:0;display:flex;align-items:center;gap:12px">
-      <div style="font-weight:800;font-size:32px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
+  // ── v408: Life360-style header — photo with the battery badge on its
+  // corner (reusing the same glyph as the map pin and member-list rows),
+  // instead of a name row with a large detached battery pill far from any
+  // photo. isMe/other consent-off cases still render, just without a badge.
+  const battBadge = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
+    ? `<div class="fam-avatar-batt lvl-${famBattLevel(s.battery)}"><span class="fam-pin-batt-ic" style="--lvl:${Math.max(2,Math.round(s.battery))}%"></span>${famBatteryBolt(s.batteryCharging)}<span class="txt">${Math.round(s.battery)}%</span></div>` : '';
+  h+=`<div style="display:flex;align-items:center;gap:14px;cursor:pointer" data-fam="live-sel-open" data-arg="${m.uid}">
+    <div class="fam-detail-av" style="${avPhoto}">${m.photo?'':esc((m.name||'?').slice(0,1).toUpperCase())}${battBadge}</div>
+    <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px">
+      <div style="font-weight:800;font-size:30px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}${isMe?` <span style="font-size:15px;color:var(--ink3);font-weight:600">(${L==='fa'?'شما':'you'})</span>`:''}</div>
       <span class="fam-dot ${m.meta.tone}" style="width:12px;height:12px;margin:0;flex:none"></span>
     </div>
-    ${battPill}
   </div>`;
   // ── Honest LIVE-STATE banner for me: explicit lifecycle + accuracy + age ──
   if(isMe && fb && fb.location && fb.location.locState){
@@ -17999,6 +18045,70 @@ function bindFamily(){
   if(qt){/* visibility handled on save/re-render */}
 }
 
+/* ── v406: in-app confirm/prompt dialogs for the Family module ──
+   These replace the browser's native confirm()/prompt(), which render as a
+   plain system popup ("The page at ... says") with no app styling at all —
+   visibly foreign next to the rest of the screen. Both functions reuse the
+   SAME #sheet component every other screen in the app already uses (openSheet/
+   closeSheet), and the same .btn/.btn-danger/.btn-ghost/.finput classes used
+   throughout — so these dialogs look like part of MBM Life, not a separate
+   overlay. Both return a Promise so call sites can simply `await` them in
+   place of the old confirm()/prompt() call. famAction() is already `async`,
+   so no caller needed restructuring beyond the one-line swap.
+   danger:true tints the confirm button red (rgba(244,63,94,...), the app's
+   existing --danger token) for destructive actions like Delete/Revoke. */
+function famConfirm(message,opts={}){
+  return new Promise(resolve=>{
+    const danger=opts.danger!==false; // Family confirms are destructive by default
+    const okLabel=opts.okLabel||(L==='fa'?'تأیید':'Confirm');
+    const cancelLabel=opts.cancelLabel||(L==='fa'?'انصراف':'Cancel');
+    let settled=false;
+    const finish=(val)=>{ if(settled)return; settled=true; closeSheet(); resolve(val); };
+    openSheet(`
+      <div class="sheet-handle"></div>
+      <div style="padding:18px 22px 22px">
+        <div style="font-size:16px;font-weight:700;line-height:1.5;margin-bottom:18px">${esc(message)}</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="fam-confirm-cancel">${esc(cancelLabel)}</button>
+          <button class="btn ${danger?'btn-danger':'btn-primary'}" id="fam-confirm-ok">${esc(okLabel)}</button>
+        </div>
+      </div>`);
+    document.getElementById('fam-confirm-ok').onclick=()=>finish(true);
+    document.getElementById('fam-confirm-cancel').onclick=()=>finish(false);
+    // Dismissing via the backdrop or back-gesture must resolve too (as `false`,
+    // matching native confirm()'s Cancel), never leave the caller's await stuck.
+    const bg=document.getElementById('sheet-bg');
+    const onBgClick=()=>finish(false);
+    bg.addEventListener('click',onBgClick,{once:true});
+  });
+}
+function famPrompt(message,defaultValue,opts={}){
+  return new Promise(resolve=>{
+    const okLabel=opts.okLabel||(L==='fa'?'تأیید':'Confirm');
+    const cancelLabel=opts.cancelLabel||(L==='fa'?'انصراف':'Cancel');
+    let settled=false;
+    const finish=(val)=>{ if(settled)return; settled=true; closeSheet(); resolve(val); };
+    openSheet(`
+      <div class="sheet-handle"></div>
+      <div style="padding:18px 22px 22px">
+        <div style="font-size:16px;font-weight:700;line-height:1.5;margin-bottom:14px">${esc(message)}</div>
+        <div class="fld"><input class="finput" id="fam-prompt-input" value="${esc(defaultValue||'')}"></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="fam-prompt-cancel">${esc(cancelLabel)}</button>
+          <button class="btn btn-primary" id="fam-prompt-ok">${esc(okLabel)}</button>
+        </div>
+      </div>`);
+    const input=document.getElementById('fam-prompt-input');
+    input.focus(); input.select();
+    const submit=()=>finish(input.value);
+    document.getElementById('fam-prompt-ok').onclick=submit;
+    document.getElementById('fam-prompt-cancel').onclick=()=>finish(null);   // null matches native prompt()'s Cancel
+    input.onkeydown=(e)=>{ if(e.key==='Enter'){ e.preventDefault(); submit(); } };
+    const bg=document.getElementById('sheet-bg');
+    const onBgClick=()=>finish(null);
+    bg.addEventListener('click',onBgClick,{once:true});
+  });
+}
 async function famAction(act,arg,ev){
   const P=famPlacesMap(), I=famInvitesMap(), cfg=famCfg();
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
@@ -18062,7 +18172,7 @@ async function famAction(act,arg,ev){
     case 'live-fit':{ const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)FamilyMapCamera.fit(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
     case 'live-share-toggle':{ const c=FamilyBackend.location.myConsent(); let patch; if(!c.enabled)patch={enabled:true,paused:false}; else if(c.paused)patch={paused:false}; else patch={paused:true}; FamilyBackend.location.setConsent(patch).then(()=>{ render(); }); return; }
-    case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!confirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?'))return; }
+    case 'live-directions':{ const st=FamilyBackend.location.memberState(arg); if(!st||st.lat==null){ toast(L==='fa'?'موقعیتی برای مسیریابی نیست':'No location to navigate to'); return; } const status=FamilyBackend.location.memberStatus(arg); if(status==='stale'||status==='offline'){ if(!await famConfirm(L==='fa'?'این موقعیت قدیمی است. ادامه؟':'This location is stale. Continue anyway?',{danger:false,okLabel:L==='fa'?'ادامه':'Continue'}))return; }
       // Launch REAL turn-by-turn navigation (like Life360), not a static map pin.
       // Google Maps universal directions URL opens the native Maps app in
       // navigation mode on Android/iOS and the web app on desktop; travelmode
@@ -18120,7 +18230,7 @@ async function famAction(act,arg,ev){
       return;
     }
     case 'circle-create':{
-      const name=prompt(L==='fa'?'نام خانواده جدید':'New Circle name',L==='fa'?'خانواده':'Family');
+      const name=await famPrompt(L==='fa'?'نام خانواده جدید':'New Circle name',L==='fa'?'خانواده':'Family');
       if(name==null)return;
       try{
         const fid=await FamilyBackend.createFamily(name,true);
@@ -18245,7 +18355,7 @@ async function famAction(act,arg,ev){
       _famPlaceDraft=null; saveDB(); toast(L==='fa'?'مکان ذخیره شد':'Place saved'); go('places');
       try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.location.syncPlace(p).catch(()=>{ toast(L==='fa'?'ذخیره در ابر ناموفق بود (محلی ذخیره شد)':'Cloud sync failed (saved locally)'); }); } }catch(e){}
       return; }
-    case 'place-remove':{ if(!famActivePlaceId||!famCan('managePlaces'))return; const p=P[famActivePlaceId]; if(!confirm(L==='fa'?'حذف مکان؟':'Remove place?'))return; famLog('place_removed',{name:p?p.name:''}); const wasCloud=p&&p._cloudSeeded; delete P[famActivePlaceId]; saveDB();
+    case 'place-remove':{ if(!famActivePlaceId||!famCan('managePlaces'))return; const p=P[famActivePlaceId]; if(!await famConfirm(L==='fa'?'حذف مکان؟':'Remove place?',{okLabel:L==='fa'?'حذف':'Delete'}))return; famLog('place_removed',{name:p?p.name:''}); const wasCloud=p&&p._cloudSeeded; delete P[famActivePlaceId]; saveDB();
       try{ if(wasCloud&&typeof FamilyBackend!=='undefined'&&FamilyBackend.ready&&FamilyBackend.ready()&&FamilyBackend.isMember()){ FamilyBackend.location.deletePlaceRemote(famActivePlaceId); } }catch(e){}
       go('places'); return; }
     // invitations
@@ -18267,7 +18377,7 @@ async function famAction(act,arg,ev){
     case 'cloud-create':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } toast(L==='fa'?'در حال ساخت…':'Creating…'); fb.createFamily().then(()=>{ toast(L==='fa'?'فضای ابری ساخته شد':'Cloud space created'); render(); }).catch((err)=>{ console.error('[cloud-create]', err&&err.rawCode, err&&err.rawMessage, err); famFriendlyError('Create cloud family', err); }); return; }
     case 'cloud-join':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای این کار باید آنلاین باشید':'You must be online'); return; } famView='joinCode'; render(); window.scrollTo(0,0); return; }
     case 'cloud-rename':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const el=document.getElementById('fam-cloud-name'); const nn=(el?el.value:'').trim(); if(!nn){ toast(L==='fa'?'نام لازم است':'Name required'); return; } toast(L==='fa'?'در حال ذخیره…':'Saving…'); fb.renameFamily(nn).then(()=>{ toast(L==='fa'?'نام ذخیره شد':'Name saved'); render(); }).catch((err)=>{ console.error('[cloud-rename]',err&&err.message,err); toast(L==='fa'?'ذخیره ناموفق بود':'Save failed'); }); return; }
-    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!confirm(msg))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='live'; render(); }).catch((err)=>{ console.error('[cloud-leave]',err&&err.message,err); toast(L==='fa'?'خروج ناموفق بود':'Could not leave family'); }); return; }
+    case 'cloud-leave':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const isSoleOwner=st.ownerUid===((FB.user&&FB.user.uid))&&st.memberCount<=1; const msg=isSoleOwner?(L==='fa'?'شما تنها عضو هستید؛ با خروج، فضای ابری خانواده حذف می‌شود. ادامه؟':'You are the only member; leaving will delete the cloud family space. Continue?'):(L==='fa'?'از فضای ابری خانواده خارج می‌شوید؟ داده‌های خصوصی شما دست‌نخورده می‌ماند.':'Leave the cloud family space? Your private data stays intact.'); if(!await famConfirm(msg,{okLabel:L==='fa'?'خروج':'Leave'}))return; fb.leaveFamily().then(()=>{ toast(L==='fa'?'خارج شدید':'Left family'); famView='live'; render(); }).catch((err)=>{ console.error('[cloud-leave]',err&&err.message,err); toast(L==='fa'?'خروج ناموفق بود':'Could not leave family'); }); return; }
     case 'inv-copy':{ const inv=I[arg]; if(!inv)return; const link=famInviteLink(inv.code); famCopy(link); return; }
     case 'inv-share':{
       const inv=I[arg]; if(!inv)return;
@@ -18288,10 +18398,10 @@ async function famAction(act,arg,ev){
       }else famCopy(link);
       return;
     }
-    case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!confirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?'))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch((err)=>{ console.error('[inv-revoke]',err&&err.message,err); toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
+    case 'inv-revoke':{ const inv=I[arg]; if(!inv)return; const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()){ toast(L==='fa'?'برای لغو باید آنلاین باشید':'You must be online to revoke'); return; } if(!await famConfirm(L==='fa'?'این دعوت لغو شود؟':'Revoke this invitation?',{okLabel:L==='fa'?'لغو دعوت':'Revoke'}))return; fb.revokeInvite(inv.code).then(()=>{ inv.status='revoked'; saveDB(); render(); }).catch((err)=>{ console.error('[inv-revoke]',err&&err.message,err); toast(L==='fa'?'لغو ناموفق بود':'Revoke failed'); }); return; }
     case 'inv-del':{
       const inv=I[arg]; if(!inv)return;
-      if(!confirm(L==='fa'?'دعوت حذف شود؟':'Delete this invitation?'))return;
+      if(!await famConfirm(L==='fa'?'دعوت حذف شود؟':'Delete this invitation?',{okLabel:L==='fa'?'حذف':'Delete'}))return;
       const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
       if(inv.server&&fb&&fb.ready()){
         fb.deleteInvite(inv.code).then(()=>{delete I[arg];saveDB();render();})
@@ -18302,7 +18412,7 @@ async function famAction(act,arg,ev){
     // ── Cloud member management (owner/admin) ──
     case 'cmember-open':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready()||!fb.isMember())return; const st=fb.getState(); const m=(st.members||{})[arg]; if(!m)return; famActiveCloudUid=arg; go('cmemberEdit'); return; }
     case 'cmember-role':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; if(fb.myServerRole()!=='owner'){ toast(L==='fa'?'تغییر نقش فقط توسط مالک':'Only the owner can change roles'); return; } fb.setRole(famActiveCloudUid,arg).then(()=>{ toast(L==='fa'?'نقش تغییر کرد':'Role updated'); render(); }).catch((err)=>{ console.error('[cmember-role]',err&&err.message,err); toast(L==='fa'?'تغییر نقش ناموفق بود':'Could not update role'); }); return; }
-    case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!confirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch((err)=>{ console.error('[cmember-remove]',err&&err.message,err); toast(L==='fa'?'حذف عضو ناموفق بود':'Could not remove member'); }); return; }
+    case 'cmember-remove':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const st=fb.getState(); const m=(st.members||{})[famActiveCloudUid]; if(!m)return; if(!await famConfirm(L==='fa'?`حذف ${m.name||'عضو'} از خانواده؟`:`Remove ${m.name||'member'} from the family?`,{okLabel:L==='fa'?'حذف':'Remove'}))return; fb.removeMember(famActiveCloudUid).then(()=>{ toast(L==='fa'?'عضو حذف شد':'Member removed'); go('members'); }).catch((err)=>{ console.error('[cmember-remove]',err&&err.message,err); toast(L==='fa'?'حذف عضو ناموفق بود':'Could not remove member'); }); return; }
     // ── In-app invite redemption (deep-link / manual code) ──
     case 'join-accept':{ const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null; if(!fb||!fb.ready())return; const code=fb.pendingCode(); if(!code){ toast(L==='fa'?'دعوت یافت نشد — دوباره لینک را باز کنید':'Invitation not found — reopen the invite link'); return; } toast(L==='fa'?'در حال پیوستن…':'Joining…'); fb.redeemInvite(code).then(()=>{ fb.clearPending(); _famInvitePreview=null; toast(L==='fa'?'به خانواده پیوستید':'Joined family'); famView='live'; render(); }).catch(e=>{ const m=(e&&e.message)||''; if(m==='expired'||m==='revoked'||m==='notfound'||m==='own-invite'){ toast(m==='expired'?(L==='fa'?'کد منقضی شده':'Code expired'):m==='revoked'?(L==='fa'?'کد لغو شده':'Code revoked'):m==='notfound'?(L==='fa'?'کد یافت نشد':'Code not found'):(L==='fa'?'این دعوت متعلق به خودتان است':'This is your own invite')); } else { console.error('[join-accept]', e&&e.rawCode, e&&e.rawMessage, e); famFriendlyError('Join with code', e); } }); return; }
     case 'join-retry':{ _famInvitePreview=null; render(); return; }
