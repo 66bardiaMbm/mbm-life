@@ -1510,9 +1510,8 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    inconsistency Bahman flagged between the marker badge and the panel pill. */
 .fam-pin-batt{position:absolute;left:-2px;bottom:14px;display:flex;align-items:center;gap:3px;
   background:rgba(20,20,28,.9);border-radius:8px;padding:2px 5px 2px 3px;z-index:5;pointer-events:none}
-.fam-pin-batt-ic{position:relative;width:13px;height:7px;border:1.4px solid currentColor;border-radius:2px;flex:none}
-.fam-pin-batt-ic::after{content:'';position:absolute;right:-3px;top:1.3px;width:1.6px;height:3.4px;background:currentColor;border-radius:0 1px 1px 0}
-.fam-pin-batt-ic::before{content:'';position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:currentColor;border-radius:1px}
+.fam-pin-batt-ic{position:relative;width:15px;height:7.5px;flex:none;display:block}
+.fam-batt-svg{width:100%;height:100%;display:block;overflow:visible}
 .fam-pin-batt.lvl-high{color:#2fce6b}
 .fam-pin-batt.lvl-mid{color:#f5a623}
 .fam-pin-batt.lvl-low{color:#e5484d}
@@ -1563,15 +1562,26 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 #fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
 #fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);pointer-events:none}
 .fam-sheet-body{padding:0 20px calc(28px + env(safe-area-inset-bottom,0px));flex:1;overflow-y:auto;min-height:0}
-.fam-presence{display:flex;direction:ltr;gap:10px;overflow-x:auto;padding:6px 2px 14px}
-.fam-pcard{flex:none;width:76px;text-align:center;cursor:pointer;padding:6px 4px;border-radius:14px}
+/* v415: member list rebuilt as a Life360-style VERTICAL LIST — avatar with
+   corner battery badge, name, then a small two-line address/time block, all
+   in one horizontal row — replacing the old square-card horizontal-scroll
+   strip. Matches every Life360 reference screenshot sent. */
+.fam-presence{display:flex;flex-direction:column;gap:2px;padding:6px 2px 10px}
+.fam-pcard{flex:none;display:flex;align-items:center;gap:14px;text-align:start;cursor:pointer;
+  padding:10px 8px;border-radius:14px;width:auto}
 .fam-pcard-add .av{border:2px dashed var(--b1)!important;background-image:none!important}
 .fam-pcard.sel{background:var(--s2)}
-.fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0 auto 4px;background-size:cover;background-position:center;
-  border:2px solid var(--b1);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
+.fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0;flex:none;background-size:cover;background-position:center;
+  border:2px solid var(--b1);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;position:relative}
 .fam-pcard.sel .av{border-color:var(--fam-purple,#8652FF)}
-.fam-pcard .nm{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
-.fam-pcard .st{font-size:10px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-pcard .info{flex:1;min-width:0}
+.fam-pcard .nm{font-size:15px;color:var(--ink1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:800;line-height:1.25}
+/* v415: small, clean address/time font — the exact detail Bahman asked for by
+   name, matching Life360's compact list typography instead of the app's
+   normal 15px body text. */
+.fam-pcard .st{font-size:11.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  line-height:1.35;font-weight:500}
+.fam-pcard .st b{color:var(--ink2);font-weight:600}
 .fam-dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-inline-end:6px}
 .fam-dot.live{background:#2fce6b}.fam-dot.ok{background:#2fce6b}.fam-dot.warn{background:#f5a623}.fam-dot.muted{background:#9aa1ad}
 .fam-actionbar{display:flex;gap:10px;margin-top:16px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
@@ -1649,12 +1659,9 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;background-size:cover;background-position:center}
 .fam-mrow-batt{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:3px;
   background:var(--s1);border:1px solid var(--b1);border-radius:9px;padding:1px 5px;font-size:10px;font-weight:800;color:var(--ink2);white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.fam-mrow-batt-ic{position:relative;width:14px;height:8px;border:1.5px solid var(--ink3);border-radius:2px}
-.fam-mrow-batt-ic::after{content:"";position:absolute;right:-3px;top:1.5px;width:1.5px;height:3px;background:var(--ink3);border-radius:0 1px 1px 0}
+.fam-mrow-batt-ic{position:relative;width:15px;height:7.5px;display:block}
 .fam-mrow-batt.lvl-high{color:#2fce6b}.fam-mrow-batt.lvl-mid{color:#f5a623}.fam-mrow-batt.lvl-low{color:#e5484d}
-.fam-mrow-batt-ic{border-color:currentColor}
-.fam-mrow-batt-ic::after{background:currentColor}
-.fam-mrow-batt-ic::before{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:var(--lvl,100%);max-width:calc(100% - 2px);background:currentColor;border-radius:1px}
+
 .fam-mrow-fav{flex:none;border:none;background:transparent;color:var(--ink3);cursor:pointer;padding:6px}
 .fam-mrow-fav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-mrow-fav.on svg{fill:#f5476b;stroke:#f5476b}
@@ -1866,7 +1873,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v413';
+const APP_VERSION='v415';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -15147,6 +15154,25 @@ function famBattLevel(pct){
   return 'high';
 }
 function famBatteryBolt(charging){ return charging?'<span class="fam-battery-bolt" aria-label="Charging">⚡</span>':''; }
+// ── v415 FIX ("battery looks fake"): the old glyph was a CSS border-box with
+// a pseudo-element fill and a separate pseudo-element nub — at 13x7px the
+// border ate most of the height, leaving almost no room for the fill, which
+// read as a flat, blocky rectangle rather than a real device battery icon.
+// This renders an actual crisp SVG matching the native iOS/Android battery
+// shape: rounded body, a proper terminal nub, and a fill rect computed
+// exactly from the percentage (not CSS custom-property trickery) — same
+// currentColor mechanism so the existing lvl-high/mid/low colour classes
+// still drive it everywhere.
+function famBatteryGlyphSvg(pct){
+  const p=Math.max(0,Math.min(100,Math.round(Number(pct)||0)));
+  const maxFillW=16.4;
+  const fillW=Math.max(1.3,+( (maxFillW*p/100).toFixed(2) ));
+  return `<svg class="fam-batt-svg" viewBox="0 0 26 13" aria-hidden="true">
+    <rect x="1" y="1" width="20.5" height="11" rx="3" ry="3" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+    <rect x="22.9" y="4.2" width="2" height="4.6" rx="1" fill="currentColor"></rect>
+    <rect x="3.1" y="3.1" width="${fillW}" height="6.8" rx="1.3" fill="currentColor"></rect>
+  </svg>`;
+}
 function famLowBatteryState(){
   try{
     const raw=localStorage.getItem(FAM_LOW_BATTERY_STATE_KEY);
@@ -15615,7 +15641,7 @@ const MBMMap = (function(){
     let battBadge='';
     if(meta.battery!=null){
       const lvl=famBattLevel(meta.battery);
-      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="fam-pin-batt-ic" style="--lvl:${Math.max(2,Math.round(meta.battery))}%"></span>${famBatteryBolt(meta.batteryCharging)}<span class="txt">${Math.round(meta.battery)}%</span></div>`;
+      battBadge=`<div class="fam-pin-batt lvl-${lvl}"><span class="fam-pin-batt-ic">${famBatteryGlyphSvg(meta.battery)}</span>${famBatteryBolt(meta.batteryCharging)}<span class="txt">${Math.round(meta.battery)}%</span></div>`;
     }
     // Callout: same element as the avatar/pin, so it can never visually
     // detach — this replaces the old separate __arrived map marker that
@@ -15913,9 +15939,23 @@ const FamilyMapCamera=(function(){
     if(gestureResumeTimer){clearTimeout(gestureResumeTimer);gestureResumeTimer=null;}
     follow=true;pausedByGesture=false;_famFollow=true;request(pos,{zoom,force:true});
   }
+  // ── v415 FIX (root cause of the sheet-drag jump): setPadding() used to
+  //    force an IMMEDIATE camera pan (apply(true)) every time it was called —
+  //    which happens on every sheet-detent change. That pan runs through
+  //    MBMMap.setView() → _panToWithPadding(), which does panTo() + panBy()
+  //    to shift the map center so the marker clears the sheet. When the
+  //    sheet grows (dragged up), bottom padding grows, and panBy pushes the
+  //    center down — visually moving the marker UP toward mid-screen. When
+  //    the sheet shrinks back (released/dragged down), the reverse pan runs
+  //    — the marker drifts back down to its original spot. That is exactly
+  //    "goes to the middle, then back" — Life360 never recenters the camera
+  //    just because the sheet's height changed.
+  //    Fix: store the new padding for MBMMap to use on its own (it still
+  //    affects fitAll/fitBounds and any panTo that runs for an ACTUAL
+  //    reason), but stop forcing a camera pan here. The camera will pick up
+  //    the new padding naturally on the next real position update.
   function setPadding(pad){
     MBMMap.setPadding(pad);
-    if(follow&&lastTarget)apply(true);
   }
   function drivingState(session,pos,speedMps,accuracyM){
     const id=session&&session.id||null;
@@ -16116,19 +16156,47 @@ function famLiveSheetBodyHtml(members, sel, myUid){
     <button class="fam-cat on" data-fam="cat-people">${famIcon('people')}</button>
     <button class="fam-cat" data-fam="cat-places">${famIcon('building')}</button>
   </div>`;
+  // v415: "Add a person" restyled as a row matching the new vertical list —
+  // small dashed-avatar + label, same shape as every real member row.
   const addPersonCard=`<div class="fam-pcard fam-pcard-add" data-fam="add-person-open">
     <div class="av" style="background:var(--s2);display:flex;align-items:center;justify-content:center;color:var(--fam-purple,#8652FF);font-size:20px;font-weight:800">+</div>
-    <div class="nm">${L==='fa'?'افزودن فرد':'Add a person'}</div>
+    <div class="info"><div class="nm">${L==='fa'?'افزودن فرد':'Add a person'}</div></div>
   </div>`;
   if(members.length){
     h+=`<div class="fam-presence">`;
     members.slice().sort((a,b)=>(a.uid===_famSelUid?-1:0)-(b.uid===_famSelUid?-1:0)).forEach(m=>{
       const av=m.photo?`<div class="av" style="background-image:url('${(''+m.photo).replace(/'/g,'')}')"></div>`
                       :`<div class="av" style="background:${m.color}">${esc((m.name||'?').slice(0,1).toUpperCase())}</div>`;
+      // ── v414: battery badge on the avatar corner, reusing the exact same
+      // glyph already applied to the detail header — every Life360
+      // reference screenshot shows this on every member row.
+      const cardBatt=(m.consent&&m.consent.enabled&&!m.consent.paused&&m.state&&m.state.battery!=null)
+        ? `<div class="fam-avatar-batt lvl-${famBattLevel(m.state.battery)}"><span class="fam-pin-batt-ic">${famBatteryGlyphSvg(m.state.battery)}</span>${famBatteryBolt(m.state.batteryCharging)}<span class="txt">${Math.round(m.state.battery)}%</span></div>` : '';
+      // ── v415: address + since/updated line, reusing the EXACT SAME
+      // famComposeStatusText() composer the detail panel uses, so the list
+      // row and the expanded panel can never show contradictory text — just
+      // rendered smaller, matching Life360's compact list typography (the
+      // specific request: small, clean font for this line).
+      const showLoc=m.consent&&m.consent.enabled&&!m.consent.paused&&m.state&&m.state.lat!=null;
+      let rowAddr='';
+      if(showLoc){
+        const txt=famComposeStatusText(m);
+        const since=txt.since;
+        const movingActivity=['driving','walking','bicycling','motorcycle'].includes(txt.activityType);
+        const line1=txt.l1&&txt.l1.trim()?txt.l1:(L==='fa'?'موقعیت زنده':'Live location');
+        const sinceTxt = movingActivity
+          ? `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`
+          : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`));
+        rowAddr=`<div class="st">${esc(line1)}</div><div class="st">${esc(sinceTxt)}</div>`;
+      } else {
+        rowAddr=`<div class="st"><span class="fam-dot ${m.meta.tone}" style="width:7px;height:7px;margin-inline-end:5px"></span>${esc(famComposeStatusText(m).l1)}</div>`;
+      }
       h+=`<div class="fam-pcard${m.uid===_famSelUid?' sel':''}" data-fam="live-sel" data-arg="${m.uid}">
-        ${av}
-        <div class="nm">${esc(m.name)}</div>
-        <div class="st"><span class="fam-dot ${m.meta.tone}"></span>${esc(famComposeStatusText(m).l1)}</div>
+        <div style="position:relative;flex:none">${av}${cardBatt}</div>
+        <div class="info">
+          <div class="nm">${esc(m.name)}</div>
+          ${rowAddr}
+        </div>
       </div>`;
     });
     h+=addPersonCard;
@@ -16982,7 +17050,7 @@ function famLiveMemberDetail(m, isMe){
   // instead of a name row with a large detached battery pill far from any
   // photo. isMe/other consent-off cases still render, just without a badge.
   const battBadge = (m.consent&&m.consent.enabled&&!m.consent.paused&&s.battery!=null)
-    ? `<div class="fam-avatar-batt lvl-${famBattLevel(s.battery)}"><span class="fam-pin-batt-ic" style="--lvl:${Math.max(2,Math.round(s.battery))}%"></span>${famBatteryBolt(s.batteryCharging)}<span class="txt">${Math.round(s.battery)}%</span></div>` : '';
+    ? `<div class="fam-avatar-batt lvl-${famBattLevel(s.battery)}"><span class="fam-pin-batt-ic">${famBatteryGlyphSvg(s.battery)}</span>${famBatteryBolt(s.batteryCharging)}<span class="txt">${Math.round(s.battery)}%</span></div>` : '';
   h+=`<div style="display:flex;align-items:center;gap:14px;cursor:pointer" data-fam="live-sel-open" data-arg="${m.uid}">
     <div class="fam-detail-av" style="${avPhoto}">${m.photo?'':esc((m.name||'?').slice(0,1).toUpperCase())}${battBadge}</div>
     <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px">
@@ -17673,7 +17741,7 @@ function famMembersView(){
         }
       } else { line1=famRoleLabel(m.role); }
       const photoStyle=av.photo?`background-image:url('${(''+av.photo).replace(/'/g,'')}');background-size:cover;background-position:center`:`background:${av.color}`;
-      const battBadge = batt!=null ? `<span class="fam-mrow-batt lvl-${famBattLevel(batt)}"><span class="fam-mrow-batt-ic" style="--lvl:${Math.max(2,Math.min(100,batt))}%"></span>${famBatteryBolt(!!(lm&&lm.state&&lm.state.batteryCharging))}${batt}%</span>` : '';
+      const battBadge = batt!=null ? `<span class="fam-mrow-batt lvl-${famBattLevel(batt)}"><span class="fam-mrow-batt-ic">${famBatteryGlyphSvg(batt)}</span>${famBatteryBolt(!!(lm&&lm.state&&lm.state.batteryCharging))}${batt}%</span>` : '';
       h+=`<div class="fam-mrow" data-fam="live-sel-open" data-arg="${m.uid}">
         <div class="fam-mrow-av" style="${photoStyle}">${av.photo?'':esc((av.name).slice(0,1).toUpperCase())}${battBadge}</div>
         <div class="mmeta">
