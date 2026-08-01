@@ -1,66 +1,40 @@
-name: Build signed v418 test APK
+name: Publish v418 to main
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/v418-signed.yml"
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download and apply verified v418 patch
-        run: |
-          curl -fL "https://github.com/66bardiaMbm/mbm-life/releases/download/v418-codex-live-location/MBM-Life-v418-debug.zip" -o /tmp/v418.zip
-          unzip -j /tmp/v418.zip "0001-Fix-live-family-location-telemetry.patch" -d /tmp
-          git apply --check /tmp/0001-Fix-live-family-location-telemetry.patch
-          git apply /tmp/0001-Fix-live-family-location-telemetry.patch
-
-      - uses: actions/setup-java@v4
+      - name: Check out current main
+        uses: actions/checkout@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          ref: main
+          fetch-depth: 0
 
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Test
-        working-directory: android-app
+      - name: Download verified v418 patch
         run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest
+          curl -L --fail -o /tmp/v418.zip "https://github.com/66bardiaMbm/mbm-life/releases/download/v418-codex-live-location/MBM-Life-v418-debug.zip"
+          unzip -o /tmp/v418.zip 0001-Fix-live-family-location-telemetry.patch -d /tmp/v418
 
-      - name: Restore stable signing key
-        env:
-          MBM_ANDROID_KEYSTORE_B64: ${{ secrets.MBM_ANDROID_KEYSTORE_B64 }}
+      - name: Apply v418
         run: |
-          test -n "$MBM_ANDROID_KEYSTORE_B64"
-          printf '%s' "$MBM_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbm-life-ci.p12"
+          git apply --check /tmp/v418/0001-Fix-live-family-location-telemetry.patch
+          git apply /tmp/v418/0001-Fix-live-family-location-telemetry.patch
 
-      - name: Build signed APK
-        working-directory: android-app
-        env:
-          MBM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mbm-life-ci.p12
-          MBM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBM_ANDROID_KEYSTORE_PASSWORD }}
-          MBM_ANDROID_KEY_ALIAS: ${{ secrets.MBM_ANDROID_KEY_ALIAS }}
-          MBM_ANDROID_KEY_PASSWORD: ${{ secrets.MBM_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleDebug
-
-      - name: Verify certificate and package ZIP
+      - name: Verify web tests
         run: |
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
-          "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/debug/app-debug.apk
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk MBM-Life-v418-signed.apk
-          zip -9 MBM-Life-v418-signed.zip MBM-Life-v418-signed.apk
+          node tests/v418-live-location.test.mjs
+          node tests/v418-presence-behaviour.test.mjs
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MBM-Life-v418-signed
-          path: MBM-Life-v418-signed.zip
-          if-no-files-found: error
-          retention-days: 14
+      - name: Publish to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Publish v418 live location fixes"
+          git push origin HEAD:main
