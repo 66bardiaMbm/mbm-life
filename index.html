@@ -974,7 +974,7 @@ html[dir="rtl"] .doc-switch.on::after{transform:translateX(-18px)}
   cursor:pointer;width:36px;height:36px;border-radius:50%}
 .set-ov-back:active{background:var(--s3)}
 .set-ov-title{font-size:19px;font-weight:800}
-.set-ov-scroll{flex:1;overflow-y:auto;padding-bottom:20px}
+.set-ov-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(28px + env(safe-area-inset-bottom,0px));scroll-padding-bottom:calc(28px + env(safe-area-inset-bottom,0px))}
 .set-profile{display:flex;flex-direction:column;align-items:center;padding:18px 20px 16px}
 .set-profile-photo{width:80px;height:80px;border-radius:50%;overflow:hidden;
   cursor:pointer;position:relative;border:2px solid var(--b2)}
@@ -1561,7 +1561,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   flex:none;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 #fam-sheet .fam-sheet-draghead:active{cursor:grabbing}
 #fam-sheet .fam-sheet-grab{width:40px;height:5px;border-radius:3px;background:var(--b2);pointer-events:none}
-.fam-sheet-body{padding:0 20px calc(28px + env(safe-area-inset-bottom,0px));flex:1;overflow-y:auto;min-height:0}
+.fam-sheet-body{padding:0 20px calc(28px + env(safe-area-inset-bottom,0px));flex:1;overflow-y:auto;overscroll-behavior:contain;scroll-padding-bottom:calc(28px + env(safe-area-inset-bottom,0px));min-height:0;touch-action:pan-y}
 /* v415: member list rebuilt as a Life360-style VERTICAL LIST — avatar with
    corner battery badge, name, then a small two-line address/time block, all
    in one horizontal row — replacing the old square-card horizontal-scroll
@@ -1873,7 +1873,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v417';
+const APP_VERSION='v418';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11248,50 +11248,48 @@ const FamilyBackend = (function(){
           moving:false,
           stayStart:null, placeArrivedAt:null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:null, lastDepartureAt:null, priorFixGapMs:null,
-          _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'confirming',
-                     confirmSince:nowAt,reconfirmAccumMs:0}
+          _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'unconfirmed',
+                     observedAt:nowAt,awaySince:null}
         };
       }
-      if(prev._presence && prev._presence.state==='confirming'){
-        // Still proving the very first arrival at this anchor (no
-        // previously confirmed stayStart exists yet). Same accumulation
-        // rule as post-gap reconfirmation: each fix only credits its OWN
-        // close gap-to-the-previous-fix, so a single fix arriving long
-        // after another can never by itself satisfy the confirmation
-        // window — genuine evidence of continuous presence is required,
-        // not just elapsed wall-clock time.
-        const presence0=prev._presence;
+      // Old persisted records can predate `_presence`.  If they also have no
+      // trusted stayStart, treat them exactly like the first unconfirmed fix;
+      // otherwise the generic fall-through below could interpret that legacy
+      // record as an observed departure/arrival sequence and invent a stay.
+      const initialPresence=prev._presence||(!prev.stayStart?{
+        anchorLat:prev.lat,anchorLng:prev.lng,state:'unconfirmed',
+        observedAt:prev.capturedAt||prev.reportedAt||nowAt,awaySince:null
+      }:null);
+      if(initialPresence && (initialPresence.state==='confirming'||initialPresence.state==='unconfirmed')){
+        // Launch/first-fix presence is informational only.  Remaining near
+        // this anchor — for minutes or hours — cannot prove when arrival
+        // happened, so it must never manufacture stayStart.  We only leave
+        // this state after a sustained, observed departure; a subsequent
+        // confirmed steady period is then a trustworthy arrival.
+        const presence0=initialPresence;
         const dFromAnchor0=haversine({lat:presence0.anchorLat,lng:presence0.anchorLng},{lat:fix.lat,lng:fix.lng});
         const radius0=accuracyAdjustedRadius(fix.accuracy!=null?fix.accuracy:prev.accuracy);
-        const thisGapMs0=priorFixGapMs!=null?priorFixGapMs:Infinity;
-        const isCloseFollowUp0=thisGapMs0<=FIX_CADENCE_CREDIT_CAP_MS;
-        if(dFromAnchor0>=radius0 || !isCloseFollowUp0){
-          // Moved away from the candidate anchor, or too sparse a gap to
-          // credit — restart the confirmation candidate at THIS fix.
+        const isAway0=dFromAnchor0>=radius0;
+        if(isAway0){
+          const awaySince0=presence0.awaySince||nowAt;
+          const awayMs0=Date.parse(nowAt)-Date.parse(awaySince0);
+          if(awayMs0>=AWAY_CONFIRM_MS){
+            return {
+              moving:true, stayStart:null, placeArrivedAt:null,
+              lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:null, lastDepartureAt:awaySince0, priorFixGapMs,
+              _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'away',since:nowAt,departedAt:awaySince0}
+            };
+          }
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
-            _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'confirming',
-                       confirmSince:nowAt,reconfirmAccumMs:0}
+            _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:awaySince0})
           };
         }
-        const newAccum0=(presence0.reconfirmAccumMs||0)+thisGapMs0;
-        if(newAccum0>=STEADY_CONFIRM_MS){
-          // Genuinely confirmed: real, close-together fixes accumulated to
-          // the confirmation window near a single stable position. The
-          // new stayStart is the FIRST fix of this confirmed sequence
-          // (presence0.confirmSince), never "now" and never fabricated.
-          return {
-            moving:false, stayStart:presence0.confirmSince, placeArrivedAt:presence0.confirmSince,
-            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:null, priorFixGapMs,
-            _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence0.confirmSince}
-          };
-        }
-        // Still accumulating proof — remain unconfirmed.
         return {
           moving:false, stayStart:null, placeArrivedAt:null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
-          _presence:Object.assign({},presence0,{reconfirmAccumMs:newAccum0})
+          _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:null})
         };
       }
       // NOTE: a "gap-awareness" check that RESET stayStart/_presence based
@@ -11310,7 +11308,11 @@ const FamilyBackend = (function(){
       // here. What IS done here (and only here) is exposing priorFixGapMs
       // so the UI can be honest about the uncertainty instead of silently
       // implying confirmed continuity — see famComposeStatusText.
-      const presence=prev._presence||{anchorLat:prev.lat,anchorLng:prev.lng,state:'steady',since:prev.stayStart||prev.capturedAt||nowAt};
+      const presence=initialPresence||{
+        anchorLat:prev.lat,anchorLng:prev.lng,
+        state:prev.stayStart?'steady':'unconfirmed',
+        since:prev.stayStart||null,observedAt:prev.capturedAt||nowAt
+      };
       const radius=accuracyAdjustedRadius(fix.accuracy!=null?fix.accuracy:prev.accuracy);
       const dFromAnchor=haversine({lat:presence.anchorLat,lng:presence.anchorLng},{lat:fix.lat,lng:fix.lng});
       const isAwayNow=dFromAnchor>=radius;
@@ -11328,7 +11330,7 @@ const FamilyBackend = (function(){
       if(presence.state==='steady' && hadPriorGap && !presence.uncertainSince){
         console.debug('[presence] gap exceeded threshold — marking uncertain (sticky) and starting re-confirmation window',{priorFixGapMs,anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng}});
         return {
-          moving:isAwayNow, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          moving:isAwayNow, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence.since,
                      uncertainSince:nowAt, reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:0}
@@ -11354,7 +11356,7 @@ const FamilyBackend = (function(){
         if(isAwayNow){
           console.debug('[presence] departure while uncertain — falling through to real leaving/away detection',{anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng},distanceM:dFromAnchor});
           return {
-            moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
           };
@@ -11376,7 +11378,7 @@ const FamilyBackend = (function(){
           // fix, but keep the ORIGINAL anchor unchanged (still needed to
           // detect a real departure on a future fix).
           return {
-            moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:Object.assign({},presence,{reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:0})
           };
@@ -11398,9 +11400,9 @@ const FamilyBackend = (function(){
           if(!isAwayNow){
             console.debug('[presence] uncertainty cleared — still within original anchor radius, preserving TRUE original stayStart (this was a foreground hiccup, not a real departure)',{oldStayStart:prev.stayStart,distanceFromOriginalAnchorM:dFromAnchor,accumulatedMs:newAccum});
             return {
-              moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+              moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
               lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
-              _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
+              _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||null}
             };
           }
           // Continuity genuinely reconfirmed AWAY from the original anchor
@@ -11417,7 +11419,7 @@ const FamilyBackend = (function(){
         }
         // Still accumulating — stay flagged uncertain, keep the running total.
         return {
-          moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:Object.assign({},presence,{reconfirmLat:fix.lat,reconfirmLng:fix.lng,reconfirmAccumMs:newAccum})
         };
@@ -11427,7 +11429,7 @@ const FamilyBackend = (function(){
         if(!isAwayNow){
           // Still near the known anchor — ordinary fix, stay untouched.
           return {
-            moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
             _presence:presence
           };
@@ -11437,7 +11439,7 @@ const FamilyBackend = (function(){
         // an otherwise-confirmed stay. Real departure is confirmed only if
         // accepted fixes keep reporting "away" for AWAY_CONFIRM_MS.
         return {
-          moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'leaving',since:nowAt}
         };
@@ -11449,9 +11451,9 @@ const FamilyBackend = (function(){
           // confirmed — this was GPS noise, not a real trip. Return to
           // steady at the SAME anchor/stayStart, nothing changes.
           return {
-            moving:false, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+            moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
-            _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||nowAt}
+            _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||null}
           };
         }
         const awayMs=Date.parse(nowAt)-Date.parse(presence.since);
@@ -11476,7 +11478,7 @@ const FamilyBackend = (function(){
         // Still within the confirmation window — keep waiting, old stay
         // (and its real stayStart) is still technically intact.
         return {
-          moving:true, stayStart:prev.stayStart||nowAt, placeArrivedAt:prev.stayStart||nowAt,
+          moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
           _presence:presence
         };
@@ -11624,6 +11626,59 @@ const FamilyBackend = (function(){
           if(c.precise!==false){ await flushRoute(uid).catch(()=>{}); }
         }
       }
+    }
+
+    /* Native companion live-telemetry receiver.  This is deliberately a
+       separate hot path from movement classification and Firestore writes:
+       one accepted native fix updates one coherent local state immediately. */
+    function acceptNativeFix(raw){
+      const receivedAt=Date.now();
+      if(!raw||!ready()||raw.uid!==myUid())return false;
+      const uid=raw.uid, prev=memberState(uid)||{};
+      const nextAt=Date.parse(raw.capturedAt||raw.reportedAt||'');
+      const prevAt=Date.parse(prev.capturedAt||prev.reportedAt||'');
+      const nextSeq=Number(raw.sequence);
+      const prevSeq=Number(prev.nativeSequence);
+      let rejectionReason=null;
+      if(!Number.isFinite(nextAt)) rejectionReason='invalid-captured-time';
+      else if(Number.isFinite(prevAt)&&nextAt<prevAt) rejectionReason='older-captured-time';
+      else if(Number.isFinite(nextSeq)&&Number.isFinite(prevSeq)&&nextSeq<=prevSeq&&!raw.replay) rejectionReason='non-monotonic-sequence';
+      if(rejectionReason){
+        console.debug('[location-timing]',{fixId:raw.fixId,sequence:raw.sequence,capturedAt:raw.capturedAt,javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,rejectedAtMs:Date.now(),accepted:false,rejectionReason});
+        return false;
+      }
+      const movingState=String(raw.movementState||raw.activityType||'').toLowerCase();
+      const isConfirmedDeparture=movingState&&movingState!=='stationary'&&movingState!=='unknown';
+      const trustedStay=raw.stayStart || (isConfirmedDeparture?null:(prev.stayStart||null));
+      const displayedSpeed=(raw.filteredSpeedMps!=null?raw.filteredSpeedMps:raw.speed);
+      const next=Object.assign({},prev,raw,{
+        speed:displayedSpeed!=null?Number(displayedSpeed):null,
+        stayStart:trustedStay,
+        placeArrivedAt:trustedStay,
+        nativeSequence:Number.isFinite(nextSeq)?nextSeq:null,
+        nativeFixId:raw.fixId||null,
+        lastAcceptedFixAt:raw.capturedAt,
+        reportedAt:raw.reportedAt||raw.capturedAt,
+        source:'companion',
+        _telemetryTiming:Object.assign({},raw._telemetryTiming||{},raw,{
+          javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,
+          acceptedAtMs:Date.now(),localStateUpdateAtMs:Date.now()
+        })
+      });
+      locMap()[uid]=next;
+      try{persistDB();}catch(e){}
+      console.debug('[location-timing]',{
+        fixId:next.nativeFixId,sequence:next.nativeSequence,capturedAt:next.capturedAt,
+        nativeCallbackAtMs:raw.nativeCallbackAtMs,bridgeSendAtMs:raw.bridgeSendAtMs,
+        javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,
+        acceptedAtMs:next._telemetryTiming.acceptedAtMs,
+        localStateUpdateAtMs:next._telemetryTiming.localStateUpdateAtMs,
+        lat:next.lat,lng:next.lng,accuracy:next.accuracy,
+        rawSpeedMps:raw.rawSpeedMps,filteredSpeedMps:raw.filteredSpeedMps,
+        displayedSpeedKph:raw.displayedSpeedKph,accepted:true
+      });
+      afterChange();
+      return true;
     }
 
     /* ── Places-in-scope for geofence checks (from the local mirror, which is
@@ -12020,6 +12075,10 @@ const FamilyBackend = (function(){
         let u1=null;
         if(uid!==myUid()) u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){
           const incoming=Object.assign({uid},snap.data());
+          console.debug('[location-timing]',{fixId:incoming.nativeFixId||null,uid,
+            firebaseListenerAtMs:Date.now(),capturedAt:incoming.capturedAt,
+            lat:incoming.lat,lng:incoming.lng,accuracy:incoming.accuracy,
+            displayedSpeedKph:incoming.speed==null?null:Math.round(Number(incoming.speed)*3.6)});
           locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
         } },err=>{ diag('firestore-location-listener',{uid,code:err&&err.code,message:err&&err.message}); });
         const u2=consentLocRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange(); } },()=>{});
@@ -12064,7 +12123,7 @@ const FamilyBackend = (function(){
       deriveStatus, statusMeta, permissionState, batteryPct,
       locationDebugInfo,
       // write
-      setConsent, writeMyFix, writeCheckin, flushRoute,
+      setConsent, writeMyFix, acceptNativeFix, writeCheckin, flushRoute,
       // places (real Firestore sync)
       syncPlace, deletePlaceRemote,
       // events (real arrival/departure/check-in Firestore documents)
@@ -13455,20 +13514,9 @@ function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const
    settings title) — never surfaced in the normal UI. */
 function famDevMode(){ return false; }
 let _famTitleTaps=0, _famTitleTapT=0;
-let _drvDebugTaps=0, _drvDebugTapT=0, _drvDebugOverlayOn=false;
 function famDevTap(){
   _famTitleTaps=0;
   if(DB.meta&&DB.meta._devMode){ DB.meta._devMode=false; try{saveDB();}catch(e){} }
-}
-/* Debug overlay for the Driving pipeline (watch callback -> ingestFix ->
-   session), per review request. 5 taps on the Weekly Driving Report title
-   toggles it. Every value shown is read live from FamilyLocation/
-   FamilyDriving's actual internal state — nothing here is simulated or
-   placeholder. Meant to stay available while Driving is still being
-   verified on real devices; can be hidden behind a permanent flag later. */
-function drvDebugTap(){
-  _drvDebugTaps=0;
-  _drvDebugOverlayOn=false;
 }
 /* Friendly, non-technical failure message for normal users. The raw Firestore
    detail (code/message/uid/project) is only shown when dev mode is on. */
@@ -14233,91 +14281,6 @@ function drvExportDiagnostics(uid){
     console.log('[drvExportDiagnostics] full report:',json);
   }
 }
-function drvDebugOverlayHtml(uid){
-  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  const eng=drvEngine();
-  if(!fb||!eng) return '';
-  const loc=fb.location.locationDebugInfo?fb.location.locationDebugInfo():{};
-  const dbg=eng.engineDebugInfo(uid);
-  const row=(label,val)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.08)"><span style="opacity:.65">${esc(label)}</span><span style="font-weight:700;text-align:end">${esc(val==null?'—':String(val))}</span></div>`;
-  let h=`<div style="position:fixed;left:8px;right:8px;bottom:78px;z-index:2000;background:#0b0d12ee;color:#e8ecf3;border-radius:14px;padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;max-height:60vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.5)">`;
-  h+=`<div style="font-weight:800;font-size:12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-    <span>🐛 DRIVING DEBUG</span>
-    <button data-fam="drv-debug-tap" style="all:unset;cursor:pointer;opacity:.7;font-size:11px">✕ close</button>
-  </div>`;
-  h+=`<div style="font-weight:700;opacity:.5;margin:6px 0 2px">GPS / WATCHER</div>`;
-  h+=row('watchId', loc.watchId);
-  h+=row('callbacks received', loc.watchCallbackCount);
-  h+=row('last callback at', loc.lastCallbackAt?famAbsTime(loc.lastCallbackAt):null);
-  h+=row('callback age', loc.callbackAgeMs!=null?`${Math.round(loc.callbackAgeMs/1000)}s ago`:null);
-  h+=row('raw coords.speed', loc.lastRawSpeed===undefined?'(no callback yet)':(loc.lastRawSpeed===null?'null (device did not report it)':`${loc.lastRawSpeed.toFixed(2)} m/s`));
-  h+=row('locState()', loc.locState);
-  h+=row('permissionState()', loc.permissionState);
-  h+=row('shouldWatch()', loc.shouldWatch);
-  h+=`<div style="font-weight:700;opacity:.5;margin:10px 0 2px">ENGINE / SESSION</div>`;
-  h+=row('ingestFix() calls', dbg.ingestFixCallCount);
-  h+=row('last ingestFix at', dbg.lastIngestFixAt?famAbsTime(dbg.lastIngestFixAt):null);
-  h+=row('queue.sessionId', dbg.queueSessionId);
-  h+=row('queue sample count', dbg.queueSampleCount);
-  h+=row('pre-trip candidate', dbg.queueCandidate?`${dbg.queueCandidate.type} (${Math.round((Date.now()-dbg.queueCandidate.since)/1000)}s)`:'none');
-  h+=row('active session id', dbg.activeSessionId);
-  h+=row('active session samples', dbg.activeSessionSampleCount);
-  h+=row('active distance (m)', dbg.activeSessionDistanceM);
-  h+=row('active duration (s)', dbg.activeSessionDurationSec);
-  h+=row('last Firestore sync', dbg.lastSyncAt?famAbsTime(dbg.lastSyncAt):'(never synced yet)');
-  h+=`</div>`;
-  return h;
-}
-/* Always-visible (no tap/gesture required) diagnostic strip at the top of
-   the Driving Dashboard. This replaces relying on the 5-tap debug overlay
-   as the ONLY way to see pipeline state — if that gesture has any
-   real-device quirk (timing, touch event handling), the person would see
-   nothing and have no way to tell the app apart from "broken" vs "just
-   needs you to drive". This strip needs zero interaction and shows the
-   single most useful fact: is GPS actually flowing right now, yes or no,
-   in plain language, with the real numbers backing it up.
-
-   DEV-MODE ONLY: this and the rest of the debug surfaces must never appear
-   in the normal UI — Driving Dashboard is a persisted-data summary screen
-   and must not show or depend on live GPS/watcher state at all. Gated
-   behind the same famDevMode() flag the rest of the app already uses. */
-function drvAlwaysVisibleStatusHtml(){
-  if(!famDevMode()) return '';
-  const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
-  if(!fb||!fb.location) return '';
-  const loc=fb.location.locationDebugInfo?fb.location.locationDebugInfo():null;
-  if(!loc) return '';
-  const c=fb.location.myConsent?fb.location.myConsent():null;
-  const consentOn=c&&c.enabled&&!c.paused;
-  const watcherRunning=loc.watchId!=null;
-  const hasRecentCallback=loc.callbackAgeMs!=null&&loc.callbackAgeMs<30000;
-
-  let statusText, statusColor, detail;
-  if(!consentOn){
-    statusText=L==='fa'?'اشتراک موقعیت خاموش است':'Location sharing is OFF';
-    statusColor='#e0447a';
-    detail=L==='fa'?'برای ثبت رانندگی باید اشتراک موقعیت روشن باشد.':'Location sharing must be on for driving to be recorded.';
-  } else if(!watcherRunning){
-    statusText=L==='fa'?'GPS شروع نشده':'GPS has not started';
-    statusColor='#e0447a';
-    detail=L==='fa'?`permission: ${loc.permissionState||'?'}`:`permission: ${loc.permissionState||'?'}`;
-  } else if(!hasRecentCallback){
-    statusText=L==='fa'?'GPS فعال ولی بدون داده‌ی تازه':'GPS active but no recent data';
-    statusColor='#f5a623';
-    detail=loc.lastCallbackAt?`${L==='fa'?'آخرین':'last'}: ${famRelTime(loc.lastCallbackAt)}`:(L==='fa'?'هنوز هیچ داده‌ای دریافت نشده':'no data received yet');
-  } else {
-    statusText=L==='fa'?'GPS فعال و در حال دریافت':'GPS active and receiving data';
-    statusColor='#2fce6b';
-    detail=`${loc.watchCallbackCount||0} ${L==='fa'?'دریافتی':'callbacks'} · raw speed: ${loc.lastRawSpeed===undefined?'—':(loc.lastRawSpeed===null?'null':loc.lastRawSpeed.toFixed(1)+' m/s')}`;
-  }
-  return `<div style="display:flex;align-items:center;gap:10px;background:${statusColor}14;border:1px solid ${statusColor}44;border-radius:12px;padding:10px 14px;margin-bottom:14px">
-    <span style="width:9px;height:9px;border-radius:50%;background:${statusColor};flex:none"></span>
-    <div style="flex:1;min-width:0">
-      <div style="font-size:13px;font-weight:800;color:${statusColor}">${esc(statusText)}</div>
-      <div style="font-size:11px;color:var(--ink3);margin-top:1px">${esc(detail)}</div>
-    </div>
-  </div>`;
-}
 function DrivingDashboard(){
   const eng=drvEngine();
   if(!eng){
@@ -14332,7 +14295,7 @@ function DrivingDashboard(){
     <button class="btn ${_drvWeekOffset===0?'':'btn-ghost'}" data-fam="drv-week" data-arg="0" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'این هفته':'This week'}</button>
     <button class="btn ${_drvWeekOffset===1?'':'btn-ghost'}" data-fam="drv-week" data-arg="1" style="width:auto;padding:8px 16px;font-size:13px;border-radius:20px">${L==='fa'?'هفته قبل':'Last week'}</button>
   </div>`;
-  h+=`<div data-fam="drv-debug-tap" style="font-size:22px;font-weight:800;margin-bottom:4px;user-select:none">${L==='fa'?'گزارش هفتگی رانندگی':'Weekly Driving Report'}</div>`;
+  h+=`<div style="font-size:22px;font-weight:800;margin-bottom:4px">${L==='fa'?'گزارش هفتگی رانندگی':'Weekly Driving Report'}</div>`;
   h+=`<div style="font-size:12px;color:var(--ink3);margin-bottom:14px">${wk.label}</div>`;
 
   if(members.length>1) h+=DrivingMemberSelector(selUid);
@@ -14384,7 +14347,6 @@ function DrivingDashboard(){
   // Member/profile browsing belongs to Location. The Driving dashboard
   // stays focused on weekly safety metrics and the signed-in driver's trip history.
   h+=`</div>`;
-  if(_drvDebugOverlayOn) h+=drvDebugOverlayHtml(selUid);
   h+=famBottomNavHtml();
   h+=`</div>`;
   return h;
@@ -14450,7 +14412,6 @@ function LiveDriving(){
   }
   const active=eng.activeSession(uid);
   let h=`<div id="drv-live-wrap" style="display:flex;flex-direction:column;height:100%">`;
-  h+=`<div style="padding:8px 16px 0"><div id="drv-status-strip">`+drvAlwaysVisibleStatusHtml()+`</div></div>`;
   h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 16px 8px">
     <button data-fam="drv-back-dash" style="all:unset;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--ink)">${famIcon('back')}</button>
     <div style="flex:1;min-width:0">`+DriverHeader(uid,{showSwitcher:true})+`</div>
@@ -14473,7 +14434,6 @@ function LiveDriving(){
     h+=`<div style="flex:1;overflow-y:auto;padding:18px 20px 90px">`;
     h+=`<div id="drv-live-body">`+drvLiveBodyHtml(active,curSpeedKph,loc,lastSample)+`</div>`;
     h+=`</div>`;
-    h+=`<div id="drv-debug-overlay-wrap">`+(_drvDebugOverlayOn?drvDebugOverlayHtml(uid):'')+`</div>`;
     h+=famBottomNavHtml();
     h+=`</div>`;
     return h;
@@ -14556,7 +14516,6 @@ function LiveDriving(){
       </div>
     </div>`;
   }
-  h+=`<div id="drv-debug-overlay-wrap">`+(_drvDebugOverlayOn?drvDebugOverlayHtml(uid):'')+`</div>`;
   h+=famBottomNavHtml();
   h+=`</div>`;
   return h;
@@ -14633,8 +14592,6 @@ function drvLiveApply(){
   if(!eng||!uid||!fb){ render(); return; }
   const active=eng.activeSession(uid);
   const bodyEl=document.getElementById('drv-live-body');
-  const stripEl=document.getElementById('drv-status-strip');
-  if(stripEl) stripEl.innerHTML=drvAlwaysVisibleStatusHtml(); // refresh every tick, regardless of driving state
   const wasDriving=_drvLiveMapSessionId!=null;
   const isDrivingNow=!!active;
   if(wasDriving!==isDrivingNow){ render(); return; } // state actually changed — full render needed
@@ -14656,17 +14613,7 @@ function drvLiveApply(){
   const lastSample=(live&&live.length)?live[live.length-1]:null;
   const curSpeedKph=lastSample?drvFmtSpeedKph(lastSample.speedMps):avgSpeedKph;
   const loc=lastSample?famLocationLines(lastSample.lat,lastSample.lng,true,null,lastSample.capturedAt||lastSample.at):null;
-  // Debug overlay: patch in place too, so it shows real-time pipeline data
-  // during an actual drive (watch callback count, ingestFix count, sample
-  // count all ticking up live) rather than a stale snapshot from mount time.
-  // Done BEFORE the single bindFamily() call below so its close button
-  // (data-fam="drv-debug-tap") gets bound in the same pass — binding it
-  // AFTER would leave it unresponsive until the next full render.
-  if(_drvDebugOverlayOn){
-    const dbgEl=document.getElementById('drv-debug-overlay-wrap');
-    if(dbgEl) dbgEl.innerHTML=drvDebugOverlayHtml(uid);
-  }
-  if(typeof bindFamily==='function') bindFamily(); // rebind any data-fam handlers inside the freshly-written nodes (body + overlay)
+  if(typeof bindFamily==='function') bindFamily(); // rebind handlers inside freshly-written live nodes
   // Map: update marker/route WITHOUT re-initializing (see drvLiveMount).
   const samples=live||[];
   const last=samples.length?samples[samples.length-1]:null;
@@ -15797,6 +15744,13 @@ const MBMMap = (function(){
     _markerMeta[uid]={pinCls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color,
       activityType:meta.activityType,battery:meta.battery,batteryCharging:meta.batteryCharging,speedKph:meta.speedKph,
       calloutL1:meta.calloutL1,calloutL2:meta.calloutL2};
+    if(meta.fixId){
+      console.debug('[location-timing]',{
+        fixId:meta.fixId,sequence:meta.sequence,markerRenderAtMs:Date.now(),
+        speedRenderAtMs:Date.now(),lat:latlng[0],lng:latlng[1],
+        displayedSpeedKph:meta.displayedSpeedKph!=null?meta.displayedSpeedKph:meta.speedKph
+      });
+    }
   }
   function clearMarkersExcept(uids){
     Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; delete _markerRenderPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
@@ -16868,6 +16822,7 @@ const FamGeo = (function(){
                               // used to detect and discard a response that arrives after a
                               // newer request for the same key has been sent (see pump()).
   let queue = [];            // [{key,lat,lng,fixId}]
+  const superseding = {};    // newest request that arrived while this cell was in flight
   let lastCall = 0;
   const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
   const TTL = 6*3600*1000;   // 6h cache lifetime
@@ -17007,7 +16962,13 @@ const FamGeo = (function(){
           }
         })
         .catch(()=>{ /* keep whatever we had; no fabricated address */ })
-        .then(()=>{ delete pending[k]; delete inflight[k]; if(typeof afterGeoResolved==='function')afterGeoResolved(); if(queue.length)pump(); });
+        .then(()=>{
+          delete pending[k]; delete inflight[k];
+          const newer=superseding[k]; delete superseding[k];
+          if(newer){ pending[k]=true; queue.push(newer); }
+          if(typeof afterGeoResolved==='function')afterGeoResolved();
+          if(queue.length)pump();
+        });
     }, wait);
   }
   // Public: request an address for a fix. Returns cached result immediately (or
@@ -17035,7 +16996,13 @@ const FamGeo = (function(){
     }
     const resolvedFixId=fixId!=null?fixId:k;
     if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId}); pump(); }
-    else { inflight[k]=resolvedFixId; } // a newer fix wants this same cell; invalidate the older in-flight response
+    else {
+      // Invalidate the older response AND retain the newest coordinate for a
+      // follow-up request.  The old code invalidated without re-queueing,
+      // leaving the cell blank/stale until some unrelated later render.
+      inflight[k]=resolvedFixId;
+      superseding[k]={key:k,lat,lng,fixId:resolvedFixId};
+    }
     return null;
   }
   function famGeoDiagnosticInfo(){ return _lastLookup; }
@@ -17214,7 +17181,6 @@ function famLiveMemberDetail(m, isMe){
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
-        ${(famDevMode()||_drvDebugOverlayOn)?famSinceDiagLineHtml(m,txt,since):''}
       </div>
       <button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}">
         <span class="fam-saveplace-ic">${famIcon('pin')}<span class="fam-saveplace-plus">+</span></span>
@@ -17313,6 +17279,8 @@ function famLivePaintMarkers(members, sel){
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
          batteryCharging:(m.consent&&m.consent.enabled&&!m.consent.paused)?!!m.state.batteryCharging:false,
          speedKph:txt.speedKph,
+         displayedSpeedKph:m.state.displayedSpeedKph,
+         fixId:m.state.nativeFixId,sequence:m.state.nativeSequence,
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
          calloutL2:markerCallout.l2?esc(markerCallout.l2):''},
         m.uid===_famSelUid, m.meta.tone,
@@ -18391,8 +18359,6 @@ async function famAction(act,arg,ev){
     case 'nav-membership': famView='membership'; render(); window.scrollTo(0,0); return;
     // ── Driving (Phase 2A) ──
     case 'drv-week': _drvWeekOffset=parseInt(arg,10)||0; render(); return;
-    case 'drv-debug-tap': drvDebugTap(); return;
-    case 'drv-export-diag': drvExportDiagnostics(arg); return;
     case 'drv-sel-member': _drvSelUid=arg; render(); return;
     case 'drv-open-member': _drvSelUid=arg; famView='drivingLive'; render(); window.scrollTo(0,0); return;
     case 'drv-open-member-history': _drvSelUid=arg; famView='drivingHistory'; render(); window.scrollTo(0,0); return;
@@ -21230,18 +21196,20 @@ function openFamPhotoSheet(){
   openSheet(`
     <div style="padding:8px 16px 4px;font-size:17px;font-weight:800">${tr('changePhoto')}</div>
     <div style="padding:8px 14px">
-      <button class="sheet-cancel" id="fpp-upload" style="margin:0 0 8px;border-radius:var(--r)">📷 ${tr('uploadPhoto')}</button>
+      <label class="sheet-cancel" id="fpp-upload" for="fam-photo-file-sheet" role="button" tabindex="0" style="margin:0 0 8px;border-radius:var(--r);text-align:center;cursor:pointer">📷 ${tr('uploadPhoto')}</label>
     </div>
     <div style="padding:4px 16px 6px;font-size:13px;color:var(--ink3)">${tr('chooseAvatar')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;padding:6px 16px 14px">${avGrid}</div>
     ${hasCustom?`<div style="padding:0 14px"><button class="sheet-cancel" id="fpp-remove" style="margin:0 0 8px;border-radius:var(--r);color:var(--danger)">🗑 ${tr('removePhoto')}</button></div>`:''}
     <button class="sheet-cancel">${tr('cancel')}</button>
-    <input type="file" id="fam-photo-file-sheet" accept="image/*" style="display:none">`);
+    <input type="file" id="fam-photo-file-sheet" accept="image/jpeg,image/png,image/webp" style="position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:.01">`);
   document.querySelectorAll('.sheet-cancel').forEach(b=>{if(!b.id)b.onclick=()=>closeSheet();});
   const up=document.getElementById('fpp-upload');
-  if(up)up.onclick=()=>{
+  if(up)up.onkeydown=e=>{
+    if(e.key!=='Enter'&&e.key!==' ')return;
+    e.preventDefault();
     const inp=document.getElementById('fam-photo-file-sheet');
-    if(inp)inp.click();
+    if(inp){ inp.value=''; if(typeof inp.showPicker==='function')inp.showPicker(); else inp.click(); }
   };
   const inpSheet=document.getElementById('fam-photo-file-sheet');
   if(inpSheet)inpSheet.onchange=e=>{

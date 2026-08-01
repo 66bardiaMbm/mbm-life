@@ -96,6 +96,7 @@ class TrackingRepository(private val context: Context) {
             "driving"
         )
         val payload = JSONObject()
+            .put("nativeFixId", "native-${sample.elapsedRealtimeNanos}")
             .put("uid", sample.uid)
             .put("lat", sample.latitude)
             .put("lng", sample.longitude)

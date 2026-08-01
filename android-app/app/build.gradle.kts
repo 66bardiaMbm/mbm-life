@@ -13,14 +13,14 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.7.5-v405-family-circles"
+        versionCode = 15
+        versionName = "0.7.6-v418-live-location"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v405\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v418\""
         )
     }
 
@@ -61,6 +61,14 @@ android {
         )
     }
 }
+
+val bundledPwaAssets = layout.buildDirectory.dir("generated/pwaAssets")
+val bundleCurrentPwa by tasks.registering(Copy::class) {
+    from(rootProject.projectDir.parentFile.resolve("index.html"))
+    into(bundledPwaAssets)
+}
+android.sourceSets.getByName("main").assets.srcDir(bundledPwaAssets)
+tasks.named("preBuild").configure { dependsOn(bundleCurrentPwa) }
 
 kotlin {
     compilerOptions {

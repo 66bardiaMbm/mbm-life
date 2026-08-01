@@ -50,11 +50,13 @@ class SyncWorker(
                 dao.deleteOutbox(item.documentPath)
                 app.preferences.lastSyncAtMs = System.currentTimeMillis()
                 logger.info(
-                    "Sync",
+                    "LocationTiming",
                     "Firestore write acknowledged",
                     JSONObject()
                         .put("uid", authUid)
                         .put("path", item.documentPath)
+                        .put("fixId", payload["nativeFixId"])
+                        .put("firebaseWriteAcknowledgedAtMs", System.currentTimeMillis())
                         .toString()
                 )
             } catch (error: Exception) {
@@ -65,10 +67,11 @@ class SyncWorker(
                     System.currentTimeMillis()
                 )
                 logger.error(
-                    "Sync",
+                    "LocationTiming",
                     "Firestore write failed",
                     JSONObject()
                         .put("path", item.documentPath)
+                        .put("firebaseWriteFailedAtMs", System.currentTimeMillis())
                         .put("error", exact)
                         .toString()
                 )

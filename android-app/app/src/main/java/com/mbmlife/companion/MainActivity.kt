@@ -259,11 +259,15 @@ class MainActivity : AppCompatActivity() {
                 pendingFileChooserCallback?.onReceiveValue(null)
                 pendingFileChooserCallback = filePathCallback
                 return try {
-                    val chooserIntent = fileChooserParams?.createIntent()
-                        ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "image/*"
-                        }
+                    // Always use Android's document picker for profile images.
+                    // Some WebView implementations return a generic chooser
+                    // intent that has no matching credential/provider and the
+                    // tap then appears to do nothing.
+                    val chooserIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/jpeg", "image/png", "image/webp"))
+                    }
                     fileChooserLauncher.launch(chooserIntent)
                     true
                 } catch (e: Exception) {
@@ -337,6 +341,9 @@ class MainActivity : AppCompatActivity() {
                                     ?: JSONObject.NULL
                             )
                             .put("nativeTrackingActive", app.preferences.trackingEnabled)
+                            .put("fixId", "room-replay-${sample.id}")
+                            .put("sequence", sample.capturedAtMs)
+                            .put("replay", true)
                         injectNativeFix(json.toString())
                     }
                 }
@@ -478,31 +485,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun injectNativeFix(json: String) {
+        val nativeBroadcastReceivedAtMs = System.currentTimeMillis()
         val js = """
-            (function(nativeFix){
+            (function(nativeFix,nativeBroadcastReceivedAtMs){
               try {
-                var uid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-                if(!uid || uid!==nativeFix.uid || typeof DB==='undefined') return false;
-                DB.entities=DB.entities||{};
-                DB.entities.famLocations=DB.entities.famLocations||{};
-                var previous=DB.entities.famLocations[uid]||{};
-                var nextAt=Date.parse(nativeFix.capturedAt||nativeFix.reportedAt||'');
-                var previousAt=Date.parse(previous.capturedAt||previous.reportedAt||'');
-                if(!isNaN(previousAt) && !isNaN(nextAt) && nextAt<=previousAt) return false;
-                var next=Object.assign({},previous,nativeFix);
-                if(!Object.prototype.hasOwnProperty.call(nativeFix,'stayStart') && !next.stayStart)
-                  next.stayStart=nativeFix.capturedAt;
-                DB.entities.famLocations[uid]=next;
-                if(typeof famLiveApply==='function' &&
-                   typeof screen!=='undefined' && screen==='module' &&
-                   typeof currentModule!=='undefined' && currentModule==='family'){
-                  famLiveApply();
-                }
-                return true;
-              } catch(e) { return false; }
-            })($json)
+                nativeFix.nativeBroadcastReceivedAtMs=nativeBroadcastReceivedAtMs;
+                nativeFix.javascriptReceiveAtMs=Date.now();
+                if(typeof FamilyBackend==='undefined' ||
+                   typeof FamilyBackend.acceptNativeFix!=='function') return false;
+                return FamilyBackend.acceptNativeFix(nativeFix);
+              } catch(e) {
+                console.error('[location-timing] native bridge receive failed',e);
+                return false;
+              }
+            })($json,$nativeBroadcastReceivedAtMs)
         """.trimIndent()
-        binding.webView.evaluateJavascript(js, null)
+        binding.webView.evaluateJavascript(js) { result ->
+            logger.info(
+                "LocationTiming",
+                "JavaScript bridge evaluation completed",
+                JSONObject()
+                    .put("nativeBroadcastReceivedAtMs", nativeBroadcastReceivedAtMs)
+                    .put("bridgeEvaluationCompletedAtMs", System.currentTimeMillis())
+                    .put("acceptedByJavaScript", result)
+                    .toString()
+            )
+        }
     }
 
     private fun signInWithGoogle() {

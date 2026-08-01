@@ -48,6 +48,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicLong
 
 class TrackingService : Service() {
     companion object {
@@ -73,7 +74,18 @@ class TrackingService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val locationChannel = Channel<Location>(Channel.UNLIMITED)
+    private data class QueuedLocation(
+        val location: Location,
+        val fixId: String,
+        val sequence: Long,
+        val nativeCallbackAtMs: Long
+    )
+
+    // Live telemetry must never replay a backlog of old coordinates.  The
+    // detector receives the newest callback as soon as the previous fix has
+    // finished; an obsolete queued fix is replaced rather than rendered late.
+    private val locationChannel = Channel<QueuedLocation>(Channel.CONFLATED)
+    private val fixSequence = AtomicLong(0L)
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var activityRecognition: ActivityRecognitionClient
     private lateinit var repository: TrackingRepository
@@ -91,7 +103,28 @@ class TrackingService : Service() {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            result.locations.forEach { locationChannel.trySend(it) }
+            val callbackAt = System.currentTimeMillis()
+            result.locations.sortedBy { it.time }.forEach { location ->
+                val sequence = fixSequence.incrementAndGet()
+                // Stable across the bridge, Room/outbox and Firestore so one
+                // physical fix can be followed through every timing stage.
+                val fixId = "native-${location.elapsedRealtimeNanos}"
+                repository.logger().info(
+                    "LocationTiming",
+                    "Native location callback",
+                    JSONObject()
+                        .put("fixId", fixId)
+                        .put("sequence", sequence)
+                        .put("capturedAtMs", location.time)
+                        .put("nativeCallbackAtMs", callbackAt)
+                        .put("lat", location.latitude)
+                        .put("lng", location.longitude)
+                        .put("accuracyM", if (location.hasAccuracy()) location.accuracy else JSONObject.NULL)
+                        .put("rawSpeedMps", if (location.hasSpeed()) location.speed else JSONObject.NULL)
+                        .toString()
+                )
+                locationChannel.trySend(QueuedLocation(location, fixId, sequence, callbackAt))
+            }
         }
     }
 
@@ -104,7 +137,7 @@ class TrackingService : Service() {
         activityRecognition = ActivityRecognition.getClient(this)
         createNotificationChannel()
         serviceScope.launch {
-            for (location in locationChannel) processLocation(location)
+            for (queued in locationChannel) processLocation(queued)
         }
     }
 
@@ -182,10 +215,11 @@ class TrackingService : Service() {
         }
         val builder = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
-            5_000L
+            2_000L
         )
-            .setMinUpdateIntervalMillis(2_000L)
-            .setMaxUpdateDelayMillis(10_000L)
+            .setMinUpdateIntervalMillis(1_000L)
+            // Do not enable max-update-delay/batching: it produced the exact
+            // repeated 10–15 second marker/speed freezes seen on the phone.
         // v402: never gate stationary callbacks behind a distance threshold.
         // That gate could suppress fixes for minutes while the service was
         // healthy, producing "Location stale" and starving arrival/movement
@@ -307,7 +341,8 @@ class TrackingService : Service() {
         )
     }
 
-    private suspend fun processLocation(location: Location) {
+    private suspend fun processLocation(queued: QueuedLocation) {
+        val location = queued.location
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val familyId = app.preferences.familyId ?: return
         val engine = detector ?: run {
@@ -333,6 +368,7 @@ class TrackingService : Service() {
             activityType = if (activityIsFresh) app.preferences.lastActivityType else "UNKNOWN",
             activityConfidence = if (activityIsFresh) app.preferences.lastActivityConfidence else 0
         )
+        val acceptedAtMs = System.currentTimeMillis()
         val output = detectorMutex.withLock { engine.ingest(fix) }
         readBatteryState()
         val nativeDriving = output.trip?.status == "active"
@@ -358,9 +394,6 @@ class TrackingService : Service() {
             app.preferences.stayStartAtMs = 0
         } else if (output.arrivalAtMs != null) {
             app.preferences.stayStartAtMs = output.arrivalAtMs
-        } else if (app.preferences.stayStartAtMs == 0L) {
-            app.preferences.stayStartAtMs =
-                movementStartedAt.takeIf { it > 0L } ?: capturedAt
         }
         repository.logSpeed(stableOutput.sample)
         repository.logger().info(
@@ -375,16 +408,38 @@ class TrackingService : Service() {
                 .put("sampleAtMs", capturedAt)
                 .toString()
         )
-        repository.persist(stableOutput)
         app.preferences.lastFixAtMs = capturedAt
         currentSpeedKph = stableOutput.sample.displayedSpeedKph
+        val localStateUpdatedAtMs = System.currentTimeMillis()
         val tripModeChanged = currentTripActive != nativeDriving
         currentTripActive = nativeDriving
         if (tripModeChanged) {
             withContext(Dispatchers.Main) { requestLocationUpdates() }
         }
         updateNotification()
-        broadcastForWebView(stableOutput)
+        // The signed-in user's UI is updated before Room/Firestore work. Cloud
+        // persistence is deliberately downstream and can never gate the local
+        // marker or speed.
+        broadcastForWebView(
+            stableOutput,
+            fixId = queued.fixId,
+            sequence = queued.sequence,
+            nativeCallbackAtMs = queued.nativeCallbackAtMs,
+            acceptedAtMs = acceptedAtMs,
+            localStateUpdatedAtMs = localStateUpdatedAtMs
+        )
+        repository.persist(stableOutput)
+        repository.logger().info(
+            "LocationTiming",
+            "Fix queued for persistence",
+            JSONObject()
+                .put("fixId", queued.fixId)
+                .put("sequence", queued.sequence)
+                .put("firebaseWriteQueuedAtMs", System.currentTimeMillis())
+                .put("accepted", stableOutput.sample.accepted)
+                .put("rejectionReason", stableOutput.sample.rejectionReason ?: JSONObject.NULL)
+                .toString()
+        )
         if (output.transition != TripTransition.NONE) {
             repository.logger().info(
                 "Trip",
@@ -401,16 +456,28 @@ class TrackingService : Service() {
 
     private fun broadcastForWebView(
         output: com.mbmlife.companion.engine.DrivingOutput,
-        reportedAtMs: Long = System.currentTimeMillis()
+        reportedAtMs: Long = System.currentTimeMillis(),
+        fixId: String = "native-${output.sample.elapsedRealtimeNanos}",
+        sequence: Long = fixSequence.incrementAndGet(),
+        nativeCallbackAtMs: Long = System.currentTimeMillis(),
+        acceptedAtMs: Long = System.currentTimeMillis(),
+        localStateUpdatedAtMs: Long = System.currentTimeMillis()
     ) {
         if (!output.sample.accepted) return
         val sample = output.sample
+        val bridgeSendAtMs = System.currentTimeMillis()
         val payload = JSONObject()
+            .put("fixId", fixId)
+            .put("sequence", sequence)
             .put("uid", sample.uid)
             .put("lat", sample.latitude)
             .put("lng", sample.longitude)
             .put("accuracy", sample.accuracyM ?: JSONObject.NULL)
             .put("speed", sample.filteredSpeedMps ?: JSONObject.NULL)
+            .put("rawSpeedMps", sample.rawSpeedMps ?: JSONObject.NULL)
+            .put("fallbackSpeedMps", sample.fallbackSpeedMps ?: JSONObject.NULL)
+            .put("filteredSpeedMps", sample.filteredSpeedMps ?: JSONObject.NULL)
+            .put("displayedSpeedKph", sample.displayedSpeedKph)
             .put("battery", app.preferences.batteryPct ?: JSONObject.NULL)
             .put("batteryCharging", app.preferences.batteryCharging)
             .put("heading", sample.bearingDeg ?: JSONObject.NULL)
@@ -439,6 +506,11 @@ class TrackingService : Service() {
                     ?: JSONObject.NULL
             )
             .put("nativeTrackingActive", true)
+            .put("nativeCallbackAtMs", nativeCallbackAtMs)
+            .put("acceptedAtMs", acceptedAtMs)
+            .put("localStateUpdatedAtMs", localStateUpdatedAtMs)
+            .put("bridgeSendAtMs", bridgeSendAtMs)
+        repository.logger().info("LocationTiming", "Bridge send", payload.toString())
         sendBroadcast(
             Intent(ACTION_NATIVE_FIX)
                 .setPackage(packageName)

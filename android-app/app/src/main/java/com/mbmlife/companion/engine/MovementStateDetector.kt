@@ -100,8 +100,11 @@ class MovementStateDetector(
         val walkingSpeedEvidence =
             observedSpeed >= WALK_ENTER_SPEED_MPS &&
                 (rawSpeedAvailable || fallbackMovementCredible)
-        val stationaryEvidence = observedSpeed <= WALK_KEEP_SPEED_MPS ||
-            (!rawSpeedAvailable && !fallbackMovementCredible && !walkingHint)
+        // A single low/missing speed fix must not end walking. Stationary is
+        // evidence only when both speed and the accuracy-aware displacement
+        // window agree; low-quality/missing evidence simply preserves state.
+        val stationaryEvidence = observedSpeed <= WALK_KEEP_SPEED_MPS &&
+            !fallbackMovementCredible && !walkingHint
 
         val proposed = when {
             observedSpeed >= DRIVE_SPEED_MPS ->
@@ -112,7 +115,8 @@ class MovementStateDetector(
             walkingSpeedEvidence -> MovementState.WALKING
             walkingHint && observedSpeed >= WALK_KEEP_SPEED_MPS -> MovementState.WALKING
             stationaryEvidence && !walkingHint -> MovementState.STATIONARY
-            stillHint && observedSpeed < WALK_ENTER_SPEED_MPS -> MovementState.STATIONARY
+            stillHint && observedSpeed < WALK_ENTER_SPEED_MPS &&
+                !fallbackMovementCredible && !walkingHint -> MovementState.STATIONARY
             else -> null
         } ?: return unchanged(true, "ambiguous_evidence")
 
@@ -187,7 +191,12 @@ class MovementStateDetector(
             last.latitude,
             last.longitude
         )
-        if (net < FALLBACK_MIN_NET_DISTANCE_M) return false
+        val accuracyEnvelope = listOfNotNull(
+            first.accuracyM?.toDouble(),
+            last.accuracyM?.toDouble()
+        ).sum()
+        val credibleNetThreshold = maxOf(FALLBACK_MIN_NET_DISTANCE_M, accuracyEnvelope)
+        if (net < credibleNetThreshold) return false
         val path = credibleHistory.zipWithNext().sumOf { (a, b) ->
             Geo.distanceM(a.latitude, a.longitude, b.latitude, b.longitude)
         }
