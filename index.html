@@ -224,7 +224,7 @@ body.light .trow-title{color:var(--ink)}
    ════════════════════════════ */
 .lists-hub-header{display:flex;align-items:center;gap:14px;padding:20px 20px 8px}
 .lists-hub-avatar{width:44px;height:44px;border-radius:50%;background:var(--brandg);
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;
   font-size:18px;font-weight:800;color:#fff;flex:none}
 .lists-hub-name{font-size:17px;font-weight:700;flex:1}
 .lists-hub-search{width:42px;height:42px;flex:none;display:flex;align-items:center;
@@ -1878,7 +1878,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v423';
+const APP_VERSION='v424';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
