@@ -1568,7 +1568,12 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    strip. Matches every Life360 reference screenshot sent. */
 .fam-presence{display:flex;flex-direction:column;gap:2px;padding:6px 2px 10px}
 .fam-pcard{flex:none;display:flex;align-items:center;gap:14px;text-align:start;cursor:pointer;
-  padding:10px 8px;border-radius:14px;width:auto}
+  padding:10px 8px;border-radius:14px;width:auto;position:relative}
+/* v418: Life360-style row divider — a thin inset line under every real
+   member row (not the trailing "Add a person" row, and not the last row),
+   starting after the avatar so it aligns with the text column instead of
+   running full-bleed under the photo. */
+.fam-pcard:not(:last-child)::after{content:'';position:absolute;left:74px;right:8px;bottom:0;height:1px;background:var(--b1)}
 .fam-pcard-add .av{border:2px dashed var(--b1)!important;background-image:none!important}
 .fam-pcard.sel{background:var(--s2)}
 .fam-pcard .av{width:52px;height:52px;border-radius:50%;margin:0;flex:none;background-size:cover;background-position:center;
@@ -1873,7 +1878,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v418';
+const APP_VERSION='v423';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -1938,6 +1943,18 @@ function appVersionDisplay(){
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof voiceHardStop==='function') voiceHardStop(); });
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && typeof VaultSession!=='undefined'){ VaultSession.lock(); if(typeof _vaultReveal!=='undefined')_vaultReveal={}; if(typeof vaultWipeInputs==='function')vaultWipeInputs(); } });
   document.addEventListener('visibilitychange', ()=>{ try{ if(typeof FamilyBackend!=='undefined'&&FamilyBackend.location)FamilyBackend.location.reconcileWatch(); }catch(e){} });
+  // v420: cover the case where the app returns to foreground while the
+  // user is ALREADY sitting on the Family screen (famLiveMount only runs
+  // on a fresh mount, not on a plain resume) — same missed-membership
+  // self-heal as famLiveMount, see its comment for why this is needed.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState!=='visible') return;
+    if(!(currentModule==='family' && (famView==='live'||famView==='dashboard'))) return;
+    try{
+      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+      if(fb&&fb.refreshRoster) fb.refreshRoster().then(()=>{ if(typeof famLiveApply==='function')famLiveApply(); });
+    }catch(e){}
+  });
   window.addEventListener('pagehide', ()=>{ if(typeof voiceHardStop==='function') voiceHardStop(); });
   window.addEventListener('pagehide', ()=>{ if(typeof VaultSession!=='undefined'){VaultSession.lock(); if(typeof vaultWipeInputs==='function')vaultWipeInputs();} });
   window.addEventListener('pageshow', function(){ _exitingApp=false; _guards=0; });
@@ -11642,7 +11659,17 @@ const FamilyBackend = (function(){
       let rejectionReason=null;
       if(!Number.isFinite(nextAt)) rejectionReason='invalid-captured-time';
       else if(Number.isFinite(prevAt)&&nextAt<prevAt) rejectionReason='older-captured-time';
-      else if(Number.isFinite(nextSeq)&&Number.isFinite(prevSeq)&&nextSeq<=prevSeq&&!raw.replay) rejectionReason='non-monotonic-sequence';
+      // v419: the native `sequence` counter is an in-memory AtomicLong that
+      // resets to 0 on every TrackingService restart, Android process
+      // restart, and phone reboot — while `prevSeq` here is read from
+      // PERSISTED local state that survives all of those. Rejecting on
+      // nextSeq<=prevSeq made every later fix stale-forever after any such
+      // restart, until the new counter numerically climbed back past the
+      // old value (observed: hours of "frozen marker" / stale-looking
+      // status). `capturedAt` (device wall-clock/GPS time, already checked
+      // above) is restart-safe and is now the sole ordering/freshness rule.
+      // `nativeSequence`/`nativeFixId` are still recorded below for
+      // diagnostics only — they no longer gate acceptance.
       if(rejectionReason){
         console.debug('[location-timing]',{fixId:raw.fixId,sequence:raw.sequence,capturedAt:raw.capturedAt,javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,rejectedAtMs:Date.now(),accepted:false,rejectionReason});
         return false;
@@ -11651,7 +11678,20 @@ const FamilyBackend = (function(){
       const isConfirmedDeparture=movingState&&movingState!=='stationary'&&movingState!=='unknown';
       const trustedStay=raw.stayStart || (isConfirmedDeparture?null:(prev.stayStart||null));
       const displayedSpeed=(raw.filteredSpeedMps!=null?raw.filteredSpeedMps:raw.speed);
+      // v419: no accuracy gate previously existed on the drawn position — a
+      // single low-quality fix (GPS multipath near buildings, dense parallel
+      // streets) moved the marker immediately, which reads as "jumped to the
+      // next street". A poor-accuracy fix still updates speed/timestamp/
+      // everything else live, it just doesn't relocate the marker on its own;
+      // the very next good-accuracy fix corrects the position as normal.
+      const MAX_POSITION_ACCURACY_M=50;
+      const accM=(raw.accuracy!=null&&!isNaN(raw.accuracy))?Number(raw.accuracy):null;
+      const positionTrusted=(accM==null)||(accM<=MAX_POSITION_ACCURACY_M)||(prev.lat==null);
+      const nextLat=positionTrusted?raw.lat:prev.lat;
+      const nextLng=positionTrusted?raw.lng:prev.lng;
       const next=Object.assign({},prev,raw,{
+        lat:nextLat,
+        lng:nextLng,
         speed:displayedSpeed!=null?Number(displayedSpeed):null,
         stayStart:trustedStay,
         placeArrivedAt:trustedStay,
@@ -12170,7 +12210,18 @@ const FamilyBackend = (function(){
     const SCHEMA_VERSION = 1;
     const DRIVE_MIN_MS   = 2.8;
     const WALK_MAX_MS    = 2.3;
-    const START_HYST_MS  = 15000;
+    // v423: replaced by a sample-count confirmation (DRIVE_CONFIRM_SAMPLES
+    // below) instead of a fixed wall-clock wait — see there for why.
+    const START_HYST_MS  = 0;
+    // v423: Driving is now confirmed by N CONSECUTIVE qualifying fixes,
+    // not a fixed timer. A fix qualifies when it has driving-range speed,
+    // acceptable GPS accuracy, AND its own displacement from the previous
+    // qualifying fix is independently also in driving range (a cross-check
+    // against a single noisy high-speed reading). This reaches "Driving"
+    // in however long 3 real fixes actually take to arrive (typically a
+    // couple of seconds at the current 1-2s location interval) rather than
+    // always waiting a fixed amount, while still resisting a lone bad fix.
+    const DRIVE_CONFIRM_SAMPLES = 3;
     const CANDIDATE_TOLERANCE_MS = 8000; // brief non-driving blips (GPS noise, a stop-light dip) within this window don't reset the start-candidate timer
     const END_HYST_MS    = 90000;
     const SYNC_THROTTLE_MS = 15000;
@@ -12756,19 +12807,40 @@ const FamilyBackend = (function(){
 
       if(!q.sessionId){
         if(rawType==='driving'){
+          // v423: a fix "qualifies" toward confirmation only with acceptable
+          // GPS accuracy — driving-range speed alone (already true by virtue
+          // of rawType==='driving') is not enough on its own.
+          const accOk = sample.accuracyM==null || sample.accuracyM<=MAX_ACCEPT_ACCURACY_M;
           if(!q.candidate||q.candidate.type!=='driving'){
-            q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs};
+            q.candidate={type:'driving',since:nowMs,lastGoodAt:nowMs,count:accOk?1:0,lastQualified:accOk?sample:null};
             pipelineLog('candidate-start',{uid,speedMps:sample.speedMps,accuracyM:sample.accuracyM});
           }
           else {
-            q.candidate.lastGoodAt=nowMs; // still driving — refresh, keep the original 'since' so the timer keeps counting
-            if(nowMs-q.candidate.since>=START_HYST_MS){
+            q.candidate.lastGoodAt=nowMs; // still driving — refresh (diagnostics only now, no timer depends on this)
+            if(accOk){
+              // "Consistent movement": the displacement between this fix and
+              // the last QUALIFYING one must independently also compute to
+              // driving-range speed — a real cross-check against a single
+              // noisy high-speed reading, not just repeating the same
+              // device-reported speed three times.
+              let consistent=true;
+              if(q.candidate.lastQualified){
+                const dtC=(Date.parse(sample.t)-Date.parse(q.candidate.lastQualified.t))/1000;
+                if(dtC>0){
+                  const estC=haversineM(q.candidate.lastQualified,sample)/dtC;
+                  consistent = estC>=DRIVE_MIN_MS;
+                }
+              }
+              q.candidate.count = consistent ? (q.candidate.count||0)+1 : 1;
+              q.candidate.lastQualified=sample;
+            }
+            if((q.candidate.count||0)>=DRIVE_CONFIRM_SAMPLES){
               const acceptedPre=q.preFixWindow.filter(s=>s.accuracyM==null||s.accuracyM<=MAX_ACCEPT_ACCURACY_M);
               q.samples=(acceptedPre.length?acceptedPre:[sample]).slice();
               q.lastFlushIdx=0;
               const sess=startSession(uid,q.samples[0]);
               q.sessionId=sess.id; q.candidate=null; q.preLastFix=null; // q.samples is now authoritative
-              console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id});
+              console.debug('[FamilyDriving] SESSION STARTED',{uid,sessionId:sess.id,confirmedBy:'consecutive-samples'});
               pipelineLog('session-start',{uid,sessionId:sess.id});
             }
           }
@@ -12783,9 +12855,9 @@ const FamilyBackend = (function(){
           // very likely the actual reason real drives never registered.
           // Fix: tolerate brief non-driving gaps (up to
           // CANDIDATE_TOLERANCE_MS since the last genuinely-driving fix)
-          // before giving up on the candidate — the START_HYST_MS timer
-          // itself is preserved (not reset) through short blips, only
-          // reset if the gap is sustained.
+          // before giving up on the candidate — the consecutive-sample
+          // count (v423) is preserved (not reset) through short blips,
+          // only reset if the gap is sustained.
           if(q.candidate && q.candidate.type==='driving'){
             const gapMs=nowMs-q.candidate.lastGoodAt;
             if(gapMs>CANDIDATE_TOLERANCE_MS){ q.candidate=null; }
@@ -13363,7 +13435,7 @@ const FamilyBackend = (function(){
       sessionEvents, memberEventsInRange, memberSessionsInRange, deriveTimeline,
       recomputeMetricsAsync, engineDebugInfo, cloudDiagnostics,
       replay: FamilyDrivingReplay,
-      consts:{ DRIVE_MIN_MS, WALK_MAX_MS, START_HYST_MS, END_HYST_MS, SYNC_THROTTLE_MS,
+      consts:{ DRIVE_MIN_MS, WALK_MAX_MS, START_HYST_MS, DRIVE_CONFIRM_SAMPLES, END_HYST_MS, SYNC_THROTTLE_MS,
                MAX_JUMP_MS, MAX_ACCEPT_ACCURACY_M, HARD_BRAKE_MPS2, RAPID_ACCEL_MPS2,
                HIGH_SPEED_THRESHOLD_MPS, SCHEMA_VERSION, SAMPLES_PER_CHUNK,
                DRIFT_MIN_M, STOP_SPEED_MPS, STOP_HOLD_MS, HEADING_MIN_MPS, SPIKE_NEIGHBOR_MPS }
@@ -16218,7 +16290,7 @@ function famLiveSheetBodyHtml(members, sel, myUid){
         const movingActivity=['driving','walking','bicycling','motorcycle'].includes(txt.activityType);
         const line1=txt.l1&&txt.l1.trim()?txt.l1:(L==='fa'?'موقعیت زنده':'Live location');
         const sinceTxt = movingActivity
-          ? `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`
+          ? (txt.region || `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`)
           : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`));
         rowAddr=`<div class="st">${esc(line1)}</div><div class="st">${esc(sinceTxt)}</div>`;
       } else {
@@ -17353,6 +17425,19 @@ let _famPrevMountView=null; // v401: last mounted Family view, used to detect a 
 function famLiveMount(){
   const el=document.getElementById('fam-map');
   if(!el) return;
+  // v420: the family-doc onSnapshot listener can miss a membership change
+  // if this device was backgrounded/suspended at the moment someone else
+  // joined (see refreshRoster()'s own comment) — that member then never
+  // gets a location/consent listener attached and reads as permanently
+  // Offline, regardless of what their own phone is doing. This previously
+  // only self-healed if the user happened to tap the manual refresh
+  // button. Doing a forced roster re-fetch on every mount of this screen
+  // means opening (or returning to) Location is now itself enough to pick
+  // up any member who was missed.
+  try{
+    const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+    if(fb&&fb.refreshRoster) fb.refreshRoster().then(()=>{ if(typeof famLiveApply==='function')famLiveApply(); });
+  }catch(e){}
   // Keep "Here for X" / "Since HH:MM" text ticking forward while this screen is
   // open, even if no new GPS fix arrives — it's a pure clock read (stayStart is
   // untouched), so it never resets the real duration, only refreshes its display.
@@ -17601,10 +17686,25 @@ function famSheetInitDrag(){
     // swallowed by the WebView for any reason, the user is not trapped with
     // a sheet covering the map.
     if(moved<6){ famApplySheetDetent(_famSheetDetent>0?_famSheetDetent-1:1); return; }
+    // v418: free-stop — a real drag now stays exactly where the finger let
+    // go (still clamped between the collapsed and full-height limits),
+    // instead of snapping to the nearest of the 3 fixed detents. The map
+    // camera padding and sheet-height CSS var are updated to match this
+    // exact height so the map underneath is correctly sized, not just the
+    // sheet. _famSheetDetent is still updated to the nearest bucket purely
+    // for OTHER call sites (tap-to-collapse, open-detail, back-to-list)
+    // that intentionally still want a discrete stop — it does not re-snap
+    // the height that was just set here.
     const cur=sheet.getBoundingClientRect().height;
+    const clamped=Math.max(heights[0],Math.min(heights[2],cur));
+    sheet.style.height=clamped+'px';
+    sheet.classList.remove('detent-0','detent-2');
     let best=0,bd=1e9;
-    heights.forEach((hh,i)=>{const dd=Math.abs(hh-cur); if(dd<bd){bd=dd;best=i;}});
-    famApplySheetDetent(best);
+    heights.forEach((hh,i)=>{const dd=Math.abs(hh-clamped); if(dd<bd){bd=dd;best=i;}});
+    _famSheetDetent=best;
+    syncSheetVar(clamped);
+    try{ famUpdateCameraPadding(clamped); }catch(e){}
+    try{ MBMMap.invalidate(); }catch(e){}
   };
   grab.addEventListener('touchstart',onDown,{passive:false});
   grab.addEventListener('touchmove',onMove,{passive:false});
