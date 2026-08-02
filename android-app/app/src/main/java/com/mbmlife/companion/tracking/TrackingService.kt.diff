@@ -1,0 +1,153 @@
+--- /mnt/user-data/uploads/TrackingService_kt.txt	2026-08-02 06:51:48.403038000 +0000
++++ TrackingService.kt	2026-08-02 06:55:32.281913610 +0000
+@@ -58,6 +58,7 @@
+ 
+         const val ACTION_START = "com.mbmlife.companion.action.START_TRACKING"
+         const val ACTION_STOP = "com.mbmlife.companion.action.STOP_TRACKING"
++        const val ACTION_ACTIVITY_UPDATE = "com.mbmlife.companion.action.ACTIVITY_UPDATE"
+         const val ACTION_NATIVE_FIX = "com.mbmlife.companion.action.NATIVE_FIX"
+         const val EXTRA_FIX_JSON = "fix_json"
+         private const val CHANNEL_ID = "mbm_native_tracking"
+@@ -65,6 +66,20 @@
+         private const val ACTIVITY_REQUEST_CODE = 4102
+         private const val STOP_REEVALUATION_INTERVAL_MS = 10_000L
+         private const val ACTIVITY_FRESH_MS = 30_000L
++        // v424: battery-saving GPS mode, used only when there is no active
++        // trip AND no fresh Activity Recognition evidence of movement (see
++        // shouldUseFastGps()). Deliberately not used for the fast path —
++        // that stays exactly as it was (2_000L / 1_000L / HIGH_ACCURACY),
++        // unchanged, since that cadence was purpose-built to fix the
++        // driving marker/speed freeze.
++        private const val SLOW_INTERVAL_MS = 20_000L
++        private const val SLOW_MIN_INTERVAL_MS = 10_000L
++        // Confidence is 0-100 (Google Play services ActivityRecognition
++        // scale). Tune if real-device testing shows false wake-ups.
++        private const val MOVEMENT_ACTIVITY_CONFIDENCE_MIN = 50
++        private val MOVEMENT_ACTIVITIES = setOf(
++            "IN_VEHICLE", "ON_BICYCLE", "ON_FOOT", "RUNNING", "WALKING"
++        )
+ 
+         fun startIntent(context: android.content.Context) =
+             Intent(context, TrackingService::class.java).setAction(ACTION_START)
+@@ -96,7 +111,7 @@
+     private var currentTripActive = false
+     private var trackingStartRequested = false
+     private var locationUpdatesRequested = false
+-    private var locationRequestForActiveTrip: Boolean? = null
++    private var locationRequestFastMode: Boolean? = null
+     private var activityUpdatesRequested = false
+     private var stopReevaluationJob: Job? = null
+     private val detectorMutex = Mutex()
+@@ -147,6 +162,14 @@
+                 stopTracking()
+                 return START_NOT_STICKY
+             }
++            ACTION_ACTIVITY_UPDATE -> {
++                // v424: a fresh Activity Recognition result arrived
++                // (ActivityRecognitionReceiver). Re-evaluate GPS mode only —
++                // does not start/stop tracking, does not touch trip state.
++                // requestLocationUpdates() no-ops if the mode hasn't
++                // actually changed.
++                if (trackingStartRequested) requestLocationUpdates()
++            }
+             ACTION_START, null -> startTracking()
+         }
+         return START_STICKY
+@@ -203,21 +226,49 @@
+         }
+     }
+ 
++    // v424: Activity Recognition is a wake-up signal ONLY — it can switch
++    // GPS to fast mode, but it never starts, confirms, or ends a trip.
++    // Trip start/end remain entirely owned by MovementStateDetector /
++    // DrivingDetector, which this function never touches.
++    private fun hasFreshMovementActivity(): Boolean {
++        val type = app.preferences.lastActivityType
++        if (type !in MOVEMENT_ACTIVITIES) return false
++        val at = app.preferences.lastActivityAtMs
++        if (at <= 0L || System.currentTimeMillis() - at !in 0..ACTIVITY_FRESH_MS) return false
++        return app.preferences.lastActivityConfidence >= MOVEMENT_ACTIVITY_CONFIDENCE_MIN
++    }
++
++    private fun shouldUseFastGps(): Boolean = currentTripActive || hasFreshMovementActivity()
++
+     private fun requestLocationUpdates() {
+         if (!hasForegroundLocationPermission()) return
++        val fastMode = shouldUseFastGps()
+         if (
+             locationUpdatesRequested &&
+-            locationRequestForActiveTrip == currentTripActive
++            locationRequestFastMode == fastMode
+         ) return
+         if (locationUpdatesRequested) {
+             try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+             locationUpdatesRequested = false
+         }
+-        val builder = LocationRequest.Builder(
+-            Priority.PRIORITY_HIGH_ACCURACY,
+-            2_000L
+-        )
+-            .setMinUpdateIntervalMillis(1_000L)
++        val builder = if (fastMode) {
++            LocationRequest.Builder(
++                Priority.PRIORITY_HIGH_ACCURACY,
++                2_000L
++            )
++                .setMinUpdateIntervalMillis(1_000L)
++        } else {
++            // Reachable only when there is no active trip AND no fresh
++            // Activity Recognition evidence of movement. A single
++            // ActivityRecognitionReceiver update flips this back to fast
++            // mode immediately (see ACTION_ACTIVITY_UPDATE above) — GPS
++            // itself is never what decides to slow down or speed up.
++            LocationRequest.Builder(
++                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
++                SLOW_INTERVAL_MS
++            )
++                .setMinUpdateIntervalMillis(SLOW_MIN_INTERVAL_MS)
++        }
+             // Do not enable max-update-delay/batching: it produced the exact
+             // repeated 10–15 second marker/speed freezes seen on the phone.
+         // v402: never gate stationary callbacks behind a distance threshold.
+@@ -226,12 +277,12 @@
+         // decisions. Periodic fixes are the authoritative freshness signal.
+         val request = builder.build()
+         locationUpdatesRequested = true
+-        locationRequestForActiveTrip = currentTripActive
++        locationRequestFastMode = fastMode
+         try {
+             fused.requestLocationUpdates(request, locationCallback, mainLooper)
+                 .addOnFailureListener { error ->
+                     locationUpdatesRequested = false
+-                    locationRequestForActiveTrip = null
++                    locationRequestFastMode = null
+                     repository.logger().error(
+                         "Location",
+                         "requestLocationUpdates failed",
+@@ -240,7 +291,7 @@
+                 }
+         } catch (error: SecurityException) {
+             locationUpdatesRequested = false
+-            locationRequestForActiveTrip = null
++            locationRequestFastMode = null
+             repository.logger().error("Location", "SecurityException", error.toString())
+             stopTracking()
+         }
+@@ -539,7 +590,7 @@
+         try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+         try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
+         locationUpdatesRequested = false
+-        locationRequestForActiveTrip = null
++        locationRequestFastMode = null
+         activityUpdatesRequested = false
+         trackingStartRequested = false
+         app.preferences.trackingEnabled = false
+@@ -633,7 +684,7 @@
+         try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+         try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
+         locationUpdatesRequested = false
+-        locationRequestForActiveTrip = null
++        locationRequestFastMode = null
+         activityUpdatesRequested = false
+         trackingStartRequested = false
+         locationChannel.close()
