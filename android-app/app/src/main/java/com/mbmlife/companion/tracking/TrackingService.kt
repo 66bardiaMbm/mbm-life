@@ -66,20 +66,12 @@ class TrackingService : Service() {
         private const val ACTIVITY_REQUEST_CODE = 4102
         private const val STOP_REEVALUATION_INTERVAL_MS = 10_000L
         private const val ACTIVITY_FRESH_MS = 30_000L
-        // v424: battery-saving GPS mode, used only when there is no active
-        // trip AND no fresh Activity Recognition evidence of movement (see
-        // shouldUseFastGps()). Deliberately not used for the fast path —
-        // that stays exactly as it was (2_000L / 1_000L / HIGH_ACCURACY),
-        // unchanged, since that cadence was purpose-built to fix the
-        // driving marker/speed freeze.
-        private const val SLOW_INTERVAL_MS = 20_000L
-        private const val SLOW_MIN_INTERVAL_MS = 10_000L
-        // Confidence is 0-100 (Google Play services ActivityRecognition
-        // scale). Tune if real-device testing shows false wake-ups.
-        private const val MOVEMENT_ACTIVITY_CONFIDENCE_MIN = 50
-        private val MOVEMENT_ACTIVITIES = setOf(
-            "IN_VEHICLE", "ON_BICYCLE", "ON_FOOT", "RUNNING", "WALKING"
-        )
+        // v425: the v424 fast/slow GPS mode switch (SLOW_INTERVAL_MS etc.)
+        // has been reverted — untested, and the phone got worse ("Updated
+        // 1 day ago") after it shipped. GPS is unconditionally fast again,
+        // exactly as it was when the (separately confirmed) nativeSequence
+        // fix was verified. Not reintroducing this until it can be proven
+        // safe before shipping, not after.
 
         fun startIntent(context: android.content.Context) =
             Intent(context, TrackingService::class.java).setAction(ACTION_START)
@@ -226,49 +218,21 @@ class TrackingService : Service() {
         }
     }
 
-    // v424: Activity Recognition is a wake-up signal ONLY — it can switch
-    // GPS to fast mode, but it never starts, confirms, or ends a trip.
-    // Trip start/end remain entirely owned by MovementStateDetector /
-    // DrivingDetector, which this function never touches.
-    private fun hasFreshMovementActivity(): Boolean {
-        val type = app.preferences.lastActivityType
-        if (type !in MOVEMENT_ACTIVITIES) return false
-        val at = app.preferences.lastActivityAtMs
-        if (at <= 0L || System.currentTimeMillis() - at !in 0..ACTIVITY_FRESH_MS) return false
-        return app.preferences.lastActivityConfidence >= MOVEMENT_ACTIVITY_CONFIDENCE_MIN
-    }
-
-    private fun shouldUseFastGps(): Boolean = currentTripActive || hasFreshMovementActivity()
-
     private fun requestLocationUpdates() {
         if (!hasForegroundLocationPermission()) return
-        val fastMode = shouldUseFastGps()
         if (
             locationUpdatesRequested &&
-            locationRequestFastMode == fastMode
+            locationRequestFastMode == true
         ) return
         if (locationUpdatesRequested) {
             try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
             locationUpdatesRequested = false
         }
-        val builder = if (fastMode) {
-            LocationRequest.Builder(
-                Priority.PRIORITY_HIGH_ACCURACY,
-                2_000L
-            )
-                .setMinUpdateIntervalMillis(1_000L)
-        } else {
-            // Reachable only when there is no active trip AND no fresh
-            // Activity Recognition evidence of movement. A single
-            // ActivityRecognitionReceiver update flips this back to fast
-            // mode immediately (see ACTION_ACTIVITY_UPDATE above) — GPS
-            // itself is never what decides to slow down or speed up.
-            LocationRequest.Builder(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-                SLOW_INTERVAL_MS
-            )
-                .setMinUpdateIntervalMillis(SLOW_MIN_INTERVAL_MS)
-        }
+        val builder = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            2_000L
+        )
+            .setMinUpdateIntervalMillis(1_000L)
             // Do not enable max-update-delay/batching: it produced the exact
             // repeated 10–15 second marker/speed freezes seen on the phone.
         // v402: never gate stationary callbacks behind a distance threshold.
@@ -277,7 +241,7 @@ class TrackingService : Service() {
         // decisions. Periodic fixes are the authoritative freshness signal.
         val request = builder.build()
         locationUpdatesRequested = true
-        locationRequestFastMode = fastMode
+        locationRequestFastMode = true
         try {
             fused.requestLocationUpdates(request, locationCallback, mainLooper)
                 .addOnFailureListener { error ->
