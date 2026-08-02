@@ -13,8 +13,8 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-      versionName = "0.7.6-v423-web-sync"
+        versionCode = 17
+    versionName = "0.7.6-v424-battery-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
