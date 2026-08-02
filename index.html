@@ -1878,7 +1878,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v424';
+const APP_VERSION='v425';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -3470,7 +3470,7 @@ function renderMore(){
 
     <div class="hub-sec-label">${tr('about')}</div>
     <div style="background:var(--s1);border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin:0 0 10px">
-      <div class="ul-row" style="padding:0 16px;cursor:default">
+      <div class="ul-row" style="padding:0 16px;cursor:pointer" onclick="famDevTap()">
         <div class="ul-icon"><div class="ul-icon-inner" style="background:#6e56f820;color:var(--brand);font-size:16px">i</div></div>
         <span class="ul-name">MBM Life</span>
         <span class="ul-count">${esc(appVersionDisplay())}</span>
@@ -13584,11 +13584,28 @@ function famAvatar(mem,size){ size=size||44; const c=mem.color||'#ec4899'; const
    project id, auth uid or raw error codes. Dev mode is off by default and is
    only toggled by a deliberate hidden gesture (5 quick taps on the Family
    settings title) — never surfaced in the normal UI. */
-function famDevMode(){ return false; }
+// v425: famDevMode() was hardcoded `return false` — the entire diagnostics
+// screen (fix accept/reject counts, last reject reason, etc.) was
+// permanently unreachable no matter what, regardless of DB.meta._devMode.
+// famDevTap() was also broken: _famTitleTaps was declared but never
+// incremented anywhere, and the function only ever turned dev mode OFF,
+// never on. Both are now real: tap the version row in Settings 7 times
+// within 3 seconds to toggle developer diagnostics on.
+function famDevMode(){ return !!(DB.meta && DB.meta._devMode); }
 let _famTitleTaps=0, _famTitleTapT=0;
 function famDevTap(){
-  _famTitleTaps=0;
-  if(DB.meta&&DB.meta._devMode){ DB.meta._devMode=false; try{saveDB();}catch(e){} }
+  const now=Date.now();
+  if(now-_famTitleTapT>3000) _famTitleTaps=0;
+  _famTitleTapT=now;
+  _famTitleTaps++;
+  if(_famTitleTaps>=7){
+    _famTitleTaps=0;
+    if(!DB.meta) DB.meta={};
+    DB.meta._devMode=!DB.meta._devMode;
+    try{ saveDB(); }catch(e){}
+    try{ toast(DB.meta._devMode?(L==='fa'?'حالت توسعه‌دهنده روشن شد':'Developer mode on'):(L==='fa'?'حالت توسعه‌دهنده خاموش شد':'Developer mode off')); }catch(e){}
+    render();
+  }
 }
 /* Friendly, non-technical failure message for normal users. The raw Firestore
    detail (code/message/uid/project) is only shown when dev mode is on. */
