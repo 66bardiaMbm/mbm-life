@@ -147,6 +147,34 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
         advanceTrackingSetup()
+
+        // v427: was registered in onStart()/unregistered in onStop(), so
+        // every fix TrackingService broadcast while the app was merely
+        // backgrounded (screen off, switched away — the overwhelming
+        // majority of the time for a location-tracking app) was silently
+        // dropped by Android (no receiver = no-op, never queued/retried).
+        // TrackingService itself kept running and broadcasting the whole
+        // time; nothing was ever listening. Registering here (survives
+        // until the Activity is actually destroyed) instead of onStart/
+        // onStop fixes that — evaluateJavascript() on a backgrounded
+        // WebView is safe, it just doesn't repaint until foregrounded again.
+        if (!receiverRegistered) {
+            ContextCompat.registerReceiver(
+                this,
+                nativeFixReceiver,
+                IntentFilter(TrackingService.ACTION_NATIVE_FIX),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            receiverRegistered = true
+        }
+    }
+
+    override fun onDestroy() {
+        if (receiverRegistered) {
+            unregisterReceiver(nativeFixReceiver)
+            receiverRegistered = false
+        }
+        super.onDestroy()
     }
 
     /**
@@ -199,24 +227,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (!receiverRegistered) {
-            ContextCompat.registerReceiver(
-                this,
-                nativeFixReceiver,
-                IntentFilter(TrackingService.ACTION_NATIVE_FIX),
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-            receiverRegistered = true
-        }
         handler.post(contextPoll)
     }
 
     override fun onStop() {
         handler.removeCallbacks(contextPoll)
-        if (receiverRegistered) {
-            unregisterReceiver(nativeFixReceiver)
-            receiverRegistered = false
-        }
         super.onStop()
     }
 
