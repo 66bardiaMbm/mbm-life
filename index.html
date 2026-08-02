@@ -1878,7 +1878,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v425';
+const APP_VERSION='v426';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13842,7 +13842,7 @@ function renderFamily(){
   if(famView==='membership') return famMembershipView();
   if(famView==='timeline') return head(L==='fa'?'تایم‌لاین خانواده':'Family Timeline','fam-back-dash')+famLaterView(L==='fa'?'تایم‌لاین':'Timeline',L==='fa'?'فاز ۲':'Phase 2','🕘');
   if(famView==='settings') return head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-live')+famSettingsView();
-  if(famView==='diag') return famDevMode()?(head(L==='fa'?'تشخیص':'Diagnostics','fam-back-settings')+famDiagView()):(head(L==='fa'?'تنظیمات خانواده':'Family Settings','fam-back-live')+famSettingsView());
+  if(famView==='diag') return head(L==='fa'?'تشخیص':'Diagnostics','fam-back-settings')+famDiagView();
   return famLiveView();
 }
 
@@ -18260,7 +18260,7 @@ function famSettingsView(){
     } else {
       h+=`<div style="font-size:13px;color:var(--ink2)">${L==='fa'?'برای مدیریت فضای ابری خانواده باید آنلاین باشید.':'Go online to manage the cloud family space.'}</div>`;
     }
-    if(famDevMode()) h+=`<button class="btn btn-ghost" data-fam="diag-open" style="width:100%;margin-top:18px;font-size:13px">${L==='fa'?'🩺 اجرای تشخیص (حالت توسعه)':'🩺 Run diagnostics (developer)'}</button>`;
+    h+=`<button class="btn btn-ghost" data-fam="diag-open" style="width:100%;margin-top:18px;font-size:13px">${L==='fa'?'🩺 اجرای تشخیص':'🩺 Run diagnostics'}</button>`;
   }
   else if(famSettingsTab==='members')h+=famTile('👥',L==='fa'?'مدیریت اعضا':'Manage members','members');
   else if(famSettingsTab==='places')h+=famTile('📍',L==='fa'?'مکان‌ها و هشدارها':'Places & alerts','places');
@@ -18391,7 +18391,7 @@ async function famAction(act,arg,ev){
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
   switch(act){
     case 'settings': go('settings'); return;
-    case 'diag-open': if(!famDevMode()){ famDevTap(); return; } famView='diag'; _famDiagResults=null; render(); window.scrollTo(0,0); return;
+    case 'diag-open': famView='diag'; _famDiagResults=null; render(); window.scrollTo(0,0); return;
     case 'dev-tap': famDevTap(); return;
     case 'profile-photo':{ if(typeof openFamPhotoSheet==='function')openFamPhotoSheet(); return; }
     case 'profile-save':{
