@@ -41,6 +41,7 @@ import com.mbmlife.companion.databinding.ActivityMainBinding
 import com.mbmlife.companion.sync.SyncWorker
 import com.mbmlife.companion.tracking.TrackingService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -214,7 +215,9 @@ class MainActivity : AppCompatActivity() {
         val logs = dao.recentLogs(200)
         val latest = uid?.let { dao.latestAcceptedSample(it) }
         val workInfos = runCatching {
-            WorkManager.getInstance(this).getWorkInfosForUniqueWork(SyncWorker.UNIQUE_WORK).get()
+            WorkManager.getInstance(this)
+                .getWorkInfosForUniqueWorkFlow(SyncWorker.UNIQUE_WORK)
+                .first()
         }.getOrElse { emptyList() }
         val workerCounts = workInfos.groupingBy { it.state.name }.eachCount().toSortedMap()
         return JSONObject()
