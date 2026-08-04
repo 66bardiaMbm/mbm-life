@@ -1810,7 +1810,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v403';
+const APP_VERSION='v404';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -10888,6 +10888,19 @@ const FamilyBackend = (function(){
     let _consentUnsub=null;          // my own consent listener
     let _routeUnsub=null;            // my own route doc listener (to restore after reopen)
 
+    /* ── Consent listener recovery (bug #2 fix) — in-memory only, never
+       persisted to DB.entities.famConsent. Distinguishes "consent doc says
+       false" from "we simply haven't heard from the listener yet", so a
+       reconnecting/backgrounded device never falsely renders a member as
+       Offline just because its consent snapshot hasn't arrived. ── */
+    const _consentState={};          // uid -> 'unknown' | 'enabled' | 'disabled'
+    const _consentLastConfirmed={};  // uid -> last real consent doc {enabled,precise,paused,updatedAt}
+    const _consentGraceUntil={};     // uid -> ms epoch until which the last-confirmed value may still be used
+    const CONSENT_GRACE_MS=60*1000;  // after this, an unresolved consent stops being treated as its old value
+    let _listenerGeneration=0;       // bumped every startListening(); listener callbacks from an older
+                                      // generation (attached before the latest reconnect) are ignored —
+                                      // prevents a late/stale snapshot from overwriting fresher state.
+
     function nowISO(){ return new Date().toISOString(); }
     function ageMs(iso){ const t=Date.parse(iso||''); return isNaN(t)?Infinity:(Date.now()-t); }
     function haversine(a,b){ if(!a||!b)return Infinity; const R=6371000,toR=x=>x*Math.PI/180;
@@ -10898,12 +10911,19 @@ const FamilyBackend = (function(){
     /* Derive the honest display status from raw state + consent. Never returns
        a "live" verdict for old data; consent/pause/permission win over freshness. */
     function deriveStatus(state, consent){
-      if(!consent||!consent.enabled) return 'unavailable';   // not sharing → no position claim
-      if(consent.paused) return 'paused';
+      // Consent hasn't resolved to a real answer yet (listener reconnecting,
+      // or never yet heard from) — do NOT assert an explicit Offline/"not
+      // sharing" verdict on that alone; fall through to what the actual
+      // location data honestly shows.
+      const consentUnknown=!!(consent && consent._unknown);
+      if(!consentUnknown){
+        if(!consent||!consent.enabled) return 'unavailable';   // not sharing → no position claim
+        if(consent.paused) return 'paused';
+      }
       if(state && state.permission==='denied') return 'denied';
-      if(!state || state.lat==null) return 'unavailable';
+      if(!state || state.lat==null) return consentUnknown?'reconnecting':'unavailable';
       const age=ageMs(state.reportedAt||state.capturedAt);
-      if(age>STALE_MS) return 'offline';
+      if(age>STALE_MS) return consentUnknown?'reconnecting':'offline';
       if(age>RECENT_MS) return 'stale';
       if(state.moving) return 'moving';
       if(age<=FRESH_MS) return 'updating';
@@ -10920,7 +10940,8 @@ const FamilyBackend = (function(){
         offline:{en:'Device offline',fa:'دستگاه آفلاین',tone:'muted'},
         paused:{en:'Sharing paused',fa:'اشتراک متوقف شده',tone:'muted'},
         denied:{en:'Permission denied',fa:'اجازه رد شده',tone:'warn'},
-        unavailable:{en:'Not sharing',fa:'اشتراک‌گذاری نشده',tone:'muted'}
+        unavailable:{en:'Not sharing',fa:'اشتراک‌گذاری نشده',tone:'muted'},
+        reconnecting:{en:'Reconnecting…',fa:'در حال اتصال مجدد…',tone:'muted'}
       };
       return M[status]||M.unavailable;
     }
@@ -11298,7 +11319,25 @@ const FamilyBackend = (function(){
     function consentMap(){ if(!DB.entities.famConsent)DB.entities.famConsent={}; return DB.entities.famConsent; }
 
     function myConsent(){ const c=consentMap()[myUid()]; return c||{enabled:false,precise:true,paused:false,updatedAt:null}; }
-    function memberConsent(uid){ return consentMap()[uid]||{enabled:false,precise:true,paused:false,updatedAt:null}; }
+    /* Three-state read: 'enabled'/'disabled' come from a real Firestore
+       snapshot (including an explicit "document doesn't exist" result) and
+       are returned as-is. 'unknown' (never resolved yet, or the listener is
+       reconnecting) returns the last CONFIRMED value while within the grace
+       window — so behaviour is unchanged during a brief reconnect — and
+       only falls back to a genuinely-unknown marker (_unknown:true) once
+       that grace window has passed with no new snapshot. Callers that must
+       distinguish this from a real "not sharing" check consent._unknown. */
+    function memberConsent(uid){
+      const state=_consentState[uid];
+      if(state==='enabled'||state==='disabled'){
+        return consentMap()[uid]||{enabled:state==='enabled',precise:true,paused:false,updatedAt:null};
+      }
+      const last=_consentLastConfirmed[uid];
+      if(last && Date.now()<(_consentGraceUntil[uid]||0)){
+        return Object.assign({}, last, {_provisional:true});
+      }
+      return {enabled:false,precise:true,paused:false,updatedAt:null,_unknown:true};
+    }
     function memberState(uid){ return locMap()[uid]||null; }
     function memberStatus(uid){ return deriveStatus(memberState(uid), memberConsent(uid)); }
     function memberRoute(uid){ const r=routeMap()[uid]; return r&&Array.isArray(r.points)?r.points:[]; }
@@ -11766,20 +11805,45 @@ const FamilyBackend = (function(){
     function startListening(){
       stopListening();
       if(!ready()||!isMember())return;
+      // New generation: any callback still in flight from a PRIOR generation
+      // (e.g. a delayed snapshot from a listener we're about to replace)
+      // must be ignored rather than allowed to overwrite fresher state.
+      _listenerGeneration++;
+      const myGen=_listenerGeneration;
       const fid=familyId();
       const uids=Object.keys((_current&&_current.members)||{});
       uids.forEach(uid=>{
+        // Mark this member's consent as reconnecting. If we have a
+        // last-confirmed value it keeps being used (unchanged behaviour)
+        // for up to CONSENT_GRACE_MS while we wait for a fresh snapshot;
+        // only after that grace window (and still no snapshot) does
+        // memberConsent() start returning the genuinely-unknown marker.
+        _consentState[uid]='unknown';
+        _consentGraceUntil[uid]=Date.now()+CONSENT_GRACE_MS;
         // The signed-in user's marker has one authoritative source:
         // local watchPosition -> writeMyFix -> famLivePaintMarkers.
         // We still upload this user's location document, but never subscribe
         // to its echoed copy because an echo can race a newer local fix and
         // move the same marker backwards.
         let u1=null;
-        if(uid!==myUid()) u1=locRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){
-          const incoming=Object.assign({uid},snap.data());
-          locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
-        } },err=>{ diag('firestore-location-listener',{uid,code:err&&err.code,message:err&&err.message}); });
-        const u2=consentLocRef(fid,uid).onSnapshot(snap=>{ if(snap.exists){ consentMap()[uid]=snap.data(); persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange(); } },()=>{});
+        if(uid!==myUid()) u1=locRef(fid,uid).onSnapshot(snap=>{
+          if(myGen!==_listenerGeneration) return; // stale generation — ignore
+          if(snap.exists){
+            const incoming=Object.assign({uid},snap.data());
+            locMap()[uid]=incoming; persistDB&&persistDB(); afterChange();
+          }
+        },err=>{ diag('firestore-location-listener',{uid,code:err&&err.code,message:err&&err.message}); });
+        const u2=consentLocRef(fid,uid).onSnapshot(snap=>{
+          if(myGen!==_listenerGeneration) return; // stale generation — ignore (superseded by a newer reconnect)
+          // A real snapshot always wins, whether it says the doc exists
+          // (explicit enabled:true/false) or explicitly does NOT exist —
+          // both are authoritative answers, distinct from "no snapshot yet".
+          const data=snap.exists?snap.data():{enabled:false,precise:true,paused:false,updatedAt:null};
+          consentMap()[uid]=data;
+          _consentLastConfirmed[uid]=data;
+          _consentState[uid]=data.enabled?'enabled':'disabled';
+          persistDB&&persistDB(); if(uid===myUid())reconcileWatch(); afterChange();
+        },()=>{});
         if(u1)_locUnsubs.push(u1);
         _locUnsubs.push(u2);
       });
@@ -15781,7 +15845,10 @@ function famLiveMembers(){
     return { uid, name:(uid===((FB.user&&FB.user.uid))?famSelfName():(m.name||'Member')),
              role:m.role, photo:m.photo, phone:m.phone||null, color:famColorForUid(uid),
              state, consent, status, meta:loc.statusMeta(status),
-             hasFix: !!(state&&state.lat!=null && (consent&&consent.enabled&&!consent.paused)) };
+             hasFix: !!(state&&state.lat!=null && (
+               (consent&&consent.enabled&&!consent.paused) ||
+               (consent&&consent._unknown) // don't hide a real fix just because consent hasn't resolved yet
+             )) };
   });
 }
 let _famSelUid=null;   // selected member on the live map
@@ -16056,9 +16123,15 @@ const STALE_PRESENCE_MS=45*60*1000; // beyond this fix age, "Since"/"Here for" i
 const UNCERTAIN_GAP_MS=20*60*1000;  // if the PRIOR fix was more than this long ago, we cannot honestly claim continuous presence through that gap — even though the CURRENT fix is fresh. Distinct from STALE_PRESENCE_MS (which is about the current fix being old, not a past gap).
 
 function famClassifyRawActivity(m,currentState){
-  if(!m.consent||!m.consent.enabled) return 'offline';
-  if(m.consent.paused) return 'paused';
-  if(!m.state||m.state.lat==null) return 'offline';
+  // consent._unknown = the consent listener hasn't resolved yet (never
+  // heard from it, or reconnecting past its grace window) — this must NOT
+  // be treated the same as an explicit "not sharing" answer.
+  const consentUnknown=!!(m.consent && m.consent._unknown);
+  if(!consentUnknown){
+    if(!m.consent||!m.consent.enabled) return 'offline';
+    if(m.consent.paused) return 'paused';
+  }
+  if(!m.state||m.state.lat==null) return consentUnknown?'reconnecting':'offline';
   if(m.status==='offline') return 'offline';
   const s=m.state;
   // The Android companion publishes an already-confirmed, persisted state.
@@ -16128,9 +16201,9 @@ function famDeriveMemberDisplay(m){
   // but the GPS fix positions themselves clearly show a car moving.
   if(!nativePersisted && raw!=='offline' && raw!=='paused' && famCumulativeIsDriving(c,m)) raw='driving';
   if(raw==='driving'||raw==='walking'||raw==='bicycling'||raw==='motorcycle') c.lastMovementAt=(m.state&&(m.state.reportedAt||m.state.capturedAt))||new Date(nowMs).toISOString();
-  // offline/paused are never debounced — these are honest device/consent
-  // facts, not noisy motion signals, so they apply immediately.
-  if(raw==='offline'||raw==='paused'){
+  // offline/paused/reconnecting are never debounced — these are honest
+  // device/consent facts, not noisy motion signals, so they apply immediately.
+  if(raw==='offline'||raw==='paused'||raw==='reconnecting'){
     if(c.activityType!==raw){ c.activityType=raw; c.activityStartedAt=new Date(nowMs).toISOString(); }
     c._candidate=null; c._candidateSince=0; c._candidateSamples=0;
   } else if(nativePersisted){
@@ -16238,6 +16311,9 @@ function famComposeStatusText(m){
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(d.activityType==='offline'){
     return { l1:(L==='fa'?'آفلاین':'Offline'), l2:'', since:null, activityType:'offline' };
+  }
+  if(d.activityType==='reconnecting'){
+    return { l1:(L==='fa'?'در حال اتصال مجدد':'Reconnecting…'), l2:'', since:null, activityType:'reconnecting' };
   }
   if(d.activityType==='paused'){
     return { l1:(L==='fa'?'اشتراک متوقف شده':'Sharing paused'), l2:'', since:null, activityType:'paused' };
@@ -16396,9 +16472,12 @@ function famMarkerCalloutText(txt){
    exclusively. Keeping this narrow prevents it from ever becoming a second
    status formatter again. */
 function famLiveStatusLine(m){
-  if(!m.consent||!m.consent.enabled) return L==='fa'?'اشتراک‌گذاری نشده':'Not sharing';
-  if(m.consent.paused) return L==='fa'?'اشتراک متوقف شده':'Sharing paused';
-  if(!m.state||m.state.lat==null) return L==='fa'?'موقعیت نامشخص':'Location unknown';
+  const consentUnknown=!!(m.consent && m.consent._unknown);
+  if(!consentUnknown){
+    if(!m.consent||!m.consent.enabled) return L==='fa'?'اشتراک‌گذاری نشده':'Not sharing';
+    if(m.consent.paused) return L==='fa'?'اشتراک متوقف شده':'Sharing paused';
+  }
+  if(!m.state||m.state.lat==null) return consentUnknown?(L==='fa'?'در حال اتصال مجدد':'Reconnecting…'):(L==='fa'?'موقعیت نامشخص':'Location unknown');
   const rel=famRelTime(m.state.reportedAt||m.state.capturedAt);
   if(m.status==='offline') return L==='fa'?`آفلاین · ${rel}`:`Offline · ${rel}`;
   return (L==='fa'?'به‌روزرسانی ':'Updated ')+rel;
@@ -21399,6 +21478,27 @@ document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='hidden' && currentModule==='notes' && activeNoteId){
     noteFlushPending(activeNoteId);
   }
+});
+/* Bug #2 fix: the Family real-time member listeners (location + consent)
+   can silently stop delivering updates after this device is backgrounded
+   for a while, with no automatic recovery — previously the ONLY recovery
+   path was the person manually tapping the refresh button. This restores
+   them automatically on resume, using the EXACT same recovery path as that
+   manual button (refreshRoster -> FamilyLocation.startListening, which is
+   already idempotent — it unsubscribes everything before resubscribing, so
+   repeated resumes never create duplicate listeners). Scoped to only fire
+   when the Family screen is actually open, so it never runs pointlessly on
+   every tab switch. Does not touch GPS, native tracking, battery, movement
+   classification, stayStart/presence, or trip logic. */
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible') return;
+  if(!(screen==='module' && currentModule==='family')) return;
+  try{
+    const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+    if(fb && fb.refreshRoster){
+      fb.refreshRoster().then(()=>{ if(typeof famLiveApply==='function')famLiveApply(); });
+    }
+  }catch(e){}
 });
 window.addEventListener('beforeunload',()=>{
   if(currentModule==='notes' && activeNoteId) noteFlushPending(activeNoteId);
