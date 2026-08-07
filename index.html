@@ -1810,7 +1810,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v404';
+const APP_VERSION='v407';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -15432,7 +15432,10 @@ const MBMMap = (function(){
     let callout='';
     if(meta.calloutL1){
       callout=`<div class="fam-callout"><div class="l1">${meta.calloutL1}</div>`+
-        (meta.calloutL2?`<div class="l2">${meta.calloutL2}</div>`:'')+
+        (meta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
+          <span style="width:14px;height:14px;flex:none;display:inline-flex;align-items:center;justify-content:center;background:var(--fam-purple,#8652FF);border-radius:4px;color:#fff;padding:2px;box-sizing:border-box">${famIcon('pin')}</span>
+          <span>${meta.calloutL2}</span>
+        </div>`:'')+
         `<div class="fam-callout-tip"></div></div>`;
     }
     const pin=`<div class="fam-pin-glow"></div><div class="fam-pin-pulse"></div><div class="fam-pin-body"></div>`+head+av+activityBadge+battBadge;
@@ -15764,9 +15767,18 @@ function famRelTime(iso){
 function famAbsTime(iso){
   const t=Date.parse(iso||''); if(isNaN(t))return '';
   const d=new Date(t);
-  return d.toLocaleTimeString(L==='fa'?'fa-IR':'en-AU',{
+  const timeStr=d.toLocaleTimeString(L==='fa'?'fa-IR':'en-AU',{
     hour:'2-digit',minute:'2-digit',hour12:false,hourCycle:'h23'
   });
+  // v405: if the timestamp isn't from today, append the day name (matches
+  // Life360's "Since 16:23 Tuesday" format) — without this, a multi-day-old
+  // "Since HH:mm" reads as if it happened today, which is what caused the
+  // false "Here for 54hr doesn't match Since 16:24" confusion.
+  const now=new Date();
+  const isToday=d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth()&&d.getDate()===now.getDate();
+  if(isToday) return timeStr;
+  const dayStr=d.toLocaleDateString(L==='fa'?'fa-IR':'en-AU',{weekday:'long'});
+  return `${timeStr} ${dayStr}`;
 }
 /* Honest accuracy classification. A raw ±2000m must NEVER be shown as if it
    were a normal precise value — instead it's labelled "Approximate" and, when
@@ -16842,7 +16854,10 @@ function famLiveMemberDetail(m, isMe){
       : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTime(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`));
     h+=`<div class="fam-loc-block" data-fam-debug="loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
-        <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="width:16px;height:16px;flex:none;color:var(--fam-purple,#8652FF)">${famIcon('pin')}</span>
+          <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
+        </div>
         ${regionTxt?`<div style="font-size:15px;color:var(--ink3);margin-top:3px">${regionTxt}</div>`:''}
         <div style="font-size:15px;color:var(--ink3);margin-top:3px">${sinceTxt}</div>
         ${(famDevMode()||_drvDebugOverlayOn)?famSinceDiagLineHtml(m,txt,since):''}
@@ -17847,6 +17862,7 @@ function famGetLocation(cb){
   );
 }
 /* ── Family action router ── */
+let _famDelegatedClickBound=false;
 function bindFamily(){
   if(!(screen==='module'&&currentModule==='family'))return;
   const go=(v)=>{ famView=v; render(); window.scrollTo(0,0); };
@@ -17858,10 +17874,27 @@ function bindFamily(){
   const b5=document.getElementById('fam-back-settings'); if(b5)b5.onclick=()=>go('settings');
   const b6=document.getElementById('fam-back-drivingDash'); if(b6)b6.onclick=()=>go('drivingDash');
   const b7=document.getElementById('fam-back-drivingHistory'); if(b7)b7.onclick=()=>go('drivingHistory');
-  document.querySelectorAll('[data-fam]').forEach(el=>{
-    if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
-    el.onclick=(ev)=>{ ev.stopPropagation(); const act=el.dataset.fam, arg=el.dataset.arg||''; famAction(act,arg,ev); };
-  });
+  // v406 (Bug #4 fix): the old approach re-attached el.onclick to every
+  // [data-fam] element found by querySelectorAll AT THE MOMENT bindFamily()
+  // ran. That only works if bindFamily() is called again after every single
+  // DOM update that adds new [data-fam] nodes — any re-render path that
+  // updates the sheet without also calling bindFamily() (or that runs before
+  // the new nodes exist) silently leaves those specific rows unresponsive to
+  // taps, which matches the reported symptom (only some rows react). A single
+  // delegated listener, bound ONCE on document and never re-attached, cannot
+  // go stale this way — it resolves the actual target element at click time.
+  if(!_famDelegatedClickBound){
+    _famDelegatedClickBound=true;
+    document.addEventListener('click',(ev)=>{
+      if(!(screen==='module'&&currentModule==='family'))return;
+      const el=ev.target&&ev.target.closest?ev.target.closest('[data-fam]'):null;
+      if(!el)return;
+      if(el.tagName==='A')return; // let tel:/sms: anchors work natively (still log below)
+      ev.stopPropagation();
+      const act=el.dataset.fam, arg=el.dataset.arg||'';
+      famAction(act,arg,ev);
+    });
+  }
   // tel/sms anchors: log the action was opened (never claim delivered)
   document.querySelectorAll('a[data-fam="sos-log"]').forEach(a=>a.addEventListener('click',()=>{ famLog('sos_action',{action:a.dataset.arg}); saveDB(); }));
   // live-bind toggle time box for quiet hours
@@ -17892,7 +17925,13 @@ function famAction(act,arg,ev){
     case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
-    case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); try{ famEnsureSheetVisible(); }catch(e){} return;
+    case 'live-sel':
+      // v405 diagnostic (Bug #4): confirm the tap handler actually fires and
+      // with which uid, so a "nothing happens on the second row" report can
+      // be checked against a real console/toast trace instead of guessed at.
+      if(famDevMode()) toast('live-sel: '+arg);
+      console.log('[fam-tap-debug] live-sel fired, arg=',arg,'prev _famSelUid=',_famSelUid);
+      _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); try{ famEnsureSheetVisible(); }catch(e){} return;
     case 'live-refresh':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.reconcileWatch(); fb.location.refreshPermission(); fb.location.requestFreshFix({cb:()=>{ if(typeof famLiveApply==='function')famLiveApply(); }}); }
       // Force a real re-fetch of the family roster too — the real-time
       // listener can miss updates (e.g. a new member joined while this
