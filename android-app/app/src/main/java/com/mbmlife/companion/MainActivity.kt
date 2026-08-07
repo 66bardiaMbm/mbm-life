@@ -2,6 +2,8 @@ package com.mbmlife.companion
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -28,6 +30,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.lifecycle.lifecycleScope
+import androidx.work.WorkManager
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
@@ -35,11 +38,17 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.mbmlife.companion.data.DiagnosticLogger
 import com.mbmlife.companion.data.FamilyResolver
 import com.mbmlife.companion.databinding.ActivityMainBinding
+import com.mbmlife.companion.sync.SyncWorker
 import com.mbmlife.companion.tracking.TrackingService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONTokener
 import org.json.JSONObject
+import java.time.Instant
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -146,6 +155,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         configureWebView()
+        binding.syncDiagnosticsButton.setOnClickListener { exportNativeSyncDiagnostics() }
         advanceTrackingSetup()
 
         // v427: was registered in onStart()/unregistered in onStop(), so
@@ -167,6 +177,131 @@ class MainActivity : AppCompatActivity() {
             )
             receiverRegistered = true
         }
+    }
+
+    /**
+     * Read-only diagnostic export for the dedicated sync-diagnostics APK.
+     * This intentionally does not enqueue/cancel work, delete outbox rows,
+     * refresh auth, request a GPS fix, or alter tracking preferences.
+     */
+    private fun exportNativeSyncDiagnostics() {
+        binding.syncDiagnosticsButton.isEnabled = false
+        binding.syncDiagnosticsButton.text = "READING…"
+        lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) { buildNativeSyncDiagnostics() }
+            binding.syncDiagnosticsButton.isEnabled = true
+            binding.syncDiagnosticsButton.text = "SYNC DIAGNOSTICS"
+            val parsed = runCatching { JSONObject(report) }.getOrNull()
+            val summary = buildString {
+                append("Pending outbox: ").append(parsed?.optInt("pendingOutboxCount", -1)).append('\n')
+                append("Worker states: ").append(parsed?.optString("workerStateSummary", "unknown")).append('\n')
+                append("Last fix: ").append(parsed?.optString("lastFixAt", "never")).append('\n')
+                append("Last sync: ").append(parsed?.optString("lastSyncAt", "never"))
+            }
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Native sync diagnostics")
+                .setMessage(summary)
+                .setPositiveButton("Share report") { _, _ -> shareDiagnostics(report) }
+                .setNeutralButton("Copy") { _, _ -> copyDiagnostics(report) }
+                .setNegativeButton("Close", null)
+                .show()
+        }
+    }
+
+    private suspend fun buildNativeSyncDiagnostics(): String {
+        val dao = app.database.trackingDao()
+        val uid = auth.currentUser?.uid
+        val pending = dao.pendingOutbox(200)
+        val logs = dao.recentLogs(200)
+        val latest = uid?.let { dao.latestAcceptedSample(it) }
+        val workInfos = runCatching {
+            WorkManager.getInstance(this)
+                .getWorkInfosForUniqueWorkFlow(SyncWorker.UNIQUE_WORK)
+                .first()
+        }.getOrElse { emptyList() }
+        val workerCounts = workInfos.groupingBy { it.state.name }.eachCount().toSortedMap()
+        return JSONObject()
+            .put("reportType", "mbm-native-sync-diagnostics")
+            .put("generatedAt", Instant.now().toString())
+            .put("nativeVersion", BuildConfig.VERSION_NAME)
+            .put("versionCode", BuildConfig.VERSION_CODE)
+            .put("pwaUrl", BuildConfig.PWA_URL)
+            .put("authUid", uid ?: JSONObject.NULL)
+            .put("webUid", app.preferences.webUid ?: JSONObject.NULL)
+            .put("familyId", app.preferences.familyId ?: JSONObject.NULL)
+            .put("trackingEnabled", app.preferences.trackingEnabled)
+            .put("trackingServiceRunning", TrackingService.isRunning)
+            .put("movementState", app.preferences.movementState)
+            .put("lastFixAt", app.preferences.lastFixAtMs.asIsoOrNull())
+            .put("lastSyncAt", app.preferences.lastSyncAtMs.asIsoOrNull())
+            .put("latestAcceptedSample", latest?.let { sample ->
+                JSONObject()
+                    .put("id", sample.id)
+                    .put("uid", sample.uid)
+                    .put("familyId", sample.familyId)
+                    .put("capturedAt", sample.capturedAtMs.asIsoOrNull())
+                    .put("lat", sample.latitude)
+                    .put("lng", sample.longitude)
+                    .put("accuracyM", sample.accuracyM ?: JSONObject.NULL)
+                    .put("displayedSpeedKph", sample.displayedSpeedKph)
+                    .put("activityType", sample.activityType)
+                    .put("accepted", sample.accepted)
+                    .put("rejectionReason", sample.rejectionReason ?: JSONObject.NULL)
+            } ?: JSONObject.NULL)
+            .put("workerStateSummary", workerCounts.entries.joinToString(", ") { "${it.key}=${it.value}" })
+            .put("workers", JSONArray().apply {
+                workInfos.forEach { info ->
+                    put(JSONObject()
+                        .put("id", info.id.toString())
+                        .put("state", info.state.name)
+                        .put("runAttemptCount", info.runAttemptCount)
+                        .put("stopReason", info.stopReason))
+                }
+            })
+            .put("pendingOutboxCount", pending.size)
+            .put("pendingOutbox", JSONArray().apply {
+                pending.forEach { item ->
+                    put(JSONObject()
+                        .put("documentPath", item.documentPath)
+                        .put("createdAt", item.createdAtMs.asIsoOrNull())
+                        .put("updatedAt", item.updatedAtMs.asIsoOrNull())
+                        .put("attempts", item.attempts)
+                        .put("lastError", item.lastError ?: JSONObject.NULL)
+                        .put("payload", runCatching { JSONObject(item.payloadJson) }
+                            .getOrElse { item.payloadJson }))
+                }
+            })
+            .put("recentLogs", JSONArray().apply {
+                logs.forEach { entry ->
+                    put(JSONObject()
+                        .put("id", entry.id)
+                        .put("timestamp", entry.timestampMs.asIsoOrNull())
+                        .put("level", entry.level)
+                        .put("tag", entry.tag)
+                        .put("message", entry.message)
+                        .put("details", entry.detailsJson?.let {
+                            runCatching { JSONTokener(it).nextValue() }.getOrElse { _ -> it }
+                        } ?: JSONObject.NULL))
+                }
+            })
+            .toString(2)
+    }
+
+    private fun Long.asIsoOrNull(): Any =
+        if (this > 0L) Instant.ofEpochMilli(this).toString() else JSONObject.NULL
+
+    private fun copyDiagnostics(report: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("MBM Life sync diagnostics", report))
+    }
+
+    private fun shareDiagnostics(report: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_SUBJECT, "MBM Life native sync diagnostics")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        startActivity(Intent.createChooser(intent, "Share diagnostics"))
     }
 
     override fun onDestroy() {
