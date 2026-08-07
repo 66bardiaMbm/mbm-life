@@ -270,7 +270,7 @@ class TrackingRepository(private val context: Context) {
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             SyncWorker.UNIQUE_WORK,
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            ExistingWorkPolicy.KEEP,
             request
         )
     }

@@ -40,6 +40,9 @@ interface TrackingDao {
     @Query("SELECT * FROM outbox ORDER BY updatedAtMs ASC LIMIT :limit")
     suspend fun pendingOutbox(limit: Int = 50): List<OutboxEntity>
 
+    @Query("SELECT * FROM outbox WHERE documentPath LIKE :prefix || '%' ORDER BY updatedAtMs ASC LIMIT :limit")
+    suspend fun pendingOutboxForPrefix(prefix: String, limit: Int = 100): List<OutboxEntity>
+
     @Query("DELETE FROM outbox WHERE documentPath = :path")
     suspend fun deleteOutbox(path: String)
 
