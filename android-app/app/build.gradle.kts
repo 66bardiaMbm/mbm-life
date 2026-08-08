@@ -65,8 +65,8 @@ android {
 val bundledPwaAssets = layout.buildDirectory.dir("generated/pwaAssets")
 val bundleCurrentPwa by tasks.registering(Copy::class) {
     from(rootProject.projectDir.parentFile.resolve("index.html"))
-    into(bundledPwaAssets)
-}
+            versionCode = 18
+        versionName = "0.9.0-BOOTTEST"
 android.sourceSets.getByName("main").assets.srcDir(bundledPwaAssets)
 tasks.named("preBuild").configure { dependsOn(bundleCurrentPwa) }
 
