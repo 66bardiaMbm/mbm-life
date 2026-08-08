@@ -13,8 +13,8 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-    versionName = "0.7.6-v424-battery-fix"
+        versionCode = 18
+    versionName = "0.9.0-BOOTTEST"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -65,8 +65,8 @@ android {
 val bundledPwaAssets = layout.buildDirectory.dir("generated/pwaAssets")
 val bundleCurrentPwa by tasks.registering(Copy::class) {
     from(rootProject.projectDir.parentFile.resolve("index.html"))
-            versionCode = 18
-        versionName = "0.9.0-BOOTTEST"
+    into(bundledPwaAssets)
+}
 android.sourceSets.getByName("main").assets.srcDir(bundledPwaAssets)
 tasks.named("preBuild").configure { dependsOn(bundleCurrentPwa) }
 
