@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".MbmApplication"
@@ -39,5 +40,20 @@
         <receiver
             android:name=".tracking.ActivityRecognitionReceiver"
             android:exported="false" />
+
+        <!-- v433: resumes tracking after reboot/app-update, ONLY if it was
+             already active (see BootTrackingReceiver's trackingEnabled
+             check). BOOT_COMPLETED and MY_PACKAGE_REPLACED are protected
+             system broadcasts — only the system can send them, so
+             exported="false" is correct and matches the other receiver
+             above. -->
+        <receiver
+            android:name=".tracking.BootTrackingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

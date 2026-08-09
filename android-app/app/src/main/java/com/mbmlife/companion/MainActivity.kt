@@ -110,28 +110,6 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun appVersionName(): String = BuildConfig.VERSION_NAME
-
-        /**
-         * Opens Android's real share sheet for WebView actions such as Family
-         * invitations. WebView may expose navigator.share but reject the call,
-         * so the PWA cannot treat the browser API as proof that sharing works.
-         */
-        @JavascriptInterface
-        fun shareText(title: String?, text: String?, url: String?) {
-            runOnUiThread {
-                val payload = listOfNotNull(
-                    text?.trim()?.takeIf { it.isNotEmpty() },
-                    url?.trim()?.takeIf { it.isNotEmpty() }
-                ).joinToString("\n")
-                if (payload.isEmpty()) return@runOnUiThread
-                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "MBM Life")
-                    putExtra(Intent.EXTRA_TEXT, payload)
-                }
-                startActivity(Intent.createChooser(sendIntent, title ?: "Share"))
-            }
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -147,34 +125,6 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
         advanceTrackingSetup()
-
-        // v427: was registered in onStart()/unregistered in onStop(), so
-        // every fix TrackingService broadcast while the app was merely
-        // backgrounded (screen off, switched away — the overwhelming
-        // majority of the time for a location-tracking app) was silently
-        // dropped by Android (no receiver = no-op, never queued/retried).
-        // TrackingService itself kept running and broadcasting the whole
-        // time; nothing was ever listening. Registering here (survives
-        // until the Activity is actually destroyed) instead of onStart/
-        // onStop fixes that — evaluateJavascript() on a backgrounded
-        // WebView is safe, it just doesn't repaint until foregrounded again.
-        if (!receiverRegistered) {
-            ContextCompat.registerReceiver(
-                this,
-                nativeFixReceiver,
-                IntentFilter(TrackingService.ACTION_NATIVE_FIX),
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-            receiverRegistered = true
-        }
-    }
-
-    override fun onDestroy() {
-        if (receiverRegistered) {
-            unregisterReceiver(nativeFixReceiver)
-            receiverRegistered = false
-        }
-        super.onDestroy()
     }
 
     /**
@@ -227,11 +177,24 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!receiverRegistered) {
+            ContextCompat.registerReceiver(
+                this,
+                nativeFixReceiver,
+                IntentFilter(TrackingService.ACTION_NATIVE_FIX),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            receiverRegistered = true
+        }
         handler.post(contextPoll)
     }
 
     override fun onStop() {
         handler.removeCallbacks(contextPoll)
+        if (receiverRegistered) {
+            unregisterReceiver(nativeFixReceiver)
+            receiverRegistered = false
+        }
         super.onStop()
     }
 
@@ -274,15 +237,11 @@ class MainActivity : AppCompatActivity() {
                 pendingFileChooserCallback?.onReceiveValue(null)
                 pendingFileChooserCallback = filePathCallback
                 return try {
-                    // Always use Android's document picker for profile images.
-                    // Some WebView implementations return a generic chooser
-                    // intent that has no matching credential/provider and the
-                    // tap then appears to do nothing.
-                    val chooserIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "image/*"
-                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/jpeg", "image/png", "image/webp"))
-                    }
+                    val chooserIntent = fileChooserParams?.createIntent()
+                        ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "image/*"
+                        }
                     fileChooserLauncher.launch(chooserIntent)
                     true
                 } catch (e: Exception) {
@@ -322,7 +281,6 @@ class MainActivity : AppCompatActivity() {
                             .put("accuracy", sample.accuracyM ?: JSONObject.NULL)
                             .put("speed", sample.filteredSpeedMps ?: JSONObject.NULL)
                             .put("battery", app.preferences.batteryPct ?: JSONObject.NULL)
-                            .put("batteryCharging", app.preferences.batteryCharging)
                             .put("heading", sample.bearingDeg ?: JSONObject.NULL)
                             .put("capturedAt", java.time.Instant.ofEpochMilli(sample.capturedAtMs).toString())
                             .put(
@@ -356,9 +314,6 @@ class MainActivity : AppCompatActivity() {
                                     ?: JSONObject.NULL
                             )
                             .put("nativeTrackingActive", app.preferences.trackingEnabled)
-                            .put("fixId", "room-replay-${sample.id}")
-                            .put("sequence", sample.capturedAtMs)
-                            .put("replay", true)
                         injectNativeFix(json.toString())
                     }
                 }
@@ -500,32 +455,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun injectNativeFix(json: String) {
-        val nativeBroadcastReceivedAtMs = System.currentTimeMillis()
         val js = """
-            (function(nativeFix,nativeBroadcastReceivedAtMs){
+            (function(nativeFix){
               try {
-                nativeFix.nativeBroadcastReceivedAtMs=nativeBroadcastReceivedAtMs;
-                nativeFix.javascriptReceiveAtMs=Date.now();
-                if(typeof FamilyBackend==='undefined' ||
-                   typeof FamilyBackend.acceptNativeFix!=='function') return false;
-                return FamilyBackend.acceptNativeFix(nativeFix);
-              } catch(e) {
-                console.error('[location-timing] native bridge receive failed',e);
-                return false;
-              }
-            })($json,$nativeBroadcastReceivedAtMs)
+                var uid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+                if(!uid || uid!==nativeFix.uid || typeof DB==='undefined') return false;
+                DB.entities=DB.entities||{};
+                DB.entities.famLocations=DB.entities.famLocations||{};
+                var previous=DB.entities.famLocations[uid]||{};
+                var nextAt=Date.parse(nativeFix.capturedAt||nativeFix.reportedAt||'');
+                var previousAt=Date.parse(previous.capturedAt||previous.reportedAt||'');
+                if(!isNaN(previousAt) && !isNaN(nextAt) && nextAt<=previousAt) return false;
+                var next=Object.assign({},previous,nativeFix);
+                if(!Object.prototype.hasOwnProperty.call(nativeFix,'stayStart') && !next.stayStart)
+                  next.stayStart=nativeFix.capturedAt;
+                DB.entities.famLocations[uid]=next;
+                if(typeof famLiveApply==='function' &&
+                   typeof screen!=='undefined' && screen==='module' &&
+                   typeof currentModule!=='undefined' && currentModule==='family'){
+                  famLiveApply();
+                }
+                return true;
+              } catch(e) { return false; }
+            })($json)
         """.trimIndent()
-        binding.webView.evaluateJavascript(js) { result ->
-            logger.info(
-                "LocationTiming",
-                "JavaScript bridge evaluation completed",
-                JSONObject()
-                    .put("nativeBroadcastReceivedAtMs", nativeBroadcastReceivedAtMs)
-                    .put("bridgeEvaluationCompletedAtMs", System.currentTimeMillis())
-                    .put("acceptedByJavaScript", result)
-                    .toString()
-            )
-        }
+        binding.webView.evaluateJavascript(js, null)
     }
 
     private fun signInWithGoogle() {
