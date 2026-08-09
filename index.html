@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v434';
+const APP_VERSION='v435';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11364,43 +11364,47 @@ const FamilyBackend = (function(){
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
-            _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:awaySince0,steadySince:null,steadyAccumMs:0})
+            _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:awaySince0})
           };
         }
-        // The original code returned stayStart:null here on EVERY fix, so
-        // 'unconfirmed' could only ever be escaped by a sustained observed
-        // DEPARTURE. That made it a dead end for the common case of "the app
-        // starts while I'm already home and I don't go anywhere" — presence
-        // stayed unconfirmed indefinitely. The comment below explains the
-        // original reasoning: on a foreground-only PWA there are no fixes
-        // while backgrounded, so staying near an anchor proved nothing.
-        // That premise no longer holds when the native companion is
-        // delivering continuous background fixes: an unbroken run of
-        // close-together accepted fixes near one anchor IS real observed
-        // evidence of presence. Confirm via the SAME accumulation rule used
-        // for re-confirmation above — only fix-to-fix gaps within
-        // FIX_CADENCE_CREDIT_CAP_MS are credited, so sparse foreground-only
-        // polling still cannot manufacture a stay, and the original
-        // protection is preserved exactly where it still applies. stayStart
-        // becomes the FIRST fix of the accumulating window — genuinely
-        // observed, never fabricated as "now", and never claimed to be
-        // earlier than we actually started watching.
-        const gap0=priorFixGapMs!=null?priorFixGapMs:Infinity;
-        const credit0=gap0<=FIX_CADENCE_CREDIT_CAP_MS;
-        const accum0=credit0?((presence0.steadyAccumMs||0)+gap0):0;
-        const steadySince0=credit0?(presence0.steadySince||nowAt):nowAt;
-        if(accum0>=STEADY_CONFIRM_MS){
-          console.debug('[presence] first stay confirmed from unconfirmed state via accumulated continuous fixes',{stayStart:steadySince0,accumulatedMs:accum0});
+        // FIX (v435): not away from the launch anchor — accumulate steady
+        // evidence toward a real, trustworthy arrival instead of staying
+        // 'unconfirmed' forever. Uses the SAME accumulation rule already
+        // proven below for post-gap reconfirmation: only close-together
+        // fixes (gap <= FIX_CADENCE_CREDIT_CAP_MS) are credited, accumulated
+        // to STEADY_CONFIRM_MS, and stayStart becomes the FIRST fix of that
+        // window — never fabricated as "now". This is the escape hatch the
+        // departure-only exit above could never provide for the extremely
+        // common case: the app/native service starts while the person is
+        // already home and never leaves, so no departure ever happens.
+        const steadyLat0=presence0.steadyLat!=null?presence0.steadyLat:fix.lat;
+        const steadyLng0=presence0.steadyLng!=null?presence0.steadyLng:fix.lng;
+        const dFromSteady0=haversine({lat:steadyLat0,lng:steadyLng0},{lat:fix.lat,lng:fix.lng});
+        const thisGapMs0=priorFixGapMs!=null?priorFixGapMs:Infinity;
+        const isCloseFollowUp0=thisGapMs0<=FIX_CADENCE_CREDIT_CAP_MS;
+        if(dFromSteady0>=radius0 || !isCloseFollowUp0 || presence0.steadySince==null){
+          // (Re)start the accumulation window at this fix.
           return {
-            moving:false, stayStart:steadySince0, placeArrivedAt:steadySince0,
-            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
-            _presence:{anchorLat:presence0.anchorLat,anchorLng:presence0.anchorLng,state:'steady',since:steadySince0}
+            moving:false, stayStart:null, placeArrivedAt:null,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
+            _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:null,
+              steadyLat:fix.lat,steadyLng:fix.lng,steadySince:nowAt,steadyAccumMs:0})
+          };
+        }
+        const newAccum0=(presence0.steadyAccumMs||0)+thisGapMs0;
+        if(newAccum0>=STEADY_CONFIRM_MS){
+          console.debug('[presence] launch-anchor steady period confirmed — first real arrival',{newStayStart:presence0.steadySince,accumulatedMs:newAccum0});
+          return {
+            moving:false, stayStart:presence0.steadySince, placeArrivedAt:presence0.steadySince,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:null, priorFixGapMs,
+            _presence:{anchorLat:fix.lat,anchorLng:fix.lng,state:'steady',since:presence0.steadySince}
           };
         }
         return {
           moving:false, stayStart:null, placeArrivedAt:null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
-          _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:null,steadySince:steadySince0,steadyAccumMs:accum0})
+          _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:null,
+            steadyLat:steadyLat0,steadyLng:steadyLng0,steadySince:presence0.steadySince,steadyAccumMs:newAccum0})
         };
       }
       // NOTE: a "gap-awareness" check that RESET stayStart/_presence based
