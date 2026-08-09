@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v436';
+const APP_VERSION='v437';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13852,6 +13852,20 @@ async function famRunDiagnostics(){
   push('FB.user.uid', !!(auth.user&&auth.user.uid), (auth.user&&auth.user.uid)||'null');
   push('auth.currentUser.uid', !!(cu&&cu.uid), (cu&&cu.uid)||'null');
   push('uids match', !!(auth.user&&cu&&auth.user.uid===cu.uid), (auth.user&&cu)?(auth.user.uid===cu.uid?'yes':'NO — mismatch'):'n/a');
+  // v436: expose the LIVE presence engine's internal state for self, so a
+  // stuck "Presence unconfirmed" can be diagnosed from one screenshot
+  // instead of another guess-and-wait round trip. steadyAccumMs is the raw
+  // number this file's own logic uses against STEADY_CONFIRM_MS (60000) —
+  // if it is stuck near 0 across repeated screenshots despite continuous
+  // fixes, the fix-to-fix gap being credited is not what it appears to be.
+  try{
+    const _selfSt=FamilyLocation.memberState(myUid());
+    const _p=_selfSt&&_selfSt._presence;
+    push('presence.state', !!_p, (_p&&_p.state)||'null');
+    push('presence.steadyAccumMs', true, (_p&&_p.steadyAccumMs!=null)?String(_p.steadyAccumMs):'n/a');
+    push('presence.priorFixGapMs', true, (_selfSt&&_selfSt.priorFixGapMs!=null)?String(_selfSt.priorFixGapMs):'n/a');
+    push('stayStart', true, (_selfSt&&_selfSt.stayStart)||'null');
+  }catch(e){ push('presence debug', false, String(e&&e.message||e)); }
 
   // 2) Live ID token — proves request.auth will be non-null server-side.
   try{
