@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v435';
+const APP_VERSION='v436';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11772,9 +11772,6 @@ const FamilyBackend = (function(){
         console.debug('[location-timing]',{fixId:raw.fixId,sequence:raw.sequence,capturedAt:raw.capturedAt,javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,rejectedAtMs:Date.now(),accepted:false,rejectionReason});
         return false;
       }
-      const movingState=String(raw.movementState||raw.activityType||'').toLowerCase();
-      const isConfirmedDeparture=movingState&&movingState!=='stationary'&&movingState!=='unknown';
-      const trustedStay=raw.stayStart || (isConfirmedDeparture?null:(prev.stayStart||null));
       const displayedSpeed=(raw.filteredSpeedMps!=null?raw.filteredSpeedMps:raw.speed);
       // v419: no accuracy gate previously existed on the drawn position — a
       // single low-quality fix (GPS multipath near buildings, dense parallel
@@ -11787,12 +11784,30 @@ const FamilyBackend = (function(){
       const positionTrusted=(accM==null)||(accM<=MAX_POSITION_ACCURACY_M)||(prev.lat==null);
       const nextLat=positionTrusted?raw.lat:prev.lat;
       const nextLng=positionTrusted?raw.lng:prev.lng;
+      // FIX (v436): stayStart/presence for companion (native) fixes must
+      // come from the SAME presence engine used on the web/foreground path
+      // (classifyMovement), not from raw.stayStart — the native side has
+      // never actually populated that field (it was written for a "future
+      // native companion" per the telemetry-contract comment above, which
+      // never materialized on the Kotlin side), so trustedStay stayed null
+      // forever and "Presence unconfirmed" never cleared no matter how long
+      // the person sat still. classifyMovement is the one tested, verified
+      // presence engine in this file (see the v435 fix and its 4 passing
+      // scenarios) — routing companion fixes through it too unifies both
+      // sources on identical, proven logic instead of a second, untested,
+      // native-dependent path.
+      const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt});
+      const trustedStay=mv.stayStart;
       const next=Object.assign({},prev,raw,{
         lat:nextLat,
         lng:nextLng,
         speed:displayedSpeed!=null?Number(displayedSpeed):null,
         stayStart:trustedStay,
-        placeArrivedAt:trustedStay,
+        placeArrivedAt:mv.placeArrivedAt,
+        lastPresenceConfirmedAt:mv.lastPresenceConfirmedAt,
+        lastDepartureAt:mv.lastDepartureAt,
+        priorFixGapMs:mv.priorFixGapMs,
+        _presence:mv._presence,
         nativeSequence:Number.isFinite(nextSeq)?nextSeq:null,
         nativeFixId:raw.fixId||null,
         lastAcceptedFixAt:raw.capturedAt,
