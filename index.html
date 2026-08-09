@@ -1406,6 +1406,8 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
 .dark .fam-callout .l1{color:#f2f3f7}
 .fam-callout .l2{font-size:12px;font-weight:600;color:#9297a3;line-height:1.25;margin-top:2px}
+.fam-callout-pin{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none;background:var(--fam-purple,#8652FF);border-radius:4px}
+.fam-callout-pin svg{width:9px;height:9px;fill:#fff;stroke:none}
 .fam-callout-tip{position:absolute;left:50%;bottom:-6px;width:13px;height:13px;background:#fff;
   transform:translateX(-50%) rotate(45deg);z-index:0;border-radius:0 0 3px 0}
 .dark .fam-callout-tip{background:#262733}
@@ -1880,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v431';
+const APP_VERSION='v434';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11362,13 +11364,43 @@ const FamilyBackend = (function(){
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
-            _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:awaySince0})
+            _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:awaySince0,steadySince:null,steadyAccumMs:0})
+          };
+        }
+        // The original code returned stayStart:null here on EVERY fix, so
+        // 'unconfirmed' could only ever be escaped by a sustained observed
+        // DEPARTURE. That made it a dead end for the common case of "the app
+        // starts while I'm already home and I don't go anywhere" — presence
+        // stayed unconfirmed indefinitely. The comment below explains the
+        // original reasoning: on a foreground-only PWA there are no fixes
+        // while backgrounded, so staying near an anchor proved nothing.
+        // That premise no longer holds when the native companion is
+        // delivering continuous background fixes: an unbroken run of
+        // close-together accepted fixes near one anchor IS real observed
+        // evidence of presence. Confirm via the SAME accumulation rule used
+        // for re-confirmation above — only fix-to-fix gaps within
+        // FIX_CADENCE_CREDIT_CAP_MS are credited, so sparse foreground-only
+        // polling still cannot manufacture a stay, and the original
+        // protection is preserved exactly where it still applies. stayStart
+        // becomes the FIRST fix of the accumulating window — genuinely
+        // observed, never fabricated as "now", and never claimed to be
+        // earlier than we actually started watching.
+        const gap0=priorFixGapMs!=null?priorFixGapMs:Infinity;
+        const credit0=gap0<=FIX_CADENCE_CREDIT_CAP_MS;
+        const accum0=credit0?((presence0.steadyAccumMs||0)+gap0):0;
+        const steadySince0=credit0?(presence0.steadySince||nowAt):nowAt;
+        if(accum0>=STEADY_CONFIRM_MS){
+          console.debug('[presence] first stay confirmed from unconfirmed state via accumulated continuous fixes',{stayStart:steadySince0,accumulatedMs:accum0});
+          return {
+            moving:false, stayStart:steadySince0, placeArrivedAt:steadySince0,
+            lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+            _presence:{anchorLat:presence0.anchorLat,anchorLng:presence0.anchorLng,state:'steady',since:steadySince0}
           };
         }
         return {
           moving:false, stayStart:null, placeArrivedAt:null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:null, priorFixGapMs,
-          _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:null})
+          _presence:Object.assign({},presence0,{state:'unconfirmed',awaySince:null,steadySince:steadySince0,steadyAccumMs:accum0})
         };
       }
       // NOTE: a "gap-awareness" check that RESET stayStart/_presence based
@@ -15847,7 +15879,7 @@ const MBMMap = (function(){
     if(meta.calloutL1){
       callout=`<div class="fam-callout"><div class="l1">${meta.calloutL1}</div>`+
         (meta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
-          <span style="width:14px;height:14px;flex:none;display:inline-flex;align-items:center;justify-content:center;background:var(--fam-purple,#8652FF);border-radius:4px;color:#fff;padding:2px;box-sizing:border-box">${famIcon('pin')}</span>
+          <span class="fam-callout-pin">${famIcon('pin')}</span>
           <span>${meta.calloutL2}</span>
         </div>`:'')+
         `<div class="fam-callout-tip"></div></div>`;
@@ -16261,8 +16293,13 @@ function famDurSince(iso){
   const t=Date.parse(iso||''); if(isNaN(t))return '';
   let m=Math.max(0,Math.floor((Date.now()-t)/60000));
   const h=Math.floor(m/60); m=m%60;
-  if(h>0) return L==='fa'?`${h} ساعت ${m} دقیقه`:`${h} hr ${m} min`;
-  return L==='fa'?`${m} دقیقه`:`${m} min`;
+  // Life360 wording: pluralised units separated by a comma ("12 hrs, 12 mins").
+  // Only this presence/dwell label changed — drvFmtDuration below keeps its own
+  // format so the Driving screens stay consistent with themselves.
+  if(L==='fa') return h>0?`${h} ساعت و ${m} دقیقه`:`${m} دقیقه`;
+  const hUnit=h===1?'hr':'hrs', mUnit=m===1?'min':'mins';
+  if(h>0) return `${h} ${hUnit}, ${m} ${mUnit}`;
+  return `${m} ${mUnit}`;
 }
 /* ── Driving format helpers (Phase 2A UI) ──────────────────────────────
    Small, pure, reusable — every Driving screen/component uses these so a
@@ -16778,6 +16815,11 @@ function famAbsTimeWithDay(iso){
   const d=new Date(t), now=new Date();
   const startOfDay=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
   if(startOfDay(d)>=startOfDay(now)) return timeStr; // today → no day name
+  // Life360 wording: the immediately-previous day reads "yesterday" rather
+  // than its weekday name; anything older still uses the weekday name.
+  if(startOfDay(d)===startOfDay(now)-86400000){
+    return `${timeStr} ${L==='fa'?'دیروز':'yesterday'}`;
+  }
   const dayStr=d.toLocaleDateString(L==='fa'?'fa-IR':'en-AU',{weekday:'long'});
   return `${timeStr} ${dayStr}`;
 }
