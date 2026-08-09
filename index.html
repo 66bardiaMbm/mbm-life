@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v438';
+const APP_VERSION='v439';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13860,7 +13860,8 @@ async function famRunDiagnostics(){
   // fixes, the fix-to-fix gap being credited is not what it appears to be.
   try{
     const _fbLoc=(typeof FamilyBackend!=='undefined'&&FamilyBackend.location)?FamilyBackend.location:null;
-    const _selfSt=_fbLoc?_fbLoc.memberState(myUid()):null;
+    const _myUid=(auth.user&&auth.user.uid)||(cu&&cu.uid)||null;
+    const _selfSt=(_fbLoc&&_myUid)?_fbLoc.memberState(_myUid):null;
     const _p=_selfSt&&_selfSt._presence;
     push('presence.state', !!_p, (_p&&_p.state)||'null');
     push('presence.steadyAccumMs', true, (_p&&_p.steadyAccumMs!=null)?String(_p.steadyAccumMs):'n/a');
