@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v445';
+const APP_VERSION='v446';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11902,7 +11902,21 @@ const FamilyBackend = (function(){
       const evs=memberEvents(uid);
       const st=memberState(uid);
       for(let i=evs.length-1;i>=0;i--){
-        if(evs[i].type==='arrival') return evs[i].at;
+        if(evs[i].type==='arrival'){
+          // v446 FIX: this branch used to blindly trust the arrival event,
+          // with no check against the real continuous stayStart — unlike
+          // the departure branch just below, which already does this
+          // comparison. A saved-place geofence can re-fire 'arrival' from
+          // ordinary GPS jitter near its boundary WITHOUT the person ever
+          // actually leaving their real (much longer) continuous stay, so
+          // "Since" showed a fresh 3-minutes-ago time while "Here for"
+          // correctly showed 2 days 10 hrs from the untouched stayStart.
+          // The true start of an ongoing stay is always the EARLIER of the
+          // two candidates — a later "arrival" inside an already-continuous
+          // stay is definitionally noise, not a new arrival.
+          if(st && st.stayStart && Date.parse(st.stayStart) < Date.parse(evs[i].at)) return st.stayStart;
+          return evs[i].at;
+        }
         if(evs[i].type==='departure'){
           // A departure event only means "no since" if the member's CURRENT
           // stay actually began before or at that departure — i.e. they
