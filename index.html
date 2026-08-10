@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v441';
+const APP_VERSION='v442';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12317,6 +12317,18 @@ const FamilyBackend = (function(){
     };
   })();
 
+  /* ── v441: authoritative Native-fix bridge entry point ────────────────
+     ROOT CAUSE this fixes: MainActivity.injectNativeFix() was doing its own
+     Object.assign() straight into DB.entities.famLocations[uid], completely
+     bypassing FamilyBackend.location.acceptNativeFix(). That raw merge never
+     ran classifyMovement, so it never produced _presence / placeArrivedAt /
+     priorFixGapMs / lastAcceptedFixAt — which is exactly why presence stayed
+     "unconfirmed" forever and why every web-side presence patch (v435–v440)
+     had no effect: acceptNativeFix had zero call sites at runtime.
+     FamilyBackend is a module-scoped const, so Kotlin could not reach it by
+     name from evaluateJavascript. This single global is the minimum needed
+     surface. It is a pure delegation — no logic of its own — so there is
+     exactly ONE acceptance path for native fixes, not two parallel writers. */
   window.mbmAcceptNativeFix = function(nativeFix){
     try{
       if(!nativeFix || typeof nativeFix!=='object') return false;
@@ -16485,10 +16497,17 @@ function famLiveSheetBodyHtml(members, sel, myUid){
         const since=txt.since;
         const movingActivity=['driving','walking','bicycling','motorcycle'].includes(txt.activityType);
         const line1=txt.l1&&txt.l1.trim()?txt.l1:(L==='fa'?'موقعیت زنده':'Live location');
+        // v442: the suburb/region line (txt.region — already computed by
+        // FamGeo, already shown in the detail sheet at line ~17493) was
+        // being dropped for the STATIONARY case here — only the moving
+        // branch ever read it. Life360 shows suburb under the road name in
+        // BOTH states, so the list row now does too.
+        const regionTxt = txt.region ? esc(txt.region) : '';
         const sinceTxt = movingActivity
           ? (txt.region || `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`)
           : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTimeWithDay(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`));
-        rowAddr=`<div class="st"><span class="fam-row-pin">${famIcon('pin')}</span>${esc(line1)}</div><div class="st">${esc(sinceTxt)}</div>`;
+        const regionRow = (!movingActivity && regionTxt) ? `<div class="st">${regionTxt}</div>` : '';
+        rowAddr=`<div class="st"><span class="fam-row-pin">${famIcon('pin')}</span>${esc(line1)}</div>${regionRow}<div class="st">${esc(sinceTxt)}</div>`;
       } else {
         rowAddr=`<div class="st"><span class="fam-dot ${m.meta.tone}" style="width:7px;height:7px;margin-inline-end:5px"></span>${esc(famComposeStatusText(m).l1)}</div>`;
       }
