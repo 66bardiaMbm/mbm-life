@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v448';
+const APP_VERSION='v449';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -16051,19 +16051,37 @@ const MBMMap = (function(){
     Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; delete _markerRenderPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
   }
 
-  function setClusterMarker(key, latlng, members, selected, onClick){
+  function setClusterMarker(key, latlng, members, selected, onClick, calloutMeta){
     if(!_map) return;
     const max=3; const shown=members.slice(0,max);
     let inner=shown.map(mm=>mm.photo
       ? `<div class="fam-cluster-av" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}')"></div>`
       : `<div class="fam-cluster-av" style="background:${mm.color||'#6e56f8'}">${mm.initial||'?'}</div>`).join('');
     if(members.length>max) inner+=`<div class="fam-cluster-more">+${members.length-max}</div>`;
-    const html=`<div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div>`;
+    // v449 FIX: the cluster bubble (co-located members merged into one pin,
+    // see v448) had no callout at all — setClusterMarker never accepted or
+    // rendered one, unlike the single-marker pinHtml() it was modeled on.
+    // Reuses the EXACT same .fam-callout markup/classes as the single-
+    // marker case so it's visually identical to Life360's own merged-pin
+    // callout. calloutMeta carries ONE real member's already-correct
+    // calloutL1/L2 (the selected member if one of the cluster is selected,
+    // else the local user) — never a fabricated "combined" duration, since
+    // two co-located people can have genuinely different arrival times.
+    let callout='';
+    if(calloutMeta && calloutMeta.calloutL1){
+      callout=`<div class="fam-callout"><div class="l1">${calloutMeta.calloutL1}</div>`+
+        (calloutMeta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
+          <span class="fam-callout-pin">${famIcon('pin')}</span>
+          <span>${calloutMeta.calloutL2}</span>
+        </div>`:'')+
+        `<div class="fam-callout-tip"></div></div>`;
+    }
+    const html=callout+`<div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div>`;
     const cls='fam-cluster'+(selected?' sel':'');
     if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
     else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
       const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _markerPos[key]=latlng; _markerRenderPos[key]=latlng; }
-    _markerMeta[key]={cls};
+    _markerMeta[key]={cls,calloutL1:calloutMeta&&calloutMeta.calloutL1,calloutL2:calloutMeta&&calloutMeta.calloutL2};
   }
 
   function setArrivedBubble(latlng, text){
@@ -17689,13 +17707,25 @@ function famLivePaintMarkers(members, sel){
       const key='cluster:'+g.members.map(m=>m.uid).sort().join(',');
       activeKeys.push(key);
       const selectedInCluster=g.members.some(m=>m.uid===_famSelUid);
+      // v449: the callout shows ONE real member's own accurate text — the
+      // currently-selected member if they're in this cluster, else the
+      // local/self user, else whoever's first. Never a fabricated average
+      // across members, since co-located people can have genuinely
+      // different real arrival times (exactly the Life360 comparison that
+      // surfaced this gap).
+      const featured = g.members.find(m=>m.uid===_famSelUid)
+                     || g.members.find(m=>m.uid===localUid)
+                     || g.members[0];
+      const featuredTxt=famComposeStatusText(featured);
+      const featuredCallout=famMarkerCalloutText(featuredTxt);
       MBMMap.setClusterMarker(key,[cLat,cLng],
         g.members.map(m=>({photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color})),
         selectedInCluster,
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true; famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} });
+          _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true; famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} },
+        {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):''});
     }
   });
   MBMMap.clearMarkersExcept(activeKeys);
