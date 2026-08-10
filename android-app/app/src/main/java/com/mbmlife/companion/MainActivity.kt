@@ -458,28 +458,16 @@ class MainActivity : AppCompatActivity() {
         val js = """
             (function(nativeFix){
               try {
-                var uid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-                if(!uid || uid!==nativeFix.uid || typeof DB==='undefined') return false;
-                DB.entities=DB.entities||{};
-                DB.entities.famLocations=DB.entities.famLocations||{};
-                var previous=DB.entities.famLocations[uid]||{};
-                var nextAt=Date.parse(nativeFix.capturedAt||nativeFix.reportedAt||'');
-                var previousAt=Date.parse(previous.capturedAt||previous.reportedAt||'');
-                if(!isNaN(previousAt) && !isNaN(nextAt) && nextAt<=previousAt) return false;
-                var next=Object.assign({},previous,nativeFix);
-                if(!Object.prototype.hasOwnProperty.call(nativeFix,'stayStart') && !next.stayStart)
-                  next.stayStart=nativeFix.capturedAt;
-                DB.entities.famLocations[uid]=next;
-                if(typeof famLiveApply==='function' &&
-                   typeof screen!=='undefined' && screen==='module' &&
-                   typeof currentModule!=='undefined' && currentModule==='family'){
-                  famLiveApply();
-                }
-                return true;
-              } catch(e) { return false; }
+                if (typeof window.mbmAcceptNativeFix !== 'function') return 'no-bridge';
+                return window.mbmAcceptNativeFix(nativeFix) ? 'accepted' : 'rejected';
+              } catch(e) { return 'error'; }
             })($json)
         """.trimIndent()
-        binding.webView.evaluateJavascript(js, null)
+        binding.webView.evaluateJavascript(js) { result ->
+            if (result != null && result.contains("no-bridge")) {
+                logger.warn("Family", "mbmAcceptNativeFix missing in WebView - fix dropped")
+            }
+        }
     }
 
     private fun signInWithGoogle() {

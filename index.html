@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v440';
+const APP_VERSION='v441';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12316,6 +12316,16 @@ const FamilyBackend = (function(){
       consts:{ FRESH_MS, RECENT_MS, STALE_MS, MOVE_MIN_M, ROUTE_MAX }
     };
   })();
+
+  window.mbmAcceptNativeFix = function(nativeFix){
+    try{
+      if(!nativeFix || typeof nativeFix!=='object') return false;
+      return FamilyLocation.acceptNativeFix(nativeFix)===true;
+    }catch(e){
+      console.debug('[native-bridge] acceptNativeFix threw', e);
+      return false;
+    }
+  };
 
   /* ═══════════════════════════════════════════════════════════════════
      FamilyDriving — Driving Engine (data/architecture only, no UI).

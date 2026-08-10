@@ -13,8 +13,8 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-       versionCode = 19
-versionName = "1.0.0-MAINFIX"
+       versionCode = 20
+versionName = "1.1.0-BRIDGEFIX"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
