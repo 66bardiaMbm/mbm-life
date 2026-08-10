@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v446';
+const APP_VERSION='v448';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17057,8 +17057,19 @@ function famComposeStatusText(m){
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
   const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt);
-  const since2=d.currentPlaceId?(d.placeEnteredAt || (fb&&fb.location&&fb.location.hereSince?fb.location.hereSince(m.uid):(s.stayStart||null)))
-                                :((fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null));
+  // v447 FIX: when inside a saved place, this used to prefer the CACHED
+  // d.placeEnteredAt (only refreshed when crossing that place's boundary —
+  // see famDeriveMemberDisplay above) over a fresh hereSince() call. The
+  // v446 fix corrected hereSince() itself, but this cache had already been
+  // frozen with a stale/wrong value from before that fix ever ran, and
+  // since the person never left the place, the boundary-crossing condition
+  // never re-fired to refresh it — so the now-correct hereSince() result
+  // was computed but then discarded every single time by the `||`. Flipped
+  // to always prefer the fresh, authoritative hereSince() result; the cache
+  // is now only a fallback for the rare case hereSince() itself returns
+  // nothing (e.g. mid-flight before any event/stayStart exists yet).
+  const freshSince=(fb&&fb.location&&fb.location.hereSince)?fb.location.hereSince(m.uid):(s.stayStart||null);
+  const since2=d.currentPlaceId?(freshSince || d.placeEnteredAt) : freshSince;
   // NOTE: famLocationLines already formats line1 as "Near <road>" (or the
   // real address) — do not prepend "Near"/"نزدیک" again here, that was
   // producing "Near Near Pirie Street".
@@ -17640,9 +17651,19 @@ function famLivePaintMarkers(members, sel){
   // The persistent latch prevents repeated warnings on every render/GPS fix.
   withFixList.forEach(famMaybeAlertLowBattery);
   withFixList.forEach(m=>{
-    const g=m.uid===localUid?null:groups.find(gp=>!gp.local&&famHaversineM(gp.lat,gp.lng,m.state.lat,m.state.lng)<=CLUSTER_M);
+    // v448 FIX: self used to be force-excluded from clustering (m.uid===
+    // localUid?null:...), so when co-located with another member, both
+    // rendered as separate single markers at the same pixel position with
+    // identical zIndex — whichever painted last simply covered the other,
+    // arbitrarily hiding "your own" marker. The reference app instead
+    // merges BOTH avatars into one shared bubble when co-located (confirmed
+    // against Life360's own detail view showing self+Mahsa side-by-side in
+    // one pin) — self now participates in grouping exactly like anyone
+    // else, so co-location always produces one merged bubble with every
+    // co-located member's photo visible, never a silent overlap.
+    const g=groups.find(gp=>famHaversineM(gp.lat,gp.lng,m.state.lat,m.state.lng)<=CLUSTER_M);
     if(g){ g.members.push(m); }
-    else { groups.push({lat:m.state.lat,lng:m.state.lng,members:[m],local:m.uid===localUid}); }
+    else { groups.push({lat:m.state.lat,lng:m.state.lng,members:[m]}); }
   });
   const activeKeys=[];
   groups.forEach(g=>{
