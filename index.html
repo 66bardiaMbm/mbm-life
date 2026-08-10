@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v449';
+const APP_VERSION='v450';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17699,7 +17699,21 @@ function famLivePaintMarkers(members, sel){
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
          calloutL2:markerCallout.l2?esc(markerCallout.l2):''},
         m.uid===_famSelUid, m.meta.tone,
-        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famDetailOpen=true; famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} });
+        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famDetailOpen=true;
+              // v450 FIX: Google Maps marker taps don't reliably bubble a
+              // real click/pointerdown to window the way normal HTML button
+              // taps do, so the global back-guard listener (backButtonBootstrap,
+              // ~line 1918) never fires for this gesture — no guard gets
+              // armed for the newly-opened detail sheet. Next hardware Back
+              // then has nothing of ours to consume for this layer and
+              // Chrome's history-skip intervention (documented above,
+              // ~line 1909) jumps straight out of the app instead of just
+              // closing the sheet. Arming explicitly here, synchronously
+              // inside the tap callback (still within the user-activation
+              // window), fixes it regardless of why the global listener
+              // missed it.
+              try{ reconcileGuards(); }catch(e){}
+              famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} });
     } else {
       // merged cluster bubble at the group's centroid of real fixes
       const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
@@ -17724,7 +17738,9 @@ function famLivePaintMarkers(members, sel){
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true; famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} },
+          _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true;
+          try{ reconcileGuards(); }catch(e){}   // v450 — same fix as the single-marker tap above
+          famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} },
         {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):''});
     }
   });
