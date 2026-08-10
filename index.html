@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v442';
+const APP_VERSION='v445';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11865,8 +11865,17 @@ const FamilyBackend = (function(){
       if(!ready()||!isMember())return;
       const id=(typeof uid==='function'?uid():(''+Date.now()+Math.random())).replace(/[^a-z0-9]/gi,'').slice(0,16);
       const fid=familyId(), me=myUid();
-      const doc={ id, type:ev.type, memberUid:me, placeId:ev.placeId||null, placeName:ev.placeName||null,
+      // v445: memberUid now honors an explicit ev.memberUid when the caller
+      // provides one (needed for reactions, which are ABOUT the recipient,
+      // not the sender) — falls back to `me` exactly as before for every
+      // existing caller (checkin/no_show/arrival/departure never pass
+      // memberUid, so their behavior is byte-for-byte unchanged). emoji/
+      // label/fromUid/fromName are optional pass-through fields, only
+      // written when present, for the reaction feature specifically.
+      const doc={ id, type:ev.type, memberUid:(ev.memberUid!=null?ev.memberUid:me),
+        placeId:ev.placeId||null, placeName:ev.placeName||null,
         lat:ev.lat!=null?ev.lat:null, lng:ev.lng!=null?ev.lng:null, note:ev.note||null,
+        emoji:ev.emoji||null, label:ev.label||null, fromUid:ev.fromUid||null, fromName:ev.fromName||null,
         at:ev.at||nowISO(), createdAt:nowISO() };
       eventsMap()[id]=doc;                                    // optimistic mirror
       try{ persistDB(); }catch(e){}
@@ -16358,7 +16367,20 @@ function famDurSince(iso){
   // Life360 wording: pluralised units separated by a comma ("12 hrs, 12 mins").
   // Only this presence/dwell label changed — drvFmtDuration below keeps its own
   // format so the Driving screens stay consistent with themselves.
-  if(L==='fa') return h>0?`${h} ساعت و ${m} دقیقه`:`${m} دقیقه`;
+  // v442 FIX: hours were never rolled into days, so a multi-day dwell showed
+  // as a raw, ever-growing hour count ("134 hrs, 31 mins") instead of
+  // Life360's day-aware format. Past 24h, show days (+ leftover hours);
+  // minutes drop off at that point — Life360 does the same, since "134
+  // hrs, 31 mins" is far less readable than "5 days, 14 hrs".
+  const d=Math.floor(h/24), hRem=h%24;
+  if(L==='fa'){
+    if(d>0) return hRem>0?`${d} روز و ${hRem} ساعت`:`${d} روز`;
+    return h>0?`${h} ساعت و ${m} دقیقه`:`${m} دقیقه`;
+  }
+  if(d>0){
+    const dUnit=d===1?'day':'days', hUnit2=hRem===1?'hr':'hrs';
+    return hRem>0?`${d} ${dUnit}, ${hRem} ${hUnit2}`:`${d} ${dUnit}`;
+  }
   const hUnit=h===1?'hr':'hrs', mUnit=m===1?'min':'mins';
   if(h>0) return `${h} ${hUnit}, ${m} ${mUnit}`;
   return `${m} ${mUnit}`;
@@ -16517,6 +16539,9 @@ function famLiveSheetBodyHtml(members, sel, myUid){
           <div class="nm">${esc(m.name)}</div>
           ${rowAddr}
         </div>
+        ${showLoc?`<button class="fam-saveplace" data-fam="live-save-place" data-arg="${m.uid}" style="gap:2px;padding:4px" title="${L==='fa'?'ذخیره مکان':'Save Place'}">
+          <span class="fam-saveplace-ic">${famIcon('pin')}<span class="fam-saveplace-plus">+</span></span>
+        </button>`:''}
       </div>`;
     });
     h+=addPersonCard;
@@ -17545,12 +17570,31 @@ function famLiveMemberDetail(m, isMe){
         <div style="font-size:12px;color:var(--ink3)">${L==='fa'?`اگر ${esc(m.name)} تا زمان مشخص در محلی نبود، اطلاع بده`:`Get notified if ${esc(m.name)} is not at a place by a set time`}</div></div>
       <span style="color:var(--ink3);opacity:.4">›</span></button>`;
   }
+  // v445: quick reactions (Life360-style "Boo!/Love ya!/Slow down") — only
+  // makes sense sent TO someone else, never to yourself. Delivered through
+  // the same real emitEvent()/Firestore path as check-ins and no-shows (not
+  // a fake local-only toast) — the recipient sees it in their History for
+  // this member. Reaction kind is encoded in data-arg as "uid|kind" since
+  // the delegated dispatcher only reads data-fam + a single data-arg.
+  if(!isMe){
+    const reactions=[
+      {kind:'boo',emoji:'🍅',label:(L==='fa'?'هوو!':'Boo!')},
+      {kind:'love',emoji:'❤️',label:(L==='fa'?'دوستت دارم!':'Love ya!')},
+      {kind:'slow',emoji:'😳',label:(L==='fa'?'یواش‌تر برو!':'Slow down!')}
+    ];
+    h+=`<div style="display:flex;gap:8px;margin-top:12px;overflow-x:auto">`;
+    reactions.forEach(r=>{
+      h+=`<button class="btn btn-ghost" data-fam="live-react" data-arg="${m.uid}|${r.kind}" style="flex:none;white-space:nowrap">${r.emoji} ${esc(r.label)}</button>`;
+    });
+    h+=`</div>`;
+  }
   // action bar — only genuinely-functional actions (Phase 2), clean SVG icons
   h+=`<div class="fam-actionbar">`;
   const canDir = s.lat!=null;
   h+=`<button class="btn btn-ghost" data-fam="live-directions" data-arg="${m.uid}" ${canDir?'':'disabled'}>${famIcon('nav')} ${L==='fa'?'مسیر':'Directions'}</button>`;
   const phone = m.phone || null;
   h+=`<button class="btn btn-ghost" data-fam="live-call" data-arg="${m.uid}" ${phone?'':'disabled'} title="${phone?'':(L==='fa'?'شماره تلفن ثبت نشده':'No phone number on file')}">${famIcon('phone')} ${L==='fa'?'تماس':'Call'}</button>`;
+  h+=`<button class="btn btn-ghost" data-fam="live-message" data-arg="${m.uid}" ${phone?'':'disabled'} title="${phone?'':(L==='fa'?'شماره تلفن ثبت نشده':'No phone number on file')}">${famIcon('chat')||'💬'} ${L==='fa'?'پیام':'Message'}</button>`;
   if(isMe){
     h+=`<button class="btn btn-ghost" data-fam="live-checkin">${famIcon('check')} ${L==='fa'?'ثبت ورود':'Check in'}</button>`;
     const shLabel=m.consent&&m.consent.enabled?(m.consent.paused?(L==='fa'?'ادامه':'Resume'):(L==='fa'?'توقف':'Pause')):(L==='fa'?'اشتراک':'Share');
@@ -18004,8 +18048,15 @@ function famHistoryView(){
     const evMeta=t=>({arrival:{t:(L==='fa'?'ورود':'Arrived'),tone:'ok'},departure:{t:(L==='fa'?'خروج':'Left'),tone:'warn'},checkin:{t:(L==='fa'?'ثبت ورود':'Checked in'),tone:'info'},no_show:{t:(L==='fa'?'عدم حضور':'No-show'),tone:'warn'}}[t]||{t:t,tone:''});
     h+=`<div class="fam-tl">`;
     evs.slice().reverse().forEach(e=>{
-      const meta=evMeta(e.type);
-      const sub = e.placeName?esc(e.placeName):(e.note?esc(e.note):(e.lat!=null?`${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}`:''));
+      // v445: reactions (Boo!/Love ya!/Slow down — see emitEvent type:'reaction')
+      // carry their own emoji+label per tap rather than a fixed lookup table,
+      // since which of the 3 was sent varies per event.
+      const meta = e.type==='reaction'
+        ? { t:`${e.emoji||'💬'} ${e.label||(L==='fa'?'واکنش':'Reaction')}`, tone:'info' }
+        : evMeta(e.type);
+      const sub = e.type==='reaction'
+        ? (e.fromName?`${L==='fa'?'از طرف':'From'} ${esc(e.fromName)}`:'')
+        : (e.placeName?esc(e.placeName):(e.note?esc(e.note):(e.lat!=null?`${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}`:'')));
       h+=`<div class="fam-tl-item"><div class="fam-tl-dot ${meta.tone}"></div>
         <div class="fam-tl-t">${meta.t}${e.placeName?` · ${esc(e.placeName)}`:''}</div>
         ${sub&&!e.placeName?`<div class="fam-tl-s">${sub}</div>`:''}
@@ -18809,6 +18860,31 @@ async function famAction(act,arg,ev){
       const mem=famLiveMembers().find(x=>x.uid===arg);
       if(!mem||!mem.phone){ toast(L==='fa'?'شماره تلفن برای این عضو ثبت نشده':'No phone number on file for this member'); return; }
       window.location.href='tel:'+mem.phone;
+      return;
+    }
+    // v444: Message button — same phone field the already-working Call
+    // button uses (m.phone), so no data-model change was needed. Opens the
+    // device's own SMS app via the sms: URI scheme, same pattern as tel:.
+    case 'live-message':{
+      const mem=famLiveMembers().find(x=>x.uid===arg);
+      if(!mem||!mem.phone){ toast(L==='fa'?'شماره تلفن برای این عضو ثبت نشده':'No phone number on file for this member'); return; }
+      window.location.href='sms:'+mem.phone;
+      return;
+    }
+    case 'live-react':{
+      const [targetUid,kind]=String(arg).split('|');
+      const RX={ boo:{emoji:'🍅',label:(L==='fa'?'هوو!':'Boo!')},
+                 love:{emoji:'❤️',label:(L==='fa'?'دوستت دارم!':'Love ya!')},
+                 slow:{emoji:'😳',label:(L==='fa'?'یواش‌تر برو!':'Slow down!')} }[kind];
+      if(!targetUid||!RX) return;
+      const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
+      const me=famLiveMembers().find(x=>x.uid===myUid());
+      if(fb&&fb.location&&fb.location.emitEvent){
+        fb.location.emitEvent({type:'reaction',memberUid:targetUid,fromUid:myUid(),
+          fromName:(me&&me.name)||'',emoji:RX.emoji,label:RX.label,at:nowISO()})
+          .then(()=>{ toast(`${RX.emoji} ${L==='fa'?'ارسال شد':'Sent'}`); })
+          .catch(()=>{ toast(L==='fa'?'ارسال نشد':'Could not send'); });
+      }
       return;
     }
     case 'live-save-place':{
