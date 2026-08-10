@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v439';
+const APP_VERSION='v440';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13867,6 +13867,11 @@ async function famRunDiagnostics(){
     push('presence.steadyAccumMs', true, (_p&&_p.steadyAccumMs!=null)?String(_p.steadyAccumMs):'n/a');
     push('presence.priorFixGapMs', true, (_selfSt&&_selfSt.priorFixGapMs!=null)?String(_selfSt.priorFixGapMs):'n/a');
     push('stayStart', true, (_selfSt&&_selfSt.stayStart)||'null');
+    // v440: dump the RAW keys + source of the persisted self-state, so the
+    // next screenshot shows ground truth directly instead of my summary of
+    // it — removes any remaining ambiguity about what is actually stored.
+    push('selfState.source', true, (_selfSt&&_selfSt.source)||'null');
+    push('selfState keys', true, _selfSt?Object.keys(_selfSt).sort().join(', '):'null (no member state at all)');
   }catch(e){ push('presence debug', false, String(e&&e.message||e)); }
 
   // 2) Live ID token — proves request.auth will be non-null server-side.
