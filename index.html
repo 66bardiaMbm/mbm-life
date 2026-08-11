@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v450';
+const APP_VERSION='v452';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17792,6 +17792,14 @@ function famLivePaintMarkers(members, sel){
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
    already-mounted map (no destroy/re-init on routine refresh). ── */
 let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
+// v452: exact pixel height from a real drag release, or null when the sheet
+// is at one of the 3 discrete detents above. Kept separate from
+// _famSheetDetent (which stays a "nearest bucket" bookkeeping value for the
+// back button and other discrete-stop callers) so a live-location re-render
+// — happening every few seconds — has something to re-apply besides always
+// snapping back to the nearest bucket, which is what made a free drag look
+// like it "auto-corrected itself" moments after release.
+let _famSheetFreeHeight=null;
 let _famPrevMountView=null; // v401: last mounted Family view, used to detect a FRESH entry to Location
 function famLiveMount(){
   const el=document.getElementById('fam-map');
@@ -17999,6 +18007,10 @@ function famApplySheetDetent(i){
   famSyncChromeMetrics();
   const heights=famSheetHeights();
   _famSheetDetent=Math.max(0,Math.min(2,i));
+  // v452 FIX: any call here means "go to a real, discrete stop" — clear the
+  // remembered free-drag height so the next re-render (see famSheetInitDrag
+  // below) doesn't fight this intentional change back to a stale position.
+  _famSheetFreeHeight=null;
   sheet.classList.remove('detent-0','detent-2');
   if(_famSheetDetent===0)sheet.classList.add('detent-0');
   if(_famSheetDetent===2)sheet.classList.add('detent-2');
@@ -18017,7 +18029,22 @@ function famSheetInitDrag(){
   // duplicate mousemove/mouseup handlers on the window. A re-entry with the
   // listeners already bound still re-applies the detent, because #screen's
   // re-render can hand us a sheet element whose inline height was lost.
-  if(sheet._dragBound){ famApplySheetDetent(_famSheetDetent); return; }
+  if(sheet._dragBound){
+    // v452 FIX: this used to unconditionally re-snap to the nearest of the
+    // 3 discrete detents on every re-render (family-live re-renders on
+    // every live-location update, i.e. every few seconds), which silently
+    // pulled a freely-dragged sheet back to the nearest fixed stop moments
+    // after the user released it. If the user is currently at a free
+    // (non-detent) height, re-apply THAT exact height instead.
+    if(_famSheetFreeHeight!=null){
+      sheet.style.height=_famSheetFreeHeight+'px';
+      syncSheetVar(_famSheetFreeHeight);
+      try{ famUpdateCameraPadding(_famSheetFreeHeight); }catch(e){}
+    } else {
+      famApplySheetDetent(_famSheetDetent);
+    }
+    return;
+  }
   sheet._dragBound=true;
   function syncSheetVar(px){
     const wrap=document.getElementById('fam-live-wrap');
@@ -18073,6 +18100,12 @@ function famSheetInitDrag(){
     let best=0,bd=1e9;
     heights.forEach((hh,i)=>{const dd=Math.abs(hh-clamped); if(dd<bd){bd=dd;best=i;}});
     _famSheetDetent=best;
+    // v452: remember the EXACT height too — see famSheetInitDrag's re-render
+    // guard above, which is what actually keeps a live-updating screen from
+    // snapping this back to the `best` bucket a moment later. Only treated
+    // as a genuine "free" position when it's meaningfully off the nearest
+    // bucket (a few px of rounding shouldn't disable snapping forever).
+    _famSheetFreeHeight=(bd>2)?clamped:null;
     syncSheetVar(clamped);
     try{ famUpdateCameraPadding(clamped); }catch(e){}
     try{ MBMMap.invalidate(); }catch(e){}
@@ -22542,6 +22575,14 @@ function appDepth(){
   // famView) was never counted here, so Back skipped straight past it and
   // exited the whole app instead of closing the detail card first.
   else if(screen==='module' && currentModule==='family' && famView==='live' && typeof _famDetailOpen!=='undefined' && _famDetailOpen) d+=3;
+  // v451 FIX: the Family Live sheet's own size (_famSheetDetent: 0
+  // collapsed/map-maximised, 1 partial, 2 full-list) was never counted
+  // either — so with the list expanded but no individual detail open, Back
+  // jumped straight past the whole Family module to Life Hub in one press,
+  // instead of first shrinking the sheet back down (matching the reference
+  // app's own behaviour: Back reduces the panel one step before it ever
+  // leaves the screen). One extra depth point per detent step above 0.
+  else if(screen==='module' && currentModule==='family' && famView==='live' && typeof _famSheetDetent!=='undefined' && _famSheetDetent>0) d+=(2+_famSheetDetent);
   else if(screen==='module') d+=2;
   else if(screen==='lifehub') d+=1;
   else if(tasksView==='detail' || (screen && screen!=='lists')) d++;
@@ -22608,6 +22649,11 @@ function onPop(){
     // Member-detail sheet open on the live map → close it, stay on the map.
     _famDetailOpen=false;
     if(typeof famLiveApply==='function')famLiveApply(); else render();
+  } else if(screen==='module' && currentModule==='family' && famView==='live' && typeof _famSheetDetent!=='undefined' && _famSheetDetent>0){
+    // v451: sheet expanded (list showing) but no individual detail open →
+    // step it down one notch (matches appDepth's +1-per-step above) instead
+    // of leaving the module outright.
+    try{ famApplySheetDetent(_famSheetDetent-1); }catch(e){}
   } else if(screen==='module' && currentModule==='family'){
     // Family Live (home of the module) → Life Hub grid. Tear down the map.
     try{ MBMMap.destroy(); }catch(e){}
