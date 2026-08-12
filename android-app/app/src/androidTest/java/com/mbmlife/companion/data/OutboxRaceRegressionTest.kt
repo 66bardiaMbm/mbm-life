@@ -1,6 +1,5 @@
 package com.mbmlife.companion.data
 
-import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -10,7 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -31,12 +29,6 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class OutboxRaceRegressionTest {
 
-    @get:Rule
-    val instantTaskExecutorRule = InstantTaskExecutorRule()
-
-    // Placeholder: swap for the app's actual RoomDatabase class if its name
-    // differs (I don't have that file — only TrackingDao.kt/Entities.kt
-    // were uploaded).
     private lateinit var db: AppDatabase
     private lateinit var dao: TrackingDao
 
