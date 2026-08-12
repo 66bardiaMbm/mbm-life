@@ -72,3 +72,39 @@ jobs:
           path: android-app/app/build/outputs/apk/debug/MBM-Life-v405-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+  outbox-race-regression:
+    name: Compile and run OutboxRaceRegressionTest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        working-directory: android-app
+        run: chmod +x gradlew
+
+      - name: Compile instrumented tests
+        working-directory: android-app
+        run: ./gradlew --no-daemon compileDebugAndroidTestKotlin
+
+      - name: Run OutboxRaceRegressionTest on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: cd android-app && ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.mbmlife.companion.data.OutboxRaceRegressionTest
