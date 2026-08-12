@@ -107,7 +107,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
+          script: >
             adb logcat -c
             test_exit=0
             cd android-app
