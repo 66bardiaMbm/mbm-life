@@ -44,11 +44,6 @@ class TrackingRepository(private val context: Context) {
         }
 
         tripForStorage?.let { trip ->
-            // Persist route chunks during the drive as well as at completion.
-            // Chunk documents are deterministic and merged, so this safely
-            // replaces the current partial chunk without duplicating points.
-            // A crash/restart therefore loses at most the latest 25 accepted
-            // samples instead of the entire route.
             if (
                 output.transition != TripTransition.NONE ||
                 (output.sample.accepted && trip.status == "active" && trip.sampleCount % 25 == 0)
@@ -268,9 +263,22 @@ class TrackingRepository(private val context: Context) {
                     .build()
             )
             .build()
+        // v453 FIX (battery/CPU root cause, part 2 of 2 — see SyncWorker.kt
+        // for the matching drain-loop change this depends on): persist()
+        // calls scheduleSync() on essentially every accepted GPS sample —
+        // with GPS at 1-2s cadence that's on the order of ~2000+ enqueue
+        // calls/hour. APPEND_OR_REPLACE turned every one of those into a
+        // real WorkManager/Room bookkeeping operation regardless of
+        // whether a sync was already pending or running. KEEP collapses
+        // that to "at most one sync doing useful work at a time" — a fix
+        // already in flight (or already queued) absorbs every fix that
+        // arrives while it's active, since SyncWorker (see the other file)
+        // now re-queries the outbox until it's genuinely empty before
+        // finishing, so nothing gets stranded waiting for the next fix to
+        // arrive and trigger a fresh enqueue.
         WorkManager.getInstance(context).enqueueUniqueWork(
             SyncWorker.UNIQUE_WORK,
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            ExistingWorkPolicy.KEEP,
             request
         )
     }
