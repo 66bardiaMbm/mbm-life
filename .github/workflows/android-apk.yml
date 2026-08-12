@@ -107,14 +107,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: >
-            adb logcat -c
-            test_exit=0
-            cd android-app
-            ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.mbmlife.companion.data.OutboxRaceRegressionTest || test_exit=$?
-            cd ..
-            adb logcat -d > logcat.txt
-            exit "$test_exit"
+          script: adb logcat -c; test_exit=0; cd android-app; ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.mbmlife.companion.data.OutboxRaceRegressionTest || test_exit=$?; cd ..; adb logcat -d > logcat.txt; exit "$test_exit"
 
       - name: Upload instrumented test diagnostics
         if: always()
