@@ -13,8 +13,8 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-       versionCode = 20
-versionName = "1.1.0-BRIDGEFIX"
+        versionCode = 21
+        versionName = "1.2.0-v453"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -27,7 +27,7 @@ versionName = "1.1.0-BRIDGEFIX"
     signingConfigs {
         val ciKeystorePath = System.getenv("MBM_ANDROID_KEYSTORE_PATH")
         if (!ciKeystorePath.isNullOrBlank()) {
-            create("ciDebug") {
+            create("ciSigning") {
                 storeFile = file(ciKeystorePath)
                 storePassword = System.getenv("MBM_ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("MBM_ANDROID_KEY_ALIAS")
@@ -39,13 +39,20 @@ versionName = "1.1.0-BRIDGEFIX"
 
     buildTypes {
         getByName("debug") {
-            signingConfigs.findByName("ciDebug")?.let { signingConfig = it }
+            signingConfigs.findByName("ciSigning")?.let { signingConfig = it }
+        }
+        getByName("release") {
+            signingConfigs.findByName("ciSigning")?.let { signingConfig = it }
         }
     }
 
     buildFeatures {
         buildConfig = true
         viewBinding = true
+    }
+
+    lint {
+        disable += "NullSafeMutableLiveData"
     }
 
     compileOptions {

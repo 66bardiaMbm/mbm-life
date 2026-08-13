@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build v453 signed release APK
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Test and build debug APK
+    name: Test and build signed release APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -41,6 +41,17 @@ jobs:
         working-directory: android-app
         run: ./gradlew --no-daemon testDebugUnitTest
 
+      - name: Enable KVM access
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Run instrumented regression tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          working-directory: android-app
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
+
       - name: Restore stable APK signing key
         env:
           MBM_ANDROID_KEYSTORE_B64: ${{ secrets.MBM_ANDROID_KEYSTORE_B64 }}
@@ -48,27 +59,27 @@ jobs:
           test -n "$MBM_ANDROID_KEYSTORE_B64"
           printf '%s' "$MBM_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbm-life-ci.p12"
 
-      - name: Assemble auth-fixed debug APK
+      - name: Assemble signed v453 release APK
         working-directory: android-app
         env:
           MBM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mbm-life-ci.p12
           MBM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBM_ANDROID_KEYSTORE_PASSWORD }}
           MBM_ANDROID_KEY_ALIAS: ${{ secrets.MBM_ANDROID_KEY_ALIAS }}
           MBM_ANDROID_KEY_PASSWORD: ${{ secrets.MBM_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleRelease
 
       - name: Verify APK signing certificate
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
-          "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/debug/app-debug.apk
+          "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/release/app-release.apk
 
-      - name: Name v405 APK
-        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk android-app/app/build/outputs/apk/debug/MBM-Life-v405-debug.apk
+      - name: Name v453 APK
+        run: cp android-app/app/build/outputs/apk/release/app-release.apk android-app/app/build/outputs/apk/release/MBM-Life-v453-release.apk
 
-      - name: Upload v405 APK
+      - name: Upload v453 APK
         uses: actions/upload-artifact@v4
         with:
-          name: MBM-Life-v405-debug
-          path: android-app/app/build/outputs/apk/debug/MBM-Life-v405-debug.apk
+          name: MBM-Life-v453-release
+          path: android-app/app/build/outputs/apk/release/MBM-Life-v453-release.apk
           if-no-files-found: error
           retention-days: 14
