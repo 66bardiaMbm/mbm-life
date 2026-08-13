@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v452';
+const APP_VERSION='v454';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17271,8 +17271,18 @@ const FamGeo = (function(){
     // a.town/a.village, so an outer-suburb address could show the wrong,
     // broader locality name. suburb/neighbourhood/town/village/hamlet are
     // always more specific than city/municipality and must be tried first.
+    // v454: Australian addressing commonly carries the LGA (Local
+    // Government Area — e.g. "Brighton Council") under state_district or
+    // county rather than municipality, which the old chain never checked —
+    // so a point with no suburb/town/village polygon match (common on the
+    // rural/outer edge of a metro area) fell straight through to the much
+    // broader city field (e.g. "Hobart" for a point actually in Brighton,
+    // ~20km away). Added as fallbacks in the same "most specific first"
+    // order, positioned after the hyper-local fields and before the
+    // broadest ones (still ahead of city).
     const suburb = a.suburb || a.town || a.village || a.hamlet || a.city_district
-                   || a.neighbourhood || a.quarter || a.municipality || a.city;
+                   || a.neighbourhood || a.quarter || a.state_district || a.county
+                   || a.municipality || a.city;
     const isoState=a['ISO3166-2-lvl4'];
     const region = a.state_code || (isoState&&isoState.indexOf('-')>=0?isoState.split('-').pop():null)
                    || a.state || a.region || a.province;
@@ -17325,6 +17335,7 @@ const FamGeo = (function(){
             const addr=res.address||{};
             const selectedField=addr.suburb?'suburb':addr.town?'town':addr.village?'village':addr.hamlet?'hamlet'
               :addr.city_district?'city_district':addr.neighbourhood?'neighbourhood':addr.quarter?'quarter'
+              :addr.state_district?'state_district':addr.county?'county'
               :addr.municipality?'municipality':addr.city?'city':null;
             _lastLookup={
               requestId:k, requestLat:job.lat, requestLng:job.lng,
