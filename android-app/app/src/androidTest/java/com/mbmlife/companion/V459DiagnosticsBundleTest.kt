@@ -15,7 +15,7 @@ class V459DiagnosticsBundleTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val bundledIndex = context.assets.open("index.html").bufferedReader().use { it.readText() }
-        assertTrue(bundledIndex.contains("const APP_VERSION='v459'"))
+        assertTrue(bundledIndex.contains("const APP_VERSION='v460'"))
         assertTrue(bundledIndex.contains("window.diagHistoryPush=diagHistoryPush"))
         assertTrue(bundledIndex.contains("camera_target"))
         assertTrue(bundledIndex.contains("raw_fix_rejected"))
