@@ -38,6 +38,23 @@ data class TimedStopClosure(
     val arrivalAtMs: Long
 )
 
+/** Read-only diagnostic state. It must never participate in a decision. */
+data class DrivingDiagnosticSnapshot(
+    val activeTripId: String?,
+    val activeTripStatus: String?,
+    val lastAcceptedFixId: String?,
+    val lastAcceptedAtMs: Long?,
+    val lastAcceptedLat: Double?,
+    val lastAcceptedLng: Double?,
+    val filteredSpeedMps: Double?,
+    val driveCandidateSinceMs: Long?,
+    val lastDriveEvidenceAtMs: Long?,
+    val stopCandidateSinceMs: Long?,
+    val lastStopEvidenceAtMs: Long?,
+    val preWindowSize: Int,
+    val tailSize: Int
+)
+
 /**
  * Native-only driving state machine. It never reads WebView state and never
  * fabricates coordinates. All timing comes from provider capture timestamps.
@@ -77,6 +94,22 @@ class DrivingDetector(
     private var lastDriveEvidenceAt: Long? = null
     private var stopCandidateSince: Long? = null
     private var lastStopEvidenceAt: Long? = null
+
+    fun diagnosticSnapshot() = DrivingDiagnosticSnapshot(
+        activeTripId = active?.id,
+        activeTripStatus = active?.status,
+        lastAcceptedFixId = lastAccepted?.id,
+        lastAcceptedAtMs = lastAccepted?.capturedAtMs,
+        lastAcceptedLat = lastAccepted?.latitude,
+        lastAcceptedLng = lastAccepted?.longitude,
+        filteredSpeedMps = filteredSpeed,
+        driveCandidateSinceMs = driveCandidateSince,
+        lastDriveEvidenceAtMs = lastDriveEvidenceAt,
+        stopCandidateSinceMs = stopCandidateSince,
+        lastStopEvidenceAtMs = lastStopEvidenceAt,
+        preWindowSize = preWindow.size,
+        tailSize = tail.size
+    )
 
     init {
         val latest = tail.lastOrNull()
