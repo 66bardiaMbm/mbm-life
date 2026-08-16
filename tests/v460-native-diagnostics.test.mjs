@@ -37,5 +37,7 @@ assert.match(html, /recentDecisionDiagnostics\(80\)/);
 assert.match(html, /Native movement history/);
 assert.match(html, /GEOCODE DIAG/);
 assert.match(html, /const APP_VERSION='v460'/);
+assert.match(html, /function hideSplash\(\)/);
+assert.match(html, /<\/body>\s*<\/html>\s*$/);
 
 console.log('PASS v460 native diagnostics wiring contract');
