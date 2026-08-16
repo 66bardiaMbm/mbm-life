@@ -39,6 +39,7 @@ android {
 
     buildTypes {
         getByName("debug") {
+            buildConfigField("String", "PWA_URL", "\"file:///android_asset/index.html\"")
             signingConfigs.findByName("ciSigning")?.let { signingConfig = it }
         }
         getByName("release") {
