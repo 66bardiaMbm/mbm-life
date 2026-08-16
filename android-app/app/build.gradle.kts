@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 22
-        versionName = "1.2.0-v459-test"
+        versionName = "1.2.0-v460-test"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -39,7 +39,6 @@ android {
 
     buildTypes {
         getByName("debug") {
-            buildConfigField("String", "PWA_URL", "\"file:///android_asset/index.html\"")
             signingConfigs.findByName("ciSigning")?.let { signingConfig = it }
         }
         getByName("release") {
