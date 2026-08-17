@@ -5,6 +5,14 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private data class ObservedFix(
+    val offsetMs: Long,
+    val lat: Double,
+    val lng: Double,
+    val accuracyM: Float,
+    val rawSpeedMps: Float
+)
+
 class DrivingDetectorTest {
     private val uid = "test-user"
     private val familyId = "test-family"
@@ -245,6 +253,101 @@ class DrivingDetectorTest {
     }
 
     @Test
+    fun stationaryDeviceTraceWithRepeatedRawSpeedSpikesEventuallyEndsTrip() {
+        val detector = DrivingDetector()
+        var output: DrivingOutput? = null
+
+        // Establish a real trip through the public ingest path before replaying
+        // the stationary device trace captured at 02:42 on 17 August 2026.
+        for (seconds in listOf(0, 5, 10, 15)) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7790 + seconds * 0.0001,
+                    lng = 147.0546,
+                    speed = 10f,
+                    activity = "IN_VEHICLE"
+                )
+            )
+        }
+        assertEquals(TripTransition.STARTED, output?.transition)
+
+        val observed = listOf(
+            ObservedFix(0L, -42.777185, 147.054536, 24f, 1.59f),
+            ObservedFix(995L, -42.777052, 147.054422, 26f, 6.10f),
+            ObservedFix(1_992L, -42.777015, 147.054484, 25f, 4.77f),
+            ObservedFix(2_990L, -42.777057, 147.054503, 26f, 1.55f),
+            ObservedFix(3_998L, -42.777139, 147.054467, 27f, 0.47f),
+            // The screenshot cuts off the raw speed at 02:42:16, so that row
+            // is deliberately omitted instead of inventing a value.
+            ObservedFix(6_004L, -42.777152, 147.054435, 29f, 0.76f),
+            ObservedFix(6_984L, -42.777513, 147.054155, 30f, 10.23f),
+            ObservedFix(7_987L, -42.777566, 147.054116, 30f, 9.39f),
+            ObservedFix(8_997L, -42.777565, 147.054087, 30f, 7.41f)
+        )
+
+        var ended: DrivingOutput? = null
+        val stationaryStartMs = 31_925L
+        for (cycle in 0..12) {
+            // Synthetic continuation: repeat the observed stationary jitter
+            // pattern long enough to exercise the 90-second end hysteresis.
+            for (point in observed) {
+                output = detector.ingest(
+                    fix(
+                        timeMs = stationaryStartMs + cycle * 10_000L + point.offsetMs,
+                        lat = point.lat,
+                        lng = point.lng,
+                        speed = point.rawSpeedMps,
+                        accuracy = point.accuracyM
+                    )
+                )
+                if (output?.transition == TripTransition.ENDED) {
+                    ended = output
+                    break
+                }
+            }
+            if (ended != null) break
+        }
+
+        assertNotNull(ended)
+        assertEquals("sustained_stop", ended?.trip?.closeReason)
+    }
+
+    @Test
+    fun sustainedRealDisplacementDoesNotEndActiveTripUnderWeakAccuracy() {
+        val detector = DrivingDetector()
+        var output: DrivingOutput? = null
+        for (seconds in listOf(0, 5, 10, 15)) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7790 + seconds * 0.0001,
+                    lng = 147.0546,
+                    speed = 10f,
+                    activity = "IN_VEHICLE",
+                    accuracy = 30f
+                )
+            )
+        }
+        assertEquals(TripTransition.STARTED, output?.transition)
+
+        for (seconds in 20..160 step 5) {
+            output = detector.ingest(
+                fix(
+                    timeMs = 1_000L + seconds * 1_000L,
+                    lat = -42.7775 + (seconds - 20) * 0.0005,
+                    lng = 147.0546,
+                    speed = 10f,
+                    activity = "IN_VEHICLE",
+                    accuracy = 30f
+                )
+            )
+            assertEquals(TripTransition.UPDATED, output?.transition)
+            assertEquals("active", output?.trip?.status)
+        }
+    }
+
+    @Test
     fun bicycleActivityDoesNotOpenCarTripAtDrivingSpeed() {
         val detector = DrivingDetector()
         var output: DrivingOutput? = null
@@ -269,13 +372,14 @@ class DrivingDetectorTest {
         lat: Double,
         lng: Double,
         speed: Float?,
-        activity: String = "UNKNOWN"
+        activity: String = "UNKNOWN",
+        accuracy: Float = 4f
     ) = RawLocationFix(
         uid = uid,
         familyId = familyId,
         latitude = lat,
         longitude = lng,
-        accuracyM = 4f,
+        accuracyM = accuracy,
         speedMps = speed,
         bearingDeg = null,
         altitudeM = null,
