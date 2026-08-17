@@ -335,7 +335,9 @@ class DrivingDetectorTest {
             output = detector.ingest(
                 fix(
                     timeMs = 1_000L + seconds * 1_000L,
-                    lat = -42.7775 + (seconds - 20) * 0.0005,
+                    // About 55 m every five seconds: sustained real movement
+                    // without crossing the detector's impossible-spike guard.
+                    lat = -42.7775 + ((seconds - 20) / 5) * 0.0005,
                     lng = 147.0546,
                     speed = 10f,
                     activity = "IN_VEHICLE",
