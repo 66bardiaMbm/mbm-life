@@ -14051,7 +14051,10 @@ function famDiagView(){
           if(e.source==='raw_fix') return `<div>${time} ${seq}· <b>raw_fix</b> · raw ${e.rawLat.toFixed(6)},${e.rawLng.toFixed(6)} ±${e.rawAccuracy!=null?Math.round(e.rawAccuracy):'?'}m → accepted ${e.acceptedLat.toFixed(6)},${e.acceptedLng.toFixed(6)}${e.positionTrusted?'':' <b style="color:#f59e0b">(gated!)</b>'} · presence=${esc(e.presenceState||'—')}</div>`;
           if(e.source==='raw_fix_rejected') return `<div>${time} ${seq}· <b style="color:#f43f5e">raw_fix REJECTED</b> · raw ${e.rawLat!=null?e.rawLat.toFixed(6):'—'},${e.rawLng!=null?e.rawLng.toFixed(6):'—'} · reason=${esc(e.rejectionReason||'—')}</div>`;
           if(e.source==='marker_target') return `<div>${time} ${seq}· marker_target · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → ${e.lat.toFixed(6)},${e.lng.toFixed(6)}${e.willSnap?' <b style="color:#f59e0b">(snap!)</b>':''}</div>`;
-          if(e.source==='camera_target') return `<div>${time} ${seq}· camera_target(<b>${esc(e.reason||'?')}</b>) · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → raw ${e.rawToLat.toFixed(6)},${e.rawToLng.toFixed(6)} → padded ${e.lat.toFixed(6)},${e.lng.toFixed(6)} z${e.zoom} pad(${Math.round(e.padDxPx)},${Math.round(e.padDyPx)})</div>`;
+          if(e.source==='camera_target') return `<div>${time} ${seq}· camera_target #${esc(e.animationId==null?'?':e.animationId)}(<b>${esc(e.reason||'?')}</b>) · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → raw ${e.rawToLat.toFixed(6)},${e.rawToLng.toFixed(6)} → padded ${e.lat.toFixed(6)},${e.lng.toFixed(6)} z${e.zoom} pad(${Math.round(e.padDxPx)},${Math.round(e.padDyPx)})</div>`;
+          if(e.source==='camera_anim_start') return `<div>${time} ${seq}· camera_anim_start #${esc(e.animationId)}(<b>${esc(e.reason||'?')}</b>) · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → ${e.lat.toFixed(6)},${e.lng.toFixed(6)}</div>`;
+          if(e.source==='camera_anim_end') return `<div>${time} ${seq}· <b style="color:#22c55e">camera_anim_end</b> #${esc(e.animationId)} · ${Math.round(e.durationMs)}ms · ${e.lat.toFixed(6)},${e.lng.toFixed(6)}</div>`;
+          if(e.source==='camera_anim_cancel') return `<div>${time} ${seq}· <b style="color:#f59e0b">camera_anim_cancel</b> #${esc(e.animationId)} · ${Math.round(e.elapsedMs)}ms · reason=${esc(e.reason||'?')} · ${e.lat==null?'—':e.lat.toFixed(6)},${e.lng==null?'—':e.lng.toFixed(6)}</div>`;
           return `<div>${time} ${seq}· ${esc(e.source)}</div>`;
         }).join('');
         return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'تاریخچهٔ همزمان (fix/مارکر/دوربین)':'Synchronized history (fix/marker/camera)'}</div>
@@ -15916,12 +15919,34 @@ const MBMMap = (function(){
   function invalidate(){ if(_map)try{ window.google.maps.event.trigger(_map,'resize'); }catch(e){} }
 
   let _camAnim=null;
+  let _camAnimSeq=0;
   const CAM_ANIM_MS=650;
   function _lerp(a,b,t){ return a+(b-a)*t; }
-  function cancelCameraAnimation(){
+  function _cameraAnimPosition(){
+    const center=_map&&_map.getCenter&&_map.getCenter();
+    return {
+      lat:center&&typeof center.lat==='function'?center.lat():null,
+      lng:center&&typeof center.lng==='function'?center.lng():null,
+      zoom:_map&&_map.getZoom?_map.getZoom():null
+    };
+  }
+  function _cameraAnimDiag(source,payload){
+    try{
+      if(typeof window.diagHistoryPush==='function') window.diagHistoryPush(source,payload);
+    }catch(e){}
+  }
+  function cancelCameraAnimation(reason){
     if(_camAnim){
-      cancelAnimationFrame(_camAnim.raf);
+      const anim=_camAnim;
+      cancelAnimationFrame(anim.raf);
       _camAnim=null;
+      const p=_cameraAnimPosition();
+      _cameraAnimDiag('camera_anim_cancel',{
+        animationId:anim.animationId,
+        reason:reason||'other',
+        elapsedMs:Math.max(0,performance.now()-anim.startedAt),
+        lat:p.lat,lng:p.lng,zoom:p.zoom
+      });
     }
   }
   function _moveCameraFrame(lat,lng,zoom){
@@ -15939,7 +15964,7 @@ const MBMMap = (function(){
      centre/zoom move so the selected marker finishes in the safe viewport. */
   function setCamera(opts){
     if(!_map||!available()) return;
-    cancelCameraAnimation();
+    cancelCameraAnimation('replaced');
     // v456 ROOT-CAUSE FIX (real-world report + frame-by-frame video
     // measurement: a perfectly periodic ~1s, ~70px vertical oscillation
     // while driving — smooth rise over ~650ms then an abrupt drop in
@@ -15971,6 +15996,7 @@ const MBMMap = (function(){
     const dxPx=(_pad.right-_pad.left)/2;
     const to=(dyPx||dxPx) ? _offsetLatLngByPixels(rawTo.lat,rawTo.lng,rawTo.zoom,dxPx,dyPx) : rawTo;
     to.zoom=rawTo.zoom;
+    const animationId=++_camAnimSeq;
     try{
       if(typeof window.diagHistoryPush==='function'){
         // v457 FIX (Codex review): was logging only the final padded `to`
@@ -15980,17 +16006,28 @@ const MBMMap = (function(){
         // `rawTo` (the actual GPS-driven target), or the padding math
         // itself.
         window.diagHistoryPush('camera_target',{
+          animationId,
           reason:opts.reason||'unspecified',
           fromLat:from.lat,fromLng:from.lng,fromZoom:from.zoom,
           rawToLat:rawTo.lat,rawToLng:rawTo.lng,rawToZoom:rawTo.zoom,
           lat:to.lat,lng:to.lng,zoom:to.zoom,padDxPx:dxPx,padDyPx:dyPx});
       }
     }catch(e){}
+    const startedAt=performance.now();
+    _cameraAnimDiag('camera_anim_start',{
+      animationId,
+      reason:opts.reason||'unspecified',
+      fromLat:from.lat,fromLng:from.lng,fromZoom:from.zoom,
+      lat:to.lat,lng:to.lng,zoom:to.zoom
+    });
     if(opts.instant||CAM_ANIM_MS<=0){
       _moveCameraFrame(to.lat,to.lng,to.zoom);
+      _cameraAnimDiag('camera_anim_end',{
+        animationId,durationMs:Math.max(0,performance.now()-startedAt),
+        lat:to.lat,lng:to.lng,zoom:to.zoom
+      });
       return;
     }
-    const startedAt=performance.now();
     const step=(now)=>{
       const t=Math.min(1,(now-startedAt)/CAM_ANIM_MS);
       const eased=1-Math.pow(1-t,3);
@@ -16000,12 +16037,16 @@ const MBMMap = (function(){
         _lerp(from.zoom,to.zoom,eased)
       );
       if(t<1){
-        _camAnim={raf:requestAnimationFrame(step)};
+        _camAnim.raf=requestAnimationFrame(step);
       }else{
         _camAnim=null;
+        _cameraAnimDiag('camera_anim_end',{
+          animationId,durationMs:Math.max(0,now-startedAt),
+          lat:to.lat,lng:to.lng,zoom:to.zoom
+        });
       }
     };
-    _camAnim={raf:requestAnimationFrame(step)};
+    _camAnim={animationId,startedAt,raf:requestAnimationFrame(step)};
   }
   // v456: converts a screen-pixel offset (dxPx right, dyPx down) into a
   // lat/lng delta at the given latitude/zoom, using the standard Web
@@ -16418,12 +16459,12 @@ const FamilyMapCamera=(function(){
   function fit(points){
     if(!points||!points.length)return;
     follow=false; pausedByGesture=true; drivingMode=false;
-    MBMMap.cancelCameraAnimation();
+    MBMMap.cancelCameraAnimation('fit');
     if(timer){clearTimeout(timer);timer=null;}
     MBMMap.fitAll(points);
   }
   function pauseByGesture(){
-    MBMMap.cancelCameraAnimation();
+    MBMMap.cancelCameraAnimation('gesture');
     follow=false;
     pausedByGesture=true;
     _famFollow=false;
