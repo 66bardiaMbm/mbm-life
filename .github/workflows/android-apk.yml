@@ -7,6 +7,7 @@ on:
       - "android-app/**"
       - "index.html"
       - "tests/diag-history.test.mjs"
+      - "tests/camera-animation-lifecycle.test.mjs"
       - "tests/v460-native-diagnostics.test.mjs"
       - ".github/workflows/android-apk.yml"
 
@@ -48,6 +49,7 @@ jobs:
       - name: Run v460 JavaScript tests and parse inline scripts
         run: |
           node tests/diag-history.test.mjs
+          node tests/camera-animation-lifecycle.test.mjs
           node tests/v460-native-diagnostics.test.mjs
           node <<'NODE'
           const fs = require('node:fs');
