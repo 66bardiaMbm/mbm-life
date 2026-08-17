@@ -38,6 +38,23 @@ data class TimedStopClosure(
     val arrivalAtMs: Long
 )
 
+/** Read-only diagnostic state. It must never participate in a decision. */
+data class DrivingDiagnosticSnapshot(
+    val activeTripId: String?,
+    val activeTripStatus: String?,
+    val lastAcceptedFixId: String?,
+    val lastAcceptedAtMs: Long?,
+    val lastAcceptedLat: Double?,
+    val lastAcceptedLng: Double?,
+    val filteredSpeedMps: Double?,
+    val driveCandidateSinceMs: Long?,
+    val lastDriveEvidenceAtMs: Long?,
+    val stopCandidateSinceMs: Long?,
+    val lastStopEvidenceAtMs: Long?,
+    val preWindowSize: Int,
+    val tailSize: Int
+)
+
 /**
  * Native-only driving state machine. It never reads WebView state and never
  * fabricates coordinates. All timing comes from provider capture timestamps.
@@ -77,6 +94,22 @@ class DrivingDetector(
     private var lastDriveEvidenceAt: Long? = null
     private var stopCandidateSince: Long? = null
     private var lastStopEvidenceAt: Long? = null
+
+    fun diagnosticSnapshot() = DrivingDiagnosticSnapshot(
+        activeTripId = active?.id,
+        activeTripStatus = active?.status,
+        lastAcceptedFixId = lastAccepted?.id,
+        lastAcceptedAtMs = lastAccepted?.capturedAtMs,
+        lastAcceptedLat = lastAccepted?.latitude,
+        lastAcceptedLng = lastAccepted?.longitude,
+        filteredSpeedMps = filteredSpeed,
+        driveCandidateSinceMs = driveCandidateSince,
+        lastDriveEvidenceAtMs = lastDriveEvidenceAt,
+        stopCandidateSinceMs = stopCandidateSince,
+        lastStopEvidenceAtMs = lastStopEvidenceAt,
+        preWindowSize = preWindow.size,
+        tailSize = tail.size
+    )
 
     init {
         val latest = tail.lastOrNull()
@@ -364,10 +397,14 @@ class DrivingDetector(
     }
 
     private fun isSustainedStopEvidence(sample: LocationSampleEntity): Boolean {
-        if ((sample.rawSpeedMps?.toDouble() ?: 0.0) >= DRIVE_ENTER_MPS) return false
         val cutoff = sample.capturedAtMs - STOP_WINDOW_MS
         val recent = tail.filter { it.capturedAtMs >= cutoff && it.accepted }
         if (recent.size < STOP_MIN_SAMPLES) return false
+
+        // Keep the existing provider-speed path for normal fixes. A high raw
+        // speed must not veto stop evidence by itself, though: the stationary
+        // device trace shows repeated Doppler spikes while every accepted
+        // coordinate remains inside the reported accuracy envelope.
         val samplesWithSpeed = recent.mapNotNull { candidate ->
             (candidate.rawSpeedMps?.toDouble() ?: candidate.filteredSpeedMps)
                 ?.let { speed -> candidate to speed }
@@ -375,18 +412,47 @@ class DrivingDetector(
         val lowSpeedSamples = samplesWithSpeed
             .takeLastWhile { it.second <= STOP_LOW_SPEED_MPS }
             .map { it.first }
-        if (lowSpeedSamples.size < STOP_MIN_SAMPLES) return false
-        val first = lowSpeedSamples.first()
-        if (sample.capturedAtMs - first.capturedAtMs < STOP_MIN_WINDOW_MS) return false
+
+        val providerSpeedSupportsStop =
+            (sample.rawSpeedMps?.toDouble() ?: 0.0) < DRIVE_ENTER_MPS &&
+                lowSpeedSamples.size >= STOP_MIN_SAMPLES &&
+                sample.capturedAtMs - lowSpeedSamples.first().capturedAtMs >=
+                    STOP_MIN_WINDOW_MS &&
+                isInsideAccuracyAllowance(lowSpeedSamples.first(), sample)
+        if (providerSpeedSupportsStop) return true
+
+        // Fallback speed is only corroborating evidence. It can override raw
+        // speed spikes only when the whole recent trace is also spatially
+        // consistent with one accuracy-bounded stationary cluster.
+        val lowFallbackSamples = recent.filter { candidate ->
+            candidate.fallbackSpeedMps
+                ?.let { speed -> speed <= STOP_LOW_SPEED_MPS } == true
+        }
+        if (lowFallbackSamples.size < STOP_MIN_SAMPLES) return false
+        if (
+            lowFallbackSamples.last().capturedAtMs -
+            lowFallbackSamples.first().capturedAtMs < STOP_MIN_WINDOW_MS
+        ) {
+            return false
+        }
+        return recent.any { anchor ->
+            recent.all { candidate -> isInsideAccuracyAllowance(anchor, candidate) }
+        }
+    }
+
+    private fun isInsideAccuracyAllowance(
+        first: LocationSampleEntity,
+        last: LocationSampleEntity
+    ): Boolean {
         val distance = Geo.distanceM(
             first.latitude,
             first.longitude,
-            sample.latitude,
-            sample.longitude
+            last.latitude,
+            last.longitude
         )
         val accuracyAllowance =
             (first.accuracyM?.toDouble() ?: 0.0) +
-                (sample.accuracyM?.toDouble() ?: 0.0) + 8.0
+                (last.accuracyM?.toDouble() ?: 0.0) + 8.0
         return distance <= max(STOP_NET_DISTANCE_M, accuracyAllowance)
     }
 

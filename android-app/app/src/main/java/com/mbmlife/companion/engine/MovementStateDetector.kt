@@ -22,6 +22,17 @@ data class MovementDecision(
     val reason: String
 )
 
+/** Read-only diagnostic state. It must never participate in a decision. */
+data class MovementDiagnosticSnapshot(
+    val currentState: MovementState,
+    val currentStateStartedAtMs: Long,
+    val lastSampleAtMs: Long,
+    val candidateState: MovementState?,
+    val candidateSinceMs: Long,
+    val candidateSamples: Int,
+    val credibleHistorySize: Int
+)
+
 /**
  * Converts accepted native location samples into one persisted movement state.
  *
@@ -56,6 +67,16 @@ class MovementStateDetector(
     private var candidateSinceMs = 0L
     private var candidateSamples = 0
     private val credibleHistory = ArrayDeque<LocationSampleEntity>()
+
+    fun diagnosticSnapshot() = MovementDiagnosticSnapshot(
+        currentState = current,
+        currentStateStartedAtMs = currentStartedAtMs,
+        lastSampleAtMs = lastSampleAtMs,
+        candidateState = candidate,
+        candidateSinceMs = candidateSinceMs,
+        candidateSamples = candidateSamples,
+        credibleHistorySize = credibleHistory.size
+    )
 
     fun ingest(
         sample: LocationSampleEntity,

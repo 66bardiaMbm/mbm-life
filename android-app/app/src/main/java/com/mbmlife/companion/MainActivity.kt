@@ -36,10 +36,13 @@ import com.mbmlife.companion.data.DiagnosticLogger
 import com.mbmlife.companion.data.FamilyResolver
 import com.mbmlife.companion.databinding.ActivityMainBinding
 import com.mbmlife.companion.tracking.TrackingService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 import org.json.JSONTokener
 import org.json.JSONObject
+import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -110,6 +113,32 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun appVersionName(): String = BuildConfig.VERSION_NAME
+
+        @JavascriptInterface
+        fun recentDecisionDiagnostics(limit: Int): String = runBlocking(Dispatchers.IO) {
+            val safeLimit = limit.coerceIn(1, 200)
+            val rows = app.database.trackingDao()
+                .recentLogsForTag("NativeDecision", safeLimit)
+            JSONArray().apply {
+                rows.forEach { row ->
+                    put(
+                        JSONObject()
+                            .put("id", row.id)
+                            .put("timestampMs", row.timestampMs)
+                            .put("eventType", row.message)
+                            .put(
+                                "details",
+                                try {
+                                    JSONObject(row.detailsJson ?: "{}")
+                                } catch (_: Exception) {
+                                    JSONObject().put("parseError", true)
+                                        .put("raw", row.detailsJson ?: JSONObject.NULL)
+                                }
+                            )
+                    )
+                }
+            }.toString()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

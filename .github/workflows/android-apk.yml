@@ -1,24 +1,28 @@
-name: Build v453 signed release APK
+name: Build v460 diagnostics test APKs
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - "android-app/**"
+      - "index.html"
+      - "tests/diag-history.test.mjs"
+      - "tests/camera-animation-lifecycle.test.mjs"
+      - "tests/v460-native-diagnostics.test.mjs"
       - ".github/workflows/android-apk.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-debug-apk-${{ github.ref }}
+  group: android-v460-test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Test and build signed release APK
+    name: Test and build v460 diagnostics APKs
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
@@ -30,6 +34,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -37,20 +46,67 @@ jobs:
         working-directory: android-app
         run: chmod +x gradlew
 
+      - name: Run v460 JavaScript tests and parse inline scripts
+        run: |
+          node tests/diag-history.test.mjs
+          node tests/camera-animation-lifecycle.test.mjs
+          node tests/v460-native-diagnostics.test.mjs
+          node <<'NODE'
+          const fs = require('node:fs');
+          const vm = require('node:vm');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const scriptPattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+          let parsed = 0;
+          let match;
+          while ((match = scriptPattern.exec(html)) !== null) {
+            const attrs = match[1];
+            const source = match[2];
+            if (/\bsrc\s*=/.test(attrs)) continue;
+            const type = attrs.match(/\btype\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase();
+            if (type && !['text/javascript', 'application/javascript'].includes(type)) continue;
+            new vm.Script(source, { filename: `index-inline-${parsed + 1}.js` });
+            parsed += 1;
+          }
+          if (parsed === 0) throw new Error('No inline JavaScript was parsed');
+          console.log(`PASS parsed ${parsed} inline JavaScript block(s)`);
+          NODE
+
       - name: Run unit tests
         working-directory: android-app
         run: ./gradlew --no-daemon testDebugUnitTest
 
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v460-test-unit-reports
+          path: |
+            android-app/app/build/reports/tests/testDebugUnitTest/**
+            android-app/app/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Enable KVM access
         run: sudo chmod 666 /dev/kvm
 
-      - name: Run instrumented regression tests
+      - name: Run instrumented Android tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           working-directory: android-app
           script: ./gradlew --no-daemon connectedDebugAndroidTest
+
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v460-test-instrumented-reports
+          path: |
+            android-app/app/build/reports/androidTests/connected/**
+            android-app/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Restore stable APK signing key
         env:
@@ -59,27 +115,45 @@ jobs:
           test -n "$MBM_ANDROID_KEYSTORE_B64"
           printf '%s' "$MBM_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbm-life-ci.p12"
 
-      - name: Assemble signed v453 release APK
+      - name: Assemble signed v460 debug and release APKs
         working-directory: android-app
         env:
           MBM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mbm-life-ci.p12
           MBM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBM_ANDROID_KEYSTORE_PASSWORD }}
           MBM_ANDROID_KEY_ALIAS: ${{ secrets.MBM_ANDROID_KEY_ALIAS }}
           MBM_ANDROID_KEY_PASSWORD: ${{ secrets.MBM_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease
+        run: |
+          ./gradlew --no-daemon assembleDebug
+          ./gradlew --no-daemon assembleRelease
 
-      - name: Verify APK signing certificate
+      - name: Verify APK signatures and record certificates
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
-          "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/release/app-release.apk
+          test -x "$APKSIGNER"
+          DEBUG_APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="android-app/app/build/outputs/apk/release/app-release.apk"
+          test -f "$DEBUG_APK"
+          test -f "$RELEASE_APK"
+          echo "=== v460 debug certificate ==="
+          "$APKSIGNER" verify --print-certs "$DEBUG_APK"
+          echo "=== v460 release-test certificate ==="
+          "$APKSIGNER" verify --print-certs "$RELEASE_APK"
+          mkdir -p "$RUNNER_TEMP/v460-apks"
+          cp "$DEBUG_APK" "$RUNNER_TEMP/v460-apks/MBM-Life-v460-test-debug.apk"
+          cp "$RELEASE_APK" "$RUNNER_TEMP/v460-apks/MBM-Life-v460-test-release.apk"
 
-      - name: Name v453 APK
-        run: cp android-app/app/build/outputs/apk/release/app-release.apk android-app/app/build/outputs/apk/release/MBM-Life-v453-release.apk
-
-      - name: Upload v453 APK
+      - name: Upload v460 debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: MBM-Life-v453-release
-          path: android-app/app/build/outputs/apk/release/MBM-Life-v453-release.apk
+          name: MBM-Life-v460-test-debug
+          path: ${{ runner.temp }}/v460-apks/MBM-Life-v460-test-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload v460 release-test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v460-test-release
+          path: ${{ runner.temp }}/v460-apks/MBM-Life-v460-test-release.apk
           if-no-files-found: error
           retention-days: 14

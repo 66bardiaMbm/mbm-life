@@ -8,6 +8,19 @@ import org.junit.Test
 
 class MovementStateDetectorTest {
     @Test
+    fun diagnosticSnapshotReportsCandidateWithoutChangingDecision() {
+        val detector = MovementStateDetector()
+        detector.ingest(sample(1_000L, speed = 1.1), false)
+
+        val snapshot = detector.diagnosticSnapshot()
+
+        assertEquals(MovementState.STATIONARY, snapshot.currentState)
+        assertEquals(MovementState.WALKING, snapshot.candidateState)
+        assertEquals(1, snapshot.candidateSamples)
+        assertEquals(1_000L, snapshot.lastSampleAtMs)
+    }
+
+    @Test
     fun oneWalkingOutlierDoesNotChangeStationaryState() {
         val detector = MovementStateDetector()
         val decision = detector.ingest(sample(5_000L, speed = 1.2), false)

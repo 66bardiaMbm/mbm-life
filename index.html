@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v454';
+const APP_VERSION='v460';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11154,6 +11154,31 @@ const FamilyBackend = (function(){
      status derivation, movement/stay detection, route ring-buffer,
      freshness classification, and the telemetry contract. No UI here.
      ═══════════════════════════════════════════════════════════════════ */
+  // v456: shared, timestamped diagnostic history — records raw GPS fixes,
+  // rendered marker position, and camera target together (each tagged with
+  // a real timestamp) so a reported "jump" can be diagnosed after the fact
+  // by comparing what GPS actually reported vs where the marker/camera
+  // ended up, instead of relying on a single point-in-time Diagnostics
+  // screenshot that may not even be from the same moment as the incident.
+  // Capped ring buffer — bounded memory, no persistence needed for this.
+  const _diagHistory=[];
+  const DIAG_HISTORY_MAX=120;
+  let _diagHistorySeq=0;
+  function diagHistoryPush(source,data){
+    try{
+      _diagHistorySeq++;
+      _diagHistory.push(Object.assign({t:Date.now(),seq:_diagHistorySeq,source:source},data));
+      if(_diagHistory.length>DIAG_HISTORY_MAX) _diagHistory.shift();
+    }catch(e){}
+  }
+  function diagHistoryGet(){ return _diagHistory.slice(); }
+  // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
+  // and cannot reach these directly — same class of scope mistake made
+  // earlier this session with myUid()/FamilyLocation. Exposing on window,
+  // matching the established window.mbmAcceptNativeFix bridge pattern.
+  window.diagHistoryPush=diagHistoryPush;
+  window.diagHistoryGet=diagHistoryGet;
+
   const FamilyLocation = (function(){
     // Tunables (Product-Owner-adjustable; honest defaults).
     const FRESH_MS   = 90*1000;      // <=90s since reportedAt → "updating/recent"
@@ -11770,6 +11795,17 @@ const FamilyBackend = (function(){
       // diagnostics only — they no longer gate acceptance.
       if(rejectionReason){
         console.debug('[location-timing]',{fixId:raw.fixId,sequence:raw.sequence,capturedAt:raw.capturedAt,javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,rejectedAtMs:Date.now(),accepted:false,rejectionReason});
+        // v458 FIX (Codex review): a fix rejected here (bad/stale
+        // timestamp) previously vanished with no trace in the diagnostic
+        // history — only ACCEPTED fixes were ever logged. If a reported
+        // jump is actually explained by a run of rejected fixes (e.g. the
+        // app silently coasting on a stale position while several bad
+        // fixes get thrown away), the history couldn't show that at all.
+        if(uid===myUid()){
+          diagHistoryPush('raw_fix_rejected',{
+            rawLat:raw.lat,rawLng:raw.lng,rawAccuracy:raw.accuracy,
+            capturedAt:raw.capturedAt,fixId:raw.fixId,rejectionReason});
+        }
         return false;
       }
       const displayedSpeed=(raw.filteredSpeedMps!=null?raw.filteredSpeedMps:raw.speed);
@@ -11830,6 +11866,22 @@ const FamilyBackend = (function(){
         rawSpeedMps:raw.rawSpeedMps,filteredSpeedMps:raw.filteredSpeedMps,
         displayedSpeedKph:raw.displayedSpeedKph,accepted:true
       });
+      if(uid===myUid()){
+        // v457 FIX (found by Codex's review): this used to log only
+        // next.lat/next.lng — the ACCEPTED position, which can differ from
+        // what the GPS chip actually reported if positionTrusted rejected a
+        // low-accuracy sample and kept the previous position instead. That
+        // silently hid exactly the kind of bad jump this history exists to
+        // catch. Now logs both: rawLat/rawLng (raw.lat/raw.lng, unfiltered,
+        // whatever the chip actually said) and acceptedLat/acceptedLng
+        // (next.lat/next.lng, what the app actually used) — comparing the
+        // two right in the log shows whether the gate did its job.
+        diagHistoryPush('raw_fix',{
+          rawLat:raw.lat,rawLng:raw.lng,rawAccuracy:raw.accuracy,
+          acceptedLat:next.lat,acceptedLng:next.lng,acceptedAccuracy:next.accuracy,
+          positionTrusted:positionTrusted,
+          capturedAt:next.capturedAt,fixId:next.nativeFixId,presenceState:next._presence&&next._presence.state});
+      }
       afterChange();
       return true;
     }
@@ -13984,6 +14036,70 @@ function famDiagView(){
       <div style="max-height:180px;overflow:auto;font-family:monospace;font-size:11px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
         ${log.length?log.slice().reverse().map(e=>`<div>${esc(e.t.slice(11,19))} · ${esc(e.kind)} · ${esc(typeof e.detail==='object'?JSON.stringify(e.detail):String(e.detail==null?'':e.detail))}</div>`).join(''):'<div>'+(L==='fa'?'هنوز رویدادی نیست':'no events yet')+'</div>'}
       </div>
+      ${(()=>{
+        // v456: raw GPS fix / rendered marker / camera target, all captured
+        // with real timestamps at the moment each happened — built exactly
+        // for cases like the reported drive-time "jump", where a single
+        // point-in-time Diagnostics screenshot can't prove whether a GPS
+        // fix, the marker, or the camera moved first. Off by default
+        // (nothing is hidden — data collects continuously in the
+        // background either way); this only controls whether it's shown.
+        const hist=(typeof window.diagHistoryGet==='function')?window.diagHistoryGet():[];
+        const rows=hist.slice().reverse().slice(0,60).map(e=>{
+          const time=new Date(e.t).toISOString().slice(11,23);
+          const seq=e.seq!=null?'#'+e.seq+' ':'';
+          if(e.source==='raw_fix') return `<div>${time} ${seq}· <b>raw_fix</b> · raw ${e.rawLat.toFixed(6)},${e.rawLng.toFixed(6)} ±${e.rawAccuracy!=null?Math.round(e.rawAccuracy):'?'}m → accepted ${e.acceptedLat.toFixed(6)},${e.acceptedLng.toFixed(6)}${e.positionTrusted?'':' <b style="color:#f59e0b">(gated!)</b>'} · presence=${esc(e.presenceState||'—')}</div>`;
+          if(e.source==='raw_fix_rejected') return `<div>${time} ${seq}· <b style="color:#f43f5e">raw_fix REJECTED</b> · raw ${e.rawLat!=null?e.rawLat.toFixed(6):'—'},${e.rawLng!=null?e.rawLng.toFixed(6):'—'} · reason=${esc(e.rejectionReason||'—')}</div>`;
+          if(e.source==='marker_target') return `<div>${time} ${seq}· marker_target · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → ${e.lat.toFixed(6)},${e.lng.toFixed(6)}${e.willSnap?' <b style="color:#f59e0b">(snap!)</b>':''}</div>`;
+          if(e.source==='camera_target') return `<div>${time} ${seq}· camera_target #${esc(e.animationId==null?'?':e.animationId)}(<b>${esc(e.reason||'?')}</b>) · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → raw ${e.rawToLat.toFixed(6)},${e.rawToLng.toFixed(6)} → padded ${e.lat.toFixed(6)},${e.lng.toFixed(6)} z${e.zoom} pad(${Math.round(e.padDxPx)},${Math.round(e.padDyPx)})</div>`;
+          if(e.source==='camera_anim_start') return `<div>${time} ${seq}· camera_anim_start #${esc(e.animationId)}(<b>${esc(e.reason||'?')}</b>) · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → ${e.lat.toFixed(6)},${e.lng.toFixed(6)}</div>`;
+          if(e.source==='camera_anim_end') return `<div>${time} ${seq}· <b style="color:#22c55e">camera_anim_end</b> #${esc(e.animationId)} · ${Math.round(e.durationMs)}ms · ${e.lat.toFixed(6)},${e.lng.toFixed(6)}</div>`;
+          if(e.source==='camera_anim_cancel') return `<div>${time} ${seq}· <b style="color:#f59e0b">camera_anim_cancel</b> #${esc(e.animationId)} · ${Math.round(e.elapsedMs)}ms · reason=${esc(e.reason||'?')} · ${e.lat==null?'—':e.lat.toFixed(6)},${e.lng==null?'—':e.lng.toFixed(6)}</div>`;
+          return `<div>${time} ${seq}· ${esc(e.source)}</div>`;
+        }).join('');
+        return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'تاریخچهٔ همزمان (fix/مارکر/دوربین)':'Synchronized history (fix/marker/camera)'}</div>
+        <div style="max-height:240px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+          ${rows||'<div>'+(L==='fa'?'هنوز داده‌ای نیست — کمی صبر کن تا فیکس بیاد':'no data yet — wait for a fix')+'</div>'}
+        </div>`;
+      })()}
+      ${(()=>{
+        let nativeRows=[];
+        try{
+          if(window.MbmNativeAuth&&typeof window.MbmNativeAuth.recentDecisionDiagnostics==='function'){
+            nativeRows=JSON.parse(window.MbmNativeAuth.recentDecisionDiagnostics(80)||'[]');
+          }
+        }catch(e){ nativeRows=[{eventType:'bridge_error',details:{reasonCode:String(e&&e.message||e)}}]; }
+        const rows=nativeRows.map(row=>{
+          const d=row.details||{};
+          const time=d.wallTimestampMs?new Date(d.wallTimestampMs).toISOString().slice(11,23):'—';
+          const seq=d.seq!=null?'#'+d.seq:'—';
+          if(row.eventType==='fix_decision'){
+            const speed=d.rawSpeedMps==null?'—':Number(d.rawSpeedMps).toFixed(2);
+            const dist=d.distanceFromLastValidFixM==null?'—':Math.round(d.distanceFromLastValidFixM)+'m';
+            return `<div>${time} ${esc(seq)} · <b>fix</b> ${esc(d.movementStateBefore||'—')}→${esc(d.movementStateAfter||'—')} · raw=${esc(speed)}m/s dist=${esc(dist)} acc=${d.accuracyM==null?'—':Math.round(d.accuracyM)+'m'} · trip=${esc(d.tripTransition||'—')} · reason=${esc(d.decisionReason||d.rejectReason||'—')}</div>`;
+          }
+          return `<div>${time} ${esc(seq)} · <b>${esc(row.eventType||d.eventType||'event')}</b> · ${esc(d.movementStateBefore||'—')}→${esc(d.movementStateAfter||'—')} · trip=${esc(d.tripTransition||'—')} · reason=${esc(d.transitionReason||d.decisionReason||d.reasonCode||'—')}</div>`;
+        }).join('');
+        return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'تاریخچهٔ تصمیم‌های native':'Native movement history'}</div>
+        <div style="max-height:300px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+          ${rows||'<div>'+(L==='fa'?'هنوز تصمیم native ثبت نشده':'no native decisions recorded yet')+'</div>'}
+        </div>`;
+      })()}
+      ${(()=>{
+        const g=(typeof FamGeo!=='undefined'&&FamGeo.famGeoDiagnosticInfo)?FamGeo.famGeoDiagnosticInfo():null;
+        if(!g) return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">GEOCODE DIAG</div><div style="font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">no lookup recorded yet</div>`;
+        const row=(k,v)=>`<div><b>${esc(k)}:</b> ${esc(v==null?'null':String(v))}</div>`;
+        return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">GEOCODE DIAG</div>
+        <div style="max-height:260px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+          ${row('cache status',g.cacheStatus)}
+          ${row('request lat,lng',g.requestLat!=null?Number(g.requestLat).toFixed(6)+','+Number(g.requestLng).toFixed(6):null)}
+          ${row('selected field',g.selectedField)}
+          ${row('selected value',g.selectedValue)}
+          ${row('result line1',g.resultLine1)}
+          ${row('result line2',g.resultLine2)}
+          ${row('raw address JSON',g.rawAddress?JSON.stringify(g.rawAddress):null)}
+        </div>`;
+      })()}
     </div>`;
   }
   h+=`<div style="font-size:13px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'این صفحه چند نوشتن واقعی و ایزوله روی Firestore انجام می‌دهد و نتیجهٔ دقیق هرکدام را نشان می‌دهد. هیچ حدسی زده نمی‌شود.':'This runs real, isolated Firestore probes and shows the exact result of each. No guessing.'}</div>`;
@@ -15803,12 +15919,34 @@ const MBMMap = (function(){
   function invalidate(){ if(_map)try{ window.google.maps.event.trigger(_map,'resize'); }catch(e){} }
 
   let _camAnim=null;
+  let _camAnimSeq=0;
   const CAM_ANIM_MS=650;
   function _lerp(a,b,t){ return a+(b-a)*t; }
-  function cancelCameraAnimation(){
+  function _cameraAnimPosition(){
+    const center=_map&&_map.getCenter&&_map.getCenter();
+    return {
+      lat:center&&typeof center.lat==='function'?center.lat():null,
+      lng:center&&typeof center.lng==='function'?center.lng():null,
+      zoom:_map&&_map.getZoom?_map.getZoom():null
+    };
+  }
+  function _cameraAnimDiag(source,payload){
+    try{
+      if(typeof window.diagHistoryPush==='function') window.diagHistoryPush(source,payload);
+    }catch(e){}
+  }
+  function cancelCameraAnimation(reason){
     if(_camAnim){
-      cancelAnimationFrame(_camAnim.raf);
+      const anim=_camAnim;
+      cancelAnimationFrame(anim.raf);
       _camAnim=null;
+      const p=_cameraAnimPosition();
+      _cameraAnimDiag('camera_anim_cancel',{
+        animationId:anim.animationId,
+        reason:reason||'other',
+        elapsedMs:Math.max(0,performance.now()-anim.startedAt),
+        lat:p.lat,lng:p.lng,zoom:p.zoom
+      });
     }
   }
   function _moveCameraFrame(lat,lng,zoom){
@@ -15826,29 +15964,70 @@ const MBMMap = (function(){
      centre/zoom move so the selected marker finishes in the safe viewport. */
   function setCamera(opts){
     if(!_map||!available()) return;
-    cancelCameraAnimation();
+    cancelCameraAnimation('replaced');
+    // v456 ROOT-CAUSE FIX (real-world report + frame-by-frame video
+    // measurement: a perfectly periodic ~1s, ~70px vertical oscillation
+    // while driving — smooth rise over ~650ms then an abrupt drop in
+    // <250ms, repeating for as long as fixes kept arriving). Root cause:
+    // `from` was read via a fresh _map.getCenter() — which already
+    // included whatever pixel offset finishPadding()'s panBy() had just
+    // applied at the END of the PREVIOUS cycle — while `to` was the RAW,
+    // unpadded target. So every cycle eased smoothly AWAY from the padded
+    // position back toward the raw center (the "rise"), then
+    // finishPadding() instantly panned it back to the padded position
+    // right after (the "drop") — perpetually undoing and redoing its own
+    // padding correction once per fix. Fixed by folding the padding pixel
+    // offset directly into the ANIMATED target (converted to a lat/lng
+    // delta at the current zoom/latitude) so there is exactly one final
+    // resting position per cycle, reached by one smooth ease — nothing
+    // left for a next cycle to "discover" and undo.
     const center=_map.getCenter&&_map.getCenter();
     const from={
       lat:center?center.lat():opts.center[0],
       lng:center?center.lng():opts.center[1],
       zoom:_map.getZoom&&_map.getZoom()!=null?_map.getZoom():opts.zoom
     };
-    const to={
+    const rawTo={
       lat:opts.center?opts.center[0]:from.lat,
       lng:opts.center?opts.center[1]:from.lng,
       zoom:opts.zoom!=null?opts.zoom:from.zoom
     };
-    const finishPadding=()=>{
-      const dy=(_pad.bottom-_pad.top)/2;
-      const dx=(_pad.right-_pad.left)/2;
-      if(dy||dx){ try{_map.panBy(dx,dy);}catch(e){} }
-    };
+    const dyPx=(_pad.bottom-_pad.top)/2;
+    const dxPx=(_pad.right-_pad.left)/2;
+    const to=(dyPx||dxPx) ? _offsetLatLngByPixels(rawTo.lat,rawTo.lng,rawTo.zoom,dxPx,dyPx) : rawTo;
+    to.zoom=rawTo.zoom;
+    const animationId=++_camAnimSeq;
+    try{
+      if(typeof window.diagHistoryPush==='function'){
+        // v457 FIX (Codex review): was logging only the final padded `to`
+        // — no way to see where the animation STARTED or what the
+        // un-padded raw target was, both needed to diagnose whether a
+        // reported jump came from `from` (stale/wrong current position),
+        // `rawTo` (the actual GPS-driven target), or the padding math
+        // itself.
+        window.diagHistoryPush('camera_target',{
+          animationId,
+          reason:opts.reason||'unspecified',
+          fromLat:from.lat,fromLng:from.lng,fromZoom:from.zoom,
+          rawToLat:rawTo.lat,rawToLng:rawTo.lng,rawToZoom:rawTo.zoom,
+          lat:to.lat,lng:to.lng,zoom:to.zoom,padDxPx:dxPx,padDyPx:dyPx});
+      }
+    }catch(e){}
+    const startedAt=performance.now();
+    _cameraAnimDiag('camera_anim_start',{
+      animationId,
+      reason:opts.reason||'unspecified',
+      fromLat:from.lat,fromLng:from.lng,fromZoom:from.zoom,
+      lat:to.lat,lng:to.lng,zoom:to.zoom
+    });
     if(opts.instant||CAM_ANIM_MS<=0){
       _moveCameraFrame(to.lat,to.lng,to.zoom);
-      finishPadding();
+      _cameraAnimDiag('camera_anim_end',{
+        animationId,durationMs:Math.max(0,performance.now()-startedAt),
+        lat:to.lat,lng:to.lng,zoom:to.zoom
+      });
       return;
     }
-    const startedAt=performance.now();
     const step=(now)=>{
       const t=Math.min(1,(now-startedAt)/CAM_ANIM_MS);
       const eased=1-Math.pow(1-t,3);
@@ -15858,13 +16037,30 @@ const MBMMap = (function(){
         _lerp(from.zoom,to.zoom,eased)
       );
       if(t<1){
-        _camAnim={raf:requestAnimationFrame(step)};
+        _camAnim.raf=requestAnimationFrame(step);
       }else{
         _camAnim=null;
-        finishPadding();
+        _cameraAnimDiag('camera_anim_end',{
+          animationId,durationMs:Math.max(0,now-startedAt),
+          lat:to.lat,lng:to.lng,zoom:to.zoom
+        });
       }
     };
-    _camAnim={raf:requestAnimationFrame(step)};
+    _camAnim={animationId,startedAt,raf:requestAnimationFrame(step)};
+  }
+  // v456: converts a screen-pixel offset (dxPx right, dyPx down) into a
+  // lat/lng delta at the given latitude/zoom, using the standard Web
+  // Mercator meters-per-pixel formula — so setCamera's target can already
+  // include the padding shift instead of applying it as a separate,
+  // un-eased panBy() after the animation finishes (see setCamera's v456
+  // comment for why that caused the periodic drive-time oscillation).
+  function _offsetLatLngByPixels(lat,lng,zoom,dxPx,dyPx){
+    const z=zoom!=null?zoom:14;
+    const metersPerPixel=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,z);
+    const dEastM=dxPx*metersPerPixel, dNorthM=-dyPx*metersPerPixel; // screen +y is down = south
+    const dLat=(dNorthM/111320);
+    const dLng=(dEastM/(111320*Math.cos(lat*Math.PI/180)||1e-9));
+    return { lat:lat+dLat, lng:lng+dLng };
   }
 
   function hasMarker(uid){ return !!_markers[uid]; }
@@ -15885,6 +16081,22 @@ const MBMMap = (function(){
     if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
     // Resume from where the marker VISUALLY is, not from the last target.
     const from=_markerRenderPos[uid]||_markerPos[uid]||to;
+    // v457 FIX (Codex review): was logging only the commanded target `to`
+    // — no visibility into where the marker ANIMATION actually started
+    // from, which is exactly what's needed to tell "GPS jumped" apart from
+    // "camera/marker jumped for its own reason". Now records `from` (real
+    // visual start) alongside `to`, and whether this specific transition
+    // was tweened smoothly or snapped instantly (dist>0.05 branch below —
+    // a snap on a small real-world move would itself be a red flag).
+    try{
+      const _me=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+      if(_me&&uid===_me&&typeof window.diagHistoryPush==='function'){
+        const distDeg=Math.abs(to[0]-from[0])+Math.abs(to[1]-from[1]);
+        window.diagHistoryPush('marker_target',{uid,
+          fromLat:from[0],fromLng:from[1],lat:to[0],lng:to[1],
+          willSnap:distDeg>0.05});
+      }
+    }catch(e){}
     _markerPos[uid]=to;                       // target (what markerLatLng reports as commanded)
     const dLat=to[0]-from[0], dLng=to[1]-from[1];
     const dist=Math.abs(dLat)+Math.abs(dLng);
@@ -16202,11 +16414,16 @@ const FamilyMapCamera=(function(){
     if(accuracyM!=null&&accuracyM>30) zoom=Math.min(zoom,15);
     return zoom;
   }
-  function apply(force){
+  function apply(force,reason){
     if(!lastTarget||!MBMMap.get()||(!follow&&!force))return;
     const run=()=>{
       timer=null; lastMoveAt=Date.now();
-      if(drivingMode) MBMMap.setCamera({center:lastTarget,zoom:lastZoom});
+      // v458 (Codex review): setCamera's diagnostic history had no way to
+      // tell WHICH caller triggered a given camera move — thread a short
+      // reason string through so a reported jump can be tied back to
+      // "regular driving follow" vs "gesture-pause resume" vs a plain
+      // request(), instead of every entry looking the same.
+      if(drivingMode) MBMMap.setCamera({center:lastTarget,zoom:lastZoom,reason:reason||'unspecified'});
       else MBMMap.setView(lastTarget,lastZoom);
     };
     const wait=force?0:Math.max(0,MIN_MOVE_MS-(Date.now()-lastMoveAt));
@@ -16218,7 +16435,7 @@ const FamilyMapCamera=(function(){
     lastTarget=[pos[0],pos[1]];
     if(opts.zoom!=null)lastZoom=opts.zoom;
     if(opts.follow===true){follow=true;pausedByGesture=false;}
-    apply(!!opts.force);
+    apply(!!opts.force,'request');
   }
   function requestDriving(pos,speedMps,accuracyM){
     if(!pos||pos[0]==null||pos[1]==null)return;
@@ -16237,17 +16454,17 @@ const FamilyMapCamera=(function(){
     // expires the camera resumes on THIS latest point, not the old drag-start
     // point.
     if(!follow||pausedByGesture)return;
-    if(!unchanged) apply(false);
+    if(!unchanged) apply(false,'driving-follow');
   }
   function fit(points){
     if(!points||!points.length)return;
     follow=false; pausedByGesture=true; drivingMode=false;
-    MBMMap.cancelCameraAnimation();
+    MBMMap.cancelCameraAnimation('fit');
     if(timer){clearTimeout(timer);timer=null;}
     MBMMap.fitAll(points);
   }
   function pauseByGesture(){
-    MBMMap.cancelCameraAnimation();
+    MBMMap.cancelCameraAnimation('gesture');
     follow=false;
     pausedByGesture=true;
     _famFollow=false;
@@ -16273,7 +16490,7 @@ const FamilyMapCamera=(function(){
         follow=true;
         pausedByGesture=false;
         _famFollow=true;
-        apply(true);
+        apply(true,'gesture-resume');
       },GESTURE_PAUSE_MS);
     }
   }
@@ -17219,7 +17436,15 @@ const FamGeo = (function(){
   // DIFFERENT cells and trigger a fresh Nominatim lookup each time, which
   // can legitimately return a different nearby road name — that's what was
   // making the address flip-flop every few seconds while stationary.
-  const GEO_SCHEMA='v2'; // bumped: locality precedence fix invalidates all pre-fix cached entries
+  const GEO_SCHEMA='v3'; // v454: bumped again — added state_district/county to
+  // the locality precedence chain, which changes the OUTPUT for any point
+  // that only had those fields (no suburb/town/village) and was previously
+  // showing the broad city name (e.g. Brighton showing as "Hobart"). Forgot
+  // to bump this the first time the precedence chain changed in v454 — the
+  // logic fix alone was correct and tested, but a stale v2-keyed cache
+  // entry from before the fix kept being served instead of a fresh lookup,
+  // so the wrong locality kept showing even after the code was updated and
+  // installed. Bumping the schema is what actually invalidates it.
   function key(lat,lng){ return GEO_SCHEMA+':'+lat.toFixed(3)+','+lng.toFixed(3); }
   function haversineM(lat1,lng1,lat2,lng2){
     const R=6371000,toR=x=>x*Math.PI/180;

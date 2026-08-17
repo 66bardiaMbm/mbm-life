@@ -79,6 +79,9 @@ interface TrackingDao {
     @Query("SELECT * FROM diagnostic_logs ORDER BY timestampMs DESC LIMIT :limit")
     suspend fun recentLogs(limit: Int = 200): List<DiagnosticLogEntity>
 
+    @Query("SELECT * FROM diagnostic_logs WHERE tag = :tag ORDER BY timestampMs DESC, id DESC LIMIT :limit")
+    suspend fun recentLogsForTag(tag: String, limit: Int = 200): List<DiagnosticLogEntity>
+
     @Query("DELETE FROM diagnostic_logs WHERE id NOT IN (SELECT id FROM diagnostic_logs ORDER BY timestampMs DESC LIMIT :keep)")
     suspend fun trimLogs(keep: Int = 1000)
 }
