@@ -1882,7 +1882,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v464';
+const APP_VERSION='v465';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -16021,7 +16021,16 @@ const MBMMap = (function(){
 
   let _camAnim=null;
   let _camAnimSeq=0;
-  const CAM_ANIM_MS=650;
+  const CAM_ANIM_MS=950; // v465 FIX: measured real Aug 19 device video (4fps frame-diff analysis)
+  // showed a precise, repeating ~250-350ms fully-static gap every ~1s cycle
+  // while driving — the exact "limping" symptom reported since Aug 17. Root
+  // cause: this was 650ms while GPS fixes arrive roughly every 1000ms (1Hz),
+  // so the camera animation finished and sat idle for ~350ms before each
+  // next fix retargeted it. Raised to 950ms so the animation is still
+  // in-flight (get retargeted, not idle) when the next fix normally arrives,
+  // closing most of the gap without an architecture change. If fixes ever
+  // arrive faster than ~950ms apart this still just retargets mid-flight
+  // (existing behavior, unchanged) — no new failure mode introduced.
   function _lerp(a,b,t){ return a+(b-a)*t; }
   function _cameraAnimPosition(){
     const center=_map&&_map.getCenter&&_map.getCenter();
