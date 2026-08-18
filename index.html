@@ -11172,6 +11172,29 @@ const FamilyBackend = (function(){
     }catch(e){}
   }
   function diagHistoryGet(){ return _diagHistory.slice(); }
+  // v462: presence state-machine transitions (leaving/away/steady) are RARE
+  // (at most a handful per day) but the shared _diagHistory ring buffer is
+  // dominated by raw_fix entries (many per minute while active) — a
+  // transition logged there would almost always be evicted long before
+  // anyone could screenshot it. Real Aug 18 field reports (identical
+  // "Since 09:28" for 8+ hours across multiple real, distant locations
+  // including an active drive) need this history to survive far longer
+  // than a raw_fix-dominated 120-slot buffer would allow. Separate, small,
+  // long-lived buffer — diagnostics only, does not affect classifyMovement's
+  // actual behavior or return value in any way.
+  const _presenceHistory=[];
+  const PRESENCE_HISTORY_MAX=40;
+  let _presenceHistorySeq=0;
+  function presenceHistoryPush(reason,data){
+    try{
+      _presenceHistorySeq++;
+      _presenceHistory.push(Object.assign({t:Date.now(),seq:_presenceHistorySeq,reason:reason},data));
+      if(_presenceHistory.length>PRESENCE_HISTORY_MAX) _presenceHistory.shift();
+    }catch(e){}
+  }
+  function presenceHistoryGet(){ return _presenceHistory.slice(); }
+  window.presenceHistoryPush=presenceHistoryPush;
+  window.presenceHistoryGet=presenceHistoryGet;
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
   // earlier this session with myUid()/FamilyLocation. Exposing on window,
@@ -11313,6 +11336,7 @@ const FamilyBackend = (function(){
     const AWAY_CONFIRM_MS   = 90*1000;   // accepted fixes must show "away" for this long before departure is confirmed
     const STEADY_CONFIRM_MS = 60*1000;   // accepted fixes must show "steady near one point" for this long before a NEW stay is confirmed
     const STEADY_RADIUS_M   = 60;        // "steady" = net movement under this, across the steady-confirmation window
+    const LEAVING_REVERT_CONFIRM_MS = 30*1000; // v464 FIX: a single accepted fix landing back near the anchor while 'leaving' must NOT instantly discard the accumulated departure evidence — that was the reproduced root cause of the Aug 18 "stuck Since" reports (see tests/v462-presence-snapback.test.mjs). Real GPS noise/multipath can produce one falsely-close reading mid-drive; requiring the SAME close-together-fix accumulation pattern already used elsewhere in this function (steady/reconfirm accumulators) before fully reverting to 'steady' means a lone blip no longer resets the 90s AWAY_CONFIRM_MS departure clock — only a genuinely sustained return does.
     const UNCERTAIN_GAP_MS  = 20*60*1000; // if the PRIOR fix was more than this long ago, presence through that gap cannot be confirmed — MUST match the display layer's copy of this same constant (famComposeStatusText's scope) exactly.
     const FIX_CADENCE_CREDIT_CAP_MS = 30*1000; // a fix-to-fix gap wider than this is too sparse to credit toward reconfirmation accumulation — real watchPosition cadence is normally much tighter than this while the app is foregrounded
 
@@ -11325,7 +11349,7 @@ const FamilyBackend = (function(){
       return Math.max(base, fixAccuracyM*1.5);
     }
 
-    function classifyMovement(prev, fix){
+    function classifyMovement(prev, fix, uid){
       const nowAt=fix.capturedAt;
       // Pure informational fact, fed into every branch's return value below
       // UNCHANGED — this does not alter stayStart, _presence, or any
@@ -11578,6 +11602,7 @@ const FamilyBackend = (function(){
         // but do NOT clear stayStart yet: a single noisy fix must not undo
         // an otherwise-confirmed stay. Real departure is confirmed only if
         // accepted fixes keep reporting "away" for AWAY_CONFIRM_MS.
+        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_started',{uid,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,stayStart:prev.stayStart});
         return {
           moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11587,13 +11612,45 @@ const FamilyBackend = (function(){
 
       if(presence.state==='leaving'){
         if(!isAwayNow){
-          // Snapped back near the anchor before departure was ever
-          // confirmed — this was GPS noise, not a real trip. Return to
-          // steady at the SAME anchor/stayStart, nothing changes.
+          // v464 FIX (was: instant revert on a single non-away fix — the
+          // proven root cause of the Aug 18 "stuck Since" bug). Now:
+          // require SUSTAINED near-anchor evidence, via the same close-
+          // together-fix accumulation pattern already used elsewhere in
+          // this function, before fully reverting to 'steady'. presence.
+          // since (the departure clock) is left untouched while merely
+          // accumulating — so a brief blip costs nothing, and if isAwayNow
+          // flips true again before this confirms, the departure clock
+          // continues exactly as if the blip never happened.
+          const backLat0=presence.backLat!=null?presence.backLat:fix.lat;
+          const backLng0=presence.backLng!=null?presence.backLng:fix.lng;
+          const dFromBack=haversine({lat:backLat0,lng:backLng0},{lat:fix.lat,lng:fix.lng});
+          const backGapMs=priorFixGapMs!=null?priorFixGapMs:Infinity;
+          const isCloseBackFollowUp=backGapMs<=FIX_CADENCE_CREDIT_CAP_MS;
+          if(dFromBack>=STEADY_RADIUS_M || !isCloseBackFollowUp || presence.backSince==null){
+            if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_snapback_candidate',{uid,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy});
+            return {
+              moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
+              lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+              _presence:Object.assign({},presence,{backLat:fix.lat,backLng:fix.lng,backSince:nowAt,backAccumMs:0})
+            };
+          }
+          const backAccum=(presence.backAccumMs||0)+backGapMs;
+          if(backAccum>=LEAVING_REVERT_CONFIRM_MS){
+            // Sustained return confirmed — genuinely back near the anchor,
+            // not noise. Return to steady at the SAME anchor/stayStart.
+            if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_reverted_snapback',{uid,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,leavingSinceWasMsAgo:Date.parse(nowAt)-Date.parse(presence.since),stayStart:prev.stayStart,confirmedOverMs:backAccum});
+            return {
+              moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
+              lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
+              _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||null}
+            };
+          }
+          // Still accumulating back-evidence — remain 'leaving', departure
+          // clock (presence.since) untouched.
           return {
-            moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
+            moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
-            _presence:{anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,state:'steady',since:prev.stayStart||null}
+            _presence:Object.assign({},presence,{backLat:backLat0,backLng:backLng0,backAccumMs:backAccum})
           };
         }
         const awayMs=Date.parse(nowAt)-Date.parse(presence.since);
@@ -11609,6 +11666,7 @@ const FamilyBackend = (function(){
             currentCoord:{lat:fix.lat,lng:fix.lng},
             distanceM:dFromAnchor, oldStayStart:prev.stayStart, newStayStart:null
           });
+          if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('departure_confirmed',{uid,oldAnchorLat:presence.anchorLat,oldAnchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,oldStayStart:prev.stayStart,leavingDurationMs:awayMs});
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.since, priorFixGapMs,
@@ -11661,6 +11719,7 @@ const FamilyBackend = (function(){
           lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
           source:fix.source||'gps'
         });
+        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('arrival_confirmed',{uid,newAnchorLat:presence.candidateLat,newAnchorLng:presence.candidateLng,newStayStart:presence.candidateSince,previousDepartedAt:presence.departedAt||prev.lastDepartureAt||null});
         return {
           moving:false, stayStart:presence.candidateSince, placeArrivedAt:presence.candidateSince,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
@@ -11718,7 +11777,7 @@ const FamilyBackend = (function(){
       // classification (accuracy included — this is what departure/return
       // detection weighs against MOVE_MIN_M).
       console.debug('[presence] fix accepted', {uid, lat, lng, accuracy:raw.accuracy, prevLat:prev&&prev.lat, prevLng:prev&&prev.lng, prevStayStart:prev&&prev.stayStart, source:raw.source});
-      const mv=classifyMovement(prev,{lat,lng,capturedAt,accuracy:raw.accuracy,source:raw.source});
+      const mv=classifyMovement(prev,{lat,lng,capturedAt,accuracy:raw.accuracy,source:raw.source},uid);
       if(prev && prev.stayStart!==mv.stayStart){
         console.debug('[presence] stayStart changed', {uid, oldStayStart:prev.stayStart, newStayStart:mv.stayStart, lastDepartureAt:mv.lastDepartureAt, presenceState:mv._presence&&mv._presence.state});
       }
@@ -11832,7 +11891,7 @@ const FamilyBackend = (function(){
       // scenarios) — routing companion fixes through it too unifies both
       // sources on identical, proven logic instead of a second, untested,
       // native-dependent path.
-      const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt});
+      const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt},uid);
       const trustedStay=mv.stayStart;
       const next=Object.assign({},prev,raw,{
         lat:nextLat,
@@ -11966,7 +12025,22 @@ const FamilyBackend = (function(){
           // The true start of an ongoing stay is always the EARLIER of the
           // two candidates — a later "arrival" inside an already-continuous
           // stay is definitionally noise, not a new arrival.
-          if(st && st.stayStart && Date.parse(st.stayStart) < Date.parse(evs[i].at)) return st.stayStart;
+          // v463 DIAG: `evs` (Firestore `events` collection listener) and
+          // `st` (separate famLocations/presence listener) are two
+          // INDEPENDENT async Firestore listeners updating the local
+          // mirror on their own schedules — a real Aug 18 field report
+          // (Since briefly showed 20:55, self-corrected to the true 19:49
+          // five minutes later, with no matching stayStart-changed log)
+          // is consistent with a listener race: this function reading a
+          // fresh event before st.stayStart's own listener has caught up.
+          // Logging every evaluation of this branch (uid, the event's own
+          // timestamp, st.stayStart AS READ RIGHT NOW, and which one this
+          // call returned) — if a future report shows st.stayStart null/
+          // stale here while it's actually already correct moments later,
+          // that's the race confirmed, not a classifyMovement bug.
+          const _usedStayStart=!!(st && st.stayStart && Date.parse(st.stayStart) < Date.parse(evs[i].at));
+          if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('hereSince_arrival_eval',{uid,eventAt:evs[i].at,stayStartAtReadTime:st&&st.stayStart||null,returned:_usedStayStart?(st&&st.stayStart):evs[i].at,usedStayStart:_usedStayStart});
+          if(_usedStayStart) return st.stayStart;
           return evs[i].at;
         }
         if(evs[i].type==='departure'){
@@ -14060,6 +14134,32 @@ function famDiagView(){
         return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'تاریخچهٔ همزمان (fix/مارکر/دوربین)':'Synchronized history (fix/marker/camera)'}</div>
         <div style="max-height:240px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
           ${rows||'<div>'+(L==='fa'?'هنوز داده‌ای نیست — کمی صبر کن تا فیکس بیاد':'no data yet — wait for a fix')+'</div>'}
+        </div>`;
+      })()}
+      ${(()=>{
+        // v462: separate long-lived presence-transition log (see
+        // presenceHistoryPush) — leaving/away/steady state changes only,
+        // not every fix, so it survives far longer than the raw_fix-heavy
+        // panel above. Built specifically to catch the Aug 18 "Since never
+        // updates" reports: if leaving_reverted_snapback rows show up
+        // during a real trip (far from home, e.g. driving), that directly
+        // confirms a single stray near-anchor fix is resetting the 90s
+        // departure-confirmation countdown to zero.
+        const ph=(typeof window.presenceHistoryGet==='function')?window.presenceHistoryGet():[];
+        const prows=ph.slice().reverse().map(e=>{
+          const time=new Date(e.t).toISOString().slice(11,23);
+          const seq=e.seq!=null?'#'+e.seq+' ':'';
+          if(e.reason==='leaving_started') return `<div>${time} ${seq}· leaving_started · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · stayStart unchanged</div>`;
+          if(e.reason==='leaving_reverted_snapback') return `<div>${time} ${seq}· <b style="color:#22c55e">leaving_reverted_snapback</b> · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · had been leaving for ${Math.round((e.leavingSinceWasMsAgo||0)/1000)}s · SUSTAINED return confirmed over ${Math.round((e.confirmedOverMs||0)/1000)}s · stayStart kept</div>`;
+          if(e.reason==='leaving_snapback_candidate') return `<div>${time} ${seq}· leaving_snapback_candidate · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · accumulating, NOT yet reverted (v464 fix)</div>`;
+          if(e.reason==='departure_confirmed') return `<div>${time} ${seq}· <b style="color:#f43f5e">departure_confirmed</b> · old stayStart cleared · was leaving ${Math.round((e.leavingDurationMs||0)/1000)}s</div>`;
+          if(e.reason==='arrival_confirmed') return `<div>${time} ${seq}· <b style="color:#22c55e">arrival_confirmed</b> · new stayStart=${esc(e.newStayStart?e.newStayStart.slice(11,19):'—')}</div>`;
+          if(e.reason==='hereSince_arrival_eval') return `<div>${time} ${seq}· hereSince_eval · event@${esc(e.eventAt?e.eventAt.slice(11,19):'—')} vs stayStart@${esc(e.stayStartAtReadTime?e.stayStartAtReadTime.slice(11,19):'—')} → returned <b style="color:${e.usedStayStart?'#22c55e':'#f59e0b'}">${esc(e.returned?e.returned.slice(11,19):'—')}</b>${e.usedStayStart?' (stayStart)':' (event — check for listener race!)'}</div>`;
+          return `<div>${time} ${seq}· ${esc(e.reason)}</div>`;
+        }).join('');
+        return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'تاریخچهٔ تغییر وضعیت حضور (leaving/away/steady)':'Presence state transitions (leaving/away/steady)'}</div>
+        <div style="max-height:200px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+          ${prows||'<div>'+(L==='fa'?'هنوز تغییری ثبت نشده':'no transitions recorded yet')+'</div>'}
         </div>`;
       })()}
       ${(()=>{
