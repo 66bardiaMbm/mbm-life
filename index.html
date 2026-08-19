@@ -1883,7 +1883,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v466';
+const APP_VERSION='v467';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14107,6 +14107,8 @@ function famDiagView(){
         <div>fix timestamp: <b>${li&&li.at?esc(li.at.slice(11,19)):'—'}</b></div>
       </div>
       <button class="btn" data-fam="loc-freshfix" style="width:100%;margin-top:10px;background:#6e56f8;color:#fff">${L==='fa'?'گرفتن fix تازهٔ GPS (تست)':'Get fresh GPS fix (test)'}</button>
+      <button class="btn" data-fam="loc-toggle-heading-rotation" style="width:100%;margin-top:10px;background:#22c55e;color:#fff">${L==='fa'?'روشن/خاموش چرخش نقشه بر اساس جهت (v467، آزمایشی)':'Toggle map heading rotation (v467, experimental)'}</button>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'فقط موقع رانندگی اثر دارد — این یه فیچر آزمایشیه که هنوز رو گوشی واقعی موقع رانندگی تست نشده.':'Only takes effect while driving — this is an experimental feature not yet tested on-device while actually driving.'}</div>
       <div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'رویدادها':'Event log'}</div>
       <div style="max-height:180px;overflow:auto;font-family:monospace;font-size:11px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
         ${log.length?log.slice().reverse().map(e=>`<div>${esc(e.t.slice(11,19))} · ${esc(e.kind)} · ${esc(typeof e.detail==='object'?JSON.stringify(e.detail):String(e.detail==null?'':e.detail))}</div>`).join(''):'<div>'+(L==='fa'?'هنوز رویدادی نیست':'no events yet')+'</div>'}
@@ -15129,6 +15131,7 @@ function drvLiveApply(){
   const last=samples.length?samples[samples.length-1]:null;
   if(samples.length>=2) MBMMap.drawRoute(samples);
   if(last) FamilyMapCamera.requestDriving([last.lat,last.lng],last.speedMps,last.accuracyM,last.headingDeg);
+  if(last&&last.headingDeg!=null) MBMMap.setMapHeading(last.headingDeg);
 }
 let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
 
@@ -15909,6 +15912,12 @@ const MBMMap = (function(){
         center: sc, zoom: 15, disableDefaultUI:false,
         zoomControl:false, streetViewControl:false, mapTypeControl:false, fullscreenControl:false, rotateControl:false,
         clickableIcons:false, gestureHandling:'greedy',
+        // v467: Map ID enables vector rendering (required for setHeading/
+        // setTilt — raster maps cannot rotate at all, confirmed via
+        // research). LIFE_STYLE is empty (see below) so there is no
+        // custom-styling loss from switching to vector — verified before
+        // making this change, not assumed.
+        mapId:'9b7b8a3f4bc483801e0cd717',
         styles: LIFE_STYLE // Life360-like restyle, applied natively via Google Maps styling
       });
       let _tilesLoadedFired=false;
@@ -16478,10 +16487,28 @@ const MBMMap = (function(){
     //    teardown now resets the padding to neutral.
     _pad={top:0,right:0,bottom:0,left:0};
   }
+  // ── v467: heading-up map rotation. Vector rendering (mapId above) makes
+  // `_map.setHeading()` available for the first time — the SDK animates
+  // its own rotation smoothly, so this is intentionally a thin wrapper,
+  // not integrated into the existing eased pan/zoom animation (which
+  // already carries the delicate v456 padding fix — kept untouched).
+  // Opt-in, default OFF: this needs a real synchronized-video on-device
+  // test before being turned on by default, per the same caution already
+  // applied to every other driving-camera change in this project.
+  let _headingRotationEnabled=false;
+  function setHeadingRotationEnabled(on){
+    _headingRotationEnabled=!!on;
+    if(!_headingRotationEnabled && _map){ try{ _map.setHeading(0); }catch(e){} }
+  }
+  function setMapHeading(deg){
+    if(!_map||!_headingRotationEnabled||deg==null||isNaN(deg)) return;
+    try{ _map.setHeading(deg); }catch(e){}
+  }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            setCamera, cancelCameraAnimation,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
-           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding };
+           setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
+           setHeadingRotationEnabled, setMapHeading };
 })();
 
 /* The only application-level camera authority. Marker code never recentres
@@ -19328,6 +19355,18 @@ async function famAction(act,arg,ev){
       window.open(navUrl,'_blank'); return; }
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
+    case 'loc-toggle-heading-rotation':{
+      // v467: manual test toggle, diagnostics-only. Real enablement for
+      // all users should wait for a synchronized-video on-device test
+      // confirming the rotation looks right while actually driving.
+      try{
+        const cur=!!(MBMMap._headingRotationEnabledForTest);
+        MBMMap.setHeadingRotationEnabled(!cur);
+        MBMMap._headingRotationEnabledForTest=!cur;
+        toast(!cur?(L==='fa'?'چرخش نقشه روشن شد — رانندگی کنید تا اثرش رو ببینید':'Map rotation ON — drive to see the effect'):(L==='fa'?'چرخش نقشه خاموش شد':'Map rotation OFF'));
+      }catch(e){}
+      return;
+    }
     case 'live-sos': famView='sos'; render(); window.scrollTo(0,0); return;
     // Bottom navigation — Location and Driving are live; others are honest later-phase screens
     case 'nav-location':{
