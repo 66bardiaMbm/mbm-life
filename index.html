@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- v465-b build-trigger marker -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1882,7 +1883,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v465';
+const APP_VERSION='v466';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -15127,7 +15128,7 @@ function drvLiveApply(){
   const samples=live||[];
   const last=samples.length?samples[samples.length-1]:null;
   if(samples.length>=2) MBMMap.drawRoute(samples);
-  if(last) FamilyMapCamera.requestDriving([last.lat,last.lng],last.speedMps,last.accuracyM);
+  if(last) FamilyMapCamera.requestDriving([last.lat,last.lng],last.speedMps,last.accuracyM,last.headingDeg);
 }
 let _drvLiveWasHealthy=null; // tracks the not-driving health status across ticks, for drvLiveApply's fallback check
 
@@ -16547,8 +16548,13 @@ const FamilyMapCamera=(function(){
     if(opts.follow===true){follow=true;pausedByGesture=false;}
     apply(!!opts.force,'request');
   }
-  function requestDriving(pos,speedMps,accuracyM){
+  function requestDriving(pos,speedMps,accuracyM,headingDeg){
     if(!pos||pos[0]==null||pos[1]==null)return;
+    // v466: capture the real fix as the dead-reckoning baseline every time
+    // one arrives — this is what keeps extrapolation error bounded, since
+    // it's always reset to a fresh real point rather than compounding.
+    _drFix={lat:pos[0],lng:pos[1],speedMps,headingDeg:(headingDeg!=null&&!isNaN(headingDeg))?headingDeg:null,atMs:Date.now()};
+    _drStart();
     // v407: pass the CURRENT zoom so drivingZoomFor can apply hysteresis
     // instead of recomputing from a single hard threshold on every fix.
     const nextZoom=drivingZoomFor(speedMps,accuracyM,lastZoom);
@@ -16626,6 +16632,61 @@ const FamilyMapCamera=(function(){
   function setPadding(pad){
     MBMMap.setPadding(pad);
   }
+  // ── v466: Dead reckoning — fills the visual gap between real GPS fixes
+  // while driving by extrapolating position along the last known heading
+  // at the last known speed, using the EXACT SAME spherical destination-
+  // point formula already used for the heading cone (see setHeadingCone's
+  // `dest()` above) — extracted here as a shared, independently-tested
+  // function rather than duplicated. This is the real technique researched
+  // and confirmed for how turn-by-turn navigation apps (Google Maps
+  // included) achieve continuous smooth motion instead of visibly holding
+  // still between GPS fixes: client-side extrapolation from speed+heading,
+  // corrected by each new real fix as it arrives (a new `requestDriving`
+  // call always replaces `_drFix`, so extrapolation error never compounds
+  // past one real fix interval). Deliberately bounded so it can never run
+  // away from reality if fixes stop arriving or heading/speed are missing.
+  const DEAD_RECKON_MAX_MS = 3000;       // stop extrapolating (hold last
+  // computed point) once this long has passed since the last REAL fix —
+  // if GPS is lost for longer than this, guessing further would drift
+  // further from the truth than just holding still.
+  const DEAD_RECKON_MIN_SPEED_MPS = 1;   // below walking pace, heading is
+  // too noisy to extrapolate meaningfully — hold at the real fix instead
+  // of drifting on GPS jitter.
+  const DEAD_RECKON_UPDATE_MS = 200;     // how often the extrapolation
+  // recomputes a new target — MIN_MOVE_MS (450ms) already throttles how
+  // often the camera actually moves, so this just needs to be frequent
+  // enough that the throttle, not this loop, is the limiting factor.
+  function _destPoint(lat0,lng0,brg,d){
+    const R=6371000, toR=x=>x*Math.PI/180, toD=x=>x*180/Math.PI;
+    const br=toR(brg), la1=toR(lat0), lo1=toR(lng0), dr=d/R;
+    const la2=Math.asin(Math.sin(la1)*Math.cos(dr)+Math.cos(la1)*Math.sin(dr)*Math.cos(br));
+    const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1),Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
+    return {lat:toD(la2),lng:toD(lo2)};
+  }
+  function deadReckonPosition(fix,nowMs){
+    // fix: {lat,lng,headingDeg,speedMps,atMs}. Returns {lat,lng} — the
+    // extrapolated position, or the original fix position unchanged if
+    // extrapolation isn't applicable (missing heading, too slow, or the
+    // fix is too old to trust extrapolating from).
+    if(!fix||fix.lat==null||fix.lng==null) return null;
+    if(fix.headingDeg==null||isNaN(fix.headingDeg)) return {lat:fix.lat,lng:fix.lng};
+    if(fix.speedMps==null||fix.speedMps<DEAD_RECKON_MIN_SPEED_MPS) return {lat:fix.lat,lng:fix.lng};
+    const elapsedMs=Math.max(0,nowMs-fix.atMs);
+    const cappedMs=Math.min(elapsedMs,DEAD_RECKON_MAX_MS);
+    const distanceM=fix.speedMps*(cappedMs/1000);
+    if(distanceM<=0) return {lat:fix.lat,lng:fix.lng};
+    return _destPoint(fix.lat,fix.lng,fix.headingDeg,distanceM);
+  }
+  let _drFix=null, _drTimer=null;
+  function _drTick(){
+    _drTimer=null;
+    if(!drivingMode||!follow||pausedByGesture||!_drFix) return;
+    const pos=deadReckonPosition(_drFix,Date.now());
+    if(pos){ lastTarget=[pos.lat,pos.lng]; apply(false,'dead-reckoning'); }
+    _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS);
+  }
+  function _drStart(){ if(_drTimer==null) _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS); }
+  function _drStop(){ if(_drTimer!=null){ clearTimeout(_drTimer); _drTimer=null; } _drFix=null; }
   function drivingState(session,pos,speedMps,accuracyM){
     const id=session&&session.id||null;
     if(id&&id!==activeDriveId){
@@ -16643,16 +16704,18 @@ const FamilyMapCamera=(function(){
     }else if(!id){
       activeDriveId=null;
       drivingMode=false;
+      _drStop();
     }
   }
   function reset(){
     if(timer)clearTimeout(timer);
     if(gestureResumeTimer)clearTimeout(gestureResumeTimer);
     timer=null;gestureResumeTimer=null;lastTarget=null;lastZoom=null;follow=false;pausedByGesture=false;activeDriveId=null;drivingMode=false;
+    _drStop();
     MBMMap.cancelCameraAnimation();
   }
   function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),lastZoom,activeDriveId,drivingMode};}
-  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor};
+  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition};
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
