@@ -1883,7 +1883,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v473';
+const APP_VERSION='v475';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -16830,7 +16830,7 @@ const FAM_ICON = {
   building:'<svg viewBox="0 0 24 24"><rect x="5" y="3" width="9" height="18" rx="1"></rect><path d="M14 8h5a1 1 0 011 1v11a1 1 0 01-1 1h-5"></path><line x1="8" y1="7" x2="8" y2="7"></line><line x1="11" y1="7" x2="11" y2="7"></line><line x1="8" y1="11" x2="8" y2="11"></line><line x1="11" y1="11" x2="11" y2="11"></line></svg>',
   chevdown:'<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
   mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="4 7 12 13 20 7"></polyline></svg>',
-  compass:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"></circle><polygon points="12,4 15,12 12,12" fill="#EA4335"></polygon><polygon points="12,20 9,12 12,12" fill="#BDC1C6"></polygon></svg>'
+  compass:'<svg viewBox="0 0 24 24"><defs><linearGradient id="mbmCompassGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8ab4f8"></stop><stop offset="1" stop-color="#1967d2"></stop></linearGradient></defs><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" fill="url(#mbmCompassGrad)"></path></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
@@ -18318,6 +18318,20 @@ function famLivePaintMarkers(members, sel){
     //    member is genuinely moving AND the device reported a real heading. ──
     if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
       MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], sel.state.heading, sel.state.speed, sel.color);
+      // v474 (REAL ROOT CAUSE, confirmed by code reading + on-device diag):
+      // MBMMap.setMapHeading() has existed since v467, but the ONLY call
+      // site was drvLiveApply() — the Driving-tab's OWN separate live map
+      // (drv-live-map). THIS screen (fam-map, the Family/Location tab,
+      // where the compass button lives and where Bahman actually tested
+      // rotation against a real Google Maps side-by-side comparison) never
+      // called it at all. Toggling the button here set the persisted flag
+      // correctly, but nothing on this screen's own repaint path ever fed
+      // it a heading — so it could never visibly rotate, no matter how
+      // many times it was tried, regardless of Map ID config. v473's MAP
+      // ENGINE DIAG already confirmed renderingType is VECTOR (the SDK
+      // capability is fine) — this was purely a missing function call on
+      // this screen, not a Cloud Console/config problem after all.
+      MBMMap.setMapHeading(sel.state.heading);
     } else { MBMMap.setHeadingCone(null,null,null); }
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
