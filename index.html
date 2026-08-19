@@ -1883,7 +1883,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v471';
+const APP_VERSION='v473';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14107,7 +14107,6 @@ function famDiagView(){
         <div>fix timestamp: <b>${li&&li.at?esc(li.at.slice(11,19)):'—'}</b></div>
       </div>
       <button class="btn" data-fam="loc-freshfix" style="width:100%;margin-top:10px;background:#6e56f8;color:#fff">${L==='fa'?'گرفتن fix تازهٔ GPS (تست)':'Get fresh GPS fix (test)'}</button>
-      <button class="btn" data-fam="loc-toggle-heading-rotation" style="width:100%;margin-top:10px;background:#22c55e;color:#fff">${L==='fa'?'روشن/خاموش چرخش نقشه بر اساس جهت (v467، آزمایشی)':'Toggle map heading rotation (v467, experimental)'}</button>
       <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'فقط موقع رانندگی اثر دارد — این یه فیچر آزمایشیه که هنوز رو گوشی واقعی موقع رانندگی تست نشده.':'Only takes effect while driving — this is an experimental feature not yet tested on-device while actually driving.'}</div>
       <button class="btn" data-fam="loc-toggle-dead-reckoning" style="width:100%;margin-top:10px;background:#f59e0b;color:#fff">${L==='fa'?'روشن/خاموش پیش‌بینی مسیر (v466، الان پیش‌فرض خاموش — باگ شناخته‌شده)':'Toggle dead reckoning (v466, now OFF by default — known bug)'}</button>
       <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'باگ شناخته‌شده: دوربین پیش می‌ره ولی مارکر عقب می‌مونه، ممکنه با فاصله دیده بشن. تا وقتی درست نشده، خاموش نگه دارید.':'Known bug: camera moves ahead but the marker does not, so they can visibly diverge. Keep OFF until fixed.'}</div>
@@ -14204,6 +14203,21 @@ function famDiagView(){
           ${row('result line2',g.resultLine2)}
           ${row('raw address JSON',g.rawAddress?JSON.stringify(g.rawAddress):null)}
           ${row('administrative address JSON',g.administrativeAddress?JSON.stringify(g.administrativeAddress):null)}
+        </div>`;
+      })()}
+      ${(()=>{
+        // v473: real ground truth for the map-rotation investigation —
+        // shows whether the map is actually VECTOR (rotation possible) or
+        // RASTER (rotation can never work, regardless of code — a Cloud
+        // Console Map ID setting, not something this file controls).
+        const rt=(typeof MBMMap!=='undefined'&&MBMMap.renderingType)?MBMMap.renderingType():null;
+        const rotOn=(typeof MBMMap!=='undefined'&&MBMMap.isHeadingRotationEnabled)?MBMMap.isHeadingRotationEnabled():false;
+        const rtColor=rt==='RASTER'?'#f43f5e':(rt==='VECTOR'?'#22c55e':'var(--ink3)');
+        return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">MAP ENGINE DIAG</div>
+        <div style="font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+          <div><b>renderingType:</b> <span style="color:${rtColor};font-weight:700">${esc(rt==null?'not yet known (map not mounted this session)':String(rt))}</span></div>
+          <div><b>rotation toggle:</b> ${rotOn?'ON':'OFF'}</div>
+          ${rt==='RASTER'?`<div style="color:#f43f5e;margin-top:4px">Rotation CANNOT work while this is RASTER — fix in Cloud Console (Map Management → Map ID 9b7b8a3f4bc483801e0cd717 → Map type → Vector), not in code.</div>`:''}
         </div>`;
       })()}
     </div>`;
@@ -15789,6 +15803,7 @@ const MBMMap = (function(){
   // marker actually is on screen right now (updated every animation frame).
   let _markerRenderPos={};
   let _accCircle=null, _coneOverlay=null, _routeLine=null, _arrivedInfo=null, _arrivedAnchorMarker=null;
+  let _renderingType=null; // v473: ground truth from the SDK — 'VECTOR'/'RASTER'/'UNINITIALIZED'/null
   let _pendingInit=null; // {elId, center} queued while the SDK is still loading
 
   function apiKey(){
@@ -15923,6 +15938,21 @@ const MBMMap = (function(){
         styles: LIFE_STYLE // Life360-like restyle, applied natively via Google Maps styling
       });
       let _tilesLoadedFired=false;
+      // v473: the whole heading-rotation feature (v467-472) rested on the
+      // ASSUMPTION that mapId 9b7b8a3f4bc483801e0cd717 is configured as a
+      // VECTOR map in Cloud Console — that was never actually verified
+      // on-device, only inferred from "we set a Map ID". A Map ID's render
+      // type (Raster vs Vector) is a Cloud Console setting, independent of
+      // passing mapId in code — if it was left on the default Raster type,
+      // setHeading() silently does nothing at all (no error), which matches
+      // exactly what Bahman reported: no rotation, map just doesn't orient.
+      // getRenderingType() is the SDK's own ground truth for this — log it
+      // for real instead of continuing to guess.
+      g.event.addListenerOnce(_map,'renderingtype_changed', ()=>{
+        try{ _renderingType=_map.getRenderingType(); }catch(e){ _renderingType='(getRenderingType threw)'; }
+        diagTiles('renderingType='+_renderingType+(_renderingType==='RASTER'?' — ROOT CAUSE: this Map ID is serving RASTER tiles, so setHeading()/rotation can NEVER work no matter what code we write. Fix is in Cloud Console (Map Management → this Map ID → Map type → Vector), not in this file.':''));
+      });
+      try{ _renderingType=_map.getRenderingType(); }catch(e){} // some SDK timings resolve this before the listener attaches
       g.event.addListenerOnce(_map,'tilesloaded', ()=>{ _tilesLoadedFired=true; diagTiles('tilesloaded fired'); });
       g.event.addListenerOnce(_map,'idle', ()=>{
         _loaded=true;
@@ -16515,11 +16545,12 @@ const MBMMap = (function(){
     if(!_map||!_headingRotationEnabled||deg==null||isNaN(deg)) return;
     try{ _map.setHeading(deg); }catch(e){}
   }
+  function renderingType(){ return _renderingType; } // v473
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            setCamera, cancelCameraAnimation,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
-           setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading };
+           setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading, renderingType };
 })();
 
 /* The only application-level camera authority. Marker code never recentres
@@ -17440,6 +17471,27 @@ function famSinceDiagLineHtml(m,txt,sinceUsed){
     ${geoBlock}
   </div>`;
 }
+// v473 (real bug found and fixed): while actively driving, the list row's
+// "region" text requires FamGeo.get(s.lat,s.lng) to hit for the member's
+// EXACT current position. At driving speed a GPS fix easily lands 40-100m+
+// from the previous one — well outside FamGeo's ~25m stick radius — so a
+// fresh Nominatim lookup is queued (see famBareRoadName) but resolves for a
+// position the member has already driven past, and the CURRENT position
+// keeps missing the cache. Confirmed on-device (Bahman): the row falls back
+// to a bare "Updated {time}" with no place name for the whole drive, not
+// occasionally. Fix: remember the last region that DID resolve for each
+// member and keep showing it — it's a suburb-level name, not a house
+// number, so a few hundred metres of staleness during one drive is not
+// misleading — until either a fresher one resolves or it's old enough that
+// it could be from a different day entirely.
+const _famLastKnownRegion={}; // uid -> {text, at}
+const LAST_KNOWN_REGION_MAX_AGE_MS=30*60*1000; // 30 min: generous for one drive, never leaks into a different day
+function famRegionWithFallback(uid, freshRegion){
+  if(freshRegion){ _famLastKnownRegion[uid]={text:freshRegion, at:Date.now()}; return freshRegion; }
+  const last=_famLastKnownRegion[uid];
+  if(last && (Date.now()-last.at)<LAST_KNOWN_REGION_MAX_AGE_MS) return last.text;
+  return '';
+}
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -17485,7 +17537,7 @@ function famComposeStatusText(m){
       }
     }
     const cachedGeo=FamGeo.get(s.lat,s.lng);
-    const region=cachedGeo?cachedGeo.line2:'';
+    const region=famRegionWithFallback(m.uid, cachedGeo?cachedGeo.line2:'');
     // Status text must remain plain text. The car icon is rendered by the
     // marker's dedicated safe SVG badge, never embedded into a text string.
     return { l1, l2:'', region, since:null, activityType:'driving', speedKph };
@@ -19384,24 +19436,20 @@ async function famAction(act,arg,ev){
     case 'live-compass-toggle':{
       // v469: real on-map button, matching Google Maps — no more hunting
       // through Diagnostics for this. Same persisted setting either way.
+      // v473: turning this ON used to always claim success even if the map
+      // is actually rendering RASTER (Map ID misconfigured in Cloud
+      // Console), in which case rotation silently never happens — an honest
+      // "on" message the map then never honours. Check the SDK's real
+      // renderingType() and say so plainly if that's the case.
       try{
         const cur=MBMMap.isHeadingRotationEnabled();
         MBMMap.setHeadingRotationEnabled(!cur);
-        toast(!cur?(L==='fa'?'چرخش نقشه روشن شد':'Map rotation ON'):(L==='fa'?'چرخش نقشه خاموش شد — رو به شمال':'Map rotation OFF — facing north'));
+        if(!cur && MBMMap.renderingType()==='RASTER'){
+          toast(L==='fa'?'روشن شد، ولی این نقشه Raster است و اصلاً نمی‌تواند بچرخد — باید در Cloud Console نوع Map ID را به Vector تغییر داد':'Turned on, but this map is RASTER and cannot rotate at all — the Map ID must be changed to Vector in Cloud Console');
+        } else {
+          toast(!cur?(L==='fa'?'چرخش نقشه روشن شد':'Map rotation ON'):(L==='fa'?'چرخش نقشه خاموش شد — رو به شمال':'Map rotation OFF — facing north'));
+        }
         render();
-      }catch(e){}
-      return;
-    }
-    case 'loc-toggle-heading-rotation':{
-      // v467: manual test toggle, diagnostics-only. Real enablement for
-      // all users should wait for a synchronized-video on-device test
-      // confirming the rotation looks right while actually driving.
-      // v469: now reads the REAL persisted state instead of a session-only
-      // tracker, so the toggle behaves correctly across app reloads.
-      try{
-        const cur=MBMMap.isHeadingRotationEnabled();
-        MBMMap.setHeadingRotationEnabled(!cur);
-        toast(!cur?(L==='fa'?'چرخش نقشه روشن شد (تا خودتون خاموشش نکنید، همیشه روشن می‌مونه) — بعداً رانندگی کنید تا اثرش رو ببینید':'Map rotation ON (stays on until you turn it off) — drive later to see the effect'):(L==='fa'?'چرخش نقشه خاموش شد':'Map rotation OFF'));
       }catch(e){}
       return;
     }
