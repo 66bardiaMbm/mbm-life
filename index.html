@@ -1883,7 +1883,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v467';
+const APP_VERSION='v471';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14109,6 +14109,8 @@ function famDiagView(){
       <button class="btn" data-fam="loc-freshfix" style="width:100%;margin-top:10px;background:#6e56f8;color:#fff">${L==='fa'?'گرفتن fix تازهٔ GPS (تست)':'Get fresh GPS fix (test)'}</button>
       <button class="btn" data-fam="loc-toggle-heading-rotation" style="width:100%;margin-top:10px;background:#22c55e;color:#fff">${L==='fa'?'روشن/خاموش چرخش نقشه بر اساس جهت (v467، آزمایشی)':'Toggle map heading rotation (v467, experimental)'}</button>
       <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'فقط موقع رانندگی اثر دارد — این یه فیچر آزمایشیه که هنوز رو گوشی واقعی موقع رانندگی تست نشده.':'Only takes effect while driving — this is an experimental feature not yet tested on-device while actually driving.'}</div>
+      <button class="btn" data-fam="loc-toggle-dead-reckoning" style="width:100%;margin-top:10px;background:#f59e0b;color:#fff">${L==='fa'?'روشن/خاموش پیش‌بینی مسیر (v466، الان پیش‌فرض خاموش — باگ شناخته‌شده)':'Toggle dead reckoning (v466, now OFF by default — known bug)'}</button>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'باگ شناخته‌شده: دوربین پیش می‌ره ولی مارکر عقب می‌مونه، ممکنه با فاصله دیده بشن. تا وقتی درست نشده، خاموش نگه دارید.':'Known bug: camera moves ahead but the marker does not, so they can visibly diverge. Keep OFF until fixed.'}</div>
       <div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'رویدادها':'Event log'}</div>
       <div style="max-height:180px;overflow:auto;font-family:monospace;font-size:11px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
         ${log.length?log.slice().reverse().map(e=>`<div>${esc(e.t.slice(11,19))} · ${esc(e.kind)} · ${esc(typeof e.detail==='object'?JSON.stringify(e.detail):String(e.detail==null?'':e.detail))}</div>`).join(''):'<div>'+(L==='fa'?'هنوز رویدادی نیست':'no events yet')+'</div>'}
@@ -16495,11 +16497,20 @@ const MBMMap = (function(){
   // Opt-in, default OFF: this needs a real synchronized-video on-device
   // test before being turned on by default, per the same caution already
   // applied to every other driving-camera change in this project.
-  let _headingRotationEnabled=false;
+  // v469 FIX: was a plain in-memory flag, reset to false on every app
+  // reload — meaning the toggle could never actually be "set once and
+  // forget," which Bahman correctly pointed out makes it unsafe/impractical
+  // to use right before driving. Persisted via localStorage now, so
+  // toggling it once (any time, no rush, not tied to a drive) sticks
+  // across app restarts until explicitly toggled off again.
+  const _HEADING_ROT_KEY='mbmlife_heading_rotation_enabled';
+  let _headingRotationEnabled=(()=>{ try{ return localStorage.getItem(_HEADING_ROT_KEY)==='1'; }catch(e){ return false; } })();
   function setHeadingRotationEnabled(on){
     _headingRotationEnabled=!!on;
+    try{ localStorage.setItem(_HEADING_ROT_KEY, _headingRotationEnabled?'1':'0'); }catch(e){}
     if(!_headingRotationEnabled && _map){ try{ _map.setHeading(0); }catch(e){} }
   }
+  function isHeadingRotationEnabled(){ return _headingRotationEnabled; }
   function setMapHeading(deg){
     if(!_map||!_headingRotationEnabled||deg==null||isNaN(deg)) return;
     try{ _map.setHeading(deg); }catch(e){}
@@ -16508,7 +16519,7 @@ const MBMMap = (function(){
            setCamera, cancelCameraAnimation,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
-           setHeadingRotationEnabled, setMapHeading };
+           setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading };
 })();
 
 /* The only application-level camera authority. Marker code never recentres
@@ -16704,15 +16715,28 @@ const FamilyMapCamera=(function(){
     if(distanceM<=0) return {lat:fix.lat,lng:fix.lng};
     return _destPoint(fix.lat,fix.lng,fix.headingDeg,distanceM);
   }
+  // v468 URGENT FIX: dead reckoning (v466) was unconditionally moving the
+  // CAMERA via extrapolation while the MARKER (the person's actual pin)
+  // only ever updates on real fixes — so between real fixes the two
+  // visibly diverge (camera pans ahead onto a nearby/parallel street while
+  // the marker stays put), exactly as Bahman reported on-device: the pin
+  // sitting noticeably apart from where the map view had panned to. This
+  // is a real defect in what shipped, not a false alarm — disabling by
+  // default (same opt-in caution as the rotation toggle) until marker and
+  // camera can be kept in sync (or dead reckoning is limited to camera-only
+  // scenarios where that's provably fine). Toggle-able from Diagnostics
+  // for anyone who wants to help re-test once a real fix is designed.
+  let _deadReckoningEnabled=false;
+  function setDeadReckoningEnabled(on){ _deadReckoningEnabled=!!on; if(!on) _drStop(); }
   let _drFix=null, _drTimer=null;
   function _drTick(){
     _drTimer=null;
-    if(!drivingMode||!follow||pausedByGesture||!_drFix) return;
+    if(!_deadReckoningEnabled||!drivingMode||!follow||pausedByGesture||!_drFix) return;
     const pos=deadReckonPosition(_drFix,Date.now());
     if(pos){ lastTarget=[pos.lat,pos.lng]; apply(false,'dead-reckoning'); }
     _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS);
   }
-  function _drStart(){ if(_drTimer==null) _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS); }
+  function _drStart(){ if(_deadReckoningEnabled && _drTimer==null) _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS); }
   function _drStop(){ if(_drTimer!=null){ clearTimeout(_drTimer); _drTimer=null; } _drFix=null; }
   function drivingState(session,pos,speedMps,accuracyM){
     const id=session&&session.id||null;
@@ -16742,7 +16766,7 @@ const FamilyMapCamera=(function(){
     MBMMap.cancelCameraAnimation();
   }
   function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),lastZoom,activeDriveId,drivingMode};}
-  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition};
+  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition,setDeadReckoningEnabled};
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -16774,7 +16798,8 @@ const FAM_ICON = {
   key:'<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4"></circle><path d="M11 11l7 7"></path><path d="M16 16l2-2"></path><path d="M18 18l2-2"></path></svg>',
   building:'<svg viewBox="0 0 24 24"><rect x="5" y="3" width="9" height="18" rx="1"></rect><path d="M14 8h5a1 1 0 011 1v11a1 1 0 01-1 1h-5"></path><line x1="8" y1="7" x2="8" y2="7"></line><line x1="11" y1="7" x2="11" y2="7"></line><line x1="8" y1="11" x2="8" y2="11"></line><line x1="11" y1="11" x2="11" y2="11"></line></svg>',
   chevdown:'<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
-  mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="4 7 12 13 20 7"></polyline></svg>'
+  mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="4 7 12 13 20 7"></polyline></svg>',
+  compass:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"></circle><polygon points="12,4 15,12 12,12" fill="#EA4335"></polygon><polygon points="12,20 9,12 12,12" fill="#BDC1C6"></polygon></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
@@ -17069,6 +17094,7 @@ function famLiveView(){
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
     <button class="fam-mapbtn" data-fam="live-maptype" title="${L==='fa'?'نوع نقشه':'Map type'}">${famIcon('layers')}</button>
     <button class="fam-mapbtn fam-road-report-btn" data-fam="road-add-open" ${ownDriving?'disabled':''} title="${L==='fa'?'گزارش جاده':'Road report'}">⚠</button>
+    <button class="fam-mapbtn${(typeof MBMMap!=='undefined'&&MBMMap.isHeadingRotationEnabled&&MBMMap.isHeadingRotationEnabled())?' on':''}" data-fam="live-compass-toggle" title="${L==='fa'?'چرخش نقشه بر اساس جهت (مثل گوگل‌مپ)':'Rotate map with heading (like Google Maps)'}">${famIcon('compass')}</button>
   </div>`;
   h+=`<div id="fam-road-alert-slot">${famRoadReportAlertHtml()}</div>`;
   // honest sharing banner if I'm not sharing yet
@@ -19355,15 +19381,40 @@ async function famAction(act,arg,ev){
       window.open(navUrl,'_blank'); return; }
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
+    case 'live-compass-toggle':{
+      // v469: real on-map button, matching Google Maps — no more hunting
+      // through Diagnostics for this. Same persisted setting either way.
+      try{
+        const cur=MBMMap.isHeadingRotationEnabled();
+        MBMMap.setHeadingRotationEnabled(!cur);
+        toast(!cur?(L==='fa'?'چرخش نقشه روشن شد':'Map rotation ON'):(L==='fa'?'چرخش نقشه خاموش شد — رو به شمال':'Map rotation OFF — facing north'));
+        render();
+      }catch(e){}
+      return;
+    }
     case 'loc-toggle-heading-rotation':{
       // v467: manual test toggle, diagnostics-only. Real enablement for
       // all users should wait for a synchronized-video on-device test
       // confirming the rotation looks right while actually driving.
+      // v469: now reads the REAL persisted state instead of a session-only
+      // tracker, so the toggle behaves correctly across app reloads.
       try{
-        const cur=!!(MBMMap._headingRotationEnabledForTest);
+        const cur=MBMMap.isHeadingRotationEnabled();
         MBMMap.setHeadingRotationEnabled(!cur);
-        MBMMap._headingRotationEnabledForTest=!cur;
-        toast(!cur?(L==='fa'?'چرخش نقشه روشن شد — رانندگی کنید تا اثرش رو ببینید':'Map rotation ON — drive to see the effect'):(L==='fa'?'چرخش نقشه خاموش شد':'Map rotation OFF'));
+        toast(!cur?(L==='fa'?'چرخش نقشه روشن شد (تا خودتون خاموشش نکنید، همیشه روشن می‌مونه) — بعداً رانندگی کنید تا اثرش رو ببینید':'Map rotation ON (stays on until you turn it off) — drive later to see the effect'):(L==='fa'?'چرخش نقشه خاموش شد':'Map rotation OFF'));
+      }catch(e){}
+      return;
+    }
+    case 'loc-toggle-dead-reckoning':{
+      // v468: manual test toggle for the dead-reckoning smoothing feature
+      // — default OFF now after a real on-device report of marker/camera
+      // divergence. Only re-enable to help test a future fix, not for
+      // everyday use.
+      try{
+        const cur=!!(FamilyMapCamera._deadReckoningEnabledForTest);
+        FamilyMapCamera.setDeadReckoningEnabled(!cur);
+        FamilyMapCamera._deadReckoningEnabledForTest=!cur;
+        toast(!cur?(L==='fa'?'پیش‌بینی مسیر روشن شد (باگ شناخته‌شده فعاله)':'Dead reckoning ON (known bug active)'):(L==='fa'?'پیش‌بینی مسیر خاموش شد':'Dead reckoning OFF'));
       }catch(e){}
       return;
     }
