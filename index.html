@@ -1653,6 +1653,14 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-mapspin{width:26px;height:26px;border-radius:50%;border:2.5px solid var(--b2);border-top-color:var(--brand,#6e56f8);animation:famspin .8s linear infinite}
 /* ── clean inline-svg icon sizing for map buttons + action bar (replaces emoji) ── */
 .fam-mapbtn svg,.fam-actionbar .btn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+/* v480: the needle compass icon needs real fill colors (red/grey), not
+   the blanket stroke-outline treatment above — !important guarantees it
+   wins regardless of rule order, since this is a genuine exception, not
+   a CSS bug to work around quietly. */
+.fam-needle-svg{stroke:none !important;fill:none !important}
+.fam-needle-n{fill:url(#famNeedleN) !important}
+.fam-needle-s{fill:url(#famNeedleS) !important}
+.fam-needle-dot{fill:#fff !important;stroke:#3c4043 !important;stroke-width:.6 !important}
 .fam-actionbar .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .fam-actionbar .btn svg{width:16px;height:16px}
 .fam-actionbar .btn[disabled]{opacity:.45}
@@ -1883,7 +1891,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v478';
+const APP_VERSION='v482';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -15958,6 +15966,22 @@ const MBMMap = (function(){
       });
       try{ _renderingType=_map.getRenderingType(); }catch(e){} // some SDK timings resolve this before the listener attaches
       g.event.addListenerOnce(_map,'tilesloaded', ()=>{ _tilesLoadedFired=true; diagTiles('tilesloaded fired'); });
+      // v481 (real gap found, NOT previously known): gestureHandling is
+      // already 'greedy' and this is a VECTOR map, so a two-finger twist
+      // gesture already physically rotates the real map RIGHT NOW — that
+      // was never disabled. But the needle icon's rotation is driven
+      // purely by `_headingApplied`, which only Claude's own
+      // `setMapHeading()` calls update (from real driving fixes). A
+      // gesture rotation changes the map's TRUE heading directly through
+      // the SDK, bypassing `_headingApplied` entirely — so the needle
+      // would silently go out of sync with the actual map the moment
+      // someone rotates it by hand, exactly like Bahman demonstrated with
+      // his own finger on real Google Maps. Fix: listen to the map's own
+      // authoritative 'heading_changed' event and mirror it into
+      // `_headingApplied` no matter what caused the change.
+      g.event.addListener(_map,'heading_changed', ()=>{
+        try{ _headingApplied=(_map.getHeading()||0); }catch(e){}
+      });
       g.event.addListenerOnce(_map,'idle', ()=>{
         _loaded=true;
         diagTiles('idle fired, tilesloaded fired so far: '+_tilesLoadedFired);
@@ -16904,7 +16928,29 @@ const FAM_ICON = {
   // column and visually counter-rotates to always point at true north,
   // matching the reference screenshot Bahman sent. Distinct from `compass`
   // above (the sparkle/reset control), a different Google Maps button.
-  compassNeedle:'<svg viewBox="0 0 24 24"><polygon points="12,3 15,12 12,11" fill="#EA4335"></polygon><polygon points="12,21 9,12 12,11" fill="#BDC1C6"></polygon></svg>'
+  // v479 (real bug, confirmed by rendering it at the ACTUAL 22px button
+  // size, not just a zoomed preview): the v478 needle polygons were too
+  // thin/pointy at real size — barely a red sliver, easy to mistake for a
+  // battery-bolt icon (exactly what Bahman saw and flagged). Widened into
+  // proper kite shapes so both the red (north) and grey (south) halves are
+  // clearly visible at 22px, matching the reference screenshot.
+  // v480 (THE actual root cause of every "wrong icon" complaint on this
+  // button, found and confirmed): a pre-existing global rule —
+  // `.fam-mapbtn svg{fill:none;stroke:currentColor}` — strips fill colors
+  // from EVERY icon inside a map button and replaces them with a dark
+  // outline stroke. My previous preview renders never caught this because
+  // they were rendered in isolation, outside the app's real CSS. Every
+  // colored icon I've put in this exact button (v475's blue sparkle,
+  // v478/479's red/grey needle) was ALWAYS being flattened into a plain
+  // dark silhouette on Bahman's real device — that silhouette is what
+  // looked like a lightning bolt. Fix: give the polygons their own class
+  // with !important, which beats the blanket rule regardless of CSS order.
+  // v482: nicer custom needle design per Bahman's request ("زیبا هم باشه،
+  // طراحی اختصاصی") — gradient-shaded kite halves + a small center pivot
+  // dot, closer to a real physical compass needle. Verified rendered
+  // against the app's REAL extracted CSS (not an isolated preview) this
+  // time, learning from the v478-480 mistake.
+  compassNeedle:'<svg class="fam-needle-svg" viewBox="0 0 24 24"><defs><linearGradient id="famNeedleN" x1="12" y1="2" x2="12" y2="12" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ff6b57"></stop><stop offset="1" stop-color="#e02f1f"></stop></linearGradient><linearGradient id="famNeedleS" x1="12" y1="12" x2="12" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#c7cbd1"></stop><stop offset="1" stop-color="#9aa0a6"></stop></linearGradient></defs><path class="fam-needle-n" d="M12 1.6 L13.6 11.3 L12 10.2 L10.4 11.3 Z"></path><path class="fam-needle-s" d="M12 22.4 L10.4 12.7 L12 13.8 L13.6 12.7 Z"></path><circle class="fam-needle-dot" cx="12" cy="12" r="1.5"></circle></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
@@ -19557,13 +19603,16 @@ async function famAction(act,arg,ev){
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
     case 'live-compass-toggle':{
-      // v477 (real behavior parity — see MBMMap module comment for the
-      // Google SDK doc citations): this button only appears when rotated
-      // away from north, and tapping it resets to north and fades away —
-      // it is no longer a persistent on/off toggle (that was never how
-      // Google's own button works; v469-476 had this wrong).
+      // v478: always-visible needle button now (matches the real Google
+      // control Bahman pointed to), not the earlier hide/show experiment.
+      // v479: tapping it while already facing north is a correct no-op
+      // (nothing to reset), but gave zero feedback — indistinguishable
+      // from the button being unresponsive. Added a toast either way so
+      // every tap visibly confirms the button worked.
       try{
+        const wasRotated=MBMMap.isRotatedAwayFromNorth&&MBMMap.isRotatedAwayFromNorth();
         MBMMap.resetHeadingToNorth();
+        toast(wasRotated?(L==='fa'?'برگشت به شمال':'Reset to north'):(L==='fa'?'همین الان هم رو به شمال است':'Already facing north'));
         render();
       }catch(e){}
       return;
