@@ -1380,15 +1380,6 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-live-title b{display:block;font-size:19px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fam-live-title span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;color:var(--ink3);overflow:hidden;overflow-wrap:anywhere;line-height:1.3}
 .fam-live-ctrls{position:absolute;right:14px;z-index:1150;display:flex;flex-direction:column;gap:12px}
-/* v476: compass/heading-rotation button moved OUT of the vertical control
-   stack above and given its own standalone top-right spot — matching
-   Google Maps, where this button sits alone near the top, never inside
-   the lower button column (Bahman's explicit comparison against the real
-   Google Maps app). Positioned at the SAME top as the stack used to start
-   at; the stack itself is now pushed down (see inline style at render) to
-   leave room, so the two never collide. z-index above the stack so it's
-   never covered by it either.  */
-.fam-compass-standalone{position:absolute;right:14px;z-index:1200}
 /* Reference-matched control buttons: larger dark rounded squares with soft
    shadow, like the Life360 map controls. */
 .fam-mapbtn{width:50px;height:50px;border-radius:50%;border:none;background:#fff;color:#4a4d57;
@@ -1892,7 +1883,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v477';
+const APP_VERSION='v478';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14216,22 +14207,20 @@ function famDiagView(){
       })()}
       ${(()=>{
         // v473: real ground truth for the map-rotation investigation —
-        // shows whether the map is actually VECTOR (rotation possible) or
-        // RASTER (rotation can never work, regardless of code — a Cloud
-        // Console Map ID setting, not something this file controls).
-        // v477: rotation is now always-on auto-follow (matching real
-        // Google Maps), not a persisted manual toggle — this line reports
-        // current live state instead of a stored preference.
+        // v478: replaced the hide/show sparkle experiment with the OTHER,
+        // always-visible Google needle-compass (Bahman's reference
+        // screenshot) — it never hides, it just visually rotates, so this
+        // line now reports the needle's on-screen angle instead of a
+        // visibility flag that no longer applies.
         const rt=(typeof MBMMap!=='undefined'&&MBMMap.renderingType)?MBMMap.renderingType():null;
         const curHeading=(typeof MBMMap!=='undefined'&&MBMMap.currentHeading)?MBMMap.currentHeading():null;
-        const rotated=(typeof MBMMap!=='undefined'&&MBMMap.isRotatedAwayFromNorth)?MBMMap.isRotatedAwayFromNorth():false;
         const rtColor=rt==='RASTER'?'#f43f5e':(rt==='VECTOR'?'#22c55e':'var(--ink3)');
         return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">MAP ENGINE DIAG</div>
         <div style="font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
           <div><b>renderingType:</b> <span style="color:${rtColor};font-weight:700">${esc(rt==null?'not yet known (map not mounted this session)':String(rt))}</span></div>
           <div><b>auto heading-up:</b> always-on (Google Maps behavior — no manual toggle)</div>
           <div><b>current applied heading:</b> ${curHeading==null?'n/a':Math.round(curHeading)+'°'}</div>
-          <div><b>compass reset button visible:</b> ${rotated?'yes (rotated away from north)':'no (already north-up)'}</div>
+          <div><b>needle button:</b> always visible, needle rotated ${curHeading==null?'0':Math.round(-curHeading)}° to point true north</div>
           ${rt==='RASTER'?`<div style="color:#f43f5e;margin-top:4px">Rotation CANNOT work while this is RASTER — fix in Cloud Console (Map Management → Map ID 9b7b8a3f4bc483801e0cd717 → Map type → Vector), not in code.</div>`:''}
         </div>`;
       })()}
@@ -16909,7 +16898,13 @@ const FAM_ICON = {
   building:'<svg viewBox="0 0 24 24"><rect x="5" y="3" width="9" height="18" rx="1"></rect><path d="M14 8h5a1 1 0 011 1v11a1 1 0 01-1 1h-5"></path><line x1="8" y1="7" x2="8" y2="7"></line><line x1="11" y1="7" x2="11" y2="7"></line><line x1="8" y1="11" x2="8" y2="11"></line><line x1="11" y1="11" x2="11" y2="11"></line></svg>',
   chevdown:'<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
   mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="4 7 12 13 20 7"></polyline></svg>',
-  compass:'<svg viewBox="0 0 24 24"><defs><linearGradient id="mbmCompassGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8ab4f8"></stop><stop offset="1" stop-color="#1967d2"></stop></linearGradient></defs><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" fill="url(#mbmCompassGrad)"></path></svg>'
+  compass:'<svg viewBox="0 0 24 24"><defs><linearGradient id="mbmCompassGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8ab4f8"></stop><stop offset="1" stop-color="#1967d2"></stop></linearGradient></defs><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" fill="url(#mbmCompassGrad)"></path></svg>',
+  // v478: the OTHER, always-visible compass — a two-tone needle (red tip =
+  // north, grey tail = south) that lives permanently in the map's button
+  // column and visually counter-rotates to always point at true north,
+  // matching the reference screenshot Bahman sent. Distinct from `compass`
+  // above (the sparkle/reset control), a different Google Maps button.
+  compassNeedle:'<svg viewBox="0 0 24 24"><polygon points="12,3 15,12 12,11" fill="#EA4335"></polygon><polygon points="12,21 9,12 12,11" fill="#BDC1C6"></polygon></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
@@ -17198,14 +17193,15 @@ function famLiveView(){
   // top bar
   h+=`<div class="fam-live-top" id="fam-live-top">${famLiveHeaderHtml(sel)}</div>`;
   // map controls
-  // v476: compass button now standalone (own top-right spot, matching
-  // Google Maps — see .fam-compass-standalone). The rest of the stack is
-  // pushed down by one button's height + gap so nothing overlaps.
-  h+=`<div class="fam-compass-standalone" style="top:calc(88px + env(safe-area-inset-top,0px))">
-    ${(typeof MBMMap!=='undefined'&&MBMMap.isRotatedAwayFromNorth&&MBMMap.isRotatedAwayFromNorth())?
-      `<button class="fam-mapbtn" data-fam="live-compass-toggle" title="${L==='fa'?'برگشت به شمال':'Reset to north'}">${famIcon('compass')}</button>`:''}
-  </div>`;
-  h+=`<div class="fam-live-ctrls" style="top:calc(88px + 62px + env(safe-area-inset-top,0px))">
+  // v478 (matches Bahman's reference screenshot exactly): the real,
+  // always-visible Google Maps compass — a white circle with a two-tone
+  // needle that counter-rotates to keep pointing at true north, living
+  // permanently in the normal button column. Replaces v476-477's
+  // hide/show sparkle experiment, which turned out to be a DIFFERENT
+  // Google control (the nav-banner reset button), not this one.
+  const curHeadingForNeedle=(typeof MBMMap!=='undefined'&&MBMMap.currentHeading)?MBMMap.currentHeading():0;
+  h+=`<div class="fam-live-ctrls" style="top:calc(88px + env(safe-area-inset-top,0px))">
+    <button class="fam-mapbtn" data-fam="live-compass-toggle" title="${L==='fa'?'برگشت به شمال':'Reset to north'}"><span style="display:inline-flex;transform:rotate(${-curHeadingForNeedle}deg);transition:transform .15s linear">${famIcon('compassNeedle')}</span></button>
     <button class="fam-mapbtn${_famFollow?' on':''}" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
     <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
