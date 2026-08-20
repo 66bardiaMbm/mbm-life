@@ -1898,7 +1898,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v486';
+const APP_VERSION='v487';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14236,6 +14236,8 @@ function famDiagView(){
           <div><b>auto heading-up:</b> always-on (Google Maps behavior — no manual toggle)</div>
           <div><b>current applied heading:</b> ${curHeading==null?'n/a':Math.round(curHeading)+'°'}</div>
           <div><b>needle button:</b> always visible, needle rotated ${curHeading==null?'0':Math.round(-curHeading)}° to point true north</div>
+          <div><b>camera padding (top/right/bottom/left):</b> ${(typeof _lastAppliedPadding!=='undefined'&&_lastAppliedPadding)?`${_lastAppliedPadding.top}/${_lastAppliedPadding.right}/${_lastAppliedPadding.bottom}/${_lastAppliedPadding.left}px`:'not yet applied this session'}</div>
+          <div style="color:var(--ink3)">v487: bottom is now measured directly from the real #fam-sheet element's on-screen position, not estimated from constants.</div>
           ${rt==='RASTER'?`<div style="color:#f43f5e;margin-top:4px">Rotation CANNOT work while this is RASTER — fix in Cloud Console (Map Management → Map ID 9b7b8a3f4bc483801e0cd717 → Map type → Vector), not in code.</div>`:''}
         </div>`;
       })()}
@@ -18673,6 +18675,24 @@ function famLiveMount(){
     const heights=famSheetHeights();
     famUpdateCameraPadding(heights[_famSheetDetent]);
   }catch(e){}
+  // v487 (REAL ROOT CAUSE of why v485's padding-on-mount fix still didn't
+  // visibly work — confirmed by Bahman's fresh video/screenshots on v486,
+  // marker still under the sheet): `setPadding()` deliberately never
+  // forces a camera move on its own (see the v415 comment right above its
+  // definition — that was itself a real, intentional fix for a DIFFERENT
+  // bug, the sheet-drag jump). It only takes effect "naturally on the
+  // next real position update." Separately, `MBMMap.init()` returns the
+  // EXISTING map immediately (line ~15941) without re-running its
+  // load-callback → `famMapLoaded()` → `FamilyMapCamera.resume()` chain
+  // whenever the map element is already mounted — which is the ORDINARY
+  // case every time the user simply re-opens/returns to this screen, not
+  // just a rare cold start. Net effect: the padding value was being set
+  // correctly the whole time, but nothing was ever forcing the camera to
+  // actually respect it except on a genuinely first-ever page load —
+  // explaining why it kept failing on every normal re-entry. Force a real
+  // camera re-application here, unconditionally, using the padding we
+  // just set, instead of hoping some other code path happens to do it.
+  if(center) FamilyMapCamera.resume(center, 16);
   // BUGFIX: MBMMap.init() rebuilds the underlying Google Map from scratch
   // whenever #screen's re-render swaps out the DOM container (every render()
   // call, including the one right after tapping a map-type option). A fresh
@@ -18786,18 +18806,35 @@ function famUpdateCameraPadding(sheetPx){
     const HEADER_H=110;
     const CALLOUT_CLEARANCE=76;
     const RIGHT_CONTROLS_W=64; // recenter/person/fullscreen/layers column
-    const CTA_H=56;         // Check in / SOS row height
-    const CTA_GAP=14;
-    const navClear=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fam-navclear'))||82;
-    const SHEET_BOTTOM_MARGIN=navClear;
-    const bottom = (sheetPx||0) + SHEET_BOTTOM_MARGIN + CTA_GAP + CTA_H + 10;
     const winH=(typeof window!=='undefined'&&window.innerHeight)||780;
     const top=Math.min(HEADER_H+CALLOUT_CLEARANCE,Math.round(winH*0.24));
+    // v487 (real root cause, confirmed from Bahman's own live diagnostics —
+    // the `pad(dx,dy)` value in Synchronized history showed only ~113px of
+    // vertical compensation, nowhere near enough to clear the real sheet +
+    // Check-in/SOS row visible in his screenshots): the old bottom-padding
+    // formula ESTIMATED sheet height from constants (CTA_H=56, a fixed
+    // navClear fallback, etc.) that had drifted out of sync with the
+    // actual rendered CSS. Those were guesses. The `#fam-sheet` element's
+    // real bounding rect is ground truth for exactly how much of the
+    // bottom of the screen it covers RIGHT NOW, in whatever detent it's
+    // actually in — measure that directly instead of estimating it.
+    let bottom;
+    const sheetEl=(typeof document!=='undefined')?document.getElementById('fam-sheet'):null;
+    if(sheetEl){
+      const r=sheetEl.getBoundingClientRect();
+      bottom=Math.max(0,Math.round(winH-r.top))+24; // +24px breathing room above the sheet's visible top edge
+    } else {
+      // Fallback to the old estimate only if the sheet isn't mounted yet.
+      const navClear=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fam-navclear'))||82;
+      bottom=(sheetPx||0)+navClear+14+56+10;
+    }
     if(typeof FamilyMapCamera!=='undefined'){
       FamilyMapCamera.setPadding({top, right:RIGHT_CONTROLS_W, bottom, left:12});
+      _lastAppliedPadding={top,right:RIGHT_CONTROLS_W,bottom,left:12}; // v487: for live MAP ENGINE DIAG visibility
     }
   }catch(e){}
 }
+let _lastAppliedPadding=null;
 /* ── Draggable member sheet (collapsed / partial / full) ── */
 /* Ensure the member profile sheet is actually visible after selecting
    someone from the map (marker/cluster tap). If the sheet is at the
