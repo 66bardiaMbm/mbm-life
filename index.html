@@ -1898,7 +1898,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v484';
+const APP_VERSION='v486';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14123,8 +14123,8 @@ function famDiagView(){
       </div>
       <button class="btn" data-fam="loc-freshfix" style="width:100%;margin-top:10px;background:#6e56f8;color:#fff">${L==='fa'?'گرفتن fix تازهٔ GPS (تست)':'Get fresh GPS fix (test)'}</button>
       <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'فقط موقع رانندگی اثر دارد — این یه فیچر آزمایشیه که هنوز رو گوشی واقعی موقع رانندگی تست نشده.':'Only takes effect while driving — this is an experimental feature not yet tested on-device while actually driving.'}</div>
-      <button class="btn" data-fam="loc-toggle-dead-reckoning" style="width:100%;margin-top:10px;background:#f59e0b;color:#fff">${L==='fa'?'روشن/خاموش پیش‌بینی مسیر (v466، الان پیش‌فرض خاموش — باگ شناخته‌شده)':'Toggle dead reckoning (v466, now OFF by default — known bug)'}</button>
-      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'باگ شناخته‌شده: دوربین پیش می‌ره ولی مارکر عقب می‌مونه، ممکنه با فاصله دیده بشن. تا وقتی درست نشده، خاموش نگه دارید.':'Known bug: camera moves ahead but the marker does not, so they can visibly diverge. Keep OFF until fixed.'}</div>
+      <button class="btn" data-fam="loc-toggle-dead-reckoning" style="width:100%;margin-top:10px;background:#22c55e;color:#fff">${L==='fa'?'روشن/خاموش پیش‌بینی مسیر (v486، پیش‌فرض روشن — مارکر و دوربین حالا هماهنگ)':'Toggle dead reckoning (v486, now ON by default — marker and camera now in sync)'}</button>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'v468 مارکر و دوربین جدا می‌شدن چون فقط دوربین پیش‌بینی می‌شد. v486 هردو رو از یه نقطه‌ی مشترک در هر tick آپدیت می‌کنه — دیگه نباید جدا بشن.':'v468 had the camera and marker diverge because only the camera was extrapolated. v486 drives both from one shared point every tick — they should no longer split apart.'}</div>
       <div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'رویدادها':'Event log'}</div>
       <div style="max-height:180px;overflow:auto;font-family:monospace;font-size:11px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
         ${log.length?log.slice().reverse().map(e=>`<div>${esc(e.t.slice(11,19))} · ${esc(e.kind)} · ${esc(typeof e.detail==='object'?JSON.stringify(e.detail):String(e.detail==null?'':e.detail))}</div>`).join(''):'<div>'+(L==='fa'?'هنوز رویدادی نیست':'no events yet')+'</div>'}
@@ -16856,14 +16856,30 @@ const FamilyMapCamera=(function(){
   // camera can be kept in sync (or dead reckoning is limited to camera-only
   // scenarios where that's provably fine). Toggle-able from Diagnostics
   // for anyone who wants to help re-test once a real fix is designed.
-  let _deadReckoningEnabled=false;
+  // v486 (REAL fix, not just re-enabling v466): the v468 divergence bug
+  // happened because dead reckoning moved ONLY the camera — the marker
+  // kept painting strictly from real fixes, so between fixes the camera
+  // panned ahead while the pin stayed behind, visibly splitting apart.
+  // The fix is not "leave it off forever," it's "extrapolate BOTH from
+  // the exact same computed point, every tick" — `_drSyncCb`, if set,
+  // receives the identical `pos` the camera itself just moved to, so
+  // whoever registers it (famLivePaintMarkers, below) can move the
+  // marker to that same point on every tick. Camera and marker can no
+  // longer diverge because they're now driven from one shared value,
+  // not two independent extrapolations.
+  let _deadReckoningEnabled=true; // v486: back on, now that marker sync closes the real gap
   function setDeadReckoningEnabled(on){ _deadReckoningEnabled=!!on; if(!on) _drStop(); }
+  let _drSyncCb=null;
+  function setDeadReckonMarkerSync(fn){ _drSyncCb=fn; }
   let _drFix=null, _drTimer=null;
   function _drTick(){
     _drTimer=null;
     if(!_deadReckoningEnabled||!drivingMode||!follow||pausedByGesture||!_drFix) return;
     const pos=deadReckonPosition(_drFix,Date.now());
-    if(pos){ lastTarget=[pos.lat,pos.lng]; apply(false,'dead-reckoning'); }
+    if(pos){
+      lastTarget=[pos.lat,pos.lng]; apply(false,'dead-reckoning');
+      if(_drSyncCb){ try{ _drSyncCb(pos); }catch(e){} }
+    }
     _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS);
   }
   function _drStart(){ if(_deadReckoningEnabled && _drTimer==null) _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS); }
@@ -16896,7 +16912,7 @@ const FamilyMapCamera=(function(){
     MBMMap.cancelCameraAnimation();
   }
   function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),lastZoom,activeDriveId,drivingMode};}
-  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition,setDeadReckoningEnabled};
+  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition,setDeadReckoningEnabled,setDeadReckonMarkerSync};
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -17928,7 +17944,18 @@ const FamGeo = (function(){
   // kilometre-scale distances, so a much wider radius is honest here: this
   // is used ONLY for the region/suburb line (line2), never for the
   // road/house-level line1, which still requires the tight 25m match above.
-  const REGION_STICK_RADIUS_M = 3000;
+  // v476 first widened this to 3000m to stop the region going blank while
+  // driving fast (see the long comment above). v485 CORRECTION: 3km turned
+  // out too generous — Bahman confirmed on-device the region stayed stuck
+  // on "Brighton, TAS" for a long stretch after actually driving away from
+  // it, because that suburb's geocode (resolved hours earlier while
+  // parked) kept matching within 3km of the new position. A typical
+  // suburb is roughly 1-2km across, so 3km let an old, no-longer-true
+  // suburb win over "we genuinely don't know yet." Tightened to 1.2km —
+  // still comfortably covers the 40-100m gaps between driving GPS fixes
+  // (the original blank-text problem), while making a stale match expire
+  // much sooner as the vehicle actually leaves an area.
+  const REGION_STICK_RADIUS_M = 1200;
   function findNearbyRegion(lat,lng){
     let best=null,bestD=Infinity;
     for(const k in cache){
@@ -18425,17 +18452,16 @@ function famLivePaintMarkers(members, sel){
       const m=g.members[0]; const key=m.uid; activeKeys.push(key);
       const txt=famComposeStatusText(m);
       const markerCallout=famMarkerCalloutText(txt);
-      MBMMap.setMarker(key,[m.state.lat,m.state.lng],
-        {photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
+      const markerMeta={photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color,moving:m.state.moving,heading:m.state.heading,
          activityType:txt.activityType, battery:(m.consent&&m.consent.enabled&&!m.consent.paused)?m.state.battery:null,
          batteryCharging:(m.consent&&m.consent.enabled&&!m.consent.paused)?!!m.state.batteryCharging:false,
          speedKph:txt.speedKph,
          displayedSpeedKph:m.state.displayedSpeedKph,
          fixId:m.state.nativeFixId,sequence:m.state.nativeSequence,
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
-         calloutL2:markerCallout.l2?esc(markerCallout.l2):''},
-        m.uid===_famSelUid, m.meta.tone,
-        ()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famDetailOpen=true;
+         calloutL2:markerCallout.l2?esc(markerCallout.l2):''};
+      const markerSelected=m.uid===_famSelUid;
+      const markerOnClick=()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famDetailOpen=true;
               // v450 FIX: Google Maps marker taps don't reliably bubble a
               // real click/pointerdown to window the way normal HTML button
               // taps do, so the global back-guard listener (backButtonBootstrap,
@@ -18449,7 +18475,22 @@ function famLivePaintMarkers(members, sel){
               // window), fixes it regardless of why the global listener
               // missed it.
               try{ reconcileGuards(); }catch(e){}
-              famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} });
+              famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} };
+      MBMMap.setMarker(key,[m.state.lat,m.state.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick);
+      // v486: register (or clear) the dead-reckoning marker-sync callback
+      // for whichever member this paint pass is actually following while
+      // driving — every extrapolation tick then repaints THIS marker at
+      // the identical point the camera just moved to, using the same
+      // meta/selection/click-handler as the real fix, so only position
+      // changes (matching setMarker's own "meta unchanged → skip DOM
+      // rebuild, just animate position" behavior). Cleared to null for
+      // every non-followed member and whenever this member isn't actively
+      // driving, so a stale callback can never move the wrong pin.
+      if(sel && m.uid===sel.uid && m.state.moving){
+        FamilyMapCamera.setDeadReckonMarkerSync((pos)=>{
+          try{ MBMMap.setMarker(key,[pos.lat,pos.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick); }catch(e){}
+        });
+      }
     } else {
       // merged cluster bubble at the group's centroid of real fixes
       const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
@@ -18480,6 +18521,9 @@ function famLivePaintMarkers(members, sel){
         {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):''});
     }
   });
+  if(!(sel && sel.state && sel.state.moving)){
+    try{ FamilyMapCamera.setDeadReckonMarkerSync(null); }catch(e){}
+  }
   MBMMap.clearMarkersExcept(activeKeys);
   if(sel && sel.state && sel.state.lat!=null){
     // NOTE: the historical breadcrumb trail is intentionally NOT drawn on the
@@ -18507,6 +18551,25 @@ function famLivePaintMarkers(members, sel){
       // this screen, not a Cloud Console/config problem after all.
       MBMMap.setMapHeading(sel.state.heading);
     } else { MBMMap.setHeadingCone(null,null,null); }
+    // v485 (REAL ROOT CAUSE of "needle never rotates, ever" — confirmed by
+    // frame-by-frame analysis of two full real drives, 100% frozen at 0°
+    // the entire time despite 37-53 km/h and real turns): the needle's
+    // rotation is written as a `transform:rotate(...)` string INSIDE
+    // famLiveView()'s one-time full HTML render. This function
+    // (famLivePaintMarkers) is what actually runs on every subsequent GPS
+    // fix/tick — it updates the MAP's real heading correctly (confirmed —
+    // MBMMap.setMapHeading() above genuinely works), but never touches the
+    // needle <span> DOM node again after the initial render, so the icon
+    // visually froze at whatever angle existed at mount time while the
+    // real map heading kept changing underneath it, invisibly. Fix:
+    // update the needle's DOM transform directly here, every tick,
+    // independent of whether a full famLiveView() re-render happens.
+    try{
+      const needleEl=document.querySelector('[data-fam="live-compass-toggle"] span');
+      if(needleEl && typeof MBMMap.currentHeading==='function'){
+        needleEl.style.transform='rotate('+(-MBMMap.currentHeading())+'deg)';
+      }
+    }catch(e){}
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
@@ -18595,6 +18658,21 @@ function famLiveMount(){
   // available() is legitimately false on the very first mount — gating on
   // it would block the async loader from ever starting.
   const map=MBMMap.init('fam-map', center);
+  // v485 (REAL ROOT CAUSE of "marker sits under the panel/off in a
+  // corner", confirmed by frame-by-frame video analysis across two full
+  // real drives — happened for the ENTIRE session, not intermittently):
+  // famUpdateCameraPadding() — which correctly accounts for the sheet
+  // height + Check-in/SOS row so the follow camera keeps the marker
+  // clear of them — was ONLY ever called from sheet-DRAG event handlers
+  // (detent change, free drag, drag-end). It was never called here, on
+  // initial mount. A session where the user never manually drags the
+  // sheet (the ordinary case, especially while driving) got whatever
+  // padding was left over from a PRIOR screen or none at all, for its
+  // entire duration — matching exactly what Bahman's videos show.
+  try{
+    const heights=famSheetHeights();
+    famUpdateCameraPadding(heights[_famSheetDetent]);
+  }catch(e){}
   // BUGFIX: MBMMap.init() rebuilds the underlying Google Map from scratch
   // whenever #screen's re-render swaps out the DOM container (every render()
   // call, including the one right after tapping a map-type option). A fresh
