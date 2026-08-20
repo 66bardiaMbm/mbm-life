@@ -1898,7 +1898,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v488';
+const APP_VERSION='v490';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17267,6 +17267,17 @@ function famLiveView(){
   const myUid=FB.user&&FB.user.uid;
   const myConsent=fb.location.myConsent();
   const ownDriving=!!(fb.driving&&myUid&&fb.driving.activeSession(myUid));
+  // v489 (real gap, confirmed by Bahman comparing directly against Google
+  // Maps): our screen was timing out to lock after the device's normal
+  // 30s idle timeout even while actively driving with the app open and
+  // visible — Google Maps (and any real navigation app) keeps the screen
+  // on for exactly this reason. Uses the standard Screen Wake Lock API
+  // (broadly supported in Chrome/WebView on Android since Chrome 84) —
+  // no native/Kotlin change needed. Acquired only while `ownDriving` is
+  // true (the DEVICE'S OWN user is driving, not just whoever's selected
+  // in the UI), released the moment driving stops, so it can never keep
+  // a phone's screen on indefinitely by mistake.
+  famUpdateWakeLock(ownDriving);
 
   let h=`<div id="fam-live-wrap">`;
   h+=`<div id="fam-map"></div>`;
@@ -17834,8 +17845,26 @@ function famMarkerCalloutText(txt){
   if(txt.activityType==='stationary'){
     return {l1:txt.calloutL2||txt.l2||'',l2:''};
   }
-  // Moving states are represented by the dedicated icon pill (car + speed,
-  // walking, bicycle, motorcycle), so a second "Driving" bubble is noise.
+  // v490 (Bahman, comparing directly against a real Google Maps recording
+  // twice): he wants the live road/highway name shown as a callout
+  // attached right to the marker while driving — like Google's own car
+  // marker does — not buried in the member-list row below. v488 wired
+  // the real road name into famComposeStatusText's `l1` for the driving
+  // branch, but this function (the one that actually controls what
+  // appears ON THE MAP next to the marker) was intentionally left
+  // returning empty for every moving state, by an earlier, separate
+  // design decision to avoid "noise" duplicating the speed pill — that
+  // was true when l1 was just the static "Driving" label, but now that
+  // it can be a real, useful road name, showing it here is the entire
+  // point, not noise. Only shown when a real road actually resolved
+  // (never the bare "Driving"/"در حال رانندگی" fallback label itself —
+  // that stays exclusive to the list row, so this bubble never shows
+  // meaningless placeholder text).
+  if(txt.activityType==='driving' && txt.l1 && txt.l1!==(L==='fa'?'در حال رانندگی':'Driving')){
+    return {l1:txt.l1,l2:''};
+  }
+  // Other moving states are represented by the dedicated icon pill (car +
+  // speed, walking, bicycle, motorcycle), so a second bubble is noise.
   return {l1:'',l2:''};
 }
 /* Honest consent/permission fallback line — used ONLY when a member has no
@@ -18642,6 +18671,36 @@ function famLivePaintMarkers(members, sel){
 }
 /* ── Mount the map + paint pins/route after DOM insertion. Reuses an
    already-mounted map (no destroy/re-init on routine refresh). ── */
+// v489: Screen Wake Lock manager — keeps the screen on only while the
+// device's own user is actively driving with this screen visible.
+// Deliberately minimal state (`_famWakeLock`, `_famWakeLockWanted`) so
+// calling famUpdateWakeLock(false) always definitively releases it, and
+// so the browser's own automatic release-on-hide (spec-mandated — a
+// wake lock is always released when the document goes hidden) can be
+// re-acquired the moment the tab/screen becomes visible again, exactly
+// as the Wake Lock API's own documentation recommends handling this.
+let _famWakeLock=null, _famWakeLockWanted=false;
+async function famUpdateWakeLock(wanted){
+  _famWakeLockWanted=!!wanted;
+  try{
+    if(_famWakeLockWanted){
+      if(!_famWakeLock && typeof navigator!=='undefined' && navigator.wakeLock){
+        _famWakeLock=await navigator.wakeLock.request('screen');
+        _famWakeLock.addEventListener('release',()=>{ _famWakeLock=null; });
+      }
+    } else if(_famWakeLock){
+      try{ await _famWakeLock.release(); }catch(e){}
+      _famWakeLock=null;
+    }
+  }catch(e){ _famWakeLock=null; } // e.g. unsupported browser, or the tab wasn't visible at request time — fails silently, screen just behaves normally
+}
+if(typeof document!=='undefined'){
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible' && _famWakeLockWanted && !_famWakeLock){
+      famUpdateWakeLock(true); // re-acquire — the browser auto-released it while hidden, per spec
+    }
+  });
+}
 let _famSheetDetent=1;  // 0 collapsed, 1 partial, 2 full
 // v452: exact pixel height from a real drag release, or null when the sheet
 // is at one of the 3 discrete detents above. Kept separate from
