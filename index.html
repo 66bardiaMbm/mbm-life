@@ -1898,7 +1898,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v487';
+const APP_VERSION='v488';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17670,12 +17670,23 @@ function famComposeStatusText(m){
   }
   const s=m.state||{};
   if(d.activityType==='driving'){
-    // v401 (confirmed bug 2): while driving the callout is the SHORT label only.
-    // The road/address is not appended here — at driving speed it changes every
-    // few seconds, is frequently a full street address, and pushed a long text
-    // block above the marker. The car icon + speed live in the marker's own pill.
-    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt); // keep the geocode warm for the stationary view
-    const l1=(L==='fa'?'در حال رانندگی':'Driving');
+    // v401 (confirmed bug 2): while driving the callout used to be a SHORT
+    // static label only — no road name — because at driving speed a
+    // precise address changes every few seconds and a full street address
+    // is often long. v488 (Bahman, comparing directly against Google
+    // Maps' nav bar): he wants the actual current road/highway shown,
+    // like Google does, not a generic "Driving" label. FamGeo.getRoadNear
+    // (same widened-lookup technique as the region fix, just tighter —
+    // 400m, road-scale not suburb-scale) makes this achievable without
+    // reverting to the original "stuck on stale text" problem: falls back
+    // to the plain label only when nothing road-level has resolved
+    // recently, never shows a full house-number address (still too long),
+    // and expires like the region fix does so it can't show a road
+    // you've actually already left.
+    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt); // still the ONLY thing that queues a fresh geocode request each fix — getRoadNear/getRegionNear only read the cache, they never request
+    const liveRoad=FamGeo.getRoadNear(s.lat,s.lng);
+    const drivingLabel=(L==='fa'?'در حال رانندگی':'Driving');
+    const l1=(liveRoad&&liveRoad.road)?liveRoad.road:drivingLabel;
     // Live speed: priority 1 = real coords.speed when valid; priority 2 =
     // calculated from real GPS distance/elapsed time between the last two
     // accepted fixes. Never hard-coded, never frozen — if genuinely
@@ -17971,6 +17982,31 @@ const FamGeo = (function(){
     return best;
   }
   function getRegionNear(lat,lng){ return get(lat,lng) || findNearbyRegion(lat,lng); }
+  // v488: same underlying problem as the region freeze above, but for the
+  // ROAD name specifically — Bahman wants the live current road/highway
+  // shown while driving (matching Google Maps' nav bar: "whatever's
+  // directly under the marker right now"), not the generic static
+  // "Driving" label this app has shown until now. A road is much
+  // narrower than a suburb, so this needs its own, tighter radius — wide
+  // enough to survive the GPS-fix gaps at highway speed (same root cause
+  // as the region fix), tight enough that it doesn't claim you're still
+  // on a road you've actually turned off of. 400m: generously covers a
+  // multi-second gap between fixes even at 100+ km/h, while a typical
+  // road/intersection spacing is usually well under that.
+  const ROAD_STICK_RADIUS_M = 400;
+  function findNearbyRoad(lat,lng){
+    let best=null,bestD=Infinity;
+    for(const k in cache){
+      const c=cache[k];
+      if(!c.road) continue;
+      if((Date.now()-c.ts)>=TTL) continue;
+      if(c.lat==null||c.lng==null) continue;
+      const d=haversineM(lat,lng,c.lat,c.lng);
+      if(d<=ROAD_STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
+    }
+    return best;
+  }
+  function getRoadNear(lat,lng){ return get(lat,lng) || findNearbyRoad(lat,lng); }
   // Build the two display lines from a Nominatim address object, Life360-style.
   const LOCALITY_FIELDS=['suburb','town','village','hamlet','city_district',
     'neighbourhood','quarter','state_district','county','municipality'];
@@ -18155,7 +18191,7 @@ const FamGeo = (function(){
     return null;
   }
   function famGeoDiagnosticInfo(){ return _lastLookup; }
-  return { request, get, getRegionNear, format, _key:key,
+  return { request, get, getRegionNear, getRoadNear, format, _key:key,
     _needsAdministrativeLocality:needsAdministrativeLocality,
     famGeoDiagnosticInfo };
 })();
