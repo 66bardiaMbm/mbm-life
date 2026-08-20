@@ -1657,10 +1657,17 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    the blanket stroke-outline treatment above — !important guarantees it
    wins regardless of rule order, since this is a genuine exception, not
    a CSS bug to work around quietly. */
-.fam-needle-svg{stroke:none !important;fill:none !important}
-.fam-needle-n{fill:url(#famNeedleN) !important}
-.fam-needle-s{fill:url(#famNeedleS) !important}
-.fam-needle-dot{fill:#fff !important;stroke:#3c4043 !important;stroke-width:.6 !important}
+.fam-needle-svg{stroke:none !important;fill:none !important;width:34px !important;height:34px !important}
+.fam-rose-ring{fill:#fff !important;stroke:#9aa0a6 !important;stroke-width:.7 !important}
+.fam-rose-secL{fill:#e3e5e8 !important}
+.fam-rose-secR{fill:#c9cdd2 !important}
+.fam-rose-sL{fill:#d7dade !important}
+.fam-rose-sR{fill:#eceeef !important}
+.fam-rose-ewD{fill:#3c4043 !important}
+.fam-rose-ewL{fill:#565a5e !important}
+.fam-rose-nD{fill:#e03a2f !important}
+.fam-rose-nL{fill:#ff5c4d !important}
+.fam-rose-dot{fill:#fff !important;stroke:#9aa0a6 !important;stroke-width:.6 !important}
 .fam-actionbar .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .fam-actionbar .btn svg{width:16px;height:16px}
 .fam-actionbar .btn[disabled]{opacity:.45}
@@ -1891,7 +1898,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v482';
+const APP_VERSION='v484';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -16950,7 +16957,19 @@ const FAM_ICON = {
   // dot, closer to a real physical compass needle. Verified rendered
   // against the app's REAL extracted CSS (not an isolated preview) this
   // time, learning from the v478-480 mistake.
-  compassNeedle:'<svg class="fam-needle-svg" viewBox="0 0 24 24"><defs><linearGradient id="famNeedleN" x1="12" y1="2" x2="12" y2="12" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ff6b57"></stop><stop offset="1" stop-color="#e02f1f"></stop></linearGradient><linearGradient id="famNeedleS" x1="12" y1="12" x2="12" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#c7cbd1"></stop><stop offset="1" stop-color="#9aa0a6"></stop></linearGradient></defs><path class="fam-needle-n" d="M12 1.6 L13.6 11.3 L12 10.2 L10.4 11.3 Z"></path><path class="fam-needle-s" d="M12 22.4 L10.4 12.7 L12 13.8 L13.6 12.7 Z"></path><circle class="fam-needle-dot" cx="12" cy="12" r="1.5"></circle></svg>'
+  // v483 (Bahman: too small/unreadable as a compass — "a needle you can't
+  // tell what it is"). Made significantly larger (32px vs the button
+  // default 19px, via the .fam-needle-svg size override), added a thin
+  // outer ring + 4 cardinal tick marks so it unmistakably reads as a
+  // compass at a glance even while completely stationary — not just a
+  // stray colored sliver. Needle itself kept but thickened slightly.
+  // v484: full 8-point compass-rose design, matching Bahman's exact
+  // reference image pixel-for-pixel in STYLE (not a literal copy of any
+  // proprietary file — built from scratch: red N, dark-charcoal E/W,
+  // light-grey S + 4 secondary diagonal points, thin outer ring, subtle
+  // two-tone shading per point via a centerline split). Verified against
+  // the app's real extracted CSS before shipping.
+  compassNeedle:'<svg class="fam-needle-svg" viewBox="0 0 24 24"><circle class="fam-rose-ring" cx="12" cy="12" r="11.3"></circle><polygon class="fam-rose-secL" points="12,12 15.82,8.18 12.64,12.64"></polygon><polygon class="fam-rose-secR" points="12,12 15.82,8.18 11.36,11.36"></polygon><polygon class="fam-rose-secL" points="12,12 15.82,15.82 11.36,12.64"></polygon><polygon class="fam-rose-secR" points="12,12 15.82,15.82 12.64,11.36"></polygon><polygon class="fam-rose-secL" points="12,12 8.18,15.82 11.36,11.36"></polygon><polygon class="fam-rose-secR" points="12,12 8.18,15.82 12.64,12.64"></polygon><polygon class="fam-rose-secL" points="12,12 8.18,8.18 12.64,11.36"></polygon><polygon class="fam-rose-secR" points="12,12 8.18,8.18 11.36,12.78"></polygon><polygon class="fam-rose-sL" points="12,12 12.00,21.6 10.5,12.00"></polygon><polygon class="fam-rose-sR" points="12,12 12.00,21.6 13.5,12.00"></polygon><polygon class="fam-rose-ewD" points="12,12 21.6,12.00 12.00,13.5"></polygon><polygon class="fam-rose-ewL" points="12,12 21.6,12.00 12.00,10.5"></polygon><polygon class="fam-rose-ewD" points="12,12 2.4,12.00 12.00,10.5"></polygon><polygon class="fam-rose-ewL" points="12,12 2.4,12.00 12.00,13.5"></polygon><polygon class="fam-rose-nD" points="12,12 12.00,2.4 13.5,12.00"></polygon><polygon class="fam-rose-nL" points="12,12 12.00,2.4 10.5,12.00"></polygon><circle class="fam-rose-dot" cx="12" cy="12" r="1.8"></circle></svg>'
 };
 function famIcon(name){ return FAM_ICON[name]||''; }
 
