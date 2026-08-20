@@ -1380,6 +1380,15 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-live-title b{display:block;font-size:19px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fam-live-title span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;color:var(--ink3);overflow:hidden;overflow-wrap:anywhere;line-height:1.3}
 .fam-live-ctrls{position:absolute;right:14px;z-index:1150;display:flex;flex-direction:column;gap:12px}
+/* v476: compass/heading-rotation button moved OUT of the vertical control
+   stack above and given its own standalone top-right spot — matching
+   Google Maps, where this button sits alone near the top, never inside
+   the lower button column (Bahman's explicit comparison against the real
+   Google Maps app). Positioned at the SAME top as the stack used to start
+   at; the stack itself is now pushed down (see inline style at render) to
+   leave room, so the two never collide. z-index above the stack so it's
+   never covered by it either.  */
+.fam-compass-standalone{position:absolute;right:14px;z-index:1200}
 /* Reference-matched control buttons: larger dark rounded squares with soft
    shadow, like the Life360 map controls. */
 .fam-mapbtn{width:50px;height:50px;border-radius:50%;border:none;background:#fff;color:#4a4d57;
@@ -1883,7 +1892,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v475';
+const APP_VERSION='v477';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -14210,13 +14219,19 @@ function famDiagView(){
         // shows whether the map is actually VECTOR (rotation possible) or
         // RASTER (rotation can never work, regardless of code — a Cloud
         // Console Map ID setting, not something this file controls).
+        // v477: rotation is now always-on auto-follow (matching real
+        // Google Maps), not a persisted manual toggle — this line reports
+        // current live state instead of a stored preference.
         const rt=(typeof MBMMap!=='undefined'&&MBMMap.renderingType)?MBMMap.renderingType():null;
-        const rotOn=(typeof MBMMap!=='undefined'&&MBMMap.isHeadingRotationEnabled)?MBMMap.isHeadingRotationEnabled():false;
+        const curHeading=(typeof MBMMap!=='undefined'&&MBMMap.currentHeading)?MBMMap.currentHeading():null;
+        const rotated=(typeof MBMMap!=='undefined'&&MBMMap.isRotatedAwayFromNorth)?MBMMap.isRotatedAwayFromNorth():false;
         const rtColor=rt==='RASTER'?'#f43f5e':(rt==='VECTOR'?'#22c55e':'var(--ink3)');
         return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">MAP ENGINE DIAG</div>
         <div style="font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
           <div><b>renderingType:</b> <span style="color:${rtColor};font-weight:700">${esc(rt==null?'not yet known (map not mounted this session)':String(rt))}</span></div>
-          <div><b>rotation toggle:</b> ${rotOn?'ON':'OFF'}</div>
+          <div><b>auto heading-up:</b> always-on (Google Maps behavior — no manual toggle)</div>
+          <div><b>current applied heading:</b> ${curHeading==null?'n/a':Math.round(curHeading)+'°'}</div>
+          <div><b>compass reset button visible:</b> ${rotated?'yes (rotated away from north)':'no (already north-up)'}</div>
           ${rt==='RASTER'?`<div style="color:#f43f5e;margin-top:4px">Rotation CANNOT work while this is RASTER — fix in Cloud Console (Map Management → Map ID 9b7b8a3f4bc483801e0cd717 → Map type → Vector), not in code.</div>`:''}
         </div>`;
       })()}
@@ -16533,24 +16548,88 @@ const MBMMap = (function(){
   // to use right before driving. Persisted via localStorage now, so
   // toggling it once (any time, no rush, not tied to a drive) sticks
   // across app restarts until explicitly toggled off again.
-  const _HEADING_ROT_KEY='mbmlife_heading_rotation_enabled';
-  let _headingRotationEnabled=(()=>{ try{ return localStorage.getItem(_HEADING_ROT_KEY)==='1'; }catch(e){ return false; } })();
+  // v477 (real behavior parity, from Google's own Navigation SDK docs —
+  // Android & iOS Maps SDK "Controls" pages): Google's compass button is
+  // NOT a persistent on/off toggle. Heading-up rotation runs AUTOMATICALLY
+  // whenever a driving member is being followed (like Google's "following"
+  // camera mode) — there is no user switch for it. The compass button
+  // itself only APPEARS when the map is rotated away from north, and
+  // tapping it animates the camera back to bearing 0 and fades away again
+  // ("the camera animates back to a position with a bearing of zero...
+  // and the compass fades away shortly after" — Android SDK docs). This
+  // replaces the earlier v469-476 manual persisted toggle entirely.
+  let _headingRotationEnabled=true; // always-on capability now, not a user preference
+  let _headingSuppressUntil=0; // while now() < this, auto heading-up is paused (post-reset-to-north grace period)
+  const HEADING_RESET_SUPPRESS_MS=8000; // how long "reset to north" sticks before auto-follow resumes
   function setHeadingRotationEnabled(on){
+    // Kept only for API compatibility with any older caller — the
+    // capability is always on now, but this can still force it off
+    // entirely (e.g. a future settings kill-switch) without deleting the plumbing.
     _headingRotationEnabled=!!on;
-    try{ localStorage.setItem(_HEADING_ROT_KEY, _headingRotationEnabled?'1':'0'); }catch(e){}
     if(!_headingRotationEnabled && _map){ try{ _map.setHeading(0); }catch(e){} }
   }
   function isHeadingRotationEnabled(){ return _headingRotationEnabled; }
+  // v476 (real root cause of "jerky/limping" rotation, confirmed against
+  // Google's own docs + a matching real-world bug report): setHeading()
+  // itself — in OUR code and in Google's own API — is an instant JUMP with
+  // no built-in animation. Google Maps LOOKS smooth only because it calls
+  // the equivalent many times per second from a continuous phone-compass
+  // sensor stream. Our heading value only updates once per synced GPS fix
+  // (every few seconds), so calling setHeading() directly on that produced
+  // a visible snap every time — not a bug in the call itself, but in
+  // calling it with no interpolation between sparse values. Fix: animate
+  // from the last-applied heading to the new target over
+  // HEADING_ANIM_MS, taking the SHORT way around the 0/360 wrap (e.g.
+  // 350°→10° animates as +20°, never the long way through 180°).
+  const HEADING_ANIM_MS=900;
+  let _headingAnimId=null, _headingAnimFrom=0, _headingAnimTo=0, _headingAnimStart=0, _headingApplied=0;
+  function _shortestHeadingDelta(from,to){
+    return ((to-from)%360+540)%360-180; // wraps into (-180,180]
+  }
+  function _animateHeadingTo(target,ms){
+    const from=_headingApplied;
+    const delta=_shortestHeadingDelta(from,target);
+    const to=from+delta; // unwrapped target — lets the animation cross 0/360 smoothly
+    if(Math.abs(delta)<0.5){
+      _headingApplied=((to%360)+360)%360;
+      try{ _map.setHeading(_headingApplied); }catch(e){}
+      return;
+    }
+    if(_headingAnimId!=null){ try{ cancelAnimationFrame(_headingAnimId); }catch(e){} }
+    _headingAnimFrom=from; _headingAnimTo=to; _headingAnimStart=performance.now();
+    const step=(now)=>{
+      const t=Math.min(1,(now-_headingAnimStart)/ms);
+      const eased=1-Math.pow(1-t,3); // ease-out cubic — matches the gentle settle of real nav apps
+      const cur=_headingAnimFrom+(_headingAnimTo-_headingAnimFrom)*eased;
+      _headingApplied=((cur%360)+360)%360;
+      try{ _map.setHeading(_headingApplied); }catch(e){}
+      if(t<1){ _headingAnimId=requestAnimationFrame(step); } else { _headingAnimId=null; }
+    };
+    _headingAnimId=requestAnimationFrame(step);
+  }
   function setMapHeading(deg){
     if(!_map||!_headingRotationEnabled||deg==null||isNaN(deg)) return;
-    try{ _map.setHeading(deg); }catch(e){}
+    if(Date.now()<_headingSuppressUntil) return; // paused right after a manual reset-to-north tap
+    _animateHeadingTo(deg,HEADING_ANIM_MS);
   }
+  // v477: the compass button's actual job — snap back to north, then get
+  // out of the way (matches the Android/iOS SDK docs quoted above).
+  function resetHeadingToNorth(){
+    _animateHeadingTo(0,HEADING_ANIM_MS);
+    _headingSuppressUntil=Date.now()+HEADING_RESET_SUPPRESS_MS;
+  }
+  function currentHeading(){ return _headingApplied; }
+  // v477: button only belongs on screen while the map is actually rotated
+  // away from north — exactly like Google's compass, which "fades away"
+  // once bearing returns to 0.
+  function isRotatedAwayFromNorth(){ return Math.abs(_shortestHeadingDelta(0,_headingApplied))>5; }
   function renderingType(){ return _renderingType; } // v473
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            setCamera, cancelCameraAnimation,
            hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
-           setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading, renderingType };
+           setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading, renderingType,
+           resetHeadingToNorth, currentHeading, isRotatedAwayFromNorth };
 })();
 
 /* The only application-level camera authority. Marker code never recentres
@@ -17119,13 +17198,19 @@ function famLiveView(){
   // top bar
   h+=`<div class="fam-live-top" id="fam-live-top">${famLiveHeaderHtml(sel)}</div>`;
   // map controls
-  h+=`<div class="fam-live-ctrls" style="top:calc(88px + env(safe-area-inset-top,0px))">
+  // v476: compass button now standalone (own top-right spot, matching
+  // Google Maps — see .fam-compass-standalone). The rest of the stack is
+  // pushed down by one button's height + gap so nothing overlaps.
+  h+=`<div class="fam-compass-standalone" style="top:calc(88px + env(safe-area-inset-top,0px))">
+    ${(typeof MBMMap!=='undefined'&&MBMMap.isRotatedAwayFromNorth&&MBMMap.isRotatedAwayFromNorth())?
+      `<button class="fam-mapbtn" data-fam="live-compass-toggle" title="${L==='fa'?'برگشت به شمال':'Reset to north'}">${famIcon('compass')}</button>`:''}
+  </div>`;
+  h+=`<div class="fam-live-ctrls" style="top:calc(88px + 62px + env(safe-area-inset-top,0px))">
     <button class="fam-mapbtn${_famFollow?' on':''}" data-fam="live-center-me" title="${L==='fa'?'موقعیت من':'My location'}">${famIcon('crosshair')}</button>
     <button class="fam-mapbtn" data-fam="live-center-sel" title="${L==='fa'?'عضو انتخابی':'Selected member'}">${famIcon('user')}</button>
     <button class="fam-mapbtn" data-fam="live-fit" title="${L==='fa'?'همه':'Fit all'}">${famIcon('fit')}</button>
     <button class="fam-mapbtn" data-fam="live-maptype" title="${L==='fa'?'نوع نقشه':'Map type'}">${famIcon('layers')}</button>
     <button class="fam-mapbtn fam-road-report-btn" data-fam="road-add-open" ${ownDriving?'disabled':''} title="${L==='fa'?'گزارش جاده':'Road report'}">⚠</button>
-    <button class="fam-mapbtn${(typeof MBMMap!=='undefined'&&MBMMap.isHeadingRotationEnabled&&MBMMap.isHeadingRotationEnabled())?' on':''}" data-fam="live-compass-toggle" title="${L==='fa'?'چرخش نقشه بر اساس جهت (مثل گوگل‌مپ)':'Rotate map with heading (like Google Maps)'}">${famIcon('compass')}</button>
   </div>`;
   h+=`<div id="fam-road-alert-slot">${famRoadReportAlertHtml()}</div>`;
   // honest sharing banner if I'm not sharing yet
@@ -17536,7 +17621,7 @@ function famComposeStatusText(m){
         }
       }
     }
-    const cachedGeo=FamGeo.get(s.lat,s.lng);
+    const cachedGeo=FamGeo.getRegionNear(s.lat,s.lng);
     const region=famRegionWithFallback(m.uid, cachedGeo?cachedGeo.line2:'');
     // Status text must remain plain text. The car icon is rendered by the
     // marker's dedicated safe SVG badge, never embedded into a text string.
@@ -17768,6 +17853,34 @@ const FamGeo = (function(){
     if(c && (Date.now()-c.ts)<TTL && haversineM(lat,lng,c.lat,c.lng)<=STICK_RADIUS_M) return c;
     return findNearby(lat,lng);
   }
+  // v476 (real root cause of "region name freezes during a fast drive"):
+  // get()/findNearby() require the cached result to be within
+  // STICK_RADIUS_M (25m) of the CURRENT position — correct for a house
+  // number, but at driving speed (Bahman's video: 80-110 km/h) almost no
+  // fix ever lands within 25m of where an earlier async geocode actually
+  // resolved, since the vehicle has moved 50-100m+ in the time the network
+  // request took. Result: the very first suburb resolved early in a drive
+  // (when moving slowly) gets "stuck" as the only ever-matching entry, and
+  // the region text never updates again for the rest of the trip — v473's
+  // fallback only stopped it going BLANK, it didn't fix this staleness.
+  // Suburb-level names, unlike house numbers, stay valid over
+  // kilometre-scale distances, so a much wider radius is honest here: this
+  // is used ONLY for the region/suburb line (line2), never for the
+  // road/house-level line1, which still requires the tight 25m match above.
+  const REGION_STICK_RADIUS_M = 3000;
+  function findNearbyRegion(lat,lng){
+    let best=null,bestD=Infinity;
+    for(const k in cache){
+      const c=cache[k];
+      if(!c.line2) continue;
+      if((Date.now()-c.ts)>=TTL) continue; // full 6h lifetime is fine at suburb granularity
+      if(c.lat==null||c.lng==null) continue;
+      const d=haversineM(lat,lng,c.lat,c.lng);
+      if(d<=REGION_STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
+    }
+    return best;
+  }
+  function getRegionNear(lat,lng){ return get(lat,lng) || findNearbyRegion(lat,lng); }
   // Build the two display lines from a Nominatim address object, Life360-style.
   const LOCALITY_FIELDS=['suburb','town','village','hamlet','city_district',
     'neighbourhood','quarter','state_district','county','municipality'];
@@ -17952,7 +18065,7 @@ const FamGeo = (function(){
     return null;
   }
   function famGeoDiagnosticInfo(){ return _lastLookup; }
-  return { request, get, format, _key:key,
+  return { request, get, getRegionNear, format, _key:key,
     _needsAdministrativeLocality:needsAdministrativeLocality,
     famGeoDiagnosticInfo };
 })();
@@ -19448,21 +19561,13 @@ async function famAction(act,arg,ev){
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
     case 'live-compass-toggle':{
-      // v469: real on-map button, matching Google Maps — no more hunting
-      // through Diagnostics for this. Same persisted setting either way.
-      // v473: turning this ON used to always claim success even if the map
-      // is actually rendering RASTER (Map ID misconfigured in Cloud
-      // Console), in which case rotation silently never happens — an honest
-      // "on" message the map then never honours. Check the SDK's real
-      // renderingType() and say so plainly if that's the case.
+      // v477 (real behavior parity — see MBMMap module comment for the
+      // Google SDK doc citations): this button only appears when rotated
+      // away from north, and tapping it resets to north and fades away —
+      // it is no longer a persistent on/off toggle (that was never how
+      // Google's own button works; v469-476 had this wrong).
       try{
-        const cur=MBMMap.isHeadingRotationEnabled();
-        MBMMap.setHeadingRotationEnabled(!cur);
-        if(!cur && MBMMap.renderingType()==='RASTER'){
-          toast(L==='fa'?'روشن شد، ولی این نقشه Raster است و اصلاً نمی‌تواند بچرخد — باید در Cloud Console نوع Map ID را به Vector تغییر داد':'Turned on, but this map is RASTER and cannot rotate at all — the Map ID must be changed to Vector in Cloud Console');
-        } else {
-          toast(!cur?(L==='fa'?'چرخش نقشه روشن شد':'Map rotation ON'):(L==='fa'?'چرخش نقشه خاموش شد — رو به شمال':'Map rotation OFF — facing north'));
-        }
+        MBMMap.resetHeadingToNorth();
         render();
       }catch(e){}
       return;
