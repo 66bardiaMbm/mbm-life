@@ -1355,6 +1355,15 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-cta svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .fam-cta-sos{color:#e0447a}
 .fam-cta:active{transform:scale(.96)}
+/* v493: live road-name bar, fixed near the bottom of the map (matching
+   Google Maps' own current-road label position), independent of the
+   marker's on-screen position. Sits just above the Check-in/SOS row. */
+.fam-live-roadbar{position:absolute;left:16px;right:16px;z-index:1350;
+  bottom:calc(var(--fam-sheet-h, 30vh) + var(--fam-navclear) + 14px + 58px);
+  background:#fff;color:#1967d2;font-weight:700;font-size:13px;text-align:center;
+  border-radius:14px;padding:8px 14px;box-shadow:0 4px 14px rgba(0,0,0,.18);
+  pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* ── Life360 bottom navigation ── */
 .fam-bottomnav{position:absolute;left:0;right:0;bottom:0;z-index:1450;display:flex;background:var(--s1);border-top:1px solid var(--b1);padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px))}
 /* True clearance for content scrolling behind .fam-bottomnav: its own
@@ -1898,7 +1907,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v492';
+const APP_VERSION='v495';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11957,20 +11966,33 @@ _presenceHistory.map(e=>e.seq||0)):0);
       const positionTrusted=(accM==null)||(accM<=MAX_POSITION_ACCURACY_M)||(prev.lat==null);
       const nextLat=positionTrusted?raw.lat:prev.lat;
       const nextLng=positionTrusted?raw.lng:prev.lng;
-      // FIX (v436): stayStart/presence for companion (native) fixes must
-      // come from the SAME presence engine used on the web/foreground path
-      // (classifyMovement), not from raw.stayStart — the native side has
-      // never actually populated that field (it was written for a "future
-      // native companion" per the telemetry-contract comment above, which
-      // never materialized on the Kotlin side), so trustedStay stayed null
-      // forever and "Presence unconfirmed" never cleared no matter how long
-      // the person sat still. classifyMovement is the one tested, verified
-      // presence engine in this file (see the v435 fix and its 4 passing
-      // scenarios) — routing companion fixes through it too unifies both
-      // sources on identical, proven logic instead of a second, untested,
-      // native-dependent path.
+      // v494 (THE real root cause, found by finally reading the actual
+      // Kotlin source Bahman uploaded — every JS-side presence tweak
+      // today, including v492's real fix, was operating on the WRONG
+      // layer): the v436 comment above was correct when it was written,
+      // but is now STALE — native `TrackingService.kt` DOES populate
+      // `stayStart` correctly (`app.preferences.stayStartAtMs`, set
+      // immediately in `reevaluateActiveTripStop()` the moment
+      // `DrivingDetector` confirms a trip has genuinely ended, with
+      // direct access to raw GPS + Activity Recognition — a faster and
+      // more direct signal than anything reconstructable from fix
+      // history alone in this file). The web was still discarding that
+      // and re-deriving its own value via `classifyMovement`'s
+      // independent candidate/steady-radius accumulation — effectively
+      // a SECOND, slower, GPS-noise-sensitive confirmation stacked on
+      // top of a native one that had already confirmed correctly. This
+      // fully explains the repeated ~9-11 minute "Since" lag Bahman kept
+      // reporting even after v492 fixed a real-but-secondary bug in that
+      // same JS path. Fix: mirror the existing, already-proven pattern
+      // for `activityType`/`movementState` above (line ~17522) — trust
+      // the native value when the native side actually sent one, fall
+      // back to the JS-derived value only when it didn't (defensive,
+      // covers older app builds or any future companion regression).
+      // `classifyMovement` still runs unconditionally for its OTHER
+      // outputs (placeArrivedAt, lastPresenceConfirmedAt, lastDepartureAt,
+      // priorFixGapMs, _presence) — only `stayStart` itself is overridden.
       const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt},uid);
-      const trustedStay=mv.stayStart;
+      const trustedStay=(raw.stayStart!=null)?raw.stayStart:mv.stayStart;
       const next=Object.assign({},prev,raw,{
         lat:nextLat,
         lng:nextLng,
@@ -16248,6 +16270,24 @@ const MBMMap = (function(){
     const to=(dyPx||dxPx) ? _offsetLatLngByPixels(rawTo.lat,rawTo.lng,rawTo.zoom,dxPx,dyPx) : rawTo;
     to.zoom=rawTo.zoom;
     const animationId=++_camAnimSeq;
+    // v495 (real root cause of "map lags behind", confirmed by Bahman's
+    // OWN earlier diagnostic log: `camera_anim_cancel #606 · 450ms ·
+    // reason=replaced` — an animation was being cut off at 450ms, less
+    // than half its intended 950ms). CAM_ANIM_MS=950 was correctly
+    // calibrated (v465) for REGULAR GPS-fix-driven camera moves, which
+    // happen every 1-2+ seconds — plenty of time for a 950ms ease to
+    // finish. But dead reckoning (v466/v486) calls this same setCamera
+    // every 200ms (DEAD_RECKON_UPDATE_MS) — every tick unconditionally
+    // cancels whatever's still mid-flight (`cancelCameraAnimation`
+    // above) and restarts a brand-new 950ms ease from the interrupted
+    // midpoint. The camera can never actually reach a target — it's
+    // permanently mid-glide, always chasing, which is exactly what
+    // "lagging behind the real position" looks like. Fix: let the
+    // caller (FamilyMapCamera.apply, below) specify a shorter duration
+    // for its dead-reckoning ticks specifically, so those animations can
+    // actually complete before the next one starts. Real GPS-fix-driven
+    // calls (no override) keep the original, evidence-based 950ms.
+    const animMs=(opts.animMs!=null&&opts.animMs>0)?opts.animMs:CAM_ANIM_MS;
     try{
       if(typeof window.diagHistoryPush==='function'){
         // v457 FIX (Codex review): was logging only the final padded `to`
@@ -16271,7 +16311,7 @@ const MBMMap = (function(){
       fromLat:from.lat,fromLng:from.lng,fromZoom:from.zoom,
       lat:to.lat,lng:to.lng,zoom:to.zoom
     });
-    if(opts.instant||CAM_ANIM_MS<=0){
+    if(opts.instant||animMs<=0){
       _moveCameraFrame(to.lat,to.lng,to.zoom);
       _cameraAnimDiag('camera_anim_end',{
         animationId,durationMs:Math.max(0,performance.now()-startedAt),
@@ -16280,7 +16320,7 @@ const MBMMap = (function(){
       return;
     }
     const step=(now)=>{
-      const t=Math.min(1,(now-startedAt)/CAM_ANIM_MS);
+      const t=Math.min(1,(now-startedAt)/animMs);
       const eased=1-Math.pow(1-t,3);
       _moveCameraFrame(
         _lerp(from.lat,to.lat,eased),
@@ -16766,7 +16806,15 @@ const FamilyMapCamera=(function(){
       // reason string through so a reported jump can be tied back to
       // "regular driving follow" vs "gesture-pause resume" vs a plain
       // request(), instead of every entry looking the same.
-      if(drivingMode) MBMMap.setCamera({center:lastTarget,zoom:lastZoom,reason:reason||'unspecified'});
+      // v495: dead-reckoning ticks (every DEAD_RECKON_UPDATE_MS=200ms)
+      // need a short animation duration so each one can actually finish
+      // before the next replaces it — see the long comment in setCamera
+      // for why the default 950ms (correct for real, infrequent
+      // GPS-fix-driven moves) was causing a permanent chase/lag when
+      // reused here. 220ms: just over the 200ms tick interval, so a
+      // glide is essentially complete by the time the next tick arrives.
+      const animMs=(reason==='dead-reckoning')?220:undefined;
+      if(drivingMode) MBMMap.setCamera({center:lastTarget,zoom:lastZoom,reason:reason||'unspecified',animMs});
       else MBMMap.setView(lastTarget,lastZoom);
     };
     const wait=force?0:Math.max(0,MIN_MOVE_MS-(Date.now()-lastMoveAt));
@@ -17369,6 +17417,26 @@ function famLiveView(){
   if(!myConsent.enabled){
     h+=`<div class="fam-map-msg" id="fam-share-banner" style="top:auto;bottom:calc(40vh + 16px)">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
       <button class="btn" data-fam="live-share-on" style="width:auto;padding:4px 10px;margin-inline-start:6px;font-size:12px;background:var(--fam-purple,#8652FF);color:#fff">${L==='fa'?'روشن':'Turn on'}</button></div>`;
+  }
+  // v493 (CORRECTION to v490's misunderstanding, confirmed by re-examining
+  // Bahman's own Google Maps reference video frame-by-frame): the live
+  // road name ("National Highway 1") in Google Maps is NOT a callout
+  // bubble attached to/moving with the car marker — it's a FIXED text
+  // label near the bottom of the screen, independent of wherever the
+  // marker happens to be on screen. v490 built it as a marker-attached
+  // bubble, which is why Bahman kept saying it "wasn't there" — he was
+  // looking at the correct place (near the bottom), it just genuinely
+  // wasn't being drawn there. Shown only while the currently-followed
+  // member (sel) is actively driving with a real road resolved — same
+  // FamGeo.getRoadNear() data v488/v490 already compute, just displayed
+  // in the right screen location this time.
+  if(sel && sel.state && sel.state.activityType==='driving'){
+    try{
+      const liveRoadForBar=(typeof FamGeo!=='undefined'&&FamGeo.getRoadNear)?FamGeo.getRoadNear(sel.state.lat,sel.state.lng):null;
+      if(liveRoadForBar && liveRoadForBar.road){
+        h+=`<div class="fam-live-roadbar">${esc(liveRoadForBar.road)}</div>`;
+      }
+    }catch(e){}
   }
   // ── Life360-style Check in / SOS pills, centered low on the map ──
   h+=`<div class="fam-map-cta">
