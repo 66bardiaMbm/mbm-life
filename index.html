@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v496';
+const APP_VERSION='v499';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -16347,7 +16347,29 @@ const MBMMap = (function(){
   function _offsetLatLngByPixels(lat,lng,zoom,dxPx,dyPx){
     const z=zoom!=null?zoom:14;
     const metersPerPixel=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,z);
-    const dEastM=dxPx*metersPerPixel, dNorthM=-dyPx*metersPerPixel; // screen +y is down = south
+    // v498 (real root cause of "goes off to the side when it rotates" —
+    // found by reading this function with map rotation specifically in
+    // mind, per Bahman's own description of WHEN the marker drifts):
+    // this offset was computed assuming screen-up=geographic-north
+    // ALWAYS, with zero compensation for map rotation. That's only true
+    // when the map is unrotated. The moment the map is actually rotated
+    // (heading-up mode, active for essentially the entire time someone
+    // is driving — the exact condition under which the marker-off-center
+    // complaints kept happening), "right on screen" no longer means
+    // "east" — it means whatever direction is 90° clockwise from
+    // whichever way the vehicle is currently facing. Applying an
+    // unrotated east/north offset to a rotated map pushes the padding
+    // compensation in the wrong geographic direction, visibly off to
+    // one side, and the side it drifts toward CHANGES as the vehicle's
+    // heading changes — exactly matching what Bahman described ("goes
+    // to the right", not consistently one direction). Fix: rotate the
+    // screen-space (dxPx,dyPx) vector by the map's current applied
+    // heading before converting to east/north meters, so the offset is
+    // always correctly re-projected regardless of map rotation.
+    const headingRad=((typeof _headingApplied!=='undefined'?_headingApplied:0)||0)*Math.PI/180;
+    const cosH=Math.cos(headingRad), sinH=Math.sin(headingRad);
+    const dEastM=(dxPx*cosH - dyPx*sinH)*metersPerPixel;
+    const dNorthM=(-dxPx*sinH - dyPx*cosH)*metersPerPixel;
     const dLat=(dNorthM/111320);
     const dLng=(dEastM/(111320*Math.cos(lat*Math.PI/180)||1e-9));
     return { lat:lat+dLat, lng:lng+dLng };
@@ -18031,6 +18053,27 @@ const FamGeo = (function(){
                               // newer request for the same key has been sent (see pump()).
   let queue = [];            // [{key,lat,lng,fixId}]
   const superseding = {};    // newest request that arrived while this cell was in flight
+  // v497 (THE actual shared root cause of Bahman's "region locks onto a
+  // stale suburb" AND "road bar goes blank after sustained driving" —
+  // found by reading this exact queueing code after his own on-device
+  // evidence for both symptoms, not guessed): at highway speed, nearly
+  // EVERY fix lands in a brand-new ~35m cell (a new `key`), so every fix
+  // pushes a NEW, distinct job onto `queue` — there was no cap. Only ONE
+  // job drains per MIN_INTERVAL (1.1s), so if fixes arrive faster than
+  // that (typical), the queue grows WITHOUT BOUND the longer a drive
+  // continues. Old queued jobs for positions the vehicle passed minutes
+  // ago still eventually get processed (wastefully — nobody needs that
+  // stale position resolved anymore), while the CURRENT position's own
+  // request sits buried at the back of an ever-growing backlog, arriving
+  // "fresh" only long after it's already out of any stick-radius. This
+  // explains both symptoms with ONE cause: the live display was
+  // effectively always geocoding the RECENT PAST, falling further and
+  // further behind the longer a drive went on. Fix: cap the queue at a
+  // small depth and drop the OLDEST pending jobs when it's exceeded —
+  // for a live position display, only the newest few positions are ever
+  // worth resolving; a geocode for where you were two minutes ago is
+  // worse than useless once you're already somewhere else.
+  const MAX_QUEUE_DEPTH = 3;
   let lastCall = 0;
   const MIN_INTERVAL = 1100; // ms between Nominatim calls (>=1s policy)
   const TTL = 6*3600*1000;   // 6h cache lifetime
@@ -18138,13 +18181,18 @@ const FamGeo = (function(){
   // shown while driving (matching Google Maps' nav bar: "whatever's
   // directly under the marker right now"), not the generic static
   // "Driving" label this app has shown until now. A road is much
-  // narrower than a suburb, so this needs its own, tighter radius — wide
-  // enough to survive the GPS-fix gaps at highway speed (same root cause
-  // as the region fix), tight enough that it doesn't claim you're still
-  // on a road you've actually turned off of. 400m: generously covers a
-  // multi-second gap between fixes even at 100+ km/h, while a typical
-  // road/intersection spacing is usually well under that.
-  const ROAD_STICK_RADIUS_M = 400;
+  // narrower than a suburb, so this needs its own, tighter radius than
+  // the region radius (1.2km), while tolerating real GPS-fix gaps.
+  // v497 (real bug, confirmed by frame-by-frame video comparison): 400m
+  // was too tight — only ~19s of tolerance at 75km/h. Bahman's own video
+  // showed the road bar going blank after a sustained highway stretch
+  // while the region text (1.2km radius) kept working the entire time
+  // on the exact same drive — direct proof 400m wasn't enough margin for
+  // real-world geocode request timing, not a guess. Widened to 900m
+  // (~43s tolerance at 75km/h) — still meaningfully tighter than the
+  // 1.2km region radius, so it can't casually claim a road you've
+  // genuinely turned off of, but with real headroom for request lag.
+  const ROAD_STICK_RADIUS_M = 900;
   function findNearbyRoad(lat,lng){
     let best=null,bestD=Infinity;
     for(const k in cache){
@@ -18331,7 +18379,21 @@ const FamGeo = (function(){
       return near;
     }
     const resolvedFixId=fixId!=null?fixId:k;
-    if(!pending[k]){ pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId}); pump(); }
+    if(!pending[k]){
+      pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId});
+      // v497: drop the OLDEST queued jobs once the cap is exceeded — keeps
+      // the queue chasing the CURRENT position instead of wastefully
+      // working through an ever-growing backlog of passed-by positions.
+      // Their `pending` flag is cleared too, so if the vehicle happens to
+      // pass back through one of those exact cells later, a fresh request
+      // can still be queued for it rather than being permanently stuck
+      // marked "pending" for a job that will now never run.
+      while(queue.length>MAX_QUEUE_DEPTH){
+        const dropped=queue.shift();
+        if(dropped) delete pending[dropped.key];
+      }
+      pump();
+    }
     else {
       // Invalidate the older response AND retain the newest coordinate for a
       // follow-up request.  The old code invalidated without re-queueing,
@@ -18772,6 +18834,7 @@ function famLivePaintMarkers(members, sel){
           const liveRoadForBar=FamGeo.getRoadNear(sel.state.lat,sel.state.lng);
           if(liveRoadForBar && liveRoadForBar.road) roadText=liveRoadForBar.road;
         }
+        const wasHidden=roadbarEl.style.display==='none'||!roadbarEl.style.display;
         if(roadText){
           roadbarEl.textContent=roadText; roadbarEl.style.display='';
           // v496: measure the CTA row's REAL on-screen position (same
@@ -18787,6 +18850,14 @@ function famLivePaintMarkers(members, sel){
             }
           }catch(e){}
         } else { roadbarEl.style.display='none'; roadbarEl.textContent=''; }
+        // v499: the road bar toggling visible/hidden changes which element
+        // is topmost on screen — recompute the camera's clearance padding
+        // right now instead of waiting for the next sheet-drag event
+        // (which may never happen during an ordinary drive).
+        const isHiddenNow=roadbarEl.style.display==='none';
+        if(wasHidden!==isHiddenNow){
+          try{ famUpdateCameraPadding(famSheetHeights()[_famSheetDetent]); }catch(e){}
+        }
       }
     }catch(e){}
   } else {
@@ -19068,8 +19139,31 @@ function famUpdateCameraPadding(sheetPx){
     let bottom;
     const sheetEl=(typeof document!=='undefined')?document.getElementById('fam-sheet'):null;
     if(sheetEl){
-      const r=sheetEl.getBoundingClientRect();
-      bottom=Math.max(0,Math.round(winH-r.top))+24; // +24px breathing room above the sheet's visible top edge
+      // v499 (REAL ROOT CAUSE, found by reading the CSS/DOM structure, not
+      // guessed): .fam-map-cta (Check-in/SOS row) and #fam-live-roadbar
+      // (road-name bar, v493) both float ABOVE #fam-sheet as their OWN
+      // separate absolutely-positioned elements — see their CSS:
+      // bottom:calc(var(--fam-sheet-h)+...). They are NOT children of
+      // #fam-sheet and were never included when this function measured
+      // only #fam-sheet's own bounding rect. So the camera only ever
+      // cleared the member-list sheet itself — never the CTA row or the
+      // road bar sitting above it, which is exactly what Bahman's
+      // screenshots showed being covered. Fix: measure whichever of the
+      // three elements is currently topmost on screen (smallest `top`,
+      // i.e. the real bottom-occlusion boundary right now), not always
+      // #fam-sheet.
+      let topMostTop=sheetEl.getBoundingClientRect().top;
+      try{
+        const ctaEl=document.querySelector('.fam-map-cta');
+        if(ctaEl){ const r=ctaEl.getBoundingClientRect(); if(r.top<topMostTop) topMostTop=r.top; }
+      }catch(e){}
+      try{
+        const roadbarEl=document.getElementById('fam-live-roadbar');
+        if(roadbarEl && roadbarEl.style.display!=='none'){
+          const r=roadbarEl.getBoundingClientRect(); if(r.top<topMostTop) topMostTop=r.top;
+        }
+      }catch(e){}
+      bottom=Math.max(0,Math.round(winH-topMostTop))+24; // +24px breathing room above whichever element is topmost
     } else {
       // Fallback to the old estimate only if the sheet isn't mounted yet.
       const navClear=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fam-navclear'))||82;
