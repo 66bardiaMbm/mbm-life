@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v499';
+const APP_VERSION='v501';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12034,10 +12034,19 @@ _presenceHistory.map(e=>e.seq||0)):0);
         // whatever the chip actually said) and acceptedLat/acceptedLng
         // (next.lat/next.lng, what the app actually used) — comparing the
         // two right in the log shows whether the gate did its job.
+        // v501: log the raw heading value too — this lets Bahman check,
+        // AFTER stopping (never while driving — checking live diagnostics
+        // mid-drive is unsafe and he correctly refused), whether GPS
+        // bearing was ever actually non-null during the drive. Answers
+        // "is this a data problem (native never reports bearing) or an
+        // application problem (map ignores a valid heading)" from the
+        // SAME already-existing post-drive review habit, no new unsafe
+        // live step required.
         diagHistoryPush('raw_fix',{
           rawLat:raw.lat,rawLng:raw.lng,rawAccuracy:raw.accuracy,
           acceptedLat:next.lat,acceptedLng:next.lng,acceptedAccuracy:next.accuracy,
           positionTrusted:positionTrusted,
+          rawHeading:(raw.heading!=null&&!isNaN(raw.heading))?raw.heading:null,
           capturedAt:next.capturedAt,fixId:next.nativeFixId,presenceState:next._presence&&next._presence.state});
       }
       afterChange();
@@ -14224,7 +14233,7 @@ function famDiagView(){
         const rows=hist.slice().reverse().slice(0,60).map(e=>{
           const time=new Date(e.t).toISOString().slice(11,23);
           const seq=e.seq!=null?'#'+e.seq+' ':'';
-          if(e.source==='raw_fix') return `<div>${time} ${seq}· <b>raw_fix</b> · raw ${e.rawLat.toFixed(6)},${e.rawLng.toFixed(6)} ±${e.rawAccuracy!=null?Math.round(e.rawAccuracy):'?'}m → accepted ${e.acceptedLat.toFixed(6)},${e.acceptedLng.toFixed(6)}${e.positionTrusted?'':' <b style="color:#f59e0b">(gated!)</b>'} · presence=${esc(e.presenceState||'—')}</div>`;
+          if(e.source==='raw_fix') return `<div>${time} ${seq}· <b>raw_fix</b> · raw ${e.rawLat.toFixed(6)},${e.rawLng.toFixed(6)} ±${e.rawAccuracy!=null?Math.round(e.rawAccuracy):'?'}m → accepted ${e.acceptedLat.toFixed(6)},${e.acceptedLng.toFixed(6)}${e.positionTrusted?'':' <b style="color:#f59e0b">(gated!)</b>'} · presence=${esc(e.presenceState||'—')} · hdg=${e.rawHeading!=null?Math.round(e.rawHeading)+'°':'<b style="color:#f43f5e">null</b>'}</div>`;
           if(e.source==='raw_fix_rejected') return `<div>${time} ${seq}· <b style="color:#f43f5e">raw_fix REJECTED</b> · raw ${e.rawLat!=null?e.rawLat.toFixed(6):'—'},${e.rawLng!=null?e.rawLng.toFixed(6):'—'} · reason=${esc(e.rejectionReason||'—')}</div>`;
           if(e.source==='marker_target') return `<div>${time} ${seq}· marker_target · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → ${e.lat.toFixed(6)},${e.lng.toFixed(6)}${e.willSnap?' <b style="color:#f59e0b">(snap!)</b>':''}</div>`;
           if(e.source==='camera_target') return `<div>${time} ${seq}· camera_target #${esc(e.animationId==null?'?':e.animationId)}(<b>${esc(e.reason||'?')}</b>) · ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → raw ${e.rawToLat.toFixed(6)},${e.rawToLng.toFixed(6)} → padded ${e.lat.toFixed(6)},${e.lng.toFixed(6)} z${e.zoom} pad(${Math.round(e.padDxPx)},${Math.round(e.padDyPx)})</div>`;
@@ -17451,7 +17460,9 @@ function famLiveView(){
   // when he got out and started walking). Always render the container
   // (hidden by default); famLivePaintMarkers now updates its content
   // and visibility directly every tick, exactly like the needle fix.
-  h+=`<div id="fam-live-roadbar" class="fam-live-roadbar" style="display:none"></div>`;
+  // v499: bottom-panel road bar (v493/v496) removed per Bahman's explicit
+  // direction — the above-marker callout bubble already shows the road
+  // name, this was a redundant duplicate.
   // ── Life360-style Check in / SOS pills, centered low on the map ──
   h+=`<div class="fam-map-cta">
     <button class="fam-cta" data-fam="live-checkin">${famIcon('check')}<span>${L==='fa'?'ثبت ورود':'Check in'}</span></button>
@@ -17543,6 +17554,23 @@ function famLiveApply(){
            || members[0];
   _famSelUid = sel?sel.uid:null;
   const myUid=FB.user&&FB.user.uid;
+  // v499 (REAL ROOT CAUSE of "screen still turns off sometimes" — found by
+  // reading the actual call graph, not guessed): famUpdateWakeLock() was
+  // ONLY ever called from famLiveView(), the one-time full-page render.
+  // famLiveApply() (this function — what actually runs on every GPS
+  // fix/tick while the screen stays open) never touched it. Ordinary
+  // sequence: open the Family screen BEFORE driving starts → full render
+  // fires with ownDriving=false → wake lock never requested. Driving then
+  // starts mid-session → every subsequent update goes through THIS
+  // function, which never re-checked ownDriving → wake lock stays
+  // unrequested for the entire drive. This exactly matches the
+  // intermittent "works sometimes, not others" pattern reported: it only
+  // ever worked when the app happened to be freshly opened WHILE already
+  // driving. Re-evaluate every tick so it can never miss a transition.
+  try{
+    const ownDrivingNow=!!(fb.driving&&myUid&&fb.driving.activeSession(myUid));
+    famUpdateWakeLock(ownDrivingNow);
+  }catch(e){}
   // 1) header
   const top=document.getElementById('fam-live-top'); if(top) top.innerHTML=famLiveHeaderHtml(sel);
   // 2) sheet body
@@ -18821,45 +18849,12 @@ function famLivePaintMarkers(members, sel){
         needleEl.style.transform='rotate('+(-MBMMap.currentHeading())+'deg)';
       }
     }catch(e){}
-    // v496: same fix, same reason, for the road-name bar (v493) — see the
-    // comment on the container element in famLiveView for the full story.
-    // Updated directly here every tick so it can never go stale or fail
-    // to clear when driving stops, instead of being frozen at whatever
-    // road was current during the last full page re-render.
-    try{
-      const roadbarEl=document.getElementById('fam-live-roadbar');
-      if(roadbarEl){
-        let roadText='';
-        if(sel.state.activityType==='driving' && typeof FamGeo!=='undefined' && FamGeo.getRoadNear){
-          const liveRoadForBar=FamGeo.getRoadNear(sel.state.lat,sel.state.lng);
-          if(liveRoadForBar && liveRoadForBar.road) roadText=liveRoadForBar.road;
-        }
-        const wasHidden=roadbarEl.style.display==='none'||!roadbarEl.style.display;
-        if(roadText){
-          roadbarEl.textContent=roadText; roadbarEl.style.display='';
-          // v496: measure the CTA row's REAL on-screen position (same
-          // lesson as v487's sheet-padding fix — don't guess a pixel
-          // offset that can silently drift out of sync with actual CSS)
-          // and sit exactly 12px above it, every tick.
-          try{
-            const ctaEl=document.querySelector('.fam-map-cta');
-            if(ctaEl){
-              const r=ctaEl.getBoundingClientRect();
-              const winH=window.innerHeight||780;
-              roadbarEl.style.bottom=Math.max(0,Math.round(winH-r.top))+12+'px';
-            }
-          }catch(e){}
-        } else { roadbarEl.style.display='none'; roadbarEl.textContent=''; }
-        // v499: the road bar toggling visible/hidden changes which element
-        // is topmost on screen — recompute the camera's clearance padding
-        // right now instead of waiting for the next sheet-drag event
-        // (which may never happen during an ordinary drive).
-        const isHiddenNow=roadbarEl.style.display==='none';
-        if(wasHidden!==isHiddenNow){
-          try{ famUpdateCameraPadding(famSheetHeights()[_famSheetDetent]); }catch(e){}
-        }
-      }
-    }catch(e){}
+    // v499: the bottom-panel road bar (v493/v496) was removed per Bahman's
+    // explicit direction — the road name already shows correctly in the
+    // above-marker callout bubble (.fam-callout), so this separate
+    // floating bar duplicated that info while also being the thing that
+    // needed special-case padding math. #fam-live-roadbar itself is no
+    // longer created (see famLiveView) so there is nothing to update here.
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
   }
