@@ -1358,11 +1358,10 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 /* v493: live road-name bar, fixed near the bottom of the map (matching
    Google Maps' own current-road label position), independent of the
    marker's on-screen position. Sits just above the Check-in/SOS row. */
-.fam-live-roadbar{position:absolute;left:16px;right:16px;z-index:1350;
-  bottom:calc(var(--fam-sheet-h, 30vh) + var(--fam-navclear) + 14px + 58px);
+.fam-live-roadbar{position:absolute;left:16px;right:78px;z-index:1350;
   background:#fff;color:#1967d2;font-weight:700;font-size:13px;text-align:center;
   border-radius:14px;padding:8px 14px;box-shadow:0 4px 14px rgba(0,0,0,.18);
-  pointer-events:none;transition:bottom .25s cubic-bezier(.2,.7,.2,1);
+  pointer-events:none;transition:bottom .15s linear;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* ── Life360 bottom navigation ── */
 .fam-bottomnav{position:absolute;left:0;right:0;bottom:0;z-index:1450;display:flex;background:var(--s1);border-top:1px solid var(--b1);padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px))}
@@ -1907,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v495';
+const APP_VERSION='v496';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17418,26 +17417,19 @@ function famLiveView(){
     h+=`<div class="fam-map-msg" id="fam-share-banner" style="top:auto;bottom:calc(40vh + 16px)">${L==='fa'?'موقعیت شما خاموش است — برای اشتراک بزنید':'Your location is off — tap to share'} 
       <button class="btn" data-fam="live-share-on" style="width:auto;padding:4px 10px;margin-inline-start:6px;font-size:12px;background:var(--fam-purple,#8652FF);color:#fff">${L==='fa'?'روشن':'Turn on'}</button></div>`;
   }
-  // v493 (CORRECTION to v490's misunderstanding, confirmed by re-examining
-  // Bahman's own Google Maps reference video frame-by-frame): the live
-  // road name ("National Highway 1") in Google Maps is NOT a callout
-  // bubble attached to/moving with the car marker — it's a FIXED text
-  // label near the bottom of the screen, independent of wherever the
-  // marker happens to be on screen. v490 built it as a marker-attached
-  // bubble, which is why Bahman kept saying it "wasn't there" — he was
-  // looking at the correct place (near the bottom), it just genuinely
-  // wasn't being drawn there. Shown only while the currently-followed
-  // member (sel) is actively driving with a real road resolved — same
-  // FamGeo.getRoadNear() data v488/v490 already compute, just displayed
-  // in the right screen location this time.
-  if(sel && sel.state && sel.state.activityType==='driving'){
-    try{
-      const liveRoadForBar=(typeof FamGeo!=='undefined'&&FamGeo.getRoadNear)?FamGeo.getRoadNear(sel.state.lat,sel.state.lng):null;
-      if(liveRoadForBar && liveRoadForBar.road){
-        h+=`<div class="fam-live-roadbar">${esc(liveRoadForBar.road)}</div>`;
-      }
-    }catch(e){}
-  }
+  // v496 (real bug found from Bahman's own video — same class as v485's
+  // needle-freeze fix): this element used to only be computed inside
+  // famLiveView()'s full-page render, which does NOT run on every tick —
+  // famLivePaintMarkers (the per-tick incremental path, confirmed
+  // already updating the list row and marker pill correctly) never
+  // touched it, so it froze on whatever road was current at the last
+  // FULL render and stayed stale through activity changes (Bahman's
+  // video: showed "Domain Highway" while the list row below had already
+  // correctly moved on to "Brooker Highway", and it didn't even clear
+  // when he got out and started walking). Always render the container
+  // (hidden by default); famLivePaintMarkers now updates its content
+  // and visibility directly every tick, exactly like the needle fix.
+  h+=`<div id="fam-live-roadbar" class="fam-live-roadbar" style="display:none"></div>`;
   // ── Life360-style Check in / SOS pills, centered low on the map ──
   h+=`<div class="fam-map-cta">
     <button class="fam-cta" data-fam="live-checkin">${famIcon('check')}<span>${L==='fa'?'ثبت ورود':'Check in'}</span></button>
@@ -18765,6 +18757,36 @@ function famLivePaintMarkers(members, sel){
       const needleEl=document.querySelector('[data-fam="live-compass-toggle"] span');
       if(needleEl && typeof MBMMap.currentHeading==='function'){
         needleEl.style.transform='rotate('+(-MBMMap.currentHeading())+'deg)';
+      }
+    }catch(e){}
+    // v496: same fix, same reason, for the road-name bar (v493) — see the
+    // comment on the container element in famLiveView for the full story.
+    // Updated directly here every tick so it can never go stale or fail
+    // to clear when driving stops, instead of being frozen at whatever
+    // road was current during the last full page re-render.
+    try{
+      const roadbarEl=document.getElementById('fam-live-roadbar');
+      if(roadbarEl){
+        let roadText='';
+        if(sel.state.activityType==='driving' && typeof FamGeo!=='undefined' && FamGeo.getRoadNear){
+          const liveRoadForBar=FamGeo.getRoadNear(sel.state.lat,sel.state.lng);
+          if(liveRoadForBar && liveRoadForBar.road) roadText=liveRoadForBar.road;
+        }
+        if(roadText){
+          roadbarEl.textContent=roadText; roadbarEl.style.display='';
+          // v496: measure the CTA row's REAL on-screen position (same
+          // lesson as v487's sheet-padding fix — don't guess a pixel
+          // offset that can silently drift out of sync with actual CSS)
+          // and sit exactly 12px above it, every tick.
+          try{
+            const ctaEl=document.querySelector('.fam-map-cta');
+            if(ctaEl){
+              const r=ctaEl.getBoundingClientRect();
+              const winH=window.innerHeight||780;
+              roadbarEl.style.bottom=Math.max(0,Math.round(winH-r.top))+12+'px';
+            }
+          }catch(e){}
+        } else { roadbarEl.style.display='none'; roadbarEl.textContent=''; }
       }
     }catch(e){}
   } else {
