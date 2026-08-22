@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v501';
+const APP_VERSION='v502';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -18226,7 +18226,20 @@ const FamGeo = (function(){
     for(const k in cache){
       const c=cache[k];
       if(!c.road) continue;
-      if((Date.now()-c.ts)>=TTL) continue;
+      // v502 (REAL ROOT CAUSE, confirmed by Bahman: parked on William Cooper
+      // Dr "for a long time" but the road bar stuck on "Augusta Road" the
+      // whole time): this used the full 6-HOUR TTL, not the tight
+      // STICK_TTL (3min) that findNearby() above was specifically bugfixed
+      // to use for the exact same reason ("proximity alone does not mean
+      // the same visit once meaningful time has passed" — see that
+      // comment). An hours-old geocode from a completely different pass
+      // through the area, merely within 900m, could keep winning over the
+      // correct current road indefinitely — including while genuinely
+      // stationary, since being stationary doesn't stop an old distant-in-
+      // time cache entry from still being the "closest" match. Now uses
+      // the same tight STICK_TTL so a stale result expires in minutes, not
+      // hours, exactly like the region/general lookup already does.
+      if((Date.now()-c.ts)>=STICK_TTL) continue;
       if(c.lat==null||c.lng==null) continue;
       const d=haversineM(lat,lng,c.lat,c.lng);
       if(d<=ROAD_STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
