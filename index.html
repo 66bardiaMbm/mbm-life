@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v502';
+const APP_VERSION='v504';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11196,6 +11196,58 @@ const FamilyBackend = (function(){
     }catch(e){}
   }
   function diagHistoryGet(){ return _diagHistory.slice(); }
+  // v504 (diagnostic-only, zero behavior change): dedicated buffer for
+  // tracing the exact point where the big marker's position diverges from
+  // the accepted/DB state during a stop — requested after a real report of
+  // the marker sitting several dozen meters from the small accuracy-circle
+  // dot at 15 William Cooper Drive.
+  //
+  // v504c (Codex review correction, second pass): v504b still wrote the
+  // FULL buffer to localStorage periodically (every 10s) and on opening
+  // Diagnostics. Measured cost for a realistic 6000-record buffer: ~1.06MB
+  // JSON, 5-20ms for JSON.stringify+setItem even against an in-memory mock
+  // with NO real disk I/O (real Android WebView localStorage is
+  // SQLite/LevelDB-backed — genuinely slower, this mock number is a lower
+  // bound, not an upper bound). That's close enough to a 16ms frame budget
+  // to risk visibly affecting the exact timing being measured, and it's
+  // also unclear whether it fits remaining quota alongside everything else
+  // this app already stores. Rather than argue the risk is small, it's
+  // removed entirely: this buffer is PURE RAM, with NO localStorage
+  // read/write anywhere in this module. Persistence exists only via the
+  // explicit Export button, which builds a downloadable .json file via
+  // Blob (same pattern as drvExportDiagnostics elsewhere in this file) —
+  // that path never touches localStorage or its quota at all. Trade-off,
+  // stated plainly: if the app is closed/killed before Export is tapped,
+  // the trace is lost. Export before backgrounding the app.
+  //
+  // Capacity: dead-reckoning ticks at 5/s contribute ≤1 event each
+  // (drtick_skip or drtick_computed). Each real fix (~1/s while driving)
+  // contributes up to 6 more (native_raw_vs_accepted, paint_selected_
+  // member, drfix_updated, setMarker_called, marker_anim_start,
+  // marker_anim_end). Combined ≈11 events/s. RAM-only, so the cap can be
+  // generous: 6000 slots ≈ 9 minutes at that rate — a plain in-memory
+  // array of this size costs no measurable overhead just sitting there
+  // (the cost measured above was JSON.stringify + localStorage.setItem,
+  // neither of which happens anymore except once, on explicit Export).
+  const _pipelineHistory=[];
+  let _pipelineHistorySeq=0;
+  const PIPELINE_HISTORY_MAX=6000;
+  function pipelineHistoryPush(source,data){
+    try{
+      _pipelineHistorySeq++;
+      // t/seq are wall-clock/ordering only — data should carry fixId/
+      // animationId/tickId (added at each call site) so events belonging
+      // to the SAME underlying fix/animation/tick can be grouped, since
+      // seq alone only proves ordering, not which events are related.
+      _pipelineHistory.push(Object.assign({t:Date.now(),seq:_pipelineHistorySeq,source:source},data));
+      if(_pipelineHistory.length>PIPELINE_HISTORY_MAX) _pipelineHistory.shift();
+    }catch(e){}
+  }
+  function pipelineHistoryGet(){ return _pipelineHistory.slice(); }
+  function pipelineHistoryClear(){ _pipelineHistory.length=0; }
+  window.pipelineHistoryPush=pipelineHistoryPush;
+  window.pipelineHistoryGet=pipelineHistoryGet;
+  window.pipelineHistoryClear=pipelineHistoryClear;
   // v462: presence state-machine transitions (leaving/away/steady) are RARE
   // (at most a handful per day) but the shared _diagHistory ring buffer is
   // dominated by raw_fix entries (many per minute while active) — a
@@ -12048,6 +12100,13 @@ _presenceHistory.map(e=>e.seq||0)):0);
           positionTrusted:positionTrusted,
           rawHeading:(raw.heading!=null&&!isNaN(raw.heading))?raw.heading:null,
           capturedAt:next.capturedAt,fixId:next.nativeFixId,presenceState:next._presence&&next._presence.state});
+        // v504 (diagnostic-only): same data, mirrored into the dedicated
+        // pipeline-tracing buffer so it sits alongside the marker/camera
+        // entries in one consolidated view instead of a separate panel.
+        try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('native_raw_vs_accepted',{
+          rawLat:raw.lat,rawLng:raw.lng,rawAccuracy:raw.accuracy,
+          acceptedLat:next.lat,acceptedLng:next.lng,acceptedAccuracy:next.accuracy,
+          positionTrusted:positionTrusted, movingFlag:next.moving, fixId:next.nativeFixId }); }catch(e){}
       }
       afterChange();
       return true;
@@ -14333,6 +14392,66 @@ function famDiagView(){
           ${rt==='RASTER'?`<div style="color:#f43f5e;margin-top:4px">Rotation CANNOT work while this is RASTER — fix in Cloud Console (Map Management → Map ID 9b7b8a3f4bc483801e0cd717 → Map type → Vector), not in code.</div>`:''}
         </div>`;
       })()}
+    </div>
+    <div style="margin-top:16px">
+      <div style="font-weight:700;font-size:12px;margin:12px 0 6px">PIPELINE TRACE (v504, diagnostic-only)</div>
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:6px">${L==='fa'?'ردیابیِ خطِ کاملِ مختصات — native/accepted/moving/activeSession/_drFix/dead-reckoning/setMarker/setAccuracy/انیمیشن — همه با یه seq مشترک، مرتب‌شده بر اساس زمان.':'Full coordinate-pipeline trace — native/accepted/moving/activeSession/_drFix/dead-reckoning/setMarker/setAccuracy/animation — all sharing one seq, time-ordered.'}</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button class="btn btn-ghost" data-fam="pipeline-export" style="flex:1">${L==='fa'?'خروجیِ JSON کامل':'Export full JSON'}</button>
+        <button class="btn btn-ghost" data-fam="pipeline-clear" style="flex:1">${L==='fa'?'پاک‌کردنِ لاگ':'Clear log'}</button>
+      </div>
+      <div style="font-size:10px;color:var(--ink3);margin-bottom:8px">${L==='fa'?`${(typeof pipelineHistoryGet==='function'?pipelineHistoryGet().length:0)} رکورد در حافظه — پنل فقط ۱۵۰تای آخر رو نشون می‌ده، خروجیِ JSON همه رو داره.`:`${(typeof pipelineHistoryGet==='function'?pipelineHistoryGet().length:0)} records in memory — this panel shows only the last 150; Export JSON has everything.`}</div>
+      <div style="font-family:monospace;font-size:9.5px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px;max-height:420px;overflow-y:auto">
+        ${(()=>{
+          const entries=(typeof pipelineHistoryGet==='function')?pipelineHistoryGet():[];
+          if(!entries.length) return '<div>no pipeline entries recorded yet — this fills up once you view a moving/driving member on the Family map</div>';
+          const recent=entries.slice(-150).reverse();
+          return recent.map(e=>{
+            const time=new Date(e.t).toTimeString().slice(0,8)+'.'+String(e.t%1000).padStart(3,'0');
+            let line='';
+            switch(e.source){
+              case 'native_raw_vs_accepted':
+                line=`raw ${e.rawLat!=null?e.rawLat.toFixed(6):'—'},${e.rawLng!=null?e.rawLng.toFixed(6):'—'} ±${e.rawAccuracy!=null?Math.round(e.rawAccuracy):'?'}m → accepted ${e.acceptedLat.toFixed(6)},${e.acceptedLng.toFixed(6)}${e.positionTrusted?'':' <b style="color:#f59e0b">(gated!)</b>'} · moving=${e.movingFlag}`;
+                break;
+              case 'paint_selected_member':
+                line=`accepted=${e.acceptedLat.toFixed(6)},${e.acceptedLng.toFixed(6)} · moving=${e.moving} · activeSession=${e.activeSessionExists} · setMarker→${e.setMarkerCalledWithLat.toFixed(6)},${e.setMarkerCalledWithLng.toFixed(6)}`;
+                break;
+              case 'drfix_updated':
+                line=`_drFix SET lat=${e.lat.toFixed(6)} lng=${e.lng.toFixed(6)} speedMps=${e.speedMps} headingDeg=${e.headingDeg}`;
+                break;
+              case 'drfix_cleared':
+                line=`<b style="color:#f43f5e">_drFix CLEARED</b> (was lat=${e.lastLat.toFixed(6)} lng=${e.lastLng.toFixed(6)}, age at clear=${e.ageAtClearMs}ms)`;
+                break;
+              case 'drtick_skip':
+                line=`drtick SKIPPED — enabled=${e.deadReckoningEnabled} drivingMode=${e.drivingMode} follow=${e.follow} pausedByGesture=${e.pausedByGesture} hasDrFix=${e.hasDrFix}${e.drFixAgeMs!=null?' drFixAge='+e.drFixAgeMs+'ms':''}`;
+                break;
+              case 'drtick_computed':
+                line=`<b>drtick</b> _drFix(age=${e.drFixAgeMs}ms, speed=${e.drFixSpeedMps}, hdg=${e.drFixHeadingDeg}) @ ${e.drFixLat.toFixed(6)},${e.drFixLng.toFixed(6)} → target ${e.targetLat.toFixed(6)},${e.targetLng.toFixed(6)} · syncCb=${e.syncCbRegistered}(uid:${esc(e.syncCbUid||'—')})`;
+                break;
+              case 'drsync_register':
+                line=e.registering?`drSyncCb <b style="color:#22c55e">REGISTERED</b> for uid=${esc(e.uid||'—')}`:`drSyncCb <b style="color:#f59e0b">CLEARED</b>`;
+                break;
+              case 'setMarker_called':
+                line=`setMarker(uid=${esc(e.uid)}) ← ${e.lat.toFixed(6)},${e.lng.toFixed(6)} moving=${e.moving}`;
+                break;
+              case 'setAccuracy_called':
+                line=`setAccuracy ← ${e.lat.toFixed(6)},${e.lng.toFixed(6)} ±${e.meters}m approx=${e.approx}`;
+                break;
+              case 'marker_anim_start':
+                line=`animateMarker(uid=${esc(e.uid)}) from ${e.fromLat.toFixed(6)},${e.fromLng.toFixed(6)} → to ${e.toLat.toFixed(6)},${e.toLng.toFixed(6)} willSnap=${e.willSnap}${e.cancelledPriorAnim?' <b style="color:#f59e0b">(cancelled prior anim!)</b>':''}`;
+                break;
+              case 'marker_snap':
+                line=`marker SNAPPED → ${e.lat.toFixed(6)},${e.lng.toFixed(6)}`;
+                break;
+              case 'marker_anim_end':
+                line=`marker anim ENDED, rendered at ${e.renderedLat.toFixed(6)},${e.renderedLng.toFixed(6)}`;
+                break;
+              default: line=JSON.stringify(e);
+            }
+            return `<div>${time} #${e.seq} · <b>${esc(e.source)}</b> · ${line}</div>`;
+          }).join('');
+        })()}
+      </div>
     </div>`;
   }
   h+=`<div style="font-size:13px;color:var(--ink3);margin-bottom:12px">${L==='fa'?'این صفحه چند نوشتن واقعی و ایزوله روی Firestore انجام می‌دهد و نتیجهٔ دقیق هرکدام را نشان می‌دهد. هیچ حدسی زده نمی‌شود.':'This runs real, isolated Firestore probes and shows the exact result of each. No guessing.'}</div>`;
@@ -16386,6 +16505,10 @@ const MBMMap = (function(){
 
   function hasMarker(uid){ return !!_markers[uid]; }
   function markerLatLng(uid){ const p=_markerPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
+  // v504 (diagnostic-only): markerLatLng above reports the last COMMANDED
+  // target, not where the marker is actually drawn right now mid-tween —
+  // this exposes the real visual position for pipeline tracing.
+  function markerRenderPos(uid){ const p=_markerRenderPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
 
   /* Smooth eased glide of an existing marker to a new position — GPS drives
      this on every valid callback, never waiting on Firestore. */
@@ -16397,9 +16520,13 @@ const MBMMap = (function(){
      teleported the marker from mid-path to the previous target before the new
      tween began — the visible "jumping" while driving. The animation now
      always resumes from the real current visual position. ── */
+  let _animIdSeq=0; const _animIds={}; // uid -> current animationId, diagnostic-only
   function animateMarker(uid, to){
     const mk=_markers[uid]; if(!mk) return;
+    const wasAnimating=!!_animTimers[uid];
+    const cancelledAnimId=wasAnimating?_animIds[uid]:null;
     if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
+    _animIdSeq++; const animationId=_animIdSeq; _animIds[uid]=animationId;
     // Resume from where the marker VISUALLY is, not from the last target.
     const from=_markerRenderPos[uid]||_markerPos[uid]||to;
     // v457 FIX (Codex review): was logging only the commanded target `to`
@@ -16417,6 +16544,19 @@ const MBMMap = (function(){
           fromLat:from[0],fromLng:from[1],lat:to[0],lng:to[1],
           willSnap:distDeg>0.05});
       }
+      // v504 (diagnostic-only): mirrored into the dedicated pipeline buffer,
+      // for ANY uid being viewed (not just self) — the reported bug was
+      // while looking at a SELECTED member on the family map, which may or
+      // may not be the local user. Also records whether this call
+      // cancelled an in-flight animation (with that animation's own ID,
+      // for correlation), since a cancel-and-restart loop is itself a
+      // plausible source of visible drift/lag.
+      if(typeof window.pipelineHistoryPush==='function'){
+        const distDeg2=Math.abs(to[0]-from[0])+Math.abs(to[1]-from[1]);
+        window.pipelineHistoryPush('marker_anim_start',{uid,animationId,
+          fromLat:from[0],fromLng:from[1],toLat:to[0],toLng:to[1],
+          willSnap:distDeg2>0.05, cancelledPriorAnim:wasAnimating, cancelledAnimId});
+      }
     }catch(e){}
     _markerPos[uid]=to;                       // target (what markerLatLng reports as commanded)
     const dLat=to[0]-from[0], dLng=to[1]-from[1];
@@ -16427,6 +16567,7 @@ const MBMMap = (function(){
     if(dist>0.05){
       _markerRenderPos[uid]=to;
       try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+      try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_snap',{uid,animationId,lat:to[0],lng:to[1]}); }catch(e){}
       return;
     }
     const steps=18; let i=0;
@@ -16439,6 +16580,7 @@ const MBMMap = (function(){
         clearInterval(_animTimers[uid]); _animTimers[uid]=null;
         _markerRenderPos[uid]=to;
         try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+        try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_anim_end',{uid,animationId,renderedLat:to[0],renderedLng:to[1]}); }catch(e){}
       }
     },16);
   }
@@ -16544,6 +16686,7 @@ const MBMMap = (function(){
   function setMarker(uid, latlng, meta, selected, tone, onClick){
     if(!_map) return;
     meta=meta||{};
+    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('setMarker_called',{uid,fixId:meta.fixId,lat:latlng[0],lng:latlng[1],moving:!!meta.moving}); }catch(e){}
     // Selection/tone classes live on the OUTER wrapper's inner .fam-pin div,
     // set via a wrapperCls we apply after innerHTML — pinHtml always returns
     // callout+pin as one unit rooted at fam-pin-wrap.
@@ -16628,10 +16771,11 @@ const MBMMap = (function(){
   }
   function clearArrivedBubble(){ if(_arrivedAnchorMarker){ try{ _arrivedAnchorMarker.map=null; if(_arrivedAnchorMarker.setMap)_arrivedAnchorMarker.setMap(null); }catch(e){} _arrivedAnchorMarker=null; } }
 
-  function setAccuracy(latlng, meters, approx){
+  function setAccuracy(latlng, meters, approx, fixId){
     if(!_map) return;
     if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} _accCircle=null; }
     if(meters==null||latlng==null) return;
+    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('setAccuracy_called',{fixId,lat:latlng[0],lng:latlng[1],meters,approx:!!approx}); }catch(e){}
     try{
       const g=window.google.maps;
       _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
@@ -16780,7 +16924,7 @@ const MBMMap = (function(){
   function renderingType(){ return _renderingType; } // v473
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            setCamera, cancelCameraAnimation,
-           hasMarker, markerLatLng, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
+           hasMarker, markerLatLng, markerRenderPos, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
            setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading, renderingType,
            resetHeadingToNorth, currentHeading, isRotatedAwayFromNorth };
@@ -16858,12 +17002,13 @@ const FamilyMapCamera=(function(){
     if(opts.follow===true){follow=true;pausedByGesture=false;}
     apply(!!opts.force,'request');
   }
-  function requestDriving(pos,speedMps,accuracyM,headingDeg){
+  function requestDriving(pos,speedMps,accuracyM,headingDeg,fixId){
     if(!pos||pos[0]==null||pos[1]==null)return;
     // v466: capture the real fix as the dead-reckoning baseline every time
     // one arrives — this is what keeps extrapolation error bounded, since
     // it's always reset to a fresh real point rather than compounding.
-    _drFix={lat:pos[0],lng:pos[1],speedMps,headingDeg:(headingDeg!=null&&!isNaN(headingDeg))?headingDeg:null,atMs:Date.now()};
+    _drFix={lat:pos[0],lng:pos[1],speedMps,headingDeg:(headingDeg!=null&&!isNaN(headingDeg))?headingDeg:null,atMs:Date.now(),fixId};
+    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drfix_updated',{fixId,lat:pos[0],lng:pos[1],speedMps,headingDeg,accuracyM}); }catch(e){}
     _drStart();
     // v407: pass the CURRENT zoom so drivingZoomFor can apply hysteresis
     // instead of recomputing from a single hard threshold on every fix.
@@ -17012,21 +17157,49 @@ const FamilyMapCamera=(function(){
   let _deadReckoningEnabled=true; // v486: back on, now that marker sync closes the real gap
   function setDeadReckoningEnabled(on){ _deadReckoningEnabled=!!on; if(!on) _drStop(); }
   let _drSyncCb=null;
-  function setDeadReckonMarkerSync(fn){ _drSyncCb=fn; }
-  let _drFix=null, _drTimer=null;
+  let _drSyncCbUid=null; // diagnostic only — which uid the callback is currently wired to
+  function setDeadReckonMarkerSync(fn,uidForDiag){
+    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drsync_register',{uid:uidForDiag||null, registering:!!fn}); }catch(e){}
+    _drSyncCb=fn; _drSyncCbUid=fn?(uidForDiag||null):null;
+  }
+  let _drFix=null, _drTimer=null, _drTickIdSeq=0;
+  // v504 (diagnostic-only accessor): _drFix was entirely private before —
+  // this exposes its current value plus age so the exact moment it goes
+  // stale/null can be seen directly rather than inferred.
+  function drFixDiag(){
+    if(!_drFix) return null;
+    return { lat:_drFix.lat, lng:_drFix.lng, speedMps:_drFix.speedMps, headingDeg:_drFix.headingDeg,
+             atMs:_drFix.atMs, ageMs:Date.now()-_drFix.atMs, fixId:_drFix.fixId };
+  }
   function _drTick(){
     _drTimer=null;
-    if(!_deadReckoningEnabled||!drivingMode||!follow||pausedByGesture||!_drFix) return;
+    _drTickIdSeq++;
+    const tickId=_drTickIdSeq;
+    if(!_deadReckoningEnabled||!drivingMode||!follow||pausedByGesture||!_drFix){
+      try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drtick_skip',{
+        tickId, deadReckoningEnabled:_deadReckoningEnabled, drivingMode, follow, pausedByGesture, hasDrFix:!!_drFix,
+        drFixFixId:_drFix?_drFix.fixId:null, drFixAgeMs:_drFix?(Date.now()-_drFix.atMs):null }); }catch(e){}
+      return;
+    }
     const pos=deadReckonPosition(_drFix,Date.now());
     if(pos){
+      try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drtick_computed',{
+        tickId, drFixFixId:_drFix.fixId,
+        drFixLat:_drFix.lat, drFixLng:_drFix.lng, drFixSpeedMps:_drFix.speedMps, drFixHeadingDeg:_drFix.headingDeg,
+        drFixAgeMs:Date.now()-_drFix.atMs, targetLat:pos.lat, targetLng:pos.lng,
+        syncCbRegistered:!!_drSyncCb, syncCbUid:_drSyncCbUid }); }catch(e){}
       lastTarget=[pos.lat,pos.lng]; apply(false,'dead-reckoning');
-      if(_drSyncCb){ try{ _drSyncCb(pos); }catch(e){} }
+      if(_drSyncCb){ try{ _drSyncCb(pos,tickId); }catch(e){} }
     }
     _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS);
   }
   function _drStart(){ if(_deadReckoningEnabled && _drTimer==null) _drTimer=setTimeout(_drTick,DEAD_RECKON_UPDATE_MS); }
-  function _drStop(){ if(_drTimer!=null){ clearTimeout(_drTimer); _drTimer=null; } _drFix=null; }
-  function drivingState(session,pos,speedMps,accuracyM){
+  function _drStop(){
+    if(_drTimer!=null){ clearTimeout(_drTimer); _drTimer=null; }
+    try{ if(_drFix && typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drfix_cleared',{lastLat:_drFix.lat,lastLng:_drFix.lng,ageAtClearMs:Date.now()-_drFix.atMs}); }catch(e){}
+    _drFix=null;
+  }
+  function drivingState(session,pos,speedMps,accuracyM,fixId){
     const id=session&&session.id||null;
     if(id&&id!==activeDriveId){
       activeDriveId=id;
@@ -17039,7 +17212,7 @@ const FamilyMapCamera=(function(){
     }else if(id){
       // requestDriving updates lastTarget even during the temporary
       // gesture-pause, but only moves the camera when follow is active.
-      requestDriving(pos,speedMps,accuracyM);
+      requestDriving(pos,speedMps,accuracyM,undefined,fixId);
     }else if(!id){
       activeDriveId=null;
       drivingMode=false;
@@ -17054,7 +17227,7 @@ const FamilyMapCamera=(function(){
     MBMMap.cancelCameraAnimation();
   }
   function state(){return {follow,pausedByGesture,lastTarget:lastTarget&&lastTarget.slice(),lastZoom,activeDriveId,drivingMode};}
-  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition,setDeadReckoningEnabled,setDeadReckonMarkerSync};
+  return {request,requestDriving,fit,pauseByGesture,resume,setPadding,drivingState,reset,state,drivingZoomFor,deadReckonPosition,setDeadReckoningEnabled,setDeadReckonMarkerSync,drFixDiag};
 })();
 
 /* ── Clean inline-SVG icon set (replaces emoji in the Live map controls +
@@ -18319,13 +18492,6 @@ const FamGeo = (function(){
       const job = queue.shift(); if(!job){ return; }
       lastCall = Date.now();
       const k=job.key;
-      // Staleness guard: record which fixId is "in flight" for this cell key
-      // at send time. If a NEWER request for the same key gets enqueued
-      // before this one's response arrives (pending[k] would already be
-      // cleared and re-set by a fresh request() call), inflight[k] will no
-      // longer equal job.fixId when the response lands — in that case this
-      // response is for a fix that is no longer the accepted one, and it
-      // must be discarded rather than written to cache.
       inflight[k]=job.fixId;
       const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
       const requestedAt=Date.now();
@@ -18769,6 +18935,21 @@ function famLivePaintMarkers(members, sel){
               try{ reconcileGuards(); }catch(e){}
               famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} };
       MBMMap.setMarker(key,[m.state.lat,m.state.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick);
+      // v504 (diagnostic-only): full per-paint snapshot for the SELECTED
+      // member specifically — accepted/DB state, the "moving" flag, and
+      // whether an active driving session exists for them right now. Pure
+      // logging; none of this changes what gets rendered.
+      if(sel && m.uid===sel.uid){
+        try{
+          const engDiag=(typeof FamilyBackend!=='undefined')?FamilyBackend.driving:null;
+          const activeDiag=engDiag?engDiag.activeSession(sel.uid):null;
+          if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('paint_selected_member',{
+            uid:m.uid, fixId:m.state.nativeFixId, acceptedLat:m.state.lat, acceptedLng:m.state.lng,
+            moving:!!m.state.moving, activeSessionExists:!!activeDiag,
+            setMarkerCalledWithLat:m.state.lat, setMarkerCalledWithLng:m.state.lng
+          });
+        }catch(e){}
+      }
       // v486: register (or clear) the dead-reckoning marker-sync callback
       // for whichever member this paint pass is actually following while
       // driving — every extrapolation tick then repaints THIS marker at
@@ -18779,9 +18960,12 @@ function famLivePaintMarkers(members, sel){
       // every non-followed member and whenever this member isn't actively
       // driving, so a stale callback can never move the wrong pin.
       if(sel && m.uid===sel.uid && m.state.moving){
-        FamilyMapCamera.setDeadReckonMarkerSync((pos)=>{
-          try{ MBMMap.setMarker(key,[pos.lat,pos.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick); }catch(e){}
-        });
+        FamilyMapCamera.setDeadReckonMarkerSync((pos,tickId)=>{
+          try{
+            if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drsync_marker_update',{uid:m.uid,tickId,lat:pos.lat,lng:pos.lng});
+            MBMMap.setMarker(key,[pos.lat,pos.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick);
+          }catch(e){}
+        }, key);
       }
     } else {
       // merged cluster bubble at the group's centroid of real fixes
@@ -18823,7 +19007,7 @@ function famLivePaintMarkers(members, sel){
     // History/Driving. We clear any existing route so the live screen matches.
     MBMMap.drawRoute(null);
     const acc=famAccuracyInfo(sel.state.accuracy);
-    MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx);
+    MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx, sel.state.nativeFixId);
     // ── FEATURE 1: real directional heading cone. Only when the selected
     //    member is genuinely moving AND the device reported a real heading. ──
     if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
@@ -18888,7 +19072,8 @@ function famLivePaintMarkers(members, sel){
         activeForCam,
         [sel.state.lat,sel.state.lng],
         sel.state.speed,
-        sel.state.accuracy
+        sel.state.accuracy,
+        sel.state.nativeFixId
       );
     }else{
       FamilyMapCamera.drivingState(null,null);
@@ -20032,6 +20217,29 @@ async function famAction(act,arg,ev){
     }
     case 'diag-run': famRunDiagnostics(); return;
     case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
+    case 'pipeline-clear':{ if(typeof pipelineHistoryClear==='function') pipelineHistoryClear(); render(); return; }
+    case 'pipeline-export':{
+      try{
+        const entries=(typeof pipelineHistoryGet==='function')?pipelineHistoryGet():[];
+        const json=JSON.stringify(entries,null,2);
+        // File download instead of clipboard — a large JSON payload (this
+        // buffer can be >1MB) risks silent truncation or outright failure
+        // via navigator.clipboard.writeText on some WebViews. Same
+        // Blob+anchor-download pattern as drvExportDiagnostics elsewhere
+        // in this file; never touches localStorage or its quota.
+        const blob=new Blob([json],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url; a.download=`mbm-pipeline-trace-${Date.now()}.json`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),5000);
+        toast(L==='fa'?`فایل با ${entries.length} رکورد دانلود شد`:`Downloaded file with ${entries.length} records`);
+      }catch(e){
+        console.error('[pipeline-export] download failed',e);
+        toast(L==='fa'?'دانلود ناموفق — جزئیات در کنسول':'Download failed — see console for details');
+      }
+      return;
+    }
     // ── Family Live actions (Phase 2) ──
     case 'live-back': famExitToHub(); return;
     case 'live-sel': _famSelUid=arg; _famLastCentredUid=null; if(typeof famLiveApply==='function')famLiveApply(); else render(); try{ famEnsureSheetVisible(); }catch(e){} return;
