@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v504';
+const APP_VERSION='v505';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11273,7 +11273,20 @@ const FamilyBackend = (function(){
       return Array.isArray(parsed)?parsed:[];
     }catch(e){ return []; }
   })();
-  const PRESENCE_HISTORY_MAX=40;
+  // v505 (Codex review correction): PRESENCE_HISTORY_MAX=40 was far too
+  // small — hereSince_arrival_eval, previously sharing this SAME buffer,
+  // fires on every render of a stationary member (many times per minute)
+  // and evicted the genuinely rare, decisive events (leaving_started,
+  // departure_confirmed, arrival_confirmed, leaving_reverted_snapback)
+  // within minutes. Fixed by SEPARATING them, not just enlarging one
+  // shared buffer: this buffer now holds ONLY the rare/decisive events —
+  // real state transitions, real stayStart source handoffs/conflicts, and
+  // hereSince() OUTCOME CHANGES (not every evaluation). At true rare-event
+  // frequency (a handful per day, not per render), persisting each one is
+  // cheap — measured, not assumed; see the test harness accompanying this
+  // change for the actual before/after numbers. Capacity raised to 500,
+  // which at real-world transition rates covers many days, not minutes.
+  const PRESENCE_HISTORY_MAX=500;
   let _presenceHistorySeq=(_presenceHistory.length?Math.max(...
 _presenceHistory.map(e=>e.seq||0)):0);
   function _presenceHistorySave(){
@@ -11288,8 +11301,67 @@ _presenceHistory.map(e=>e.seq||0)):0);
     }catch(e){}
   }
   function presenceHistoryGet(){ return _presenceHistory.slice(); }
+  function presenceHistoryClear(){ _presenceHistory.length=0; try{ localStorage.setItem(PRESENCE_HISTORY_KEY,'[]'); }catch(e){} }
   window.presenceHistoryPush=presenceHistoryPush;
   window.presenceHistoryGet=presenceHistoryGet;
+  window.presenceHistoryClear=presenceHistoryClear;
+
+  // v505: SEPARATE, RAM-only buffer for the high-frequency hereSince()
+  // evaluation log — never touches localStorage, exactly the lesson
+  // already learned and applied to PIPELINE TRACE. Large cap since RAM is
+  // cheap and this fires often; sized to comfortably outlast a very long
+  // viewing session (see capacity test).
+  const HERESINCE_EVAL_HISTORY_MAX=8000;
+  const _hereSinceEvalHistory=[];
+  let _hereSinceEvalSeq=0;
+  const _hereSinceLastResult={}; // uid -> last {source,time} returned, for dedup/change-detection only
+  function hereSinceEvalHistoryPush(uid,data){
+    try{
+      _hereSinceEvalSeq++;
+      _hereSinceEvalHistory.push(Object.assign({t:Date.now(),seq:_hereSinceEvalSeq,uid},data));
+      if(_hereSinceEvalHistory.length>HERESINCE_EVAL_HISTORY_MAX) _hereSinceEvalHistory.shift();
+    }catch(e){}
+  }
+  function hereSinceEvalHistoryGet(){ return _hereSinceEvalHistory.slice(); }
+  function hereSinceEvalHistoryClear(){ _hereSinceEvalHistory.length=0; }
+  window.hereSinceEvalHistoryGet=hereSinceEvalHistoryGet;
+  window.hereSinceEvalHistoryClear=hereSinceEvalHistoryClear;
+  // Called on EVERY hereSince() evaluation (unconditional, RAM-only, cheap)
+  // — but only PROMOTES to the persisted rare-event buffer above when the
+  // actual selected source/time genuinely changed since the last call for
+  // this uid. This is what "decisive" means here: a real handoff between
+  // candidates, not a repeat of the same answer.
+  function hereSinceEvalRecord(uid,selectedSource,selectedTime,branchReason,extra){
+    try{
+      hereSinceEvalHistoryPush(uid,Object.assign({selectedSource,selectedTime,branchReason},extra));
+      const last=_hereSinceLastResult[uid];
+      const changed=!last||last.selectedSource!==selectedSource||last.selectedTime!==selectedTime;
+      if(changed){
+        presenceHistoryPush('hereSince_selection_changed',Object.assign({uid,
+          prevSelectedSource:last?last.selectedSource:null, prevSelectedTime:last?last.selectedTime:null,
+          newSelectedSource:selectedSource, newSelectedTime:selectedTime, branchReason},extra));
+        _hereSinceLastResult[uid]={selectedSource,selectedTime};
+      }
+    }catch(e){}
+  }
+  window.hereSinceEvalRecord=hereSinceEvalRecord;
+
+  // v505: presence-source (native vs JS-derived stayStart) conflict log —
+  // dedup'd the same way: only a genuine change/disagreement since the
+  // last call for this uid is promoted to the persisted rare-event buffer.
+  const _presenceSourceLast={};
+  function presenceSourceHistoryPush(uid,data){
+    try{
+      const last=_presenceSourceLast[uid];
+      const changed=!last||last.trustedStay!==data.trustedStay||last.nativeStayStart!==data.nativeStayStart||last.jsStayStart!==data.jsStayStart;
+      if(changed){
+        presenceHistoryPush('stayStart_source',Object.assign({uid,
+          prevNativeStayStart:last?last.nativeStayStart:undefined, prevJsStayStart:last?last.jsStayStart:undefined, prevTrustedStay:last?last.trustedStay:undefined},data));
+        _presenceSourceLast[uid]=data;
+      }
+    }catch(e){}
+  }
+  window.presenceSourceHistoryPush=presenceSourceHistoryPush;
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
   // earlier this session with myUid()/FamilyLocation. Exposing on window,
@@ -11697,7 +11769,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
         // but do NOT clear stayStart yet: a single noisy fix must not undo
         // an otherwise-confirmed stay. Real departure is confirmed only if
         // accepted fixes keep reporting "away" for AWAY_CONFIRM_MS.
-        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_started',{uid,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,stayStart:prev.stayStart});
+        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_started',{uid,fixId:fix.fixId||null,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,stateBefore:'steady',stateAfter:'leaving',stayStartBefore:prev.stayStart,stayStartAfter:prev.stayStart});
         return {
           moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11722,7 +11794,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
           const backGapMs=priorFixGapMs!=null?priorFixGapMs:Infinity;
           const isCloseBackFollowUp=backGapMs<=FIX_CADENCE_CREDIT_CAP_MS;
           if(dFromBack>=STEADY_RADIUS_M || !isCloseBackFollowUp || presence.backSince==null){
-            if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_snapback_candidate',{uid,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy});
+            if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_snapback_candidate',{uid,fixId:fix.fixId||null,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,stateBefore:'leaving',stateAfter:'leaving',stayStartBefore:prev.stayStart,stayStartAfter:prev.stayStart});
             return {
               moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
               lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11733,7 +11805,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
           if(backAccum>=LEAVING_REVERT_CONFIRM_MS){
             // Sustained return confirmed — genuinely back near the anchor,
             // not noise. Return to steady at the SAME anchor/stayStart.
-            if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_reverted_snapback',{uid,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,leavingSinceWasMsAgo:Date.parse(nowAt)-Date.parse(presence.since),stayStart:prev.stayStart,confirmedOverMs:backAccum});
+            if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('leaving_reverted_snapback',{uid,fixId:fix.fixId||null,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,distanceM:Math.round(dFromAnchor),radiusM:Math.round(radius),accuracy:fix.accuracy,leavingSinceWasMsAgo:Date.parse(nowAt)-Date.parse(presence.since),stateBefore:'leaving',stateAfter:'steady',stayStartBefore:prev.stayStart,stayStartAfter:prev.stayStart,confirmedOverMs:backAccum});
             return {
               moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
               lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11761,7 +11833,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
             currentCoord:{lat:fix.lat,lng:fix.lng},
             distanceM:dFromAnchor, oldStayStart:prev.stayStart, newStayStart:null
           });
-          if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('departure_confirmed',{uid,oldAnchorLat:presence.anchorLat,oldAnchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,oldStayStart:prev.stayStart,leavingDurationMs:awayMs});
+          if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('departure_confirmed',{uid,fixId:fix.fixId||null,oldAnchorLat:presence.anchorLat,oldAnchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,stateBefore:'leaving',stateAfter:'away',stayStartBefore:prev.stayStart,stayStartAfter:null,leavingDurationMs:awayMs});
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.since, priorFixGapMs,
@@ -11857,7 +11929,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
           lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
           source:fix.source||'gps'
         });
-        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('arrival_confirmed',{uid,newAnchorLat:presence.candidateLat,newAnchorLng:presence.candidateLng,newStayStart:presence.candidateSince,previousDepartedAt:presence.departedAt||prev.lastDepartureAt||null});
+        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('arrival_confirmed',{uid,fixId:fix.fixId||null,newAnchorLat:presence.candidateLat,newAnchorLng:presence.candidateLng,stateBefore:presence.state,stateAfter:'steady',stayStartBefore:prev.stayStart,stayStartAfter:presence.candidateSince,previousDepartedAt:presence.departedAt||prev.lastDepartureAt||null});
         return {
           moving:false, stayStart:presence.candidateSince, placeArrivedAt:presence.candidateSince,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
@@ -12042,8 +12114,21 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // `classifyMovement` still runs unconditionally for its OTHER
       // outputs (placeArrivedAt, lastPresenceConfirmedAt, lastDepartureAt,
       // priorFixGapMs, _presence) — only `stayStart` itself is overridden.
-      const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt},uid);
+      const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt,fixId:raw.nativeFixId||null},uid);
       const trustedStay=(raw.stayStart!=null)?raw.stayStart:mv.stayStart;
+      // v505 (diagnostic-only, zero behavior change): this line is exactly
+      // where a THIRD possible source of a stale "Since" lives — separate
+      // from both leaving_reverted_snapback and hereSince_arrival_eval,
+      // and upstream of both. Logs both candidates and which one actually
+      // won, every single fix, to the RARE/persisted buffer ONLY when they
+      // actually differ from the last logged state for this uid (a
+      // genuine source-of-truth handoff or disagreement) — not on every
+      // fix, which would flood exactly like hereSince_arrival_eval did.
+      try{
+        if(typeof window!=='undefined'&&window.presenceSourceHistoryPush){
+          window.presenceSourceHistoryPush(uid,{nativeStayStart:raw.stayStart||null,jsStayStart:mv.stayStart||null,trustedStay,fixId:raw.nativeFixId||null});
+        }
+      }catch(e){}
       const next=Object.assign({},prev,raw,{
         lat:nextLat,
         lng:nextLng,
@@ -12206,7 +12291,9 @@ _presenceHistory.map(e=>e.seq||0)):0);
           // stale here while it's actually already correct moments later,
           // that's the race confirmed, not a classifyMovement bug.
           const _usedStayStart=!!(st && st.stayStart && Date.parse(st.stayStart) < Date.parse(evs[i].at));
-          if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('hereSince_arrival_eval',{uid,eventAt:evs[i].at,stayStartAtReadTime:st&&st.stayStart||null,returned:_usedStayStart?(st&&st.stayStart):evs[i].at,usedStayStart:_usedStayStart});
+          const _selectedTime=_usedStayStart?(st&&st.stayStart):evs[i].at;
+          const _selectedSource=_usedStayStart?'stayStart':'event';
+          if(typeof window!=='undefined'&&window.hereSinceEvalRecord) window.hereSinceEvalRecord(uid,_selectedSource,_selectedTime,'arrival_branch',{eventAt:evs[i].at,stayStartAtReadTime:st&&st.stayStart||null});
           if(_usedStayStart) return st.stayStart;
           return evs[i].at;
         }
@@ -12218,10 +12305,13 @@ _presenceHistory.map(e=>e.seq||0)):0);
           // non-saved-place location included) and that real arrival time
           // must win — a stale departure from an unrelated earlier place
           // must never suppress the current, unrelated location's Since.
-          if(st && st.stayStart && Date.parse(st.stayStart) > Date.parse(evs[i].at)) return st.stayStart;
+          const _newerStay=st && st.stayStart && Date.parse(st.stayStart) > Date.parse(evs[i].at);
+          if(typeof window!=='undefined'&&window.hereSinceEvalRecord) window.hereSinceEvalRecord(uid,_newerStay?'stayStart':'null',_newerStay?st.stayStart:null,'departure_branch',{departureEventAt:evs[i].at,stayStartAtReadTime:st&&st.stayStart||null});
+          if(_newerStay) return st.stayStart;
           return null;
         }
       }
+      if(typeof window!=='undefined'&&window.hereSinceEvalRecord) window.hereSinceEvalRecord(uid,st?'stayStart':'null',st?st.stayStart:null,'no_events_fallback',{});
       return st?st.stayStart:null;
     }
 
@@ -14322,12 +14412,19 @@ function famDiagView(){
           if(e.reason==='leaving_started') return `<div>${time} ${seq}· leaving_started · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · stayStart unchanged</div>`;
           if(e.reason==='leaving_reverted_snapback') return `<div>${time} ${seq}· <b style="color:#22c55e">leaving_reverted_snapback</b> · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · had been leaving for ${Math.round((e.leavingSinceWasMsAgo||0)/1000)}s · SUSTAINED return confirmed over ${Math.round((e.confirmedOverMs||0)/1000)}s · stayStart kept</div>`;
           if(e.reason==='leaving_snapback_candidate') return `<div>${time} ${seq}· leaving_snapback_candidate · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · accumulating, NOT yet reverted (v464 fix)</div>`;
-          if(e.reason==='departure_confirmed') return `<div>${time} ${seq}· <b style="color:#f43f5e">departure_confirmed</b> · old stayStart cleared · was leaving ${Math.round((e.leavingDurationMs||0)/1000)}s</div>`;
-          if(e.reason==='arrival_confirmed') return `<div>${time} ${seq}· <b style="color:#22c55e">arrival_confirmed</b> · new stayStart=${esc(e.newStayStart?e.newStayStart.slice(11,19):'—')}</div>`;
-          if(e.reason==='hereSince_arrival_eval') return `<div>${time} ${seq}· hereSince_eval · event@${esc(e.eventAt?e.eventAt.slice(11,19):'—')} vs stayStart@${esc(e.stayStartAtReadTime?e.stayStartAtReadTime.slice(11,19):'—')} → returned <b style="color:${e.usedStayStart?'#22c55e':'#f59e0b'}">${esc(e.returned?e.returned.slice(11,19):'—')}</b>${e.usedStayStart?' (stayStart)':' (event — check for listener race!)'}</div>`;
+          if(e.reason==='departure_confirmed') return `<div>${time} ${seq}· <b style="color:#f43f5e">departure_confirmed</b> · ${esc(e.stateBefore||'—')}→${esc(e.stateAfter||'—')} · stayStart ${esc(e.stayStartBefore?e.stayStartBefore.slice(11,19):'—')}→cleared · was leaving ${Math.round((e.leavingDurationMs||0)/1000)}s${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
+          if(e.reason==='arrival_confirmed') return `<div>${time} ${seq}· <b style="color:#22c55e">arrival_confirmed</b> · ${esc(e.stateBefore||'—')}→${esc(e.stateAfter||'—')} · stayStart ${esc(e.stayStartBefore?e.stayStartBefore.slice(11,19):'—')}→${esc(e.stayStartAfter?e.stayStartAfter.slice(11,19):'—')}${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
+          if(e.reason==='stayStart_source') return `<div>${time} ${seq}· <b style="color:#f59e0b">stayStart_source</b> · native=${esc(e.nativeStayStart?e.nativeStayStart.slice(11,19):'null')} js=${esc(e.jsStayStart?e.jsStayStart.slice(11,19):'null')} → trusted=<b>${esc(e.trustedStay?e.trustedStay.slice(11,19):'null')}</b>${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
+          if(e.reason==='hereSince_selection_changed') return `<div>${time} ${seq}· <b style="color:#a855f7">hereSince_selection_changed</b> (${esc(e.branchReason||'—')}) · ${esc(e.prevSelectedSource||'—')}@${esc(e.prevSelectedTime?e.prevSelectedTime.slice(11,19):'—')} → ${esc(e.newSelectedSource||'—')}@${esc(e.newSelectedTime?e.newSelectedTime.slice(11,19):'—')}</div>`;
           return `<div>${time} ${seq}· ${esc(e.reason)}</div>`;
         }).join('');
         return `<div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'تاریخچهٔ تغییر وضعیت حضور (leaving/away/steady)':'Presence state transitions (leaving/away/steady)'}</div>
+        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`${(typeof presenceHistoryGet==='function'?presenceHistoryGet().length:0)} رویدادِ نادر — persisted، خودشون رو با refresh از دست نمی‌دن.`:`${(typeof presenceHistoryGet==='function'?presenceHistoryGet().length:0)} rare events — persisted, survives refresh.`}</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button class="btn btn-ghost" data-fam="presence-export" style="flex:1">${L==='fa'?'خروجیِ JSON (نادر)':'Export JSON (rare)'}</button>
+          <button class="btn btn-ghost" data-fam="heresince-export" style="flex:1">${L==='fa'?'خروجیِ JSON (hereSince)':'Export JSON (hereSince)'}</button>
+        </div>
+        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} ارزیابی — فقط RAM، با refresh از بین می‌ره.`:`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} evaluations — RAM-only, lost on refresh.`}</div>
         <div style="max-height:200px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
           ${prows||'<div>'+(L==='fa'?'هنوز تغییری ثبت نشده':'no transitions recorded yet')+'</div>'}
         </div>`;
@@ -20218,6 +20315,40 @@ async function famAction(act,arg,ev){
     case 'diag-run': famRunDiagnostics(); return;
     case 'diag-copy':{ const txt=decodeURIComponent(arg||''); try{ navigator.clipboard.writeText(txt); toast(L==='fa'?'کپی شد':'Copied'); }catch(e){ toast(L==='fa'?'کپی ناموفق':'Copy failed'); } return; }
     case 'pipeline-clear':{ if(typeof pipelineHistoryClear==='function') pipelineHistoryClear(); render(); return; }
+    case 'presence-export':{
+      try{
+        const entries=(typeof presenceHistoryGet==='function')?presenceHistoryGet():[];
+        const json=JSON.stringify(entries,null,2);
+        const blob=new Blob([json],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url; a.download=`mbm-presence-rare-events-${Date.now()}.json`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),5000);
+        toast(L==='fa'?`فایل با ${entries.length} رکورد دانلود شد`:`Downloaded file with ${entries.length} records`);
+      }catch(e){
+        console.error('[presence-export] download failed',e);
+        toast(L==='fa'?'دانلود ناموفق':'Download failed');
+      }
+      return;
+    }
+    case 'heresince-export':{
+      try{
+        const entries=(typeof hereSinceEvalHistoryGet==='function')?hereSinceEvalHistoryGet():[];
+        const json=JSON.stringify(entries,null,2);
+        const blob=new Blob([json],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url; a.download=`mbm-heresince-evals-${Date.now()}.json`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),5000);
+        toast(L==='fa'?`فایل با ${entries.length} رکورد دانلود شد`:`Downloaded file with ${entries.length} records`);
+      }catch(e){
+        console.error('[heresince-export] download failed',e);
+        toast(L==='fa'?'دانلود ناموفق':'Download failed');
+      }
+      return;
+    }
     case 'pipeline-export':{
       try{
         const entries=(typeof pipelineHistoryGet==='function')?pipelineHistoryGet():[];
