@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v509';
+const APP_VERSION='v511';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -16953,7 +16953,7 @@ const MBMMap = (function(){
     try{
       const g=window.google.maps;
       _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
-        fillColor: approx?'#f59e0b':'#8652FF', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#8652FF', strokeOpacity:0.5, strokeWeight:1, clickable:false });
+        fillColor: approx?'#f59e0b':'#1E88E5', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#1E88E5', strokeOpacity:0.5, strokeWeight:1, clickable:false });
     }catch(e){}
   }
   function setHeadingCone(latlng, headingDeg, speed, color){
@@ -17587,13 +17587,6 @@ function drvDayLabel(iso){
 const FAM_MEMBER_PALETTE=['#2FCE6B','#FF6B6B','#4EA8DE','#F5A623','#E056A0','#22B8A8','#9B6BFF','#E8833A','#5CC8FF','#C13584'];
 function famColorForUid(uid){
   if(!uid) return FAM_MEMBER_PALETTE[0];
-  // v507: the local user's own marker is blue (matching Life360's
-  // convention for "you"), not whatever the hash happened to land on.
-  // Uses FB.user.uid at call time (not a hardcoded uid) so this stays
-  // correct regardless of which account is actually logged in. Every
-  // other family member keeps the existing hash-assigned palette color —
-  // unchanged.
-  if(typeof FB!=='undefined'&&FB.user&&FB.user.uid&&uid===FB.user.uid) return '#8652FF';
   let h=0;
   for(let i=0;i<uid.length;i++){ h=(h*31+uid.charCodeAt(i))>>>0; }
   return FAM_MEMBER_PALETTE[h%FAM_MEMBER_PALETTE.length];
@@ -20414,39 +20407,45 @@ async function famAction(act,arg,ev){
     case 'pipeline-clear':{ if(typeof pipelineHistoryClear==='function') pipelineHistoryClear(); render(); return; }
     case 'presence-export':{
       (async()=>{
+        const entries=(typeof presenceHistoryGet==='function')?presenceHistoryGet():[];
         try{
-          const entries=(typeof presenceHistoryGet==='function')?presenceHistoryGet():[];
           const r=await famExportJsonRobust(entries,'mbm-presence-rare-events');
           toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-presence-rare-events'); }
         }catch(e){
           console.error('[presence-export] all strategies failed',e);
-          toast(L==='fa'?'خروجی ناموفق — همه‌ی روش‌ها شکست خورد':'Export failed — all methods failed');
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-presence-rare-events');
         }
       })();
       return;
     }
     case 'heresince-export':{
       (async()=>{
+        const entries=(typeof hereSinceEvalHistoryGet==='function')?hereSinceEvalHistoryGet():[];
         try{
-          const entries=(typeof hereSinceEvalHistoryGet==='function')?hereSinceEvalHistoryGet():[];
           const r=await famExportJsonRobust(entries,'mbm-heresince-evals');
           toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-heresince-evals'); }
         }catch(e){
           console.error('[heresince-export] all strategies failed',e);
-          toast(L==='fa'?'خروجی ناموفق — همه‌ی روش‌ها شکست خورد':'Export failed — all methods failed');
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-heresince-evals');
         }
       })();
       return;
     }
     case 'pipeline-export':{
       (async()=>{
+        const entries=(typeof pipelineHistoryGet==='function')?pipelineHistoryGet():[];
         try{
-          const entries=(typeof pipelineHistoryGet==='function')?pipelineHistoryGet():[];
           const r=await famExportJsonRobust(entries,'mbm-pipeline-trace');
           toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-pipeline-trace'); }
         }catch(e){
           console.error('[pipeline-export] all strategies failed',e);
-          toast(L==='fa'?'خروجی ناموفق — همه‌ی روش‌ها شکست خورد':'Export failed — all methods failed');
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-pipeline-trace');
         }
       })();
       return;
@@ -21210,22 +21209,50 @@ function toast(msg,ms=2200){
 async function famExportJsonRobust(entries,filenamePrefix){
   const json=JSON.stringify(entries,null,2);
   const filename=`${filenamePrefix}-${Date.now()}.json`;
-  // Strategy 1: OS share sheet with a real File. This goes through Android's
-  // native share intent handling, which — unlike a bare blob: URL download —
-  // doesn't depend on the WebView itself implementing download-attribute
-  // support. Most likely to actually work inside a wrapped native app.
+  const skippedReasons=[];
+  // v511 (Codex review + real on-device evidence): the previous order put
+  // Blob+anchor download as the FIRST fallback and treated it as success
+  // whenever it didn't throw. Real test: it reported "method: download",
+  // no error — but no file was ever findable anywhere on the device. This
+  // WebView doesn't throw on a failed blob download, it just silently
+  // no-ops, so a caught exception was never going to catch this failure
+  // mode. Reordered: share (file, then text) and clipboard all have an
+  // honestly observable success/failure signal in this environment;
+  // blob-download is demoted to a last resort, tried but never the
+  // headline "it worked" message on its own.
   try{
-    if(typeof navigator!=='undefined'&&navigator.share&&navigator.canShare){
+    if(typeof navigator==='undefined'||!navigator.share){ skippedReasons.push('navigator.share unavailable'); }
+    else if(!navigator.canShare){ skippedReasons.push('navigator.canShare unavailable'); }
+    else{
       const file=new File([json],filename,{type:'application/json'});
       if(navigator.canShare({files:[file]})){
         await navigator.share({files:[file],title:filename});
-        return {method:'share',count:entries.length};
+        return {method:'share-file',count:entries.length};
       }
+      skippedReasons.push('canShare({files}) returned false — file sharing not supported here');
     }
-  }catch(e){ console.warn('[export] share strategy failed',e); }
-  // Strategy 2: Blob + anchor download — works in an ordinary browser tab;
-  // may silently no-op in a WebView without download-intent handling
-  // (the likely explanation for the prior silent failure).
+  }catch(e){ skippedReasons.push('share-file threw: '+e.message); console.warn('[export] share-file strategy failed',e); }
+  // Strategy 2: text-only share — broader support than file-sharing; goes
+  // to whatever app the person picks (Notes, Gmail, Drive, etc.) as plain
+  // text, which they can then save from that app.
+  try{
+    if(typeof navigator!=='undefined'&&navigator.share){
+      await navigator.share({title:filename,text:json});
+      return {method:'share-text',count:entries.length};
+    }
+  }catch(e){ skippedReasons.push('share-text threw: '+e.message); console.warn('[export] share-text strategy failed',e); }
+  // Strategy 3: clipboard — has an honest success/throw signal here too.
+  try{
+    if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(json);
+      return {method:'clipboard',count:entries.length};
+    }
+    skippedReasons.push('navigator.clipboard.writeText unavailable');
+  }catch(e){ skippedReasons.push('clipboard threw: '+e.message); console.warn('[export] clipboard strategy failed',e); }
+  // Strategy 4 (demoted, last-resort attempt): Blob + anchor download —
+  // kept because it may still work in some environments (a real browser
+  // tab, or a WebView with proper download-intent handling), but no
+  // longer trusted as a definitive success signal on its own.
   try{
     const blob=new Blob([json],{type:'application/json'});
     const url=URL.createObjectURL(blob);
@@ -21233,22 +21260,58 @@ async function famExportJsonRobust(entries,filenamePrefix){
     a.href=url; a.download=filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),5000);
-    return {method:'download',count:entries.length};
-  }catch(e){ console.warn('[export] download strategy failed',e); }
-  // Strategy 3: clipboard — real truncation/size risk for a large payload,
-  // but still strictly better than nothing if the first two are unavailable.
-  try{
-    if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText){
-      await navigator.clipboard.writeText(json);
-      return {method:'clipboard',count:entries.length};
-    }
-  }catch(e){ console.warn('[export] clipboard strategy failed',e); }
-  throw new Error('all export strategies failed');
+    return {method:'download-unverified',count:entries.length,skippedReasons};
+  }catch(e){ skippedReasons.push('download threw: '+e.message); console.warn('[export] download strategy failed',e); }
+  console.error('[export] all strategies failed, reasons:',skippedReasons);
+  const err=new Error('all export strategies failed');
+  err.skippedReasons=skippedReasons;
+  throw err;
 }
 function famExportMethodLabel(method){
-  const map={share:{fa:'اشتراک‌گذاری',en:'share sheet'},download:{fa:'دانلود',en:'download'},clipboard:{fa:'کلیپ‌بورد',en:'clipboard'}};
+  const map={
+    'share-file':{fa:'اشتراک‌گذاریِ فایل',en:'file share'},
+    'share-text':{fa:'اشتراک‌گذاریِ متن',en:'text share'},
+    clipboard:{fa:'کلیپ‌بورد',en:'clipboard'},
+    'download-unverified':{fa:'دانلود (تأییدنشده — ممکنه واقعاً جایی ذخیره نشده باشه)',en:'download (UNVERIFIED — may not have actually saved anywhere)'}
+  };
   const m=map[method]||{fa:method,en:method};
   return L==='fa'?m.fa:m.en;
+}
+// v511: guaranteed last-resort export — a plain on-screen textarea needs no
+// OS-level share/clipboard/download API at all, so it can't fail the same
+// silent way blob-download did (proven on-device: reported success, no
+// findable file anywhere). Long-press-to-select-and-copy on a textarea is a
+// native Android text feature, independent of the JS clipboard API's own
+// permission/support quirks.
+function famShowJsonExportModal(entries,filenamePrefix){
+  try{
+    const json=JSON.stringify(entries,null,2);
+    const filename=`${filenamePrefix}-${Date.now()}.json`;
+    const overlay=document.createElement('div');
+    overlay.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;flex-direction:column;padding:16px';
+    const label=document.createElement('div');
+    label.style.cssText='color:#fff;font-size:13px;margin-bottom:8px';
+    label.textContent=(L==='fa'
+      ?`${entries.length} رکورد — انگشتتو نگه‌دار رو متن، Select All بزن، بعد Copy، بعد یه‌جا (مثلاً پیام یا نوت) Paste کن.`
+      :`${entries.length} records — long-press the text, tap Select All, then Copy, then paste it somewhere (a message or note).`);
+    const ta=document.createElement('textarea');
+    ta.value=json; ta.readOnly=true;
+    ta.style.cssText='flex:1;width:100%;font-family:monospace;font-size:10px;background:#111;color:#0f0;border:1px solid #444;border-radius:8px;padding:8px;box-sizing:border-box';
+    const btnRow=document.createElement('div');
+    btnRow.style.cssText='display:flex;gap:8px;margin-top:8px';
+    const closeBtn=document.createElement('button');
+    closeBtn.textContent=L==='fa'?'بستن':'Close';
+    closeBtn.style.cssText='flex:1;padding:12px;border-radius:8px;border:none;background:#6b7280;color:#fff;font-weight:700';
+    closeBtn.onclick=()=>overlay.remove();
+    const selectBtn=document.createElement('button');
+    selectBtn.textContent=L==='fa'?'انتخابِ همه':'Select All';
+    selectBtn.style.cssText='flex:1;padding:12px;border-radius:8px;border:none;background:#6e56f8;color:#fff;font-weight:700';
+    selectBtn.onclick=()=>{ ta.focus(); ta.select(); };
+    btnRow.appendChild(selectBtn); btnRow.appendChild(closeBtn);
+    overlay.appendChild(label); overlay.appendChild(ta); overlay.appendChild(btnRow);
+    document.body.appendChild(overlay);
+    ta.focus(); ta.select();
+  }catch(e){ console.error('[export] even the on-screen fallback failed',e); }
 }
 
 /* ══════════════════════════════════════════
