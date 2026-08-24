@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v505';
+const APP_VERSION='v506';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11362,6 +11362,44 @@ _presenceHistory.map(e=>e.seq||0)):0);
     }catch(e){}
   }
   window.presenceSourceHistoryPush=presenceSourceHistoryPush;
+
+  // v506: stayStart tombstone — fixes the race where native keeps
+  // reporting a PRE-departure stayStart for a while after the JS presence
+  // engine has already confirmed departure (native's own trip-end
+  // hysteresis, ~90s+, lags behind). Without this, "trust native when
+  // non-null" (v494) would keep resurrecting the stale value — not just
+  // for a few seconds, but (per Bahman's real report) carrying an old
+  // stop's stayStart all the way into an unrelated LATER visit at a
+  // different place, because nothing ever invalidated it. A tombstone at
+  // the exact departure_confirmed time draws a hard boundary: any native
+  // stayStart at or before that boundary is stale and rejected (falls
+  // back to the JS-derived value instead); any native stayStart AFTER it
+  // (a genuinely new arrival) is trusted normally. Persisted per-uid so a
+  // refresh mid-transition can't reopen the race. One entry per uid,
+  // always overwritten by the latest departure — bounded, no cleanup job
+  // needed.
+  const STAYSTART_TOMBSTONE_KEY='mbmlife_staystart_tombstones_v1';
+  const _stayStartTombstones=(()=>{
+    try{
+      const raw=localStorage.getItem(STAYSTART_TOMBSTONE_KEY);
+      const parsed=raw?JSON.parse(raw):{};
+      return (parsed&&typeof parsed==='object')?parsed:{};
+    }catch(e){ return {}; }
+  })();
+  function _saveStayStartTombstones(){ try{ localStorage.setItem(STAYSTART_TOMBSTONE_KEY, JSON.stringify(_stayStartTombstones)); }catch(e){} }
+  function recordDepartureTombstone(uid,departedAtIso){
+    if(!uid||!departedAtIso) return;
+    _stayStartTombstones[uid]=departedAtIso;
+    _saveStayStartTombstones();
+  }
+  function isStayStartStale(uid,nativeStayStartIso){
+    if(!uid||!nativeStayStartIso) return false;
+    const tomb=_stayStartTombstones[uid];
+    if(!tomb) return false;
+    return Date.parse(nativeStayStartIso)<=Date.parse(tomb);
+  }
+  window.recordDepartureTombstone=recordDepartureTombstone;
+  window.isStayStartStale=isStayStartStale;
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
   // earlier this session with myUid()/FamilyLocation. Exposing on window,
@@ -11834,6 +11872,11 @@ _presenceHistory.map(e=>e.seq||0)):0);
             distanceM:dFromAnchor, oldStayStart:prev.stayStart, newStayStart:null
           });
           if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('departure_confirmed',{uid,fixId:fix.fixId||null,oldAnchorLat:presence.anchorLat,oldAnchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng,stateBefore:'leaving',stateAfter:'away',stayStartBefore:prev.stayStart,stayStartAfter:null,leavingDurationMs:awayMs});
+          // v506: draw the staleness boundary at this exact confirmed-
+          // departure moment — any native stayStart at or before `nowAt`
+          // is a leftover from the visit that JUST ended and must not be
+          // allowed to resurrect it (or bleed into whatever comes next).
+          if(typeof window!=='undefined'&&window.recordDepartureTombstone) window.recordDepartureTombstone(uid,nowAt);
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.since, priorFixGapMs,
@@ -12115,7 +12158,16 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // outputs (placeArrivedAt, lastPresenceConfirmedAt, lastDepartureAt,
       // priorFixGapMs, _presence) — only `stayStart` itself is overridden.
       const mv=classifyMovement(prev,{lat:nextLat,lng:nextLng,accuracy:raw.accuracy,capturedAt:raw.capturedAt,fixId:raw.nativeFixId||null},uid);
-      const trustedStay=(raw.stayStart!=null)?raw.stayStart:mv.stayStart;
+      // v506 FIX: native stayStart is trusted over JS's (v494) UNLESS it's
+      // stale — at or before the last confirmed departure for this uid
+      // (see recordDepartureTombstone/isStayStartStale above). Without
+      // this, native lagging behind its own ~90s+ trip-end hysteresis
+      // would keep re-asserting the OLD stayStart after JS had already
+      // correctly confirmed departure — not just briefly, but (per real
+      // report) carrying it through into an unrelated later visit at a
+      // different place, since nothing ever invalidated it before now.
+      const nativeStale=(typeof window!=='undefined'&&window.isStayStartStale)?window.isStayStartStale(uid,raw.stayStart):false;
+      const trustedStay=(raw.stayStart!=null&&!nativeStale)?raw.stayStart:mv.stayStart;
       // v505 (diagnostic-only, zero behavior change): this line is exactly
       // where a THIRD possible source of a stale "Since" lives — separate
       // from both leaving_reverted_snapback and hereSince_arrival_eval,
@@ -12126,7 +12178,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // fix, which would flood exactly like hereSince_arrival_eval did.
       try{
         if(typeof window!=='undefined'&&window.presenceSourceHistoryPush){
-          window.presenceSourceHistoryPush(uid,{nativeStayStart:raw.stayStart||null,jsStayStart:mv.stayStart||null,trustedStay,fixId:raw.nativeFixId||null});
+          window.presenceSourceHistoryPush(uid,{nativeStayStart:raw.stayStart||null,jsStayStart:mv.stayStart||null,trustedStay,nativeStale,fixId:raw.nativeFixId||null});
         }
       }catch(e){}
       const next=Object.assign({},prev,raw,{
@@ -14414,7 +14466,7 @@ function famDiagView(){
           if(e.reason==='leaving_snapback_candidate') return `<div>${time} ${seq}· leaving_snapback_candidate · dist=${e.distanceM}m (radius ${e.radiusM}m, acc ±${e.accuracy!=null?Math.round(e.accuracy):'?'}m) · accumulating, NOT yet reverted (v464 fix)</div>`;
           if(e.reason==='departure_confirmed') return `<div>${time} ${seq}· <b style="color:#f43f5e">departure_confirmed</b> · ${esc(e.stateBefore||'—')}→${esc(e.stateAfter||'—')} · stayStart ${esc(e.stayStartBefore?e.stayStartBefore.slice(11,19):'—')}→cleared · was leaving ${Math.round((e.leavingDurationMs||0)/1000)}s${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
           if(e.reason==='arrival_confirmed') return `<div>${time} ${seq}· <b style="color:#22c55e">arrival_confirmed</b> · ${esc(e.stateBefore||'—')}→${esc(e.stateAfter||'—')} · stayStart ${esc(e.stayStartBefore?e.stayStartBefore.slice(11,19):'—')}→${esc(e.stayStartAfter?e.stayStartAfter.slice(11,19):'—')}${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
-          if(e.reason==='stayStart_source') return `<div>${time} ${seq}· <b style="color:#f59e0b">stayStart_source</b> · native=${esc(e.nativeStayStart?e.nativeStayStart.slice(11,19):'null')} js=${esc(e.jsStayStart?e.jsStayStart.slice(11,19):'null')} → trusted=<b>${esc(e.trustedStay?e.trustedStay.slice(11,19):'null')}</b>${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
+          if(e.reason==='stayStart_source') return `<div>${time} ${seq}· <b style="color:#f59e0b">stayStart_source</b> · native=${esc(e.nativeStayStart?e.nativeStayStart.slice(11,19):'null')}${e.nativeStale?' <b style="color:#f43f5e">(STALE, rejected)</b>':''} js=${esc(e.jsStayStart?e.jsStayStart.slice(11,19):'null')} → trusted=<b>${esc(e.trustedStay?e.trustedStay.slice(11,19):'null')}</b>${e.fixId?' · fix='+esc(e.fixId):''}</div>`;
           if(e.reason==='hereSince_selection_changed') return `<div>${time} ${seq}· <b style="color:#a855f7">hereSince_selection_changed</b> (${esc(e.branchReason||'—')}) · ${esc(e.prevSelectedSource||'—')}@${esc(e.prevSelectedTime?e.prevSelectedTime.slice(11,19):'—')} → ${esc(e.newSelectedSource||'—')}@${esc(e.newSelectedTime?e.newSelectedTime.slice(11,19):'—')}</div>`;
           return `<div>${time} ${seq}· ${esc(e.reason)}</div>`;
         }).join('');
