@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v511';
+const APP_VERSION='v515';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -19137,23 +19137,27 @@ function famLivePaintMarkers(members, sel){
           });
         }catch(e){}
       }
-      // v486: register (or clear) the dead-reckoning marker-sync callback
-      // for whichever member this paint pass is actually following while
-      // driving — every extrapolation tick then repaints THIS marker at
-      // the identical point the camera just moved to, using the same
-      // meta/selection/click-handler as the real fix, so only position
-      // changes (matching setMarker's own "meta unchanged → skip DOM
-      // rebuild, just animate position" behavior). Cleared to null for
-      // every non-followed member and whenever this member isn't actively
-      // driving, so a stale callback can never move the wrong pin.
-      if(sel && m.uid===sel.uid && m.state.moving){
-        FamilyMapCamera.setDeadReckonMarkerSync((pos,tickId)=>{
-          try{
-            if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drsync_marker_update',{uid:m.uid,tickId,lat:pos.lat,lng:pos.lng});
-            MBMMap.setMarker(key,[pos.lat,pos.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick);
-          }catch(e){}
-        }, key);
-      }
+      // v513 (root-cause fix, not another mitigation): REMOVED the dead-
+      // reckoning marker-sync entirely. This callback was the actual
+      // mechanism that repeatedly, visibly moved the big marker away from
+      // the true accepted GPS position — the exact complaint reported
+      // over and over ("مارکر یه خیابون اونورتره", "تو خونه‌ها می‌ره"):
+      // the small accuracy-circle dot always rendered the real fix
+      // (setAccuracy uses m.state.lat/lng directly, never touched by
+      // dead reckoning), while the big marker got silently overwritten
+      // by a STRAIGHT-LINE extrapolation from the last real fix's
+      // heading/speed on every 200ms tick — which doesn't follow curving
+      // roads and gets worse the longer a fix is delayed. Shrinking the
+      // extrapolation window (v508/v509) only bounded how bad that could
+      // get; it never stopped the marker from being able to sit anywhere
+      // other than the real fix. Now the big marker is set from
+      // m.state.lat/lng ONLY, on every paint, unconditionally — the same
+      // exact coordinate setAccuracy already uses, every time. The two
+      // will always be in the same place, because they now come from the
+      // literal same source. (Camera panning smoothness during a drive is
+      // unaffected — FamilyMapCamera's own dead-reckoning still runs for
+      // that; only the visible marker's position stopped being
+      // independently overwritten.)
     } else {
       // merged cluster bubble at the group's centroid of real fixes
       const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
@@ -21210,16 +21214,35 @@ async function famExportJsonRobust(entries,filenamePrefix){
   const json=JSON.stringify(entries,null,2);
   const filename=`${filenamePrefix}-${Date.now()}.json`;
   const skippedReasons=[];
-  // v511 (Codex review + real on-device evidence): the previous order put
-  // Blob+anchor download as the FIRST fallback and treated it as success
-  // whenever it didn't throw. Real test: it reported "method: download",
-  // no error — but no file was ever findable anywhere on the device. This
-  // WebView doesn't throw on a failed blob download, it just silently
-  // no-ops, so a caught exception was never going to catch this failure
-  // mode. Reordered: share (file, then text) and clipboard all have an
-  // honestly observable success/failure signal in this environment;
-  // blob-download is demoted to a last resort, tried but never the
-  // headline "it worked" message on its own.
+  // v512 (real on-device evidence): clipboard.writeText() resolved with no
+  // error, but pasting elsewhere was EMPTY. Most likely cause: it used to
+  // run AFTER awaiting the share attempts first — many browsers/WebViews
+  // require clipboard writes to happen within the same synchronous
+  // "user activation" window as the tap that triggered them, and an
+  // await (even one that fails fast) can consume that window, leaving a
+  // clipboard write that resolves successfully but silently writes
+  // nothing. Clipboard is now tried FIRST, before any other await, and
+  // verified by reading it back immediately — a write that "succeeds"
+  // but doesn't actually land is now caught here instead of reported as
+  // a false success.
+  try{
+    if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(json);
+      let verified=null;
+      try{ if(navigator.clipboard.readText) verified=await navigator.clipboard.readText(); }catch(e2){ /* read-back not permitted — can't verify, but write didn't throw */ }
+      if(verified==null || verified===json){ return {method:'clipboard',count:entries.length}; }
+      skippedReasons.push('clipboard.writeText did not throw, but read-back did not match (silent no-op)');
+    } else {
+      skippedReasons.push('navigator.clipboard.writeText unavailable');
+    }
+  }catch(e){ skippedReasons.push('clipboard threw: '+e.message); console.warn('[export] clipboard strategy failed',e); }
+  // v511: the previous order put Blob+anchor download as the FIRST
+  // fallback and treated it as success whenever it didn't throw. Real
+  // test: it reported "method: download", no error — but no file was
+  // ever findable anywhere on the device. This WebView doesn't throw on
+  // a failed blob download, it just silently no-ops. Blob-download stays
+  // demoted to a last resort below, never the headline "it worked" on
+  // its own.
   try{
     if(typeof navigator==='undefined'||!navigator.share){ skippedReasons.push('navigator.share unavailable'); }
     else if(!navigator.canShare){ skippedReasons.push('navigator.canShare unavailable'); }
@@ -21232,7 +21255,7 @@ async function famExportJsonRobust(entries,filenamePrefix){
       skippedReasons.push('canShare({files}) returned false — file sharing not supported here');
     }
   }catch(e){ skippedReasons.push('share-file threw: '+e.message); console.warn('[export] share-file strategy failed',e); }
-  // Strategy 2: text-only share — broader support than file-sharing; goes
+  // Strategy: text-only share — broader support than file-sharing; goes
   // to whatever app the person picks (Notes, Gmail, Drive, etc.) as plain
   // text, which they can then save from that app.
   try{
@@ -21241,15 +21264,7 @@ async function famExportJsonRobust(entries,filenamePrefix){
       return {method:'share-text',count:entries.length};
     }
   }catch(e){ skippedReasons.push('share-text threw: '+e.message); console.warn('[export] share-text strategy failed',e); }
-  // Strategy 3: clipboard — has an honest success/throw signal here too.
-  try{
-    if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText){
-      await navigator.clipboard.writeText(json);
-      return {method:'clipboard',count:entries.length};
-    }
-    skippedReasons.push('navigator.clipboard.writeText unavailable');
-  }catch(e){ skippedReasons.push('clipboard threw: '+e.message); console.warn('[export] clipboard strategy failed',e); }
-  // Strategy 4 (demoted, last-resort attempt): Blob + anchor download —
+  // Strategy (demoted, last-resort attempt): Blob + anchor download —
   // kept because it may still work in some environments (a real browser
   // tab, or a WebView with proper download-intent handling), but no
   // longer trusted as a definitive success signal on its own.
@@ -21304,9 +21319,20 @@ function famShowJsonExportModal(entries,filenamePrefix){
     closeBtn.style.cssText='flex:1;padding:12px;border-radius:8px;border:none;background:#6b7280;color:#fff;font-weight:700';
     closeBtn.onclick=()=>overlay.remove();
     const selectBtn=document.createElement('button');
-    selectBtn.textContent=L==='fa'?'انتخابِ همه':'Select All';
+    selectBtn.textContent=L==='fa'?'انتخاب + کپی':'Select + Copy';
     selectBtn.style.cssText='flex:1;padding:12px;border-radius:8px;border:none;background:#6e56f8;color:#fff;font-weight:700';
-    selectBtn.onclick=()=>{ ta.focus(); ta.select(); };
+    selectBtn.onclick=()=>{
+      ta.focus(); ta.select();
+      // v512: attempt a REAL synchronous copy right here, in the same
+      // tap handler — execCommand('copy') runs synchronously (unlike the
+      // async Clipboard API) so it can't lose the user-gesture window the
+      // way the automated clipboard strategy just did. Report the actual
+      // returned success/failure instead of assuming selection = copied.
+      let copied=false;
+      try{ copied=document.execCommand('copy'); }catch(e){ copied=false; }
+      if(copied){ toast(L==='fa'?'کپی شد — حالا Paste کن':'Copied — now paste it'); }
+      else{ toast(L==='fa'?'کپیِ خودکار نشد — دستی Copy رو از منوی انتخاب بزن':'Auto-copy failed — use Copy from the selection menu instead'); }
+    };
     btnRow.appendChild(selectBtn); btnRow.appendChild(closeBtn);
     overlay.appendChild(label); overlay.appendChild(ta); overlay.appendChild(btnRow);
     document.body.appendChild(overlay);
