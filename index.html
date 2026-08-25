@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v520';
+const APP_VERSION='v523';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11399,70 +11399,6 @@ _presenceHistory.map(e=>e.seq||0)):0);
     return Date.parse(nativeStayStartIso)<=Date.parse(tomb);
   }
   window.recordDepartureTombstone=recordDepartureTombstone;
-
-  // v518: Shemroon Cafe Kebab (100 Elizabeth St) address confirmation —
-  // rebuilt at Bahman's explicit request. Nominatim has no address point
-  // for Shemroon itself; the nearest OSM-tagged point is a different shop
-  // across the street, so reverse-geocoding here kept resolving to the
-  // wrong house number. No amount of GPS-radius tuning alone can safely
-  // tell "genuinely at Shemroon" apart from "briefly passing the street's
-  // midpoint" (proven earlier: the radius needed to catch a real fix and
-  // the radius that would falsely catch the midpoint overlap). So this
-  // uses the same explicit-confirmation design already tested here:
-  // ask ONCE per visit when GPS enters the ambiguous zone AND the member
-  // is confirmed stationary (not just a single fix) — never silently.
-  const SHEMROON_LAT=-42.8806383, SHEMROON_LNG=147.3253381;
-  const SHEMROON_ASK_RADIUS_M=20; // generous — this only ever triggers a QUESTION, never an automatic address change
-  const SHEMROON_CONFIRM_LS_KEY='mbmlife_shemroon_confirm_v1';
-  let _shemroonConfirmMem=null;
-  function famShemroonLoadAll(){
-    if(_shemroonConfirmMem) return _shemroonConfirmMem;
-    try{
-      const raw=localStorage.getItem(SHEMROON_CONFIRM_LS_KEY);
-      _shemroonConfirmMem=raw?JSON.parse(raw):{};
-    }catch(_){ _shemroonConfirmMem={}; }
-    return _shemroonConfirmMem;
-  }
-  function famShemroonSaveAll(all){
-    _shemroonConfirmMem=all;
-    try{ localStorage.setItem(SHEMROON_CONFIRM_LS_KEY,JSON.stringify(all)); }catch(_){}
-  }
-  function famShemroonAmbiguityCheck(c,m,uid){
-    const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-    if(uid!==localUid) return false; // only ever ask about the local user's own status
-    const s=m.state||{};
-    if(c.activityType!=='stationary'||s.lat==null) return false;
-    const curStayStart=s.stayStart||null;
-    const all=famShemroonLoadAll();
-    const rec=all[uid];
-    // Tied to stayStart, exactly like the tombstone above — a real
-    // departure (new/cleared stayStart) automatically invalidates any
-    // previous answer, so the next arrival always asks fresh.
-    if(rec && rec.stayStart===curStayStart){
-      if(rec.confirmed) return true;
-      if(rec.asked) return false;
-    } else if(rec){
-      delete all[uid]; famShemroonSaveAll(all);
-    }
-    if(c.shemroonAsking) return false;
-    const d=famHaversineM(s.lat,s.lng,SHEMROON_LAT,SHEMROON_LNG);
-    if(d>SHEMROON_ASK_RADIUS_M) return false;
-    c.shemroonAsking=true;
-    const askedForStayStart=curStayStart;
-    if(typeof famConfirm==='function'){
-      famConfirm(L==='fa'?'الان تو شمرون هستی؟':'Are you at Shemroon right now?',{danger:false,okLabel:L==='fa'?'بله':'Yes',cancelLabel:L==='fa'?'نه':'No'})
-        .then(yes=>{
-          c.shemroonAsking=false;
-          const all2=famShemroonLoadAll();
-          all2[uid]={stayStart:askedForStayStart, confirmed:!!yes, asked:true};
-          famShemroonSaveAll(all2);
-          if(typeof famLiveApply==='function') famLiveApply();
-          else if(typeof render==='function') render();
-        });
-    }
-    return false;
-  }
-  window.famShemroonAmbiguityCheck=famShemroonAmbiguityCheck;
   window.isStayStartStale=isStayStartStale;
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
@@ -16348,7 +16284,25 @@ const MBMMap = (function(){
       window.__mbmMapWaiters=[];
     };
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+cbName+'&loading=async';
+    // v521 ROOT-CAUSE FIX: &libraries=marker was NEVER in this URL. Without
+    // it, google.maps.marker.AdvancedMarkerElement never exists, so
+    // AdvMarkerCtor() (below) has always silently fallen back to a
+    // hand-rolled OverlayView for the live "B" marker — while the
+    // accuracy circle has always been a real, native google.maps.Circle.
+    // The native Circle is entirely managed by the SDK's own rendering
+    // pipeline and can never silently fail to reposition. The fallback
+    // OverlayView repositions itself by manually computing a pixel offset
+    // via getProjection().fromLatLngToDivPixel() every time — and when
+    // getProjection() is momentarily null (a normal, transient SDK state
+    // during internal map changes), the existing `if(!proj)return;` guard
+    // makes that specific redraw a silent no-op: the marker's internal
+    // coordinate updates, but the actual on-screen pixel does not move
+    // until the next redraw succeeds. This is the exact, sole mechanism
+    // that let the B marker visibly separate from the always-reliable
+    // native accuracy circle. Loading the real marker library makes B a
+    // native AdvancedMarkerElement too, eliminating the manual-redraw path
+    // entirely for any device where the library loads successfully.
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=marker&callback='+cbName+'&loading=async';
     s.async=true;
     s.onerror=function(){
       _apiLoading=false; _loadErr='load-fail';
@@ -16895,18 +16849,29 @@ const MBMMap = (function(){
       return mk;
     }
     // Fallback DOM overlay (identical visual result, works without the extra 'marker' library).
+    // v521: this path should now be rare (the real fix loads the marker
+    // library so AdvancedMarkerElement — a native overlay, never subject
+    // to this — gets used instead). Hardened anyway: getProjection()
+    // returning null is a normal, TRANSIENT SDK state, not a permanent
+    // one — retrying shortly instead of silently giving up means a
+    // position update can no longer be lost to a single bad-timing draw()
+    // call the way it could before.
     function Overlay(){}
     Overlay.prototype=Object.create(g.OverlayView.prototype);
     const ov=new Overlay();
     ov.position={lat:latlng[0],lng:latlng[1]};
     ov.onAdd=function(){ this.getPanes().overlayMouseTarget.appendChild(el); };
-    ov.draw=function(){ const proj=this.getProjection(); if(!proj)return; const p=proj.fromLatLngToDivPixel(new g.LatLng(this.position.lat,this.position.lng));
+    ov.draw=function(){
+      const proj=this.getProjection();
+      if(!proj){ setTimeout(()=>{ if(this.draw) this.draw(); },32); return; }
+      const p=proj.fromLatLngToDivPixel(new g.LatLng(this.position.lat,this.position.lng));
       // Anchor the BOTTOM of the element (the pin's tip) at the geo point,
       // not a fixed offset from the top — the wrapper's height varies with
       // whether a callout is currently shown, so a fixed top-offset would
       // shift the avatar off its real coordinate whenever the callout
       // appears/disappears.
-      el.style.position='absolute'; el.style.left=(p.x-30)+'px'; el.style.top=(p.y-el.offsetHeight)+'px'; };
+      el.style.position='absolute'; el.style.left=(p.x-30)+'px'; el.style.top=(p.y-el.offsetHeight)+'px';
+    };
     ov.onRemove=function(){ if(el.parentNode) el.parentNode.removeChild(el); };
     Object.defineProperty(ov,'position',{ get(){return this._pos;}, set(v){ this._pos=v; if(this.draw)this.draw(); } });
     ov.position={lat:latlng[0],lng:latlng[1]};
@@ -18180,10 +18145,9 @@ function famDeriveMemberDisplay(m){
     c.currentPlaceId=placeId;
     c.placeEnteredAt=placeId?( (typeof FamilyBackend!=='undefined'&&FamilyBackend.location.hereSince)?FamilyBackend.location.hereSince(uid):(m.state&&m.state.stayStart) ):null;
   }
-  const shemroonConfirmed=(typeof famShemroonAmbiguityCheck==='function')?famShemroonAmbiguityCheck(c,m,uid):false;
   return { activityType:c.activityType, activityStartedAt:c.activityStartedAt,
            currentPlaceId:c.currentPlaceId, placeEnteredAt:c.placeEnteredAt,
-           lastMovementAt:c.lastMovementAt, place, shemroonConfirmed };
+           lastMovementAt:c.lastMovementAt, place };
 }
 function nowISOSafe(){ try{ return new Date().toISOString(); }catch(e){ return null; } }
 
@@ -18372,12 +18336,6 @@ function famComposeStatusText(m){
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
   const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt);
-  // v518: explicit one-time confirmation per visit (famShemroonAmbiguityCheck
-  // above) — rebuilt at Bahman's request. Still the real civic address
-  // text, not a place name/label, consistent with the rule above.
-  if(d.shemroonConfirmed){
-    lines.line1='100 Elizabeth Street'; lines.line2='Hobart, TAS';
-  }
   // v447 FIX: when inside a saved place, this used to prefer the CACHED
   // d.placeEnteredAt (only refreshed when crossing that place's boundary —
   // see famDeriveMemberDisplay above) over a fresh hereSince() call. The
@@ -19878,7 +19836,7 @@ function famHistMount(){
     try{
       if(el._histMap){ try{ if(el._histCursor && el._histCursor.map!==undefined)el._histCursor.map=null; }catch(e){} el._histMap=null; el._histCursor=null; }
       const coords=pts.map(p=>({lat:p.lat,lng:p.lng}));
-      const m=new g.Map(el, { disableDefaultUI:true, gestureHandling:'greedy' });
+      const m=new g.Map(el, { disableDefaultUI:true, gestureHandling:'greedy', mapId:'9b7b8a3f4bc483801e0cd717' });
       el._histMap=m;
       if(_famHistCursor==null||_famHistCursor>pts.length-1)_famHistCursor=pts.length-1;
       const cEl=document.createElement('div'); cEl.style.cssText='width:20px;height:20px;border-radius:50%;background:#6e56f8;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)';
@@ -19920,7 +19878,7 @@ function famHistMount(){
     window.__mbmGmapsLoading=true;
     window.__mbmGoogleMapsReady=function(){ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(true);}catch(e){}}); window.__mbmMapWaiters=[]; };
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__mbmGoogleMapsReady&loading=async';
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=marker&callback=__mbmGoogleMapsReady&loading=async';
     s.async=true;
     s.onerror=()=>{ (window.__mbmMapWaiters||[]).forEach(w=>{try{w(false);}catch(e){}}); window.__mbmMapWaiters=[]; };
     document.head.appendChild(s);
