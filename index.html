@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v515';
+const APP_VERSION='v517';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11399,6 +11399,19 @@ _presenceHistory.map(e=>e.seq||0)):0);
     return Date.parse(nativeStayStartIso)<=Date.parse(tomb);
   }
   window.recordDepartureTombstone=recordDepartureTombstone;
+  // v517: A/B toggle between the default shared-tween animation (marker +
+  // accuracy circle move together, every frame) and v516's instant-jump-
+  // only mode, kept for comparison per explicit direction. Default OFF —
+  // shared tween is the normal path.
+  const MARKER_INSTANT_JUMP_KEY='mbmlife_marker_instant_jump_v1';
+  function famMarkerInstantJumpEnabled(){
+    try{ return localStorage.getItem(MARKER_INSTANT_JUMP_KEY)==='1'; }catch(e){ return false; }
+  }
+  function famSetMarkerInstantJump(on){
+    try{ localStorage.setItem(MARKER_INSTANT_JUMP_KEY, on?'1':'0'); }catch(e){}
+  }
+  window.famMarkerInstantJumpEnabled=famMarkerInstantJumpEnabled;
+  window.famSetMarkerInstantJump=famSetMarkerInstantJump;
   window.isStayStartStale=isStayStartStale;
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
@@ -16701,15 +16714,18 @@ const MBMMap = (function(){
     const cancelledAnimId=wasAnimating?_animIds[uid]:null;
     if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
     _animIdSeq++; const animationId=_animIdSeq; _animIds[uid]=animationId;
-    // Resume from where the marker VISUALLY is, not from the last target.
     const from=_markerRenderPos[uid]||_markerPos[uid]||to;
-    // v457 FIX (Codex review): was logging only the commanded target `to`
-    // — no visibility into where the marker ANIMATION actually started
-    // from, which is exactly what's needed to tell "GPS jumped" apart from
-    // "camera/marker jumped for its own reason". Now records `from` (real
-    // visual start) alongside `to`, and whether this specific transition
-    // was tweened smoothly or snapped instantly (dist>0.05 branch below —
-    // a snap on a small real-world move would itself be a red flag).
+    // v517 (replaces v516 per explicit direction): v516 found the real
+    // mechanism (marker tweened over ~288ms while setAccuracy jumped
+    // instantly, so a screenshot taken mid-tween could catch them apart)
+    // but fixed it by deleting the marker's animation entirely, trading
+    // away smooth motion. Instead: ONE shared animation now drives BOTH
+    // the marker AND the accuracy circle's center (when this uid owns the
+    // currently-shown circle — see _accCircleUid in setAccuracy) — same
+    // timer, same interpolated point, every single 16ms step, and the
+    // same cancel/snap/end paths for both. They can no longer differ for
+    // any span of time, without giving up the tween.
+    const moveAccCircleTo=(lat,lng)=>{ if(uid===_accCircleUid && _accCircle){ try{ _accCircle.setCenter({lat,lng}); }catch(e){} } };
     try{
       const _me=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
       if(_me&&uid===_me&&typeof window.diagHistoryPush==='function'){
@@ -16718,13 +16734,6 @@ const MBMMap = (function(){
           fromLat:from[0],fromLng:from[1],lat:to[0],lng:to[1],
           willSnap:distDeg>0.05});
       }
-      // v504 (diagnostic-only): mirrored into the dedicated pipeline buffer,
-      // for ANY uid being viewed (not just self) — the reported bug was
-      // while looking at a SELECTED member on the family map, which may or
-      // may not be the local user. Also records whether this call
-      // cancelled an in-flight animation (with that animation's own ID,
-      // for correlation), since a cancel-and-restart loop is itself a
-      // plausible source of visible drift/lag.
       if(typeof window.pipelineHistoryPush==='function'){
         const distDeg2=Math.abs(to[0]-from[0])+Math.abs(to[1]-from[1]);
         window.pipelineHistoryPush('marker_anim_start',{uid,animationId,
@@ -16732,15 +16741,25 @@ const MBMMap = (function(){
           willSnap:distDeg2>0.05, cancelledPriorAnim:wasAnimating, cancelledAnimId});
       }
     }catch(e){}
-    _markerPos[uid]=to;                       // target (what markerLatLng reports as commanded)
+    _markerPos[uid]=to;
     const dLat=to[0]-from[0], dLng=to[1]-from[1];
     const dist=Math.abs(dLat)+Math.abs(dLng);
-    if(dist<1e-8){ _markerRenderPos[uid]=to; return; }
+    if(dist<1e-8){ _markerRenderPos[uid]=to; moveAccCircleTo(to[0],to[1]); return; }
     // A jump this large is a genuine relocation (or a bad fix), not motion —
-    // tweening across it would draw a false path, so snap.
+    // tweening across it would draw a false path, so both snap together.
     if(dist>0.05){
       _markerRenderPos[uid]=to;
       try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+      moveAccCircleTo(to[0],to[1]);
+      try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_snap',{uid,animationId,lat:to[0],lng:to[1]}); }catch(e){}
+      return;
+    }
+    // A/B toggle (default off — the shared tween above is the normal
+    // path): v516's instant-jump-only mode, kept for comparison.
+    if(typeof window.famMarkerInstantJumpEnabled==='function' && window.famMarkerInstantJumpEnabled()){
+      _markerRenderPos[uid]=to;
+      try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+      moveAccCircleTo(to[0],to[1]);
       try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_snap',{uid,animationId,lat:to[0],lng:to[1]}); }catch(e){}
       return;
     }
@@ -16748,12 +16767,14 @@ const MBMMap = (function(){
     _animTimers[uid]=setInterval(()=>{
       i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t;
       const cur=[from[0]+dLat*e, from[1]+dLng*e];
-      _markerRenderPos[uid]=cur;              // keep the visual truth current every frame
+      _markerRenderPos[uid]=cur;
       try{ mk.position={lat:cur[0],lng:cur[1]}; }catch(_){}
+      moveAccCircleTo(cur[0],cur[1]);
       if(i>=steps){
         clearInterval(_animTimers[uid]); _animTimers[uid]=null;
         _markerRenderPos[uid]=to;
         try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
+        moveAccCircleTo(to[0],to[1]);
         try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_anim_end',{uid,animationId,renderedLat:to[0],renderedLng:to[1]}); }catch(e){}
       }
     },16);
@@ -16945,16 +16966,39 @@ const MBMMap = (function(){
   }
   function clearArrivedBubble(){ if(_arrivedAnchorMarker){ try{ _arrivedAnchorMarker.map=null; if(_arrivedAnchorMarker.setMap)_arrivedAnchorMarker.setMap(null); }catch(e){} _arrivedAnchorMarker=null; } }
 
-  function setAccuracy(latlng, meters, approx, fixId){
+  let _accCircleUid=null; // which uid's marker-animation tween should also drive the accuracy circle's center — see animateMarker
+  function setAccuracy(latlng, meters, approx, fixId, uid){
     if(!_map) return;
-    if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} _accCircle=null; }
-    if(meters==null||latlng==null) return;
-    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('setAccuracy_called',{fixId,lat:latlng[0],lng:latlng[1],meters,approx:!!approx}); }catch(e){}
-    try{
-      const g=window.google.maps;
-      _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
-        fillColor: approx?'#f59e0b':'#1E88E5', fillOpacity:0.10, strokeColor: approx?'#f59e0b':'#1E88E5', strokeOpacity:0.5, strokeWeight:1, clickable:false });
-    }catch(e){}
+    if(meters==null||latlng==null){
+      if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} _accCircle=null; _accCircleUid=null; }
+      return;
+    }
+    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('setAccuracy_called',{fixId,lat:latlng[0],lng:latlng[1],meters,approx:!!approx,uid}); }catch(e){}
+    const color=approx?'#f59e0b':'#1E88E5';
+    // v517 (root-cause fix, replaces v516's remove-all-animation approach
+    // per explicit direction — that traded away Google-Maps-style smooth
+    // motion just to force co-location): the marker and this circle now
+    // share ONE animation instead of the circle jumping instantly while
+    // the marker tweens over ~288ms (the real v516 finding). On first
+    // appearance for a uid (or switching which member's circle this is),
+    // there's no prior position to animate FROM, so it appears directly
+    // at the target — same as a brand-new marker does. On every
+    // SUBSEQUENT call for the SAME uid, this function does NOT move the
+    // circle's center at all — animateMarker's tween (called with the
+    // identical coordinate, for the same fix) moves it, frame by frame,
+    // in the exact same interpolation step as the marker. Radius/color
+    // aren't position-sensitive, so those still update immediately.
+    if(!_accCircle || _accCircleUid!==uid){
+      if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} }
+      try{
+        const g=window.google.maps;
+        _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
+          fillColor:color, fillOpacity:0.10, strokeColor:color, strokeOpacity:0.5, strokeWeight:1, clickable:false });
+        _accCircleUid=uid;
+      }catch(e){}
+      return;
+    }
+    try{ _accCircle.setRadius(meters); _accCircle.setOptions({fillColor:color, strokeColor:color}); }catch(e){}
   }
   function setHeadingCone(latlng, headingDeg, speed, color){
     if(!_map) return;
@@ -19198,7 +19242,7 @@ function famLivePaintMarkers(members, sel){
     // History/Driving. We clear any existing route so the live screen matches.
     MBMMap.drawRoute(null);
     const acc=famAccuracyInfo(sel.state.accuracy);
-    MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx, sel.state.nativeFixId);
+    MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx, sel.state.nativeFixId, sel.uid);
     // ── FEATURE 1: real directional heading cone. Only when the selected
     //    member is genuinely moving AND the device reported a real heading. ──
     if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
