@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v518';
+const APP_VERSION='v520';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11463,19 +11463,6 @@ _presenceHistory.map(e=>e.seq||0)):0);
     return false;
   }
   window.famShemroonAmbiguityCheck=famShemroonAmbiguityCheck;
-  // v517: A/B toggle between the default shared-tween animation (marker +
-  // accuracy circle move together, every frame) and v516's instant-jump-
-  // only mode, kept for comparison per explicit direction. Default OFF —
-  // shared tween is the normal path.
-  const MARKER_INSTANT_JUMP_KEY='mbmlife_marker_instant_jump_v1';
-  function famMarkerInstantJumpEnabled(){
-    try{ return localStorage.getItem(MARKER_INSTANT_JUMP_KEY)==='1'; }catch(e){ return false; }
-  }
-  function famSetMarkerInstantJump(on){
-    try{ localStorage.setItem(MARKER_INSTANT_JUMP_KEY, on?'1':'0'); }catch(e){}
-  }
-  window.famMarkerInstantJumpEnabled=famMarkerInstantJumpEnabled;
-  window.famSetMarkerInstantJump=famSetMarkerInstantJump;
   window.isStayStartStale=isStayStartStale;
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
@@ -16281,11 +16268,12 @@ const MBMMap = (function(){
      source. This module never blocks a marker update on Firestore.
      ═══════════════════════════════════════════════════════════════════════ */
   let _map=null, _elId=null, _mapEl=null, _loaded=false, _loadErr=null, _apiLoading=false, _apiReady=false;
-  let _markers={}, _markerMeta={}, _markerPos={}, _animTimers={};
-  // v401: _markerPos is the last COMMANDED target; _markerRenderPos is where the
-  // marker actually is on screen right now (updated every animation frame).
-  let _markerRenderPos={};
-  let _accCircle=null, _coneOverlay=null, _routeLine=null, _arrivedInfo=null, _arrivedAnchorMarker=null;
+  let _markers={}, _markerMeta={};
+  // v518: _markerPos/_markerRenderPos (commanded-target vs current-visual,
+  // tracked as two separate dicts) are gone — see _renderState near
+  // animateMarker, the single per-uid record that replaced both, shared
+  // with the accuracy circle.
+  let _accCircle=null, _accHalo=null, _coneOverlay=null, _routeLine=null, _arrivedInfo=null, _arrivedAnchorMarker=null;
   let _renderingType=null; // v473: ground truth from the SDK — 'VECTOR'/'RASTER'/'UNINITIALIZED'/null
   let _pendingInit=null; // {elId, center} queued while the SDK is still loading
 
@@ -16755,41 +16743,42 @@ const MBMMap = (function(){
   }
 
   function hasMarker(uid){ return !!_markers[uid]; }
-  function markerLatLng(uid){ const p=_markerPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
-  // v504 (diagnostic-only): markerLatLng above reports the last COMMANDED
-  // target, not where the marker is actually drawn right now mid-tween —
-  // this exposes the real visual position for pipeline tracing.
-  function markerRenderPos(uid){ const p=_markerRenderPos[uid]; return p?{lat:p[0],lng:p[1]}:null; }
+  // v518 (final, single-source architecture — replaces the v513/516/517
+  // history of separate fixes): previously _markerPos (commanded target)
+  // and _markerRenderPos (current visual position) were two marker-only
+  // variables, and the accuracy circle had its own separate _accCircleUid/
+  // _accCircle tracking that merely received the SAME computed value each
+  // frame from inside animateMarker — two objects, two positions, kept in
+  // sync by discipline rather than by construction. Collapsed into ONE
+  // per-uid record (_renderState[uid]: {pos, timer, animId}) that IS the
+  // single source of truth for where this uid is currently rendered. The
+  // marker and the accuracy circle (when it belongs to this uid) both
+  // read their position from this SAME object, written by ONE animation
+  // function, on ONE timer, every frame — there is no second state for
+  // either to fall out of sync with.
+  const _renderState={};
+  function markerLatLng(uid){ const s=_renderState[uid]; return s?{lat:s.pos[0],lng:s.pos[1]}:null; }
+  function markerRenderPos(uid){ return markerLatLng(uid); } // same value now — kept as an alias, diagnostic call sites use this name
 
-  /* Smooth eased glide of an existing marker to a new position — GPS drives
-     this on every valid callback, never waiting on Firestore. */
-  /* ── v401 FIX (requirement 10): the old implementation ended with
-     `_markerPos[uid]=to;` executed SYNCHRONOUSLY right after starting the
-     interval, not when the tween finished. So the next fix read `from =
-     _markerPos[uid]` and got the PREVIOUS TARGET rather than the position the
-     marker was actually rendered at. Cancelling a running tween therefore
-     teleported the marker from mid-path to the previous target before the new
-     tween began — the visible "jumping" while driving. The animation now
-     always resumes from the real current visual position. ── */
-  let _animIdSeq=0; const _animIds={}; // uid -> current animationId, diagnostic-only
+  let _animIdSeq=0;
   function animateMarker(uid, to){
     const mk=_markers[uid]; if(!mk) return;
-    const wasAnimating=!!_animTimers[uid];
-    const cancelledAnimId=wasAnimating?_animIds[uid]:null;
-    if(_animTimers[uid]){ clearInterval(_animTimers[uid]); _animTimers[uid]=null; }
-    _animIdSeq++; const animationId=_animIdSeq; _animIds[uid]=animationId;
-    const from=_markerRenderPos[uid]||_markerPos[uid]||to;
-    // v517 (replaces v516 per explicit direction): v516 found the real
-    // mechanism (marker tweened over ~288ms while setAccuracy jumped
-    // instantly, so a screenshot taken mid-tween could catch them apart)
-    // but fixed it by deleting the marker's animation entirely, trading
-    // away smooth motion. Instead: ONE shared animation now drives BOTH
-    // the marker AND the accuracy circle's center (when this uid owns the
-    // currently-shown circle — see _accCircleUid in setAccuracy) — same
-    // timer, same interpolated point, every single 16ms step, and the
-    // same cancel/snap/end paths for both. They can no longer differ for
-    // any span of time, without giving up the tween.
-    const moveAccCircleTo=(lat,lng)=>{ if(uid===_accCircleUid && _accCircle){ try{ _accCircle.setCenter({lat,lng}); }catch(e){} } };
+    let st=_renderState[uid];
+    const wasAnimating=!!(st&&st.timer);
+    const cancelledAnimId=wasAnimating?st.animId:null;
+    if(!st){ st=_renderState[uid]={pos:to.slice(),timer:null,animId:null}; }
+    if(st.timer){ clearInterval(st.timer); st.timer=null; }
+    _animIdSeq++; const animationId=_animIdSeq; st.animId=animationId;
+    const from=st.pos.slice();
+    // The ONE function that positions both objects from the ONE shared
+    // state, every time it changes — nothing else is allowed to move
+    // either the marker or (for the uid that owns it) the accuracy
+    // circle's center.
+    const applyPos=(lat,lng)=>{
+      st.pos=[lat,lng];
+      try{ mk.position={lat,lng}; }catch(_){}
+      if(uid===_accCircleUid && _accCircle){ try{ _accCircle.setCenter({lat,lng}); }catch(e){} if(_accHalo){ try{ _accHalo.setCenter({lat,lng}); }catch(e){} } }
+    };
     try{
       const _me=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
       if(_me&&uid===_me&&typeof window.diagHistoryPush==='function'){
@@ -16805,40 +16794,23 @@ const MBMMap = (function(){
           willSnap:distDeg2>0.05, cancelledPriorAnim:wasAnimating, cancelledAnimId});
       }
     }catch(e){}
-    _markerPos[uid]=to;
     const dLat=to[0]-from[0], dLng=to[1]-from[1];
     const dist=Math.abs(dLat)+Math.abs(dLng);
-    if(dist<1e-8){ _markerRenderPos[uid]=to; moveAccCircleTo(to[0],to[1]); return; }
+    if(dist<1e-8){ applyPos(to[0],to[1]); return; }
     // A jump this large is a genuine relocation (or a bad fix), not motion —
     // tweening across it would draw a false path, so both snap together.
     if(dist>0.05){
-      _markerRenderPos[uid]=to;
-      try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
-      moveAccCircleTo(to[0],to[1]);
-      try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_snap',{uid,animationId,lat:to[0],lng:to[1]}); }catch(e){}
-      return;
-    }
-    // A/B toggle (default off — the shared tween above is the normal
-    // path): v516's instant-jump-only mode, kept for comparison.
-    if(typeof window.famMarkerInstantJumpEnabled==='function' && window.famMarkerInstantJumpEnabled()){
-      _markerRenderPos[uid]=to;
-      try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
-      moveAccCircleTo(to[0],to[1]);
+      applyPos(to[0],to[1]);
       try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_snap',{uid,animationId,lat:to[0],lng:to[1]}); }catch(e){}
       return;
     }
     const steps=18; let i=0;
-    _animTimers[uid]=setInterval(()=>{
+    st.timer=setInterval(()=>{
       i++; const t=i/steps; const e=t<.5?2*t*t:-1+(4-2*t)*t;
-      const cur=[from[0]+dLat*e, from[1]+dLng*e];
-      _markerRenderPos[uid]=cur;
-      try{ mk.position={lat:cur[0],lng:cur[1]}; }catch(_){}
-      moveAccCircleTo(cur[0],cur[1]);
+      applyPos(from[0]+dLat*e, from[1]+dLng*e);
       if(i>=steps){
-        clearInterval(_animTimers[uid]); _animTimers[uid]=null;
-        _markerRenderPos[uid]=to;
-        try{ mk.position={lat:to[0],lng:to[1]}; }catch(_){}
-        moveAccCircleTo(to[0],to[1]);
+        clearInterval(st.timer); st.timer=null;
+        applyPos(to[0],to[1]);
         try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('marker_anim_end',{uid,animationId,renderedLat:to[0],renderedLng:to[1]}); }catch(e){}
       }
     },16);
@@ -16969,7 +16941,7 @@ const MBMMap = (function(){
       applyHtml(el);
       const mk=makeMapMarker(uid, latlng, el);
       mk._el=el;
-      _markers[uid]=mk; _markerPos[uid]=latlng; _markerRenderPos[uid]=latlng;
+      _markers[uid]=mk; _renderState[uid]={pos:latlng.slice(),timer:null,animId:null};
     }
     _markerMeta[uid]={pinCls,moving:meta.moving,heading:meta.heading,photo:meta.photo,initial:meta.initial,color:meta.color,
       activityType:meta.activityType,battery:meta.battery,batteryCharging:meta.batteryCharging,speedKph:meta.speedKph,
@@ -16983,7 +16955,7 @@ const MBMMap = (function(){
     }
   }
   function clearMarkersExcept(uids){
-    Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; delete _markerPos[u]; delete _markerRenderPos[u]; if(_animTimers[u]){clearInterval(_animTimers[u]);delete _animTimers[u];} } });
+    Object.keys(_markers).forEach(u=>{ if(uids.indexOf(u)<0){ try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){} delete _markers[u]; delete _markerMeta[u]; const st=_renderState[u]; if(st&&st.timer){clearInterval(st.timer);} delete _renderState[u]; } });
   }
 
   function setClusterMarker(key, latlng, members, selected, onClick, calloutMeta){
@@ -17015,7 +16987,7 @@ const MBMMap = (function(){
     const cls='fam-cluster'+(selected?' sel':'');
     if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
     else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
-      const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _markerPos[key]=latlng; _markerRenderPos[key]=latlng; }
+      const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _renderState[key]={pos:latlng.slice(),timer:null,animId:null}; }
     _markerMeta[key]={cls,calloutL1:calloutMeta&&calloutMeta.calloutL1,calloutL2:calloutMeta&&calloutMeta.calloutL2};
   }
 
@@ -17035,34 +17007,34 @@ const MBMMap = (function(){
     if(!_map) return;
     if(meters==null||latlng==null){
       if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} _accCircle=null; _accCircleUid=null; }
+      if(_accHalo){ try{ _accHalo.setMap(null); }catch(e){} _accHalo=null; }
       return;
     }
     try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('setAccuracy_called',{fixId,lat:latlng[0],lng:latlng[1],meters,approx:!!approx,uid}); }catch(e){}
     const color=approx?'#f59e0b':'#1E88E5';
-    // v517 (root-cause fix, replaces v516's remove-all-animation approach
-    // per explicit direction — that traded away Google-Maps-style smooth
-    // motion just to force co-location): the marker and this circle now
-    // share ONE animation instead of the circle jumping instantly while
-    // the marker tweens over ~288ms (the real v516 finding). On first
-    // appearance for a uid (or switching which member's circle this is),
-    // there's no prior position to animate FROM, so it appears directly
-    // at the target — same as a brand-new marker does. On every
-    // SUBSEQUENT call for the SAME uid, this function does NOT move the
-    // circle's center at all — animateMarker's tween (called with the
-    // identical coordinate, for the same fix) moves it, frame by frame,
-    // in the exact same interpolation step as the marker. Radius/color
-    // aren't position-sensitive, so those still update immediately.
+    // v520: Life360-style halo/glow around the accuracy dot — green, per
+    // request. A second, larger, low-opacity, stroke-free circle. Created/
+    // destroyed alongside the main accuracy circle and moved by the exact
+    // same shared applyPos() in animateMarker (see below) — never an
+    // independent position source, staying inside the single-source
+    // architecture.
+    const haloColor='#22c55e';
     if(!_accCircle || _accCircleUid!==uid){
       if(_accCircle){ try{ _accCircle.setMap(null); }catch(e){} }
+      if(_accHalo){ try{ _accHalo.setMap(null); }catch(e){} }
+      const initPos=_renderState[uid]?_renderState[uid].pos:latlng;
       try{
         const g=window.google.maps;
-        _accCircle=new g.Circle({ map:_map, center:{lat:latlng[0],lng:latlng[1]}, radius:meters,
+        _accHalo=new g.Circle({ map:_map, center:{lat:initPos[0],lng:initPos[1]}, radius:meters*2.6,
+          fillColor:haloColor, fillOpacity:0.16, strokeOpacity:0, clickable:false });
+        _accCircle=new g.Circle({ map:_map, center:{lat:initPos[0],lng:initPos[1]}, radius:meters,
           fillColor:color, fillOpacity:0.10, strokeColor:color, strokeOpacity:0.5, strokeWeight:1, clickable:false });
         _accCircleUid=uid;
       }catch(e){}
       return;
     }
     try{ _accCircle.setRadius(meters); _accCircle.setOptions({fillColor:color, strokeColor:color}); }catch(e){}
+    try{ _accHalo.setRadius(meters*2.6); }catch(e){}
   }
   function setHeadingCone(latlng, headingDeg, speed, color){
     if(!_map) return;
@@ -17095,13 +17067,15 @@ const MBMMap = (function(){
   }
   function destroy(){
     cancelCameraAnimation();
-    Object.keys(_animTimers).forEach(k=>{try{clearInterval(_animTimers[k]);}catch(e){}}); _animTimers={};
+    Object.keys(_renderState).forEach(u=>{ const st=_renderState[u]; if(st&&st.timer){try{clearInterval(st.timer);}catch(e){}} }); 
     Object.keys(_markers).forEach(u=>{try{ _markers[u].map=null; if(_markers[u].setMap)_markers[u].setMap(null); }catch(e){}});
     clearArrivedBubble();
     if(_accCircle){ try{_accCircle.setMap(null);}catch(e){} _accCircle=null; }
+    if(_accHalo){ try{_accHalo.setMap(null);}catch(e){} _accHalo=null; }
+    _accCircleUid=null; // v518: this was a real gap — previously left stale across a remount
     if(_coneOverlay){ try{_coneOverlay.setMap(null);}catch(e){} _coneOverlay=null; }
     if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
-    _markers={}; _markerMeta={}; _markerPos={}; _markerRenderPos={}; _loaded=false;
+    _markers={}; _markerMeta={}; for(const k in _renderState) delete _renderState[k]; _loaded=false;
     _map=null; _elId=null; _mapEl=null;
     // ── v401 FIX (requirement 5): _pad is a MODULE-LEVEL singleton shared by
     //    every screen that mounts this one map object. Only the Family live
