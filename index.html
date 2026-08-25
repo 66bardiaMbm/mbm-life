@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v523';
+const APP_VERSION='v527';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11400,6 +11400,199 @@ _presenceHistory.map(e=>e.seq||0)):0);
   }
   window.recordDepartureTombstone=recordDepartureTombstone;
   window.isStayStartStale=isStayStartStale;
+
+  // v524 (diagnostic-only prototype, default OFF — NOT a final fix):
+  // rotates ONLY the heading cone using the device's own orientation
+  // sensor (DeviceOrientationEvent), entirely from the browser/WebView —
+  // no native Kotlin code involved. Touches nothing else: lat/lng,
+  // marker, halo, camera, map center, address, time, and Driving logic
+  // are all completely untouched. When the toggle is off (default), or
+  // when sensor data is unavailable/stale, the cone falls back to the
+  // existing GPS-derived heading exactly as before — there is no jump,
+  // because the fallback IS the pre-existing unmodified behavior.
+  const DEVICE_ORIENTATION_DIAG_KEY='mbmlife_device_orientation_diag_v1';
+  function famDeviceOrientationEnabled(){
+    try{ return localStorage.getItem(DEVICE_ORIENTATION_DIAG_KEY)==='1'; }catch(e){ return false; }
+  }
+  function famSetDeviceOrientationEnabled(on){
+    try{ localStorage.setItem(DEVICE_ORIENTATION_DIAG_KEY, on?'1':'0'); }catch(e){}
+    if(on) _devOrientAttach(); else _devOrientDetach();
+  }
+  window.famDeviceOrientationEnabled=famDeviceOrientationEnabled;
+  window.famSetDeviceOrientationEnabled=famSetDeviceOrientationEnabled;
+
+  // Staleness window — a fresh reading must be newer than this or the
+  // cone falls back to GPS heading. Not a "threshold added without
+  // trace" in the sense the earlier dead-reckoning one was flagged for:
+  // this one only ever affects whether the DIAGNOSTIC OVERRIDE is used at
+  // all, never the underlying GPS-derived value itself, and the feature
+  // is off by default.
+  const DEVICE_ORIENTATION_STALE_MS=1000;
+
+  const _devOrientDiag={
+    supported: (typeof window!=='undefined' && 'DeviceOrientationEvent' in window),
+    listening:false,
+    receivedAnyEvent:false,
+    absolute:null,
+    rawAlpha:null,
+    correctedHeadingDeg:null,
+    lastEventAtMs:null,
+    eventCount:0,
+    eventRateHz:0,
+    _rateWindowStart:null,
+    _rateWindowCount:0,
+    _handler:null,
+    _eventName:null
+  };
+  window.famDeviceOrientationDiag=function(){
+    return {
+      supported:_devOrientDiag.supported,
+      listening:_devOrientDiag.listening,
+      receivedAnyEvent:_devOrientDiag.receivedAnyEvent,
+      absolute:_devOrientDiag.absolute,
+      rawAlpha:_devOrientDiag.rawAlpha,
+      correctedHeadingDeg:_devOrientDiag.correctedHeadingDeg,
+      lastEventAtMs:_devOrientDiag.lastEventAtMs,
+      ageMs:_devOrientDiag.lastEventAtMs?(Date.now()-_devOrientDiag.lastEventAtMs):null,
+      eventCount:_devOrientDiag.eventCount,
+      eventRateHz:_devOrientDiag.eventRateHz,
+      isFresh:!!(_devOrientDiag.lastEventAtMs && (Date.now()-_devOrientDiag.lastEventAtMs)<DEVICE_ORIENTATION_STALE_MS),
+      eventName:_devOrientDiag._eventName
+    };
+  };
+  // The one function the paint path calls — returns a heading in degrees
+  // ONLY when the toggle is on AND a fresh, valid reading exists;
+  // otherwise null, which callers treat exactly as "no override, use GPS
+  // heading" (the existing, unmodified behavior).
+  window.famDeviceOrientationHeadingOverride=function(){
+    if(!famDeviceOrientationEnabled()) return null;
+    if(!_devOrientDiag.lastEventAtMs) return null;
+    if(Date.now()-_devOrientDiag.lastEventAtMs>=DEVICE_ORIENTATION_STALE_MS) return null;
+    if(_devOrientDiag.correctedHeadingDeg==null||isNaN(_devOrientDiag.correctedHeadingDeg)) return null;
+    // v526 FIX (real bug, confirmed by review): absolute===true was never
+    // actually checked here — the comment above claimed relative data was
+    // "informational only", but nothing enforced that. A relative-only
+    // reading (absolute:false) is measured from wherever the device
+    // happened to be pointed the instant the listener attached, NOT true
+    // north — using it as the cone's angle could show a fabricated
+    // direction. Now genuinely gated: only a confirmed-absolute reading
+    // can drive the rendered cone.
+    if(_devOrientDiag.absolute!==true) return null;
+    return _devOrientDiag.correctedHeadingDeg;
+  };
+
+  function _devOrientScreenAngle(){
+    try{
+      if(window.screen&&window.screen.orientation&&typeof window.screen.orientation.angle==='number') return window.screen.orientation.angle;
+    }catch(e){}
+    try{ if(typeof window.orientation==='number') return window.orientation; }catch(e){}
+    return 0;
+  }
+  function _devOrientHandleEvent(ev){
+    const now=Date.now();
+    _devOrientDiag.receivedAnyEvent=true;
+    _devOrientDiag.eventCount++;
+    _devOrientDiag.lastEventAtMs=now;
+    // Rolling 1s window for an honest events/sec figure, not a guess.
+    if(_devOrientDiag._rateWindowStart==null||now-_devOrientDiag._rateWindowStart>=1000){
+      _devOrientDiag.eventRateHz=_devOrientDiag._rateWindowCount;
+      _devOrientDiag._rateWindowStart=now; _devOrientDiag._rateWindowCount=1;
+    } else { _devOrientDiag._rateWindowCount++; }
+
+    let heading=null;
+    // iOS Safari/WebViews expose webkitCompassHeading directly as true
+    // compass heading (0=North, clockwise) — already absolute, no
+    // inversion needed. Everything else uses the standard `alpha` field.
+    if(typeof ev.webkitCompassHeading==='number' && !isNaN(ev.webkitCompassHeading)){
+      _devOrientDiag.absolute=true;
+      heading=ev.webkitCompassHeading;
+    } else if(ev.alpha!=null && !isNaN(ev.alpha)){
+      _devOrientDiag.absolute=!!ev.absolute;
+      _devOrientDiag.rawAlpha=ev.alpha;
+      // Standard DeviceOrientationEvent convention: alpha increases
+      // counter-clockwise from the device's initial heading; compass
+      // heading increases clockwise from North. When `absolute` is true,
+      // alpha=0 corresponds to the device facing North, so heading =
+      // (360 - alpha) mod 360. When NOT absolute, this is only relative
+      // to wherever the device happened to be pointed at listener-start —
+      // not a true compass heading — so it is NOT used as an override
+      // (see the isFresh/absolute gating in the override function itself
+      // being intentionally lenient here for diagnostic visibility, but
+      // callers relying on window.famDeviceOrientationHeadingOverride
+      // should treat a false `absolute` as informational only).
+      heading=(360-ev.alpha)%360;
+    }
+    if(heading!=null){
+      const corrected=(heading+_devOrientScreenAngle()+360)%360;
+      _devOrientDiag.correctedHeadingDeg=corrected;
+    }
+    // v527 (replaces v526's per-event requestAnimationFrame scheduling):
+    // setHeadingCone is now a cheap target-update (see the MBMMap
+    // architecture note above it) — it never allocates a timer, so there
+    // is nothing left to coalesce per-event. Calling it directly, every
+    // event, at any rate, is exactly the intended behavior: the ONE
+    // continuous animation loop already owns all frame pacing, so a
+    // 60Hz stream of calls here just keeps redirecting the same ongoing
+    // motion, never restarting or queuing anything.
+    if(famDeviceOrientationEnabled() && window._famConeLastParams){
+      const ov=window.famDeviceOrientationHeadingOverride?window.famDeviceOrientationHeadingOverride():null;
+      if(ov!=null){
+        const p=window._famConeLastParams;
+        try{ if(typeof MBMMap!=='undefined'&&MBMMap.setHeadingCone) MBMMap.setHeadingCone([p.lat,p.lng], ov, p.speed, p.color); }catch(e){}
+      }
+    }
+  }
+  function _devOrientAttach(){
+    if(_devOrientDiag.listening) return;
+    if(!_devOrientDiag.supported) return;
+    const handler=(ev)=>_devOrientHandleEvent(ev);
+    _devOrientDiag._handler=handler;
+    // Prefer the absolute-specific event where the platform offers it —
+    // falls back to plain 'deviceorientation' otherwise (still usable,
+    // just gated more conservatively by the `absolute` flag captured above).
+    const eventName=('ondeviceorientationabsolute' in window)?'deviceorientationabsolute':'deviceorientation';
+    _devOrientDiag._eventName=eventName;
+    try{
+      window.addEventListener(eventName, handler, true);
+      _devOrientDiag.listening=true;
+    }catch(e){}
+    // Safeguard: famLivePaintMarkers simply stops being CALLED at all once
+    // the app navigates away from the live Family screen, so there is no
+    // paint-triggered call site to hook a synchronous detach into for that
+    // case specifically (as opposed to backgrounding, which DOES have the
+    // visibilitychange event). A light poll closes that gap without
+    // touching the app's general navigation/routing code.
+    if(_devOrientDiag._screenPollTimer==null){
+      _devOrientDiag._screenPollTimer=setInterval(()=>{
+        const onLiveScreen=(typeof screen!=='undefined'&&typeof currentModule!=='undefined'&&typeof famView!=='undefined')
+          && screen==='module' && currentModule==='family' && (famView==='live'||famView==='dashboard');
+        if(!onLiveScreen){ _devOrientDetach(); }
+      },2000);
+    }
+  }
+  function _devOrientDetach(){
+    if(_devOrientDiag._screenPollTimer!=null){ try{clearInterval(_devOrientDiag._screenPollTimer);}catch(e){} _devOrientDiag._screenPollTimer=null; }
+    if(!_devOrientDiag.listening) return;
+    try{ window.removeEventListener(_devOrientDiag._eventName, _devOrientDiag._handler, true); }catch(e){}
+    _devOrientDiag.listening=false;
+  }
+  function _devOrientSyncForScreen(screenIsActive){
+    if(screenIsActive && famDeviceOrientationEnabled()){ _devOrientAttach(); }
+    else if(!screenIsActive){ _devOrientDetach(); }
+  }
+  window.famDeviceOrientationSyncForScreen=_devOrientSyncForScreen;
+  // Lifecycle: never keep the sensor running when the app is backgrounded
+  // or the tab/webview is hidden — re-attach only if the toggle is still
+  // on when visibility returns.
+  try{
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.hidden){ _devOrientDetach(); }
+      else if(famDeviceOrientationEnabled()){ _devOrientAttach(); }
+    });
+  }catch(e){}
+  // If the toggle was left on from a previous session, honor it now.
+  try{ if(famDeviceOrientationEnabled()) _devOrientAttach(); }catch(e){}
+
   // v456: MBMMap (marker/camera rendering) is a SEPARATE top-level module
   // and cannot reach these directly — same class of scope mistake made
   // earlier this session with myUid()/FamilyLocation. Exposing on window,
@@ -14415,6 +14608,18 @@ async function famRunDiagnostics(){
   _famDiagRunning=false; render();
 }
 function famDiagView(){
+  // v524: light auto-refresh so the device-orientation telemetry
+  // (event rate / last-event age / raw alpha) actually updates live while
+  // this screen is open, instead of only on the next unrelated re-render.
+  // Self-stops once we're no longer on this screen — never runs elsewhere.
+  try{
+    if(!window._famDiagRefreshTimer){
+      window._famDiagRefreshTimer=setInterval(()=>{
+        if(famView!=='diag'){ clearInterval(window._famDiagRefreshTimer); window._famDiagRefreshTimer=null; return; }
+        if(typeof render==='function') render();
+      },500);
+    }
+  }catch(e){}
   let h=`<div style="padding:0 16px var(--fam-navclear)">`;
   // ── Live-location diagnostics (permission / provider / lat / lng / accuracy /
   //    timestamp / errors) — real values from the location backend. ──
@@ -14443,6 +14648,28 @@ function famDiagView(){
       <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'v468 مارکر و دوربین جدا می‌شدن چون فقط دوربین پیش‌بینی می‌شد. v486 هردو رو از یه نقطه‌ی مشترک در هر tick آپدیت می‌کنه — دیگه نباید جدا بشن.':'v468 had the camera and marker diverge because only the camera was extrapolated. v486 drives both from one shared point every tick — they should no longer split apart.'}</div>
       <button class="btn" data-fam="loc-toggle-dr-horizon" style="width:100%;margin-top:10px;background:${(typeof famDeadReckonHorizonShortEnabled==='function'&&famDeadReckonHorizonShortEnabled())?'#f59e0b':'#6b7280'};color:#fff">${(typeof famDeadReckonHorizonShortEnabled==='function'&&famDeadReckonHorizonShortEnabled())?(L==='fa'?'حالتِ افق کوتاه (۱.۲s) — روشن، برای خاموش‌کردن بزن':'Short horizon (1.2s) — ON, tap to turn off'):(L==='fa'?'حالتِ افق کوتاه (۱.۲s) — خاموش (پیش‌فرض ۳s)، برای تست A/B بزن':'Short horizon (1.2s) — OFF (default 3s), tap to A/B test')}</button>
       <div style="font-size:11px;color:var(--ink3);margin-top:4px">${L==='fa'?'v509: پیش‌فرض همون رفتارِ ۳ ثانیه‌ای (قبل از v508) برگشت. حالتِ ۱.۲ ثانیه یه mitigationِ آزمایشیه، فقط دستی و برای مقایسه‌ی A/B رو یه مسیرِ یکسان — پیش‌فرض روشن نیست.':'v509: default reverted to the original 3s behavior (pre-v508). The 1.2s mode is an experimental mitigation, manual-only, for A/B testing the same route — not on by default.'}</div>
+      <div style="font-weight:700;font-size:12px;margin:16px 0 6px">${L==='fa'?'قطب‌نمای گوشی (DeviceOrientationEvent) — نمونه‌ی آزمایشی':'Device compass (DeviceOrientationEvent) — diagnostic prototype'}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:8px">${L==='fa'?'v524: فقط جهتِ مخروط رو می‌چرخونه، هیچ‌جا دیگه (مختصات/مارکر/هاله/دوربین/نقشه/آدرس/زمان/Driving) رو دست نمی‌زنه. پیش‌فرض خاموش. اگه sensor نبود یا کهنه شد، بی هیچ پرشی برمی‌گرده به headingِ GPS.':'v524: rotates ONLY the cone angle — never touches position/marker/halo/camera/map/address/time/Driving. Default OFF. If the sensor is unavailable or stale, it falls back to GPS heading with no jump.'}</div>
+      <button class="btn" data-fam="loc-toggle-device-orientation" style="width:100%;background:${(typeof famDeviceOrientationEnabled==='function'&&famDeviceOrientationEnabled())?'#22c55e':'#6b7280'};color:#fff">${(typeof famDeviceOrientationEnabled==='function'&&famDeviceOrientationEnabled())?(L==='fa'?'قطب‌نمای سنسور — روشن، برای خاموش‌کردن بزن':'Sensor compass — ON, tap to turn off'):(L==='fa'?'قطب‌نمای سنسور — خاموش، برای تست بزن':'Sensor compass — OFF, tap to test')}</button>
+      <div style="font-family:monospace;font-size:10.5px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px;margin-top:8px">
+        ${(()=>{
+          const od=(typeof window.famDeviceOrientationDiag==='function')?window.famDeviceOrientationDiag():null;
+          if(!od) return '<div>n/a</div>';
+          return `
+            <div><b>supported:</b> ${od.supported}</div>
+            <div><b>listening:</b> ${od.listening}</div>
+            <div><b>event name:</b> ${esc(od.eventName||'—')}</div>
+            <div><b>received any event:</b> ${od.receivedAnyEvent}</div>
+            <div><b>absolute:</b> ${od.absolute===null?'—':od.absolute}</div>
+            <div><b>raw alpha:</b> ${od.rawAlpha==null?'—':od.rawAlpha.toFixed(1)+'°'}</div>
+            <div><b>corrected heading:</b> ${od.correctedHeadingDeg==null?'—':od.correctedHeadingDeg.toFixed(1)+'°'}</div>
+            <div><b>event rate:</b> ${od.eventRateHz} Hz</div>
+            <div><b>last event age:</b> ${od.ageMs==null?'—':od.ageMs+'ms'}</div>
+            <div><b>is fresh (< 1000ms):</b> <span style="color:${od.isFresh?'#22c55e':'#f43f5e'}">${od.isFresh}</span></div>
+            <div><b>event count total:</b> ${od.eventCount}</div>
+          `;
+        })()}
+      </div>
       <div style="font-weight:700;font-size:12px;margin:12px 0 6px">${L==='fa'?'رویدادها':'Event log'}</div>
       <div style="max-height:180px;overflow:auto;font-family:monospace;font-size:11px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
         ${log.length?log.slice().reverse().map(e=>`<div>${esc(e.t.slice(11,19))} · ${esc(e.kind)} · ${esc(typeof e.detail==='object'?JSON.stringify(e.detail):String(e.detail==null?'':e.detail))}</div>`).join(''):'<div>'+(L==='fa'?'هنوز رویدادی نیست':'no events yet')+'</div>'}
@@ -17001,10 +17228,33 @@ const MBMMap = (function(){
     try{ _accCircle.setRadius(meters); _accCircle.setOptions({fillColor:color, strokeColor:color}); }catch(e){}
     try{ _accHalo.setRadius(meters*2.6); }catch(e){}
   }
-  function setHeadingCone(latlng, headingDeg, speed, color){
-    if(!_map) return;
+  // v527 (root-cause architecture fix — replaces v525/v526's per-call
+  // restart-tween, which broke down at real 30-60Hz sensor rates: every
+  // event cancelled whatever tween was in progress and started a fresh
+  // ~144ms one, so at 30Hz+ the tween was reset roughly every 16-33ms and
+  // could never actually complete — the cone would lag, judder, or in the
+  // worst case never visibly reach the true heading at all). Now there is
+  // exactly ONE continuous animation loop, started lazily and left
+  // running for as long as the cone is active. Every caller — GPS-driven
+  // paint OR a sensor event, at any rate — only ever updates a shared
+  // TARGET (_coneTarget) and the position/speed/color to paint with; it
+  // never touches a timer. The loop itself, on its own fixed cadence,
+  // eases the rendered angle a fixed FRACTION of the remaining shortest-
+  // path distance toward the target every frame (continuous exponential
+  // convergence, not a fixed-duration tween) — so a target that moves
+  // again before convergence just redirects the SAME ongoing motion
+  // instead of restarting it from scratch. Rate-independent by
+  // construction: whether the target updates once a second or sixty
+  // times a second, there is still only the one loop, one timer, and
+  // motion that never resets.
+  let _coneRenderedHeading=null, _coneTarget=null, _coneLoopTimer=null, _coneLoopParams=null;
+  function _coneShortestDelta(from,to){
+    let d=(to-from)%360;
+    if(d>180) d-=360; else if(d<-180) d+=360;
+    return d;
+  }
+  function _paintCone(latlng,headingDeg,speed,color){
     if(_coneOverlay){ try{ _coneOverlay.setMap(null); }catch(e){} _coneOverlay=null; }
-    if(latlng==null||headingDeg==null||isNaN(headingDeg)) return;
     try{
       const g=window.google.maps;
       const spd=(speed!=null&&!isNaN(speed))?Math.max(0,Math.min(15,speed)):0;
@@ -17019,6 +17269,54 @@ const MBMMap = (function(){
       path.push({lat:lat0,lng:lng0});
       _coneOverlay=new g.Polygon({ map:_map, paths:path, fillColor:color||'#8b6df8', fillOpacity:0.28, strokeWeight:0, clickable:false });
     }catch(e){}
+  }
+  // Convergence fraction per 16ms tick — NOT a duration. At this rate the
+  // angle closes ~85% of any gap within ~150ms (matching v525/526's feel
+  // for a single isolated update) while remaining fully stable and
+  // gap-agnostic under continuous rapid retargeting, since each tick only
+  // ever asks "how far is current from CURRENT target right now", never
+  // "how far through a fixed-length animation am I".
+  const CONE_CONVERGE_FRACTION=0.32;
+  function _coneLoopTick(){
+    if(_coneTarget==null||_coneLoopParams==null){ _coneLoopStop(); return; }
+    const delta=_coneShortestDelta(_coneRenderedHeading, _coneTarget);
+    if(Math.abs(delta)<0.3){
+      _coneRenderedHeading=_coneTarget;
+    } else {
+      _coneRenderedHeading=((_coneRenderedHeading+delta*CONE_CONVERGE_FRACTION)%360+360)%360;
+    }
+    _paintCone(_coneLoopParams.latlng,_coneRenderedHeading,_coneLoopParams.speed,_coneLoopParams.color);
+  }
+  function _coneLoopStart(){
+    if(_coneLoopTimer!=null) return; // already running — never a second loop
+    _coneLoopTimer=setInterval(_coneLoopTick,16);
+  }
+  function _coneLoopStop(){
+    if(_coneLoopTimer!=null){ try{clearInterval(_coneLoopTimer);}catch(e){} _coneLoopTimer=null; }
+  }
+  // The one entry point every caller (GPS paint path, sensor events) uses.
+  // Cheap by design: sets a few fields, ensures the single loop is
+  // running — never allocates a new timer, never cancels/restarts
+  // anything, regardless of call frequency.
+  function setHeadingCone(latlng, headingDeg, speed, color){
+    if(!_map) return;
+    if(latlng==null||headingDeg==null||isNaN(headingDeg)){
+      _coneLoopStop();
+      if(_coneOverlay){ try{ _coneOverlay.setMap(null); }catch(e){} _coneOverlay=null; }
+      _coneRenderedHeading=null; _coneTarget=null; _coneLoopParams=null;
+      return;
+    }
+    const to=((headingDeg%360)+360)%360;
+    _coneTarget=to;
+    _coneLoopParams={latlng,speed,color};
+    if(_coneRenderedHeading==null){
+      // First appearance — nothing to converge FROM, so appear directly
+      // at the target (matching how a brand-new marker also just
+      // appears, rather than animating in from nowhere).
+      _coneRenderedHeading=to;
+      _paintCone(latlng,to,speed,color);
+    }
+    _coneLoopStart(); // no-op if already running
   }
   function drawRoute(points){
     if(!_map) return;
@@ -17038,6 +17336,7 @@ const MBMMap = (function(){
     if(_accCircle){ try{_accCircle.setMap(null);}catch(e){} _accCircle=null; }
     if(_accHalo){ try{_accHalo.setMap(null);}catch(e){} _accHalo=null; }
     _accCircleUid=null; // v518: this was a real gap — previously left stale across a remount
+    _coneLoopStop(); _coneRenderedHeading=null; _coneTarget=null; _coneLoopParams=null;
     if(_coneOverlay){ try{_coneOverlay.setMap(null);}catch(e){} _coneOverlay=null; }
     if(_routeLine){ try{_routeLine.setMap(null);}catch(e){} _routeLine=null; }
     _markers={}; _markerMeta={}; for(const k in _renderState) delete _renderState[k]; _loaded=false;
@@ -19248,7 +19547,25 @@ function famLivePaintMarkers(members, sel){
     MBMMap.setAccuracy([sel.state.lat,sel.state.lng], sel.state.accuracy, acc.approx, sel.state.nativeFixId, sel.uid);
     // ── FEATURE 1: real directional heading cone. Only when the selected
     //    member is genuinely moving AND the device reported a real heading. ──
-    if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
+    // v524 (diagnostic-only, additive, default OFF): when the device-
+    // orientation toggle is on and a fresh sensor reading exists, the cone
+    // may ALSO render while stationary (using the sensor heading) so the
+    // rotate-the-phone behavior can be verified at a standstill, per the
+    // explicit test requirement. This never changes sel.state.lat/lng —
+    // only which number is passed as the cone's angle. With the toggle
+    // off, this whole branch is inert and the original moving+GPS-heading
+    // path below is byte-for-byte unchanged.
+    try{ if(typeof window.famDeviceOrientationSyncForScreen==='function') window.famDeviceOrientationSyncForScreen(true); }catch(e){}
+    // v526: cache the cone's real inputs from THIS real paint — the one
+    // place they're legitimately known — so a sensor event arriving
+    // between paints can trigger its own immediate cone-only repaint
+    // (see _devOrientHandleEvent) using the SAME last-known position,
+    // never a re-derived or guessed one.
+    window._famConeLastParams={lat:sel.state.lat, lng:sel.state.lng, speed:sel.state.speed, color:sel.color};
+    const _sensorHeadingOverride=(typeof window.famDeviceOrientationHeadingOverride==='function')?window.famDeviceOrientationHeadingOverride():null;
+    if(_sensorHeadingOverride!=null){
+      MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], _sensorHeadingOverride, sel.state.speed, sel.color);
+    } else if(sel.state.moving && sel.state.heading!=null && !isNaN(sel.state.heading)){
       MBMMap.setHeadingCone([sel.state.lat,sel.state.lng], sel.state.heading, sel.state.speed, sel.color);
       // v474 (REAL ROOT CAUSE, confirmed by code reading + on-device diag):
       // MBMMap.setMapHeading() has existed since v467, but the ONLY call
@@ -19292,6 +19609,8 @@ function famLivePaintMarkers(members, sel){
     // longer created (see famLiveView) so there is nothing to update here.
   } else {
     MBMMap.setAccuracy(null,null); MBMMap.setHeadingCone(null,null,null);
+    try{ if(typeof window.famDeviceOrientationSyncForScreen==='function') window.famDeviceOrientationSyncForScreen(false); }catch(e){}
+    window._famConeLastParams=null;
   }
   // Exactly one camera decision per paint. The SELECTED member is the camera
   // authority (not always the signed-in user): selecting somebody resumes
@@ -20590,6 +20909,17 @@ async function famAction(act,arg,ev){
         const cur=(typeof famDeadReckonHorizonShortEnabled==='function')&&famDeadReckonHorizonShortEnabled();
         if(typeof famSetDeadReckonHorizonShort==='function') famSetDeadReckonHorizonShort(!cur);
         toast(!cur?(L==='fa'?'افقِ ۱.۲ ثانیه‌ای روشن شد (آزمایشی)':'1.2s horizon ON (experimental)'):(L==='fa'?'برگشت به افقِ ۳ ثانیه‌ای (پیش‌فرض)':'Back to 3s horizon (default)'));
+        render();
+      }catch(e){}
+      return;
+    }
+    case 'loc-toggle-device-orientation':{
+      // v524: explicit, persisted, OFF-by-default toggle for the
+      // DeviceOrientationEvent cone-only diagnostic prototype.
+      try{
+        const cur=(typeof famDeviceOrientationEnabled==='function')&&famDeviceOrientationEnabled();
+        if(typeof famSetDeviceOrientationEnabled==='function') famSetDeviceOrientationEnabled(!cur);
+        toast(!cur?(L==='fa'?'قطب‌نمای سنسور روشن شد (آزمایشی)':'Sensor compass ON (prototype)'):(L==='fa'?'قطب‌نمای سنسور خاموش شد':'Sensor compass OFF'));
         render();
       }catch(e){}
       return;
