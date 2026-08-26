@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v530';
+const APP_VERSION='v531';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17303,8 +17303,8 @@ const MBMMap = (function(){
       const initPos=_renderState[uid]?_renderState[uid].pos:latlng;
       try{
         const g=window.google.maps;
-        _accHalo=new g.Circle({ map:_map, center:{lat:initPos[0],lng:initPos[1]}, radius:meters*2.6,
-          fillColor:haloColor, fillOpacity:0.16, strokeOpacity:0, clickable:false });
+        _accHalo=new g.Circle({ map:_map, center:{lat:initPos[0],lng:initPos[1]}, radius:Math.max(meters*2.6,35),
+          fillColor:haloColor, fillOpacity:0.30, strokeColor:haloColor, strokeOpacity:0.55, strokeWeight:2, clickable:false });
         _accCircle=new g.Circle({ map:_map, center:{lat:initPos[0],lng:initPos[1]}, radius:meters,
           fillColor:color, fillOpacity:0.10, strokeColor:color, strokeOpacity:0.5, strokeWeight:1, clickable:false });
         _accCircleUid=uid;
@@ -17312,7 +17312,7 @@ const MBMMap = (function(){
       return;
     }
     try{ _accCircle.setRadius(meters); _accCircle.setOptions({fillColor:color, strokeColor:color}); }catch(e){}
-    try{ _accHalo.setRadius(meters*2.6); }catch(e){}
+    try{ _accHalo.setRadius(Math.max(meters*2.6,35)); }catch(e){}
   }
   // v527 (root-cause architecture fix — replaces v525/v526's per-call
   // restart-tween, which broke down at real 30-60Hz sensor rates: every
@@ -18631,6 +18631,26 @@ function famRegionWithFallback(uid, freshRegion){
   if(last && (Date.now()-last.at)<LAST_KNOWN_REGION_MAX_AGE_MS) return last.text;
   return '';
 }
+// v531 ROOT-CAUSE FIX (confirmed, not guessed): the comment a few lines
+// below (originally written alongside the driving l1 computation) already
+// described this exact fallback — "falls back to the plain label only
+// when nothing road-level has resolved recently... expires like the
+// region fix does" — but the code beneath it never actually implemented
+// it; it fell straight to the generic "Driving" label on ANY cache miss.
+// Since STICK_RADIUS_M (25m/3min) is far tighter than real fix-to-fix
+// driving distance, that miss happens on nearly every single fix while
+// actually driving — confirmed on-device via screen recording, road bar
+// blank for the whole visible drive. This mirrors the already-working
+// famRegionWithFallback above, applied to road names, with a much
+// shorter window (roads change far more often than suburbs).
+const _famLastKnownRoad={}; // uid -> {text, at}
+const LAST_KNOWN_ROAD_MAX_AGE_MS=20*1000; // 20s: short enough to correct quickly after a turn, long enough to bridge fix-to-fix cache misses while driving
+function famRoadWithFallback(uid, freshRoad){
+  if(freshRoad){ _famLastKnownRoad[uid]={text:freshRoad, at:Date.now()}; return freshRoad; }
+  const last=_famLastKnownRoad[uid];
+  if(last && (Date.now()-last.at)<LAST_KNOWN_ROAD_MAX_AGE_MS) return last.text;
+  return '';
+}
 const _lastRoadBarOutcome={};
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
@@ -18663,7 +18683,8 @@ function famComposeStatusText(m){
     const _exactRoadHit=FamGeo.get(s.lat,s.lng);
     const liveRoad=FamGeo.getRoadNear(s.lat,s.lng);
     const drivingLabel=(L==='fa'?'در حال رانندگی':'Driving');
-    const l1=(liveRoad&&liveRoad.road)?liveRoad.road:drivingLabel;
+    const roadWithFallback=famRoadWithFallback(m.uid, (liveRoad&&liveRoad.road)?liveRoad.road:null);
+    const l1=roadWithFallback||drivingLabel;
     // v529 (replaces v528's wrongly-targeted activityType log — that
     // never actually explained a disappearing road bar, since activityType
     // and the road-name RESULT are two different things): logs the real
