@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v527';
+const APP_VERSION='v530';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11287,6 +11287,19 @@ const FamilyBackend = (function(){
   // change for the actual before/after numbers. Capacity raised to 500,
   // which at real-world transition rates covers many days, not minutes.
   const PRESENCE_HISTORY_MAX=500;
+  // v529: this buffer now also receives reconfirm_start/reset/complete_*,
+  // region_sticky_match, road_bar_decision, update_check, and
+  // geo_request_cache_state. Explicit write-rate bound per source, so the
+  // 500-slot ceiling's real headroom is stated, not assumed:
+  //   reconfirm_* — only during a genuine post-gap uncertainty episode
+  //     (rare by construction: requires priorFixGapMs>20min first)
+  //   region_sticky_match, road_bar_decision, update_check — each
+  //     DEDUPED to only log when the actual OUTCOME changes, never on
+  //     every call — bounded by how often reality changes, not call rate
+  //   geo_request_cache_state — HARD-CAPPED at 5 total per session
+  //     (GEO_REQUEST_LOG_LIMIT), never grows further after that
+  // See test_v529_capacity.js for a worst-case-session simulation
+  // confirming this holds under sustained conditions, not just in theory.
   let _presenceHistorySeq=(_presenceHistory.length?Math.max(...
 _presenceHistory.map(e=>e.seq||0)):0);
   function _presenceHistorySave(){
@@ -11303,6 +11316,33 @@ _presenceHistory.map(e=>e.seq||0)):0);
   function presenceHistoryGet(){ return _presenceHistory.slice(); }
   function presenceHistoryClear(){ _presenceHistory.length=0; try{ localStorage.setItem(PRESENCE_HISTORY_KEY,'[]'); }catch(e){} }
   window.presenceHistoryPush=presenceHistoryPush;
+  // v529 (Codex review correction): reconfirm_reset can fire on EVERY fix
+  // during exactly the problematic period being diagnosed (a sustained
+  // run of resets, potentially every 1-2s) — routing that through
+  // presenceHistoryPush (synchronous localStorage.setItem on every push,
+  // by design for TRUE rare events) would both flood the 500-slot cap
+  // (evicting other real events within minutes) and reintroduce the exact
+  // hot-path I/O risk already learned from and fixed once for pipeline
+  // tracing. Dedicated RAM-only buffer instead: no localStorage write at
+  // all, ever, per event; capacity 4000 (generous, RAM is cheap); own
+  // Export JSON button. The genuinely rare reconfirm_start/complete_*
+  // events still go through the normal persisted buffer above — those
+  // are a handful per incident, not per fix.
+  const RECONFIRM_EVAL_MAX=4000;
+  const _reconfirmEvalHistory=[];
+  let _reconfirmEvalSeq=0;
+  function reconfirmEvalPush(data){
+    try{
+      _reconfirmEvalSeq++;
+      _reconfirmEvalHistory.push(Object.assign({t:Date.now(),seq:_reconfirmEvalSeq},data));
+      if(_reconfirmEvalHistory.length>RECONFIRM_EVAL_MAX) _reconfirmEvalHistory.shift();
+    }catch(e){}
+  }
+  function reconfirmEvalGet(){ return _reconfirmEvalHistory.slice(); }
+  function reconfirmEvalClear(){ _reconfirmEvalHistory.length=0; }
+  window.reconfirmEvalPush=reconfirmEvalPush;
+  window.reconfirmEvalGet=reconfirmEvalGet;
+  window.reconfirmEvalClear=reconfirmEvalClear;
   window.presenceHistoryGet=presenceHistoryGet;
   window.presenceHistoryClear=presenceHistoryClear;
 
@@ -11362,6 +11402,33 @@ _presenceHistory.map(e=>e.seq||0)):0);
     }catch(e){}
   }
   window.presenceSourceHistoryPush=presenceSourceHistoryPush;
+
+  // v530 (Codex review correction): road_bar_decision/region_sticky_match/
+  // geo_request_cache_state were routed through presenceHistoryPush,
+  // which writes to localStorage on EVERY push — a real hot-path risk
+  // while driving (road_bar_decision can legitimately fire often as
+  // roads change). And geo_request_cache_state's "first 5 per session"
+  // cap meant a LATER incident (hours into a session, like Mahsa's
+  // report) would have zero surrounding data by the time anyone noticed.
+  // Fixed with the same lesson already applied to pipelineHistory/
+  // hereSinceEvalHistory earlier this session: a dedicated, RAM-only ring
+  // buffer — real ring semantics (keeps the MOST RECENT N, evicting the
+  // oldest, not "first N and then nothing"), zero localStorage writes.
+  const GEO_DIAG_HISTORY_MAX=2000;
+  const _geoDiagHistory=[];
+  let _geoDiagHistorySeq=0;
+  function geoDiagHistoryPush(reason,data){
+    try{
+      _geoDiagHistorySeq++;
+      _geoDiagHistory.push(Object.assign({t:Date.now(),seq:_geoDiagHistorySeq,reason},data));
+      if(_geoDiagHistory.length>GEO_DIAG_HISTORY_MAX) _geoDiagHistory.shift();
+    }catch(e){}
+  }
+  function geoDiagHistoryGet(){ return _geoDiagHistory.slice(); }
+  function geoDiagHistoryClear(){ _geoDiagHistory.length=0; }
+  window.geoDiagHistoryPush=geoDiagHistoryPush;
+  window.geoDiagHistoryGet=geoDiagHistoryGet;
+  window.geoDiagHistoryClear=geoDiagHistoryClear;
 
   // v506: stayStart tombstone — fixes the race where native keeps
   // reporting a PRE-departure stayStart for a while after the JS presence
@@ -11891,6 +11958,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
       const hadPriorGap=priorFixGapMs!=null && priorFixGapMs>UNCERTAIN_GAP_MS;
       if(presence.state==='steady' && hadPriorGap && !presence.uncertainSince){
         console.debug('[presence] gap exceeded threshold — marking uncertain (sticky) and starting re-confirmation window',{priorFixGapMs,anchor:{lat:presence.anchorLat,lng:presence.anchorLng},thisFix:{lat:fix.lat,lng:fix.lng}});
+        try{ if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('reconfirm_start',{uid,fixId:fix.fixId||null,priorFixGapMs,anchorLat:presence.anchorLat,anchorLng:presence.anchorLng,fixLat:fix.lat,fixLng:fix.lng}); }catch(e){}
         return {
           moving:isAwayNow, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11939,6 +12007,13 @@ _presenceHistory.map(e=>e.seq||0)):0);
           // previous one to credit — restart the accumulator at this
           // fix, but keep the ORIGINAL anchor unchanged (still needed to
           // detect a real departure on a future fix).
+          try{
+            if(typeof window!=='undefined'&&window.reconfirmEvalPush) window.reconfirmEvalPush({
+              kind:'reset', uid, fixId:fix.fixId||null, priorFixGapMs, dFromReconfirmM:Math.round(dFromReconfirm), radiusM:Math.round(radius),
+              reconfirmAccumMsBefore:presence.reconfirmAccumMs||0, reconfirmAccumMsAfter:0,
+              resetReason:(dFromReconfirm>=radius&&!isCloseFollowUp)?'distance+gap':(dFromReconfirm>=radius?'distance':'gap')
+            });
+          }catch(e){}
           return {
             moving:true, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11961,6 +12036,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
           // to be noticed.
           if(!isAwayNow){
             console.debug('[presence] uncertainty cleared — still within original anchor radius, preserving TRUE original stayStart (this was a foreground hiccup, not a real departure)',{oldStayStart:prev.stayStart,distanceFromOriginalAnchorM:dFromAnchor,accumulatedMs:newAccum});
+            try{ if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('reconfirm_complete_same_anchor',{uid,fixId:fix.fixId||null,priorFixGapMs,accumulatedMs:newAccum,distanceFromOriginalAnchorM:Math.round(dFromAnchor),stayStartUnchanged:prev.stayStart||null}); }catch(e){}
             return {
               moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
               lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11973,6 +12049,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
           // the original spot) — this is a real relocation. "Here for" now
           // counts from the FIRST post-gap fix (presence.uncertainSince).
           console.debug('[presence] uncertainty cleared — continuity reconfirmed via accumulated close-together fixes, AWAY from original anchor (real relocation)',{oldStayStart:prev.stayStart,newStayStart:presence.uncertainSince,accumulatedMs:newAccum});
+          try{ if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('reconfirm_complete_new_anchor',{uid,fixId:fix.fixId||null,priorFixGapMs,accumulatedMs:newAccum,oldStayStart:prev.stayStart||null,newStayStart:presence.uncertainSince}); }catch(e){}
           return {
             moving:false, stayStart:presence.uncertainSince, placeArrivedAt:presence.uncertainSince,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -11980,6 +12057,12 @@ _presenceHistory.map(e=>e.seq||0)):0);
           };
         }
         // Still accumulating — stay flagged uncertain, keep the running total.
+        try{
+          if(typeof window!=='undefined'&&window.reconfirmEvalPush) window.reconfirmEvalPush({
+            kind:'accumulate', uid, fixId:fix.fixId||null, priorFixGapMs,
+            reconfirmAccumMsBefore:priorAccum, reconfirmAccumMsAfter:newAccum
+          });
+        }catch(e){}
         return {
           moving:false, stayStart:prev.stayStart||null, placeArrivedAt:prev.stayStart||null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:prev.lastDepartureAt||null, priorFixGapMs,
@@ -14728,7 +14811,10 @@ function famDiagView(){
           <button class="btn btn-ghost" data-fam="presence-export" style="flex:1">${L==='fa'?'خروجیِ JSON (نادر)':'Export JSON (rare)'}</button>
           <button class="btn btn-ghost" data-fam="heresince-export" style="flex:1">${L==='fa'?'خروجیِ JSON (hereSince)':'Export JSON (hereSince)'}</button>
         </div>
-        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} ارزیابی — فقط RAM، با refresh از بین می‌ره.`:`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} evaluations — RAM-only, lost on refresh.`}</div>
+        <button class="btn btn-ghost" data-fam="reconfirm-export" style="width:100%;margin-bottom:8px">${L==='fa'?'خروجیِ JSON (توالیِ reconfirm)':'Export JSON (reconfirm sequence)'}</button>
+        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`نادر: ظرفیت ۵۰۰، persisted، هر push یه‌بار localStorage می‌نویسه (ایمن چون واقعاً نادره). hereSince: ظرفیت ۸۰۰۰، فقط RAM. reconfirm: ظرفیت ۴۰۰۰، فقط RAM — چون می‌تونه هر فیکس fire بشه، عمداً هیچ‌وقت localStorage نمی‌نویسه.`:`Rare: cap 500, persisted, writes localStorage once per push (safe — genuinely rare). hereSince: cap 8000, RAM-only. reconfirm: cap 4000, RAM-only — deliberately never touches localStorage since it can fire every fix.`}</div>
+        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} ارزیابی — فقط RAM، با refresh از بین می‌ره. reconfirm: ${(typeof reconfirmEvalGet==='function'?reconfirmEvalGet().length:0)} رکورد — فقط RAM. geo-diag: ${(typeof geoDiagHistoryGet==='function'?geoDiagHistoryGet().length:0)}/2000 رکورد (road_bar_decision, region_sticky_match, geo_request_cache_state) — فقط RAM، هیچ‌وقت localStorage نمی‌نویسه.`:`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} evaluations — RAM-only, lost on refresh. reconfirm: ${(typeof reconfirmEvalGet==='function'?reconfirmEvalGet().length:0)} records — RAM-only. geo-diag: ${(typeof geoDiagHistoryGet==='function'?geoDiagHistoryGet().length:0)}/2000 records (road_bar_decision, region_sticky_match, geo_request_cache_state) — RAM-only, never writes localStorage.`}</div>
+        <button class="btn" data-fam="geodiag-export" style="width:100%;margin-top:6px">${L==='fa'?'Export بافرِ geo-diag':'Export geo-diag buffer'}</button>
         <div style="max-height:200px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
           ${prows||'<div>'+(L==='fa'?'هنوز تغییری ثبت نشده':'no transitions recorded yet')+'</div>'}
         </div>`;
@@ -18545,6 +18631,7 @@ function famRegionWithFallback(uid, freshRegion){
   if(last && (Date.now()-last.at)<LAST_KNOWN_REGION_MAX_AGE_MS) return last.text;
   return '';
 }
+const _lastRoadBarOutcome={};
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
@@ -18573,9 +18660,29 @@ function famComposeStatusText(m){
     // and expires like the region fix does so it can't show a road
     // you've actually already left.
     famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt); // still the ONLY thing that queues a fresh geocode request each fix — getRoadNear/getRegionNear only read the cache, they never request
+    const _exactRoadHit=FamGeo.get(s.lat,s.lng);
     const liveRoad=FamGeo.getRoadNear(s.lat,s.lng);
     const drivingLabel=(L==='fa'?'در حال رانندگی':'Driving');
     const l1=(liveRoad&&liveRoad.road)?liveRoad.road:drivingLabel;
+    // v529 (replaces v528's wrongly-targeted activityType log — that
+    // never actually explained a disappearing road bar, since activityType
+    // and the road-name RESULT are two different things): logs the real
+    // decision chain — exact cache hit/miss, sticky-fallback hit/miss, the
+    // actual liveRoad.road value, and what got displayed — deduped so it
+    // only logs when the OUTCOME actually changes (road shown → generic
+    // label, or vice versa, or one road → another), not every fix.
+    try{
+      const outcomeSig=uid+'|'+(l1===drivingLabel?'(label)':l1);
+      if(_lastRoadBarOutcome[uid]!==outcomeSig){
+        _lastRoadBarOutcome[uid]=outcomeSig;
+        if(typeof window!=='undefined'&&window.geoDiagHistoryPush) window.geoDiagHistoryPush('road_bar_decision',{
+          uid, fixId:s.nativeFixId||null,
+          exactCacheHit:!!_exactRoadHit, exactCacheRoad:_exactRoadHit?_exactRoadHit.road||null:null,
+          stickyFallbackUsed:!_exactRoadHit && !!liveRoad, liveRoadValue:liveRoad?liveRoad.road||null:null,
+          displayedL1:l1, showedGenericLabel:(l1===drivingLabel)
+        });
+      }
+    }catch(e){}
     // Live speed: priority 1 = real coords.speed when valid; priority 2 =
     // calculated from real GPS distance/elapsed time between the last two
     // accepted fixes. Never hard-coded, never frozen — if genuinely
@@ -18678,17 +18785,19 @@ function famComposeStatusText(m){
   const priorGapMs=s.priorFixGapMs;
   const hasUnconfirmedGap=priorGapMs!=null && priorGapMs>UNCERTAIN_GAP_MS;
   if(hasUnconfirmedGap && since2){
+    // v528 FIX (real bug, confirmed): this used to show "Last confirmed:
+    // <old timestamp>" in the map callout, right next to the CURRENT
+    // (correct, fresh) address. That timestamp belongs to whatever place
+    // was confirmed BEFORE the gap — which may be a completely different
+    // location. Pairing them implied a false connection ("confirmed HERE
+    // since <old time>") that the underlying data never claimed. Both
+    // lines now show neutral, non-committal text instead — accurate
+    // regardless of whether the prior confirmation was at this same spot
+    // or somewhere else entirely.
     const unconfirmedLabel=L==='fa'?'حضور تأیید نشده':'Presence unconfirmed';
-    // FIX: "Last confirmed" must read lastPresenceConfirmedAt specifically,
-    // never since2 (stayStart) directly — these are conceptually distinct
-    // (stayStart = when the stay BEGAN; lastPresenceConfirmedAt = when
-    // continuity was LAST verified). They happen to share a value at the
-    // moment of confirmation, but the field read here must be the correct
-    // one by name, not by coincidence.
-    const confirmedAt=s.lastPresenceConfirmedAt;
-    const lastConfirmedGap=confirmedAt?(L==='fa'?`آخرین تأیید: ${famAbsTime(confirmedAt)}`:`Last confirmed: ${famAbsTime(confirmedAt)}`):unconfirmedLabel;
-    console.debug('[presence] display: showing uncertainty, not a confirmed duration', {uid:m.uid, priorFixGapMs:priorGapMs, since2, lastPresenceConfirmedAt:confirmedAt, stayStartUnchanged:s.stayStart});
-    return { l1:lines.line1, region:lines.line2||'', l2:unconfirmedLabel, calloutL2:lastConfirmedGap, since:since2, activityType:'stationary', place:!!d.currentPlaceId, uncertain:true };
+    const confirmingLabel=L==='fa'?'در حالِ تأیید موقعیت…':'Confirming location…';
+    console.debug('[presence] display: showing uncertainty, not a confirmed duration', {uid:m.uid, priorFixGapMs:priorGapMs, since2, lastPresenceConfirmedAt:s.lastPresenceConfirmedAt, stayStartUnchanged:s.stayStart});
+    return { l1:lines.line1, region:lines.line2||'', l2:unconfirmedLabel, calloutL2:confirmingLabel, since:since2, activityType:'stationary', place:!!d.currentPlaceId, uncertain:true };
   }
   if(!since2){
     // stayStart is genuinely null — presence has never been confirmed yet
@@ -18897,6 +19006,7 @@ const FamGeo = (function(){
   // (the original blank-text problem), while making a stale match expire
   // much sooner as the vehicle actually leaves an area.
   const REGION_STICK_RADIUS_M = 1200;
+  let _lastLoggedRegionMatch=null;
   function findNearbyRegion(lat,lng){
     let best=null,bestD=Infinity;
     for(const k in cache){
@@ -18906,6 +19016,21 @@ const FamGeo = (function(){
       if(c.lat==null||c.lng==null) continue;
       const d=haversineM(lat,lng,c.lat,c.lng);
       if(d<=REGION_STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
+    }
+    // v528: diagnostic-only, no threshold change — logs which cached
+    // region got reused via sticky proximity, its distance and age, so a
+    // future "locked on Moonah/Hobart while position moves" report can be
+    // matched against real numbers instead of guessed. Deduped to only
+    // log when the ACTUAL matched cache entry changes, not every call.
+    if(best){
+      const sig=best.line2+'@'+best.lat.toFixed(4)+','+best.lng.toFixed(4);
+      if(sig!==_lastLoggedRegionMatch){
+        _lastLoggedRegionMatch=sig;
+        try{ if(typeof window!=='undefined'&&window.geoDiagHistoryPush) window.geoDiagHistoryPush('region_sticky_match',{
+          queryLat:lat, queryLng:lng, matchedLine2:best.line2, matchedLat:best.lat, matchedLng:best.lng,
+          distanceM:Math.round(bestD), ageMs:Date.now()-best.ts
+        }); }catch(e){}
+      }
     }
     return best;
   }
@@ -19106,6 +19231,18 @@ const FamGeo = (function(){
     if(lat==null||lng==null) return null;
     const k=key(lat,lng);
     const c=cache[k];
+    // v530 (Codex review correction, replaces v529's "first 5 per session"
+    // cap): that cap meant a LATER incident — hours into a session, like
+    // the real report this was built for — would have zero surrounding
+    // data by the time anyone noticed, since logging stopped after the
+    // first 5 requests at app load. Now every request logs into the
+    // RAM-only ring buffer (2000-slot capacity, real ring semantics —
+    // evicts OLDEST on overflow, never just "stops"), so whenever an
+    // anomaly is noticed, recent history around THAT moment is what's
+    // retained, not stale start-of-session data.
+    try{ if(typeof window!=='undefined'&&window.geoDiagHistoryPush) window.geoDiagHistoryPush('geo_request_cache_state',{
+      cacheSizeAtRequest:Object.keys(cache).length, lat, lng, fixId:fixId||null
+    }); }catch(e){}
     if(c && (Date.now()-c.ts)<TTL && haversineM(lat,lng,c.lat,c.lng)<=STICK_RADIUS_M){
       _lastLookup={ requestId:k, requestLat:lat, requestLng:lng, cacheStatus:'exact-cell-hit',
         cacheAgeMs:Date.now()-c.ts, resultLine1:c.line1, resultLine2:c.line2 };
@@ -20801,6 +20938,36 @@ async function famAction(act,arg,ev){
           console.error('[heresince-export] all strategies failed',e);
           toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
           famShowJsonExportModal(entries,'mbm-heresince-evals');
+        }
+      })();
+      return;
+    }
+    case 'reconfirm-export':{
+      (async()=>{
+        const entries=(typeof reconfirmEvalGet==='function')?reconfirmEvalGet():[];
+        try{
+          const r=await famExportJsonRobust(entries,'mbm-reconfirm-sequence');
+          toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-reconfirm-sequence'); }
+        }catch(e){
+          console.error('[reconfirm-export] all strategies failed',e);
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-reconfirm-sequence');
+        }
+      })();
+      return;
+    }
+    case 'geodiag-export':{
+      (async()=>{
+        const entries=(typeof geoDiagHistoryGet==='function')?geoDiagHistoryGet():[];
+        try{
+          const r=await famExportJsonRobust(entries,'mbm-geo-diag');
+          toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-geo-diag'); }
+        }catch(e){
+          console.error('[geodiag-export] all strategies failed',e);
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-geo-diag');
         }
       })();
       return;
@@ -24582,10 +24749,27 @@ function applyUpdate(){
 }
 
 // Automatic background check
+let _lastUpdateCheckOutcome=null;
 async function checkForUpdate(){
   _lastAutomaticUpdateCheckAt=Date.now();
   try{
     const ver=await fetchRemoteVersion();
+    // v529: diagnostic-only — logs every check's real outcome to the
+    // persisted buffer (deduped so it only logs when the outcome
+    // actually CHANGES, not every single check) so a persistent banner
+    // can be traced to an actual repeated remote-version mismatch
+    // (supporting the CDN-delay explanation) or ruled out in favor of
+    // something else, instead of being asserted either way.
+    try{
+      const outcomeSig=(ver||'null')+'|'+APP_VERSION;
+      if(_lastUpdateCheckOutcome!==outcomeSig){
+        _lastUpdateCheckOutcome=outcomeSig;
+        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('update_check',{
+          localVersion:APP_VERSION, remoteVersion:ver||null, mismatch:!!(ver&&ver!==APP_VERSION),
+          dismissedThisSession:_updDismissedSession===ver
+        });
+      }
+    }catch(e){}
     if(!ver||ver===APP_VERSION)return;          // already on the latest version
     if(_updDismissedSession===ver)return;        // "Later" hides it for THIS session only
     showUpdateBanner(ver);                        // otherwise show it (every launch until updated)
