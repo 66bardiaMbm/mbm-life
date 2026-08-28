@@ -1701,13 +1701,13 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 /* ── clustered multi-avatar pin: 2+ members sharing one bubble (like the
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
 .fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
-.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:40px;padding:6px}
+.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:36px;padding:4px}
 .fam-cluster.sel .fam-cluster-row{outline:3px solid var(--fam-purple,#8652FF)}
-.fam-cluster-av{width:52px;height:52px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;
-  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:18px;overflow:hidden}
+.fam-cluster-av{width:44px;height:44px;border-radius:50%;border:2px solid #fff;margin-inline-start:-18px;
+  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px;overflow:hidden}
 .fam-cluster-av:first-child{margin-inline-start:0}
-.fam-cluster-more{width:46px;height:46px;border-radius:50%;border:2px solid #fff;margin-inline-start:-10px;background:var(--fam-purple,#8652FF);color:#fff;
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+.fam-cluster-more{width:40px;height:40px;border-radius:50%;border:2px solid #fff;margin-inline-start:-18px;background:var(--fam-purple,#8652FF);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
 .fam-cluster-tip{position:absolute;left:50%;bottom:-8px;width:16px;height:16px;background:#fff;transform:translateX(-50%) rotate(45deg)}
 /* Circle chooser + future Safety/Membership surfaces. These are original MBM
    components that follow the same information hierarchy as the references
@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v533';
+const APP_VERSION='v536';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11860,6 +11860,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
     const LEAVING_REVERT_CONFIRM_MS = 30*1000; // v464 FIX: a single accepted fix landing back near the anchor while 'leaving' must NOT instantly discard the accumulated departure evidence — that was the reproduced root cause of the Aug 18 "stuck Since" reports (see tests/v462-presence-snapback.test.mjs). Real GPS noise/multipath can produce one falsely-close reading mid-drive; requiring the SAME close-together-fix accumulation pattern already used elsewhere in this function (steady/reconfirm accumulators) before fully reverting to 'steady' means a lone blip no longer resets the 90s AWAY_CONFIRM_MS departure clock — only a genuinely sustained return does.
     const UNCERTAIN_GAP_MS  = 20*60*1000; // if the PRIOR fix was more than this long ago, presence through that gap cannot be confirmed — MUST match the display layer's copy of this same constant (famComposeStatusText's scope) exactly.
     const FIX_CADENCE_CREDIT_CAP_MS = 30*1000; // a fix-to-fix gap wider than this is too sparse to credit toward reconfirmation accumulation — real watchPosition cadence is normally much tighter than this while the app is foregrounded
+    const RECONFIRM_GAP_CREDIT_CAP_MS = 90*1000; // v536: separate, more realistic cap specifically for POST-GAP reconfirmation — Android background/Doze batching commonly produces 30-60s+ gaps even while genuinely stationary; the tighter FIX_CADENCE_CREDIT_CAP_MS above (tuned for foreground use) was resetting the reconfirmation accumulator on nearly every fix, confirmed via reproduction (13min stationary, 20/20 resets, 0/20 confirmations)
 
     function accuracyAdjustedRadius(fixAccuracyM){
       // A low-accuracy fix needs a wider berth before we trust a distance
@@ -12054,20 +12055,30 @@ _presenceHistory.map(e=>e.seq||0)):0);
         // earlier fix (a SINGLE fix landing once, any amount of time
         // later, would otherwise trivially "reconfirm" with zero real
         // evidence of continuous presence in between).
-        const dFromReconfirm=haversine({lat:presence.reconfirmLat||presence.anchorLat,lng:presence.reconfirmLng||presence.anchorLng},{lat:fix.lat,lng:fix.lng});
+        // v536 ROOT-CAUSE FIX (confirmed via reproduction: realistic
+        // background-tracking gaps of 35-45s reset this to zero on
+        // EVERY fix, so a person who never moved could stay
+        // "unconfirmed" indefinitely — reproduced with a 13-minute
+        // stationary simulation that reset 20/20 times, confirmed 0/20).
+        // Two changes: (a) the gap-credit cap is now tuned for realistic
+        // background cadence, not foreground watchPosition; (b) the
+        // position check uses the SAME anchor-distance already computed
+        // for isAwayNow just above — this whole branch only runs when
+        // !isAwayNow, so re-checking distance from the constantly-moving
+        // "last fix" point was both redundant and the wrong reference:
+        // ordinary GPS jitter between consecutive fixes could trigger a
+        // reset even though the person never left the anchor at all.
         const thisGapMs=priorFixGapMs!=null?priorFixGapMs:Infinity;
-        const isCloseFollowUp=thisGapMs<=FIX_CADENCE_CREDIT_CAP_MS;
-        if(dFromReconfirm>=radius || !isCloseFollowUp){
-          // Moved a bit within the anchor radius but away from the exact
-          // reconfirm point, OR this fix arrived too long after the
-          // previous one to credit — restart the accumulator at this
-          // fix, but keep the ORIGINAL anchor unchanged (still needed to
-          // detect a real departure on a future fix).
+        const isCloseFollowUp=thisGapMs<=RECONFIRM_GAP_CREDIT_CAP_MS;
+        if(!isCloseFollowUp){
+          // Only a genuinely sparse gap (even by background-tracking
+          // standards) restarts the accumulator — never ordinary GPS
+          // jitter, since isAwayNow (anchor-distance) already gated entry
+          // into this branch.
           try{
             if(typeof window!=='undefined'&&window.reconfirmEvalPush) window.reconfirmEvalPush({
-              kind:'reset', uid, fixId:fix.fixId||null, priorFixGapMs, dFromReconfirmM:Math.round(dFromReconfirm), radiusM:Math.round(radius),
-              reconfirmAccumMsBefore:presence.reconfirmAccumMs||0, reconfirmAccumMsAfter:0,
-              resetReason:(dFromReconfirm>=radius&&!isCloseFollowUp)?'distance+gap':(dFromReconfirm>=radius?'distance':'gap')
+              kind:'reset', uid, fixId:fix.fixId||null, priorFixGapMs, radiusM:Math.round(radius),
+              reconfirmAccumMsBefore:presence.reconfirmAccumMs||0, reconfirmAccumMsAfter:0, resetReason:'gap'
             });
           }catch(e){}
           return {
@@ -17294,10 +17305,28 @@ const MBMMap = (function(){
 
   function setClusterMarker(key, latlng, members, selected, onClick, calloutMeta){
     if(!_map) return;
-    const max=3; const shown=members.slice(0,max);
-    let inner=shown.map(mm=>mm.photo
-      ? `<div class="fam-cluster-av" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}')"></div>`
-      : `<div class="fam-cluster-av" style="background:${mm.color||'#6e56f8'}">${mm.initial||'?'}</div>`).join('');
+    // v535: bring the currently-featured (viewed) member's avatar to the
+    // front and highlight it — matches Life360's own merged-pin behavior
+    // (confirmed via side-by-side recording) where tapping a name brings
+    // THAT person's photo forward with a colored ring, instead of always
+    // showing the same static left-to-right order no matter whose page
+    // you're on.
+    const featuredUid=calloutMeta&&calloutMeta.featuredUid;
+    let ordered=members;
+    if(featuredUid){
+      const idx=members.findIndex(mm=>mm.uid===featuredUid);
+      if(idx>0){ ordered=members.slice(); const [f]=ordered.splice(idx,1); ordered.unshift(f); }
+    }
+    const max=3; const shown=ordered.slice(0,max);
+    let inner=shown.map(mm=>{
+      const isFeatured=featuredUid&&mm.uid===featuredUid;
+      const ring=isFeatured
+        ?`border:2px solid ${mm.color||'#8652FF'};box-shadow:0 0 0 2px #fff, 0 0 0 4px ${mm.color||'#8652FF'};position:relative;z-index:2`
+        :`position:relative;z-index:1`;
+      return mm.photo
+        ? `<div class="fam-cluster-av" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}');${ring}"></div>`
+        : `<div class="fam-cluster-av" style="background:${mm.color||'#6e56f8'};${ring}">${mm.initial||'?'}</div>`;
+    }).join('');
     if(members.length>max) inner+=`<div class="fam-cluster-more">+${members.length-max}</div>`;
     // v449 FIX: the cluster bubble (co-located members merged into one pin,
     // see v448) had no callout at all — setClusterMarker never accepted or
@@ -19752,7 +19781,7 @@ function famLivePaintMarkers(members, sel){
       const featuredTxt=famComposeStatusText(featured);
       const featuredCallout=famMarkerCalloutText(featuredTxt);
       MBMMap.setClusterMarker(key,[cLat,cLng],
-        g.members.map(m=>({photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color})),
+        g.members.map(m=>({uid:m.uid,photo:m.photo,initial:esc((m.name||'?').slice(0,1).toUpperCase()),color:m.color})),
         selectedInCluster,
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
@@ -19760,7 +19789,7 @@ function famLivePaintMarkers(members, sel){
           _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true;
           try{ reconcileGuards(); }catch(e){}   // v450 — same fix as the single-marker tap above
           famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} },
-        {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):''});
+        {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):'', featuredUid:featured.uid});
     }
   });
   if(!(sel && sel.state && sel.state.moving)){
