@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v550';
+const APP_VERSION='v557';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11467,60 +11467,12 @@ _presenceHistory.map(e=>e.seq||0)):0);
   }
   window.recordDepartureTombstone=recordDepartureTombstone;
 
-  // v533: Shemroon Cafe Kebab (100 Elizabeth St) address confirmation —
-  // rebuilt again after being removed in v522. Nominatim has no address
-  // point for Shemroon itself; the nearest OSM-tagged point resolves to a
-  // different address. Explicit one-time confirmation per visit, tied to
-  // confirmed stationary presence — same design tested and working
-  // before (7/7 tests passing at the time).
-  const SHEMROON_LAT=-42.8806383, SHEMROON_LNG=147.3253381;
-  const SHEMROON_ASK_RADIUS_M=20;
-  const SHEMROON_CONFIRM_LS_KEY='mbmlife_shemroon_confirm_v1';
-  let _shemroonConfirmMem=null;
-  function famShemroonLoadAll(){
-    if(_shemroonConfirmMem) return _shemroonConfirmMem;
-    try{
-      const raw=localStorage.getItem(SHEMROON_CONFIRM_LS_KEY);
-      _shemroonConfirmMem=raw?JSON.parse(raw):{};
-    }catch(_){ _shemroonConfirmMem={}; }
-    return _shemroonConfirmMem;
-  }
-  function famShemroonSaveAll(all){
-    _shemroonConfirmMem=all;
-    try{ localStorage.setItem(SHEMROON_CONFIRM_LS_KEY,JSON.stringify(all)); }catch(_){}
-  }
-  function famShemroonAmbiguityCheck(c,m,uid){
-    const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
-    if(uid!==localUid) return false;
-    const s=m.state||{};
-    if(c.activityType!=='stationary'||s.lat==null) return false;
-    const curStayStart=s.stayStart||null;
-    const all=famShemroonLoadAll();
-    const rec=all[uid];
-    if(rec && rec.stayStart===curStayStart){
-      if(rec.confirmed) return true;
-      if(rec.asked) return false;
-    } else if(rec){
-      delete all[uid]; famShemroonSaveAll(all);
-    }
-    if(c.shemroonAsking) return false;
-    const d=famHaversineM(s.lat,s.lng,SHEMROON_LAT,SHEMROON_LNG);
-    if(d>SHEMROON_ASK_RADIUS_M) return false;
-    c.shemroonAsking=true;
-    const askedForStayStart=curStayStart;
-    if(typeof famConfirm==='function'){
-      famConfirm(L==='fa'?'الان تو شمرون هستی؟':'Are you at Shemroon right now?',{danger:false,okLabel:L==='fa'?'بله':'Yes',cancelLabel:L==='fa'?'نه':'No'})
-        .then(yes=>{
-          c.shemroonAsking=false;
-          const all2=famShemroonLoadAll();
-          all2[uid]={stayStart:askedForStayStart, confirmed:!!yes, asked:true};
-          famShemroonSaveAll(all2);
-          if(typeof famLiveApply==='function') famLiveApply();
-          else if(typeof render==='function') render();
-        });
-    }
-    return false;
-  }
+  // v551: Shemroon-specific override removed entirely, per explicit
+  // request — a hardcoded exception for one address is not a real fix
+  // and doesn't help anywhere else. Address text now comes purely from
+  // the general Nominatim pipeline for every location, with no
+  // per-place special-casing anywhere in this file.
+  function famShemroonAmbiguityCheck(){ return false; }
   window.famShemroonAmbiguityCheck=famShemroonAmbiguityCheck;
   window.isStayStartStale=isStayStartStale;
 
@@ -17588,25 +17540,38 @@ const MBMMap = (function(){
     return ((to-from)%360+540)%360-180; // wraps into (-180,180]
   }
   function _animateHeadingTo(target,ms){
+    // v554 FIX (real, not cosmetic): _map.setHeading() failures were
+    // silently swallowed by an empty catch — invisible to any caller,
+    // including the compass button's own error handling added in v553
+    // (which could only ever see errors in ITS OWN try/catch, not ones
+    // already consumed here). Every call site is now given a way to know
+    // whether setHeading actually succeeded.
     const from=_headingApplied;
     const delta=_shortestHeadingDelta(from,target);
-    const to=from+delta; // unwrapped target — lets the animation cross 0/360 smoothly
+    const to=from+delta;
+    let lastSetHeadingError=null;
+    const applyHeading=(deg)=>{
+      try{ _map.setHeading(deg); return true; }
+      catch(e){ lastSetHeadingError=e; return false; }
+    };
     if(Math.abs(delta)<0.5){
       _headingApplied=((to%360)+360)%360;
-      try{ _map.setHeading(_headingApplied); }catch(e){}
-      return;
+      applyHeading(_headingApplied);
+      return { done:true, ok:!lastSetHeadingError, error:lastSetHeadingError };
     }
     if(_headingAnimId!=null){ try{ cancelAnimationFrame(_headingAnimId); }catch(e){} }
     _headingAnimFrom=from; _headingAnimTo=to; _headingAnimStart=performance.now();
+    let anyApplyFailed=false;
     const step=(now)=>{
       const t=Math.min(1,(now-_headingAnimStart)/ms);
-      const eased=1-Math.pow(1-t,3); // ease-out cubic — matches the gentle settle of real nav apps
+      const eased=1-Math.pow(1-t,3);
       const cur=_headingAnimFrom+(_headingAnimTo-_headingAnimFrom)*eased;
       _headingApplied=((cur%360)+360)%360;
-      try{ _map.setHeading(_headingApplied); }catch(e){}
+      if(!applyHeading(_headingApplied)) anyApplyFailed=true;
       if(t<1){ _headingAnimId=requestAnimationFrame(step); } else { _headingAnimId=null; }
     };
     _headingAnimId=requestAnimationFrame(step);
+    return { done:false, animMs:ms, wasFailing:()=>anyApplyFailed, lastError:()=>lastSetHeadingError };
   }
   function setMapHeading(deg){
     if(!_map||!_headingRotationEnabled||deg==null||isNaN(deg)) return;
@@ -17616,8 +17581,45 @@ const MBMMap = (function(){
   // v477: the compass button's actual job — snap back to north, then get
   // out of the way (matches the Android/iOS SDK docs quoted above).
   function resetHeadingToNorth(){
-    _animateHeadingTo(0,HEADING_ANIM_MS);
-    _headingSuppressUntil=Date.now()+HEADING_RESET_SUPPRESS_MS;
+    return new Promise((resolve,reject)=>{
+      // v557 FIX (real bug, confirmed): this used to trust the
+      // internally-tracked _headingApplied variable for its starting
+      // point (both directly, and indirectly via the caller's
+      // isRotatedAwayFromNorth() early-exit check) — if that variable
+      // had drifted stale relative to the REAL map heading, a genuinely
+      // rotated map would be reported as "already north" and never
+      // reset. Now reads _map.getHeading() directly FIRST, validates
+      // it, and syncs _headingApplied to that real value before deciding
+      // anything.
+      let realStart=null;
+      try{ realStart=_map.getHeading(); }catch(e){ reject(e); return; }
+      if(!Number.isFinite(realStart)){ reject(new Error('getHeading() returned invalid value at start: '+realStart)); return; }
+      _headingApplied=realStart;
+      if(Math.abs(_shortestHeadingDelta(0,realStart))<=2){
+        resolve(realStart); // genuinely already at north — nothing to animate
+        return;
+      }
+      const anim=_animateHeadingTo(0,HEADING_ANIM_MS);
+      _headingSuppressUntil=Date.now()+HEADING_RESET_SUPPRESS_MS;
+      if(anim.done){
+        if(!anim.ok){ reject(anim.error||new Error('setHeading failed')); return; }
+        let real=null;
+        try{ real=_map.getHeading(); }catch(e){ reject(e); return; }
+        if(Number.isFinite(real) && Math.abs(_shortestHeadingDelta(0,real))<=2){ resolve(real); }
+        else { reject(new Error('heading invalid or did not converge: '+real)); }
+        return;
+      }
+      const deadline=Date.now()+anim.animMs+400;
+      const poll=()=>{
+        if(anim.wasFailing()){ reject(anim.lastError()||new Error('setHeading failed during animation')); return; }
+        let real=null;
+        try{ real=_map.getHeading(); }catch(e){ reject(e); return; }
+        if(Number.isFinite(real) && Math.abs(_shortestHeadingDelta(0,real))<=2){ resolve(real); return; }
+        if(Date.now()>deadline){ reject(new Error('heading reset timed out, last real heading: '+real)); return; }
+        setTimeout(poll,60);
+      };
+      poll();
+    });
   }
   function currentHeading(){ return _headingApplied; }
   // v477: button only belongs on screen while the map is actually rotated
@@ -17625,12 +17627,39 @@ const MBMMap = (function(){
   // once bearing returns to 0.
   function isRotatedAwayFromNorth(){ return Math.abs(_shortestHeadingDelta(0,_headingApplied))>5; }
   function renderingType(){ return _renderingType; } // v473
+  // v555: real lat/lng → screen-pixel conversion, for verifying a
+  // coordinate's ACTUAL on-screen position (e.g. "is this marker visible
+  // above the bottom sheet") — map center alone is not equivalent to
+  // this once padding has intentionally shifted the visual center.
+  function latLngToContainerPixel(lat,lng){
+    return new Promise((resolve,reject)=>{
+      if(!_map||typeof google==='undefined'||!google.maps){ reject(new Error('map not ready')); return; }
+      const g=google.maps;
+      function Overlay(){}
+      Overlay.prototype=Object.create(g.OverlayView.prototype);
+      const ov=new Overlay();
+      let settled=false;
+      ov.onAdd=function(){};
+      ov.onRemove=function(){};
+      ov.draw=function(){
+        if(settled) return;
+        const proj=this.getProjection();
+        if(!proj){ setTimeout(()=>{ if(this.draw) this.draw(); },32); return; }
+        const p=proj.fromLatLngToContainerPixel(new g.LatLng(lat,lng));
+        settled=true;
+        try{ ov.setMap(null); }catch(e){}
+        resolve({x:p.x,y:p.y});
+      };
+      try{ ov.setMap(_map); }catch(e){ reject(e); return; }
+      setTimeout(()=>{ if(!settled){ settled=true; try{ ov.setMap(null); }catch(e){} reject(new Error('projection timed out')); } },1500);
+    });
+  }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
            setCamera, cancelCameraAnimation,
            hasMarker, markerLatLng, markerRenderPos, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
            setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading, renderingType,
-           resetHeadingToNorth, currentHeading, isRotatedAwayFromNorth };
+           resetHeadingToNorth, currentHeading, isRotatedAwayFromNorth, latLngToContainerPixel };
 })();
 
 /* The only application-level camera authority. Marker code never recentres
@@ -18880,9 +18909,6 @@ function famComposeStatusText(m){
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
   const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt);
-  if(d.shemroonConfirmed){
-    lines.line1='100 Elizabeth Street'; lines.line2='Hobart, TAS';
-  }
   // v447 FIX: when inside a saved place, this used to prefer the CACHED
   // d.placeEnteredAt (only refreshed when crossing that place's boundary —
   // see famDeriveMemberDisplay above) over a fresh hereSince() call. The
@@ -21217,7 +21243,81 @@ async function famAction(act,arg,ev){
       const cut=arg.lastIndexOf(':'),id=arg.slice(0,cut),value=arg.slice(cut+1);
       FamilyBackend.roadReports.vote(id,value).then(()=>{toast(L==='fa'?'ثبت شد':'Recorded');if(typeof famLiveApply==='function')famLiveApply();}).catch(()=>toast(L==='fa'?'ارسال ناموفق بود':'Could not send confirmation'));return;
     }
-    case 'live-center-me':{ const fb=FamilyBackend; const members=famLiveMembers(); const selected=members.find(m=>m.uid===_famSelUid); const my=FB.user&&FB.user.uid; const target=(selected&&selected.state&&selected.state.lat!=null)?selected.state:fb.location.memberState(my); if(target&&target.lat!=null)FamilyMapCamera.resume([target.lat,target.lng],16); if(selected&&selected.uid!==my){ if(!(target&&target.lat!=null))toast(L==='fa'?'موقعیت عضو هنوز در دسترس نیست':'Member location is not available yet'); return; } fb.location.requestFreshFix({cb:()=>{ const s2=fb.location.memberState(my); if(s2&&s2.lat!=null&&_famFollow)FamilyMapCamera.request([s2.lat,s2.lng],{follow:true,force:true}); if(typeof famLiveApply==='function')famLiveApply(); }}); if(!(target&&target.lat!=null))toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…'); return; }
+    case 'live-center-me':{
+      // v555 FIX (real, not cosmetic):
+      // (1) v554 fell back to memberState's possibly-stale coordinates
+      //     whenever fix.coords was missing, silently papering over a
+      //     genuine fresh-fix failure with old data. That fallback is
+      //     removed — only fix.coords is ever trusted; anything else is
+      //     an honest, immediate failure.
+      // (2) v554 judged success via MBMMap.get().getCenter() — but the
+      //     sheet's padding deliberately offsets the visual center from
+      //     the map's geometric center, so that check could pass even
+      //     when the marker was genuinely hidden behind the sheet, or
+      //     fail even when it was correctly placed. Now converts the
+      //     target coordinate to its REAL on-screen pixel position (via
+      //     the map's own projection) and checks it against the actual
+      //     visible area above the bottom sheet.
+      const fb=FamilyBackend; const my=FB.user&&FB.user.uid;
+      const verifyMarkerVisibleAbovePanel=(lat,lng)=>new Promise((resolve,reject)=>{
+        if(!MBMMap.latLngToContainerPixel){ reject(new Error('pixel conversion unavailable')); return; }
+        const deadline=Date.now()+2500;
+        const realTopmostOcclusionTop=()=>{
+          // Same approach as famUpdateCameraPadding() (v499): #fam-sheet,
+          // .fam-map-cta (Check-in/SOS), and the road-name bar are three
+          // SEPARATE elements, each independently capable of covering
+          // the map — whichever is topmost right now is the real visible
+          // boundary, not always #fam-sheet.
+          const sheetEl=document.getElementById('fam-sheet');
+          if(!sheetEl) return null;
+          let topMostTop=sheetEl.getBoundingClientRect().top;
+          try{
+            const ctaEl=document.querySelector('.fam-map-cta');
+            if(ctaEl){ const r=ctaEl.getBoundingClientRect(); if(r.top<topMostTop) topMostTop=r.top; }
+          }catch(e){}
+          try{
+            const roadbarEl=document.getElementById('fam-live-roadbar');
+            if(roadbarEl && roadbarEl.style.display!=='none'){
+              const r=roadbarEl.getBoundingClientRect(); if(r.top<topMostTop) topMostTop=r.top;
+            }
+          }catch(e){}
+          return topMostTop;
+        };
+        const poll=()=>{
+          MBMMap.latLngToContainerPixel(lat,lng).then((p)=>{
+            const mapEl=document.getElementById('fam-map');
+            const topmostOcclusionTop=realTopmostOcclusionTop();
+            if(!mapEl||topmostOcclusionTop==null){ reject(new Error('map or occluding element missing')); return; }
+            const mapRect=mapEl.getBoundingClientRect();
+            const screenX=mapRect.left+p.x, screenY=mapRect.top+p.y;
+            const visibleBottom=Math.min(mapRect.bottom, topmostOcclusionTop);
+            const withinBounds=screenX>=mapRect.left && screenX<=mapRect.right
+                             && screenY>=mapRect.top && screenY<=visibleBottom;
+            if(withinBounds){ resolve({x:screenX,y:screenY}); return; }
+            if(Date.now()>deadline){ reject(new Error('marker not within visible map area above panel: '+JSON.stringify({screenX,screenY,mapRect:{left:mapRect.left,right:mapRect.right,top:mapRect.top},topmostOcclusionTop}))); return; }
+            setTimeout(poll,120);
+          }).catch(reject);
+        };
+        poll();
+      });
+      toast(L==='fa'?'در حال گرفتن موقعیت شما…':'Getting your location…');
+      fb.location.requestFreshFix({cb:(fix)=>{
+        if(!fix||!fix.coords||fix.coords.latitude==null||fix.coords.longitude==null){
+          toast(L==='fa'?'موقعیت تازه دریافت نشد':'Couldn\u2019t get a fresh location');
+          return;
+        }
+        const lat=fix.coords.latitude, lng=fix.coords.longitude;
+        FamilyMapCamera.resume([lat,lng],16);
+        verifyMarkerVisibleAbovePanel(lat,lng).then(()=>{
+          toast(L==='fa'?'رفتن به موقعیت من':'Centered on my location');
+        }).catch((e)=>{
+          console.error('[live-center-me] marker not visible above panel',e);
+          toast(L==='fa'?'نقشه به موقعیتِ شما نرفت — دوباره امتحان کن':'Map didn\u2019t center on your location — try again');
+        });
+        if(typeof famLiveApply==='function')famLiveApply();
+      }});
+      return;
+    }
     case 'live-center-sel':{ const fb=FamilyBackend; _famFollow=false; FamilyMapCamera.pauseByGesture(); const st=fb.location.memberState(_famSelUid); if(st&&st.lat!=null)FamilyMapCamera.request([st.lat,st.lng],{zoom:16,force:true}); else toast(L==='fa'?'موقعیت این عضو در دسترس نیست':'That member’s location isn’t available'); return; }
     case 'live-fit':{ const pts=famLiveMembers().filter(m=>m.hasFix&&m.state).map(m=>[m.state.lat,m.state.lng]); if(pts.length)FamilyMapCamera.fit(pts); else toast(L==='fa'?'هیچ موقعیتی برای نمایش نیست':'No locations to show'); return; }
     case 'live-share-on':{ FamilyBackend.location.setConsent({enabled:true,paused:false}).then(()=>{ toast(L==='fa'?'اشتراک موقعیت روشن شد':'Location sharing on'); render(); }); return; }
@@ -21234,18 +21334,26 @@ async function famAction(act,arg,ev){
     case 'live-checkin': famView='checkin'; render(); window.scrollTo(0,0); return;
     case 'loc-freshfix':{ const fb=FamilyBackend; if(fb&&fb.location){ fb.location.requestFreshFix({cb:()=>{ render(); }}); } toast(L==='fa'?'در حال گرفتن fix تازه…':'Getting a fresh fix…'); return; }
     case 'live-compass-toggle':{
-      // v478: always-visible needle button now (matches the real Google
-      // control Bahman pointed to), not the earlier hide/show experiment.
-      // v479: tapping it while already facing north is a correct no-op
-      // (nothing to reset), but gave zero feedback — indistinguishable
-      // from the button being unresponsive. Added a toast either way so
-      // every tap visibly confirms the button worked.
-      try{
-        const wasRotated=MBMMap.isRotatedAwayFromNorth&&MBMMap.isRotatedAwayFromNorth();
-        MBMMap.resetHeadingToNorth();
-        toast(wasRotated?(L==='fa'?'برگشت به شمال':'Reset to north'):(L==='fa'?'همین الان هم رو به شمال است':'Already facing north'));
-        render();
-      }catch(e){}
+      // v557 FIX (real bug, confirmed): removed the
+      // isRotatedAwayFromNorth() pre-check — it read the same
+      // potentially-stale _headingApplied variable that caused the
+      // heading bug in the first place, letting the handler exit early
+      // with "already facing north" for a map that was genuinely
+      // rotated. resetHeadingToNorth() itself now reads the REAL heading
+      // first and correctly resolves immediately (no animation needed)
+      // when it's genuinely already at north — so this handler no longer
+      // needs its own pre-check at all.
+      (async()=>{
+        try{
+          const realHeading=await MBMMap.resetHeadingToNorth();
+          toast(L==='fa'?'رو به شمال':'Facing north');
+          const needleEl=document.querySelector('[data-fam="live-compass-toggle"] span');
+          if(needleEl) needleEl.style.transform='rotate('+(-realHeading)+'deg)';
+        }catch(e){
+          console.error('[live-compass-toggle] reset failed',e);
+          toast(L==='fa'?'قطب‌نما جواب نداد — دوباره امتحان کن':'Compass didn\u2019t respond — try again');
+        }
+      })();
       return;
     }
     case 'loc-toggle-dead-reckoning':{
