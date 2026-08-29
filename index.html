@@ -1702,7 +1702,7 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
 .fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
 .fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:26px;padding:2px;width:max-content;max-width:max-content}
-.fam-cluster.sel .fam-cluster-row{outline:3px solid var(--fam-purple,#8652FF)}
+/* v541: removed .fam-cluster.sel outline — Life360 only rings the individually-selected avatar (via ringColor above), never the whole merged group */
 .fam-cluster-av{width:38px;height:38px;border-radius:50%;border:2px solid #fff;margin-inline-start:-15px;
   background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:14px;overflow:hidden}
 .fam-cluster-av:first-child{margin-inline-start:0}
@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v538';
+const APP_VERSION='v541';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17305,27 +17305,29 @@ const MBMMap = (function(){
 
   function setClusterMarker(key, latlng, members, selected, onClick, calloutMeta){
     if(!_map) return;
-    // v535: bring the currently-featured (viewed) member's avatar to the
-    // front and highlight it — matches Life360's own merged-pin behavior
-    // (confirmed via side-by-side recording) where tapping a name brings
-    // THAT person's photo forward with a colored ring, instead of always
-    // showing the same static left-to-right order no matter whose page
-    // you're on.
-    const featuredUid=calloutMeta&&calloutMeta.featuredUid;
-    let ordered=members;
-    if(featuredUid){
-      const idx=members.findIndex(mm=>mm.uid===featuredUid);
-      if(idx>0){ ordered=members.slice(); const [f]=ordered.splice(idx,1); ordered.unshift(f); }
-    }
-    const max=3; const shown=ordered.slice(0,max);
-    let inner=shown.map(mm=>{
-      const isFeatured=featuredUid&&mm.uid===featuredUid;
-      const ring=isFeatured
-        ?`border:2px solid ${mm.color||'#8652FF'};box-shadow:0 0 0 2px #fff, 0 0 0 4px ${mm.color||'#8652FF'};position:relative;z-index:2`
-        :`position:relative;z-index:1`;
+    // v540 ROOT-CAUSE FIX (replaces v535's splice/unshift reordering,
+    // confirmed wrong via frame-by-frame comparison against the Life360
+    // reference recordings): Life360 keeps each person's avatar in a
+    // FIXED left/right position — selecting someone never swaps which
+    // photo sits where. Only two things change per selection: the
+    // selected avatar's z-index (so it visually renders on top / in
+    // front of the other, which stays physically in place underneath)
+    // and its ring color (purple when selected, white otherwise). Member
+    // order is therefore NEVER touched here — every avatar is rendered
+    // from its own fixed array position, and only its z-index/ring are
+    // computed from whether ITS OWN uid equals the selectedPersonId
+    // (featuredUid). No content or photo is ever moved, swapped, or
+    // reused between positions.
+    const selectedPersonId=calloutMeta&&calloutMeta.featuredUid;
+    const max=3; const shown=members.slice(0,max);
+    let inner=shown.map((mm,i)=>{
+      const isSelected=selectedPersonId&&mm.uid===selectedPersonId;
+      const zIndex=isSelected?2:1;
+      const ringColor=isSelected?'#8652FF':'#fff';
+      const ring=`position:relative;z-index:${zIndex};border:2px solid ${ringColor};box-shadow:0 0 0 2px #fff, 0 0 0 4px ${ringColor}`;
       return mm.photo
-        ? `<div class="fam-cluster-av" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}');${ring}"></div>`
-        : `<div class="fam-cluster-av" style="background:${mm.color||'#6e56f8'};${ring}">${mm.initial||'?'}</div>`;
+        ? `<div class="fam-cluster-av" data-uid="${esc(mm.uid)}" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}');${ring}"></div>`
+        : `<div class="fam-cluster-av" data-uid="${esc(mm.uid)}" style="background:${mm.color||'#6e56f8'};${ring}">${mm.initial||'?'}</div>`;
     }).join('');
     if(members.length>max) inner+=`<div class="fam-cluster-more">+${members.length-max}</div>`;
     // v449 FIX: the cluster bubble (co-located members merged into one pin,
@@ -17348,7 +17350,7 @@ const MBMMap = (function(){
     }
     const html=callout+`<div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div>`;
     const cls='fam-cluster'+(selected?' sel':'');
-    if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} } animateMarker(key,latlng); }
+    if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} try{ if(_markers[key].content!==undefined) _markers[key].content=el; }catch(e){} } animateMarker(key,latlng); }
     else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
       const mk=makeMapMarker(key, latlng, el); mk._el=el; _markers[key]=mk; _renderState[key]={pos:latlng.slice(),timer:null,animId:null}; }
     _markerMeta[key]={cls,calloutL1:calloutMeta&&calloutMeta.calloutL1,calloutL2:calloutMeta&&calloutMeta.calloutL2};
