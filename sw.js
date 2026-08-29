@@ -16,12 +16,12 @@
 // straight through untouched, every time — this file has no way to
 // interfere with Family sync or any other live data.
 
-// v550: CACHE_NAME now bakes in the app version — MUST be bumped together
+// v557: CACHE_NAME now bakes in the app version — MUST be bumped together
 // with APP_VERSION in index.html on every release. This is what makes it
 // structurally impossible for a newly-installing worker to overwrite the
 // currently-active worker's cache: they now always have different names,
 // so install() opening "its own" cache can never touch the active one.
-const CACHE_NAME = 'mbm-life-shell-v550';
+const CACHE_NAME = 'mbm-life-shell-v557';
 const SHELL_URLS = ['./', './index.html'];
 
 self.addEventListener('install', (event) => {
