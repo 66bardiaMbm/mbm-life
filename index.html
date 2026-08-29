@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v545';
+const APP_VERSION='v546';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -19772,7 +19772,7 @@ function famLivePaintMarkers(members, sel){
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
          calloutL2:markerCallout.l2?esc(markerCallout.l2):''};
       const markerSelected=m.uid===_famSelUid;
-      const markerOnClick=()=>{ _famSelUid=m.uid; _famLastCentredUid=null; _famDetailOpen=true;
+      const markerOnClick=()=>{ _famSelUid=m.uid; _famLastCentredUid=null;
               // v450 FIX: Google Maps marker taps don't reliably bubble a
               // real click/pointerdown to window the way normal HTML button
               // taps do, so the global back-guard listener (backButtonBootstrap,
@@ -19786,7 +19786,7 @@ function famLivePaintMarkers(members, sel){
               // window), fixes it regardless of why the global listener
               // missed it.
               try{ reconcileGuards(); }catch(e){}
-              famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} };
+              famLiveApply(); };
       MBMMap.setMarker(key,[m.state.lat,m.state.lng], markerMeta, markerSelected, m.meta.tone, markerOnClick);
       // v504 (diagnostic-only): full per-paint snapshot for the SELECTED
       // member specifically — accepted/DB state, the "moving" flag, and
@@ -19848,9 +19848,9 @@ function famLivePaintMarkers(members, sel){
         ()=>{ // tap a cluster → select the first member in it not already selected (cycles through)
           const idx=g.members.findIndex(m=>m.uid===_famSelUid);
           const next=g.members[(idx+1)%g.members.length]||g.members[0];
-          _famSelUid=next.uid; _famLastCentredUid=null; _famDetailOpen=true;
+          _famSelUid=next.uid; _famLastCentredUid=null;
           try{ reconcileGuards(); }catch(e){}   // v450 — same fix as the single-marker tap above
-          famLiveApply(); try{ famApplySheetDetent(2); }catch(e){} },
+          famLiveApply(); },
         {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):'', featuredUid:featured.uid});
     }
   });
@@ -21452,11 +21452,10 @@ async function famAction(act,arg,ev){
     //    then back". famLiveApply() (used a few lines above by 'live-sel')
     //    is the correct lightweight path: it patches only the header and
     //    sheet body, leaving the live map/marker completely undisturbed.
-    case 'live-sel-open': _famSelUid=String(arg); _famLastCentredUid=null; _famDetailOpen=true; famView='live';
+    case 'live-sel-open': _famSelUid=String(arg); _famLastCentredUid=null; famView='live';
       if(screen==='module'&&currentModule==='family'&&typeof famLiveApply==='function'){ famLiveApply(); }
       else { render(); }
-      try{ famApplySheetDetent(2); }catch(e){}
-      window.scrollTo(0,0); return;
+      return;
     // v417: explicit back-out of the detail screen to the member list.
     case 'live-detail-back': _famDetailOpen=false; famLiveApply(); try{ famApplySheetDetent(1); }catch(e){} return;
     case 'members': go('members'); return;
