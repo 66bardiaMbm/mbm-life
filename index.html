@@ -1701,13 +1701,13 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 /* ── clustered multi-avatar pin: 2+ members sharing one bubble (like the
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
 .fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
-.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:36px;padding:4px}
+.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:26px;padding:2px;width:max-content;max-width:max-content}
 .fam-cluster.sel .fam-cluster-row{outline:3px solid var(--fam-purple,#8652FF)}
-.fam-cluster-av{width:44px;height:44px;border-radius:50%;border:2px solid #fff;margin-inline-start:-18px;
-  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px;overflow:hidden}
+.fam-cluster-av{width:38px;height:38px;border-radius:50%;border:2px solid #fff;margin-inline-start:-15px;
+  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:14px;overflow:hidden}
 .fam-cluster-av:first-child{margin-inline-start:0}
-.fam-cluster-more{width:40px;height:40px;border-radius:50%;border:2px solid #fff;margin-inline-start:-18px;background:var(--fam-purple,#8652FF);color:#fff;
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+.fam-cluster-more{width:34px;height:34px;border-radius:50%;border:2px solid #fff;margin-inline-start:-15px;background:var(--fam-purple,#8652FF);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
 .fam-cluster-tip{position:absolute;left:50%;bottom:-8px;width:16px;height:16px;background:#fff;transform:translateX(-50%) rotate(45deg)}
 /* Circle chooser + future Safety/Membership surfaces. These are original MBM
    components that follow the same information hierarchy as the references
@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v536';
+const APP_VERSION='v538';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -18893,7 +18893,20 @@ function famComposeStatusText(m){
   // itself (still owned entirely by classifyMovement) — it only changes
   // what confidence the DISPLAY claims about it.
   const priorGapMs=s.priorFixGapMs;
-  const hasUnconfirmedGap=priorGapMs!=null && priorGapMs>UNCERTAIN_GAP_MS;
+  // v537 FIX (real stuck-state bug, confirmed on-device: one member showed
+  // "Presence unconfirmed" for hours while the other showed a correct
+  // "Since ..." at the same place): this condition looked ONLY at
+  // priorFixGapMs — the gap between the last two fixes — with no expiry
+  // at all. That value persists in the member's stored state, so a single
+  // old gap could pin the display to "unconfirmed" indefinitely, no
+  // matter how much continuous, steady, freshly-confirmed presence
+  // followed it. The uncertainty is now scoped to the period where it's
+  // actually meaningful: if presence has since been continuously
+  // confirmed for longer than the gap itself, the doubt is resolved by
+  // the evidence and the normal confirmed reading returns.
+  const confirmedSinceMs=s.lastPresenceConfirmedAt?(Date.now()-Date.parse(s.lastPresenceConfirmedAt)):null;
+  const uncertaintyStillRelevant=!(confirmedSinceMs!=null && priorGapMs!=null && confirmedSinceMs>priorGapMs);
+  const hasUnconfirmedGap=priorGapMs!=null && priorGapMs>UNCERTAIN_GAP_MS && uncertaintyStillRelevant;
   if(hasUnconfirmedGap && since2){
     // v528 FIX (real bug, confirmed): this used to show "Last confirmed:
     // <old timestamp>" in the map callout, right next to the CURRENT
@@ -21390,7 +21403,7 @@ async function famAction(act,arg,ev){
     //    then back". famLiveApply() (used a few lines above by 'live-sel')
     //    is the correct lightweight path: it patches only the header and
     //    sheet body, leaving the live map/marker completely undisturbed.
-    case 'live-sel-open': _famSelUid=arg; _famLastCentredUid=null; _famDetailOpen=true; famView='live';
+    case 'live-sel-open': _famSelUid=String(arg); _famLastCentredUid=null; _famDetailOpen=true; famView='live';
       if(screen==='module'&&currentModule==='family'&&typeof famLiveApply==='function'){ famLiveApply(); }
       else { render(); }
       try{ famApplySheetDetent(2); }catch(e){}
