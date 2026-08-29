@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v541';
+const APP_VERSION='v545';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11752,7 +11752,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
                                       // prevents a late/stale snapshot from overwriting fresher state.
 
     function nowISO(){ return new Date().toISOString(); }
-    function ageMs(iso){ const t=Date.parse(iso||''); return isNaN(t)?Infinity:(Date.now()-t); }
+    function ageMs(iso){ const t=(typeof iso==='number')?iso:Date.parse(iso||''); return isNaN(t)?Infinity:(Date.now()-t); }
     function haversine(a,b){ if(!a||!b)return Infinity; const R=6371000,toR=x=>x*Math.PI/180;
       const dLat=toR(b.lat-a.lat),dLng=toR(b.lng-a.lng);
       const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
@@ -11792,7 +11792,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
       }
       if(state && state.permission==='denied') return 'denied';
       if(!state || state.lat==null) return consentUnknown?'reconnecting':'unavailable';
-      const age=ageMs(state.reportedAt||state.capturedAt);
+      const age=ageMs(famFreshestStateTime(state));
       if(age>STALE_MS) return consentUnknown?'reconnecting':'offline';
       if(age>RECENT_MS) return 'stale';
       if(state.moving) return 'moving';
@@ -18012,7 +18012,7 @@ function famIcon(name){ return FAM_ICON[name]||''; }
 
 /* Relative time for honest freshness display (never rounds up to "now"). */
 function famRelTime(iso){
-  const t=Date.parse(iso||''); if(isNaN(t))return L==='fa'?'—':'—';
+  const t=(typeof iso==='number')?iso:Date.parse(iso||''); if(isNaN(t))return L==='fa'?'—':'—';
   const s=Math.floor((Date.now()-t)/1000);
   if(s<0) return L==='fa'?'اکنون':'now';
   if(s<45) return L==='fa'?'همین حالا':'now';
@@ -18022,8 +18022,27 @@ function famRelTime(iso){
 }
 /* Absolute clock time, so the honest relative label ("now"/"3 min ago") is
    independently verifiable by the user — not just a claim to trust. */
+// v543: single shared source of truth for "what is the freshest real
+// timestamp we have for this member's state" — replaces the previously
+// scattered `s.reportedAt||s.capturedAt` pattern (5 separate call sites:
+// deriveStatus/t, famComposeStatusText's staleness check, Last-update
+// display, detail card, activity cache), which let an old reportedAt
+// mask a genuinely fresh capturedAt in some call sites while a
+// same-session fix in famComposeStatusText alone left the others
+// inconsistent. Every consumer of "how fresh is this fix" now goes
+// through this one function.
+function famFreshestStateTime(s){
+  if(!s) return null;
+  const reportedAtMs=Date.parse(s.reportedAt||'');
+  const capturedAtMs=Date.parse(s.capturedAt||'');
+  const validReported=!isNaN(reportedAtMs), validCaptured=!isNaN(capturedAtMs);
+  if(validReported&&validCaptured) return Math.max(reportedAtMs,capturedAtMs);
+  if(validReported) return reportedAtMs;
+  if(validCaptured) return capturedAtMs;
+  return null;
+}
 function famAbsTime(iso){
-  const t=Date.parse(iso||''); if(isNaN(t))return '';
+  const t=(typeof iso==='number')?iso:Date.parse(iso||''); if(isNaN(t))return '';
   const d=new Date(t);
   return d.toLocaleTimeString(L==='fa'?'fa-IR':'en-AU',{
     hour:'2-digit',minute:'2-digit',hour12:false,hourCycle:'h23'
@@ -18207,8 +18226,8 @@ function famLiveSheetBodyHtml(members, sel, myUid){
         // BOTH states, so the list row now does too.
         const regionTxt = txt.region ? esc(txt.region) : '';
         const sinceTxt = movingActivity
-          ? (txt.region || `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`)
-          : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTimeWithDay(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(m.state.reportedAt||m.state.capturedAt)}`));
+          ? (txt.region || `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(famFreshestStateTime(m.state))}`)
+          : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTimeWithDay(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(famFreshestStateTime(m.state))}`));
         const regionRow = (!movingActivity && regionTxt) ? `<div class="st">${regionTxt}</div>` : '';
         rowAddr=`<div class="st"><span class="fam-row-pin">${famIcon('pin')}</span>${esc(line1)}</div>${regionRow}<div class="st">${esc(sinceTxt)}</div>`;
       } else {
@@ -18544,7 +18563,7 @@ const FAM_CUM_DRIVE_M=55;        // verified net movement within the window — 
 function famCumulativeIsDriving(c,m){
   const s=m.state; if(!s||s.lat==null) return false;
   if(s.accuracy!=null && +s.accuracy>35) return false;
-  const t=Date.parse(s.reportedAt||s.capturedAt||'')||Date.now();
+  const t=famFreshestStateTime(s)||Date.now();
   if(!c._cumHist) c._cumHist=[];
   const hist=c._cumHist;
   const last=hist[hist.length-1];
@@ -18876,11 +18895,13 @@ function famComposeStatusText(m){
   // silently keep presenting yesterday's stay as still-confirmed. This is
   // display-layer honesty only — it does not touch the real stayStart
   // value itself (that's still correctly owned by classifyMovement).
-  const lastFixAt=Date.parse(s.reportedAt||s.capturedAt||'');
-  const fixAgeMs=isNaN(lastFixAt)?Infinity:(Date.now()-lastFixAt);
+  // v543: now routed through the single shared famFreshestStateTime()
+  // helper (see its definition) instead of inline duplicated logic.
+  const lastFixAt=famFreshestStateTime(s);
+  const fixAgeMs=lastFixAt==null?Infinity:(Date.now()-lastFixAt);
   const isStale=fixAgeMs>STALE_PRESENCE_MS;
   if(isStale && since2){
-    const lastConfirmed=L==='fa'?`آخرین تأیید: ${famAbsTime(s.reportedAt||s.capturedAt)}`:`Last confirmed: ${famAbsTime(s.reportedAt||s.capturedAt)}`;
+    const lastConfirmed=L==='fa'?`آخرین تأیید: ${famAbsTime(lastFixAt)}`:`Last confirmed: ${famAbsTime(lastFixAt)}`;
     return { l1:lines.line1, region:lines.line2||'', l2:lastConfirmed, calloutL2:lastConfirmed, since:null, activityType:'stationary', place:!!d.currentPlaceId, stale:true };
   }
   // Requirement: a fresh CURRENT fix does not, by itself, prove continuous
@@ -18906,9 +18927,35 @@ function famComposeStatusText(m){
   // actually meaningful: if presence has since been continuously
   // confirmed for longer than the gap itself, the doubt is resolved by
   // the evidence and the normal confirmed reading returns.
-  const confirmedSinceMs=s.lastPresenceConfirmedAt?(Date.now()-Date.parse(s.lastPresenceConfirmedAt)):null;
-  const uncertaintyStillRelevant=!(confirmedSinceMs!=null && priorGapMs!=null && confirmedSinceMs>priorGapMs);
-  const hasUnconfirmedGap=priorGapMs!=null && priorGapMs>UNCERTAIN_GAP_MS && uncertaintyStillRelevant;
+  // v542 FIX (real bug, confirmed via diagnostics): the old condition
+  // (confirmedSinceMs>priorGapMs) required waiting out the FULL OLD GAP
+  // DURATION after a fresh confirmation before clearing "unconfirmed" —
+  // backwards. arrival_confirmed sets lastPresenceConfirmedAt=nowAt AND
+  // stayStart=candidateSince in the same update, so the instant a fresh
+  // confirmation exists for the CURRENT stay, lastPresenceConfirmedAt is
+  // already >= stayStart — no additional elapsed time should be required.
+  // v543 FIX (real bug, confirmed): the previous check
+  // (lastPresenceConfirmedAt>=stayStart) could be TRUE from an OLD
+  // confirmation earlier in the SAME stay, incorrectly clearing
+  // uncertainty even while a NEW post-gap reconfirmation was still
+  // pending. The authoritative signal is the state machine's own
+  // _presence.uncertainSince: classifyMovement sets it the instant a gap
+  // is flagged and REMOVES it (not just leaves stale) the instant
+  // reconfirm_complete_same_anchor / reconfirm_complete_new_anchor
+  // fires. No timestamp comparison can substitute for reading this
+  // directly.
+  // v545 FIX (real bug, confirmed): the outer condition
+  // (priorGapMs>UNCERTAIN_GAP_MS) re-checked the CURRENT fix's OWN gap
+  // value on every call — which shrinks back to normal (e.g. 2s) on the
+  // very next fix after the one that originally flagged the gap, even
+  // though _presence.uncertainSince is still set and reconfirmation has
+  // not completed. That let the UI clear "unconfirmed" one fix too early,
+  // every time. The state machine's uncertainSince field is the ONLY
+  // correct signal for "is this member currently in an unconfirmed
+  // window" — it is already set exactly when a gap is flagged and
+  // removed exactly when reconfirm_complete_* fires; no additional
+  // gap-size re-check belongs here.
+  const hasUnconfirmedGap=!!(s._presence && s._presence.uncertainSince);
   if(hasUnconfirmedGap && since2){
     // v528 FIX (real bug, confirmed): this used to show "Last confirmed:
     // <old timestamp>" in the map callout, right next to the CURRENT
@@ -18991,7 +19038,7 @@ function famLiveStatusLine(m){
     if(m.consent.paused) return L==='fa'?'اشتراک متوقف شده':'Sharing paused';
   }
   if(!m.state||m.state.lat==null) return consentUnknown?(L==='fa'?'در حال اتصال مجدد':'Reconnecting…'):(L==='fa'?'موقعیت نامشخص':'Location unknown');
-  const rel=famRelTime(m.state.reportedAt||m.state.capturedAt);
+  const rel=famRelTime(famFreshestStateTime(m.state));
   if(m.status==='offline') return L==='fa'?`آفلاین · ${rel}`:`Offline · ${rel}`;
   return (L==='fa'?'به‌روزرسانی ':'Updated ')+rel;
 }
@@ -19587,8 +19634,8 @@ function famLiveMemberDetail(m, isMe){
     const regionTxt = txt.region?esc(txt.region):'';
     const movingActivity=['driving','walking','bicycling','motorcycle'].includes(txt.activityType);
     const sinceTxt = movingActivity
-      ? `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`
-      : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTimeWithDay(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(s.reportedAt||s.capturedAt)}`));
+      ? `${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(famFreshestStateTime(s))}`
+      : (txt.l2 || (since?`${L==='fa'?'از':'Since'} ${famAbsTimeWithDay(since)}`:`${L==='fa'?'به‌روزرسانی':'Updated'} ${famRelTime(famFreshestStateTime(s))}`));
     h+=`<div class="fam-loc-block" data-fam-debug="loc-block" style="display:flex;align-items:flex-start;gap:12px;margin-top:16px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:22px;line-height:1.15">${line1}</div>
@@ -19611,7 +19658,7 @@ function famLiveMemberDetail(m, isMe){
   if(showLoc){
     const txt2=famComposeStatusText(m);
     h+=`<div class="fam-stat-grid">`;
-    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(s.reportedAt||s.capturedAt)}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(s.reportedAt||s.capturedAt)}</div></div>`;
+    h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'آخرین به‌روزرسانی':'Last update'}</div><div class="val">${famRelTime(famFreshestStateTime(s))}</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">${famAbsTime(famFreshestStateTime(s))}</div></div>`;
     if(acc.level==='good') h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'دقت':'Accuracy'}</div><div class="val">${esc(acc.text)}</div></div>`;
     if(s.battery!=null) h+=`<div class="fam-stat-card"><div class="lbl">${L==='fa'?'باتری':'Battery'}</div><div class="val">${s.battery}%</div></div>`;
     h+=`</div>`;
