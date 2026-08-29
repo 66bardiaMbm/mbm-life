@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v547';
+const APP_VERSION='v550';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -24912,32 +24912,46 @@ function applyUpdate(){
     }));
   }catch(e){}
 
-  const reload=()=>{
-    // Always cache-bust the reload. A plain location.reload() can re-serve the
-    // stale HTML from GitHub Pages' CDN / disk cache, which makes the app come
-    // back on the SAME old version and re-show the update banner. Replacing the
-    // URL with a fresh query string forces a real network fetch. This works in
-    // standalone PWAs too (same-origin, same scope — it does not open a browser tab).
-    const base=location.href.split('?')[0].split('#')[0];
-    location.replace(base+'?v='+Date.now());
+  // v549 FIX (real bug, confirmed): the previous version reloaded
+  // unconditionally after 2.5s even with NO controllerchange, and reloaded
+  // immediately with no waiting worker at all — both cases reload the
+  // page while STILL running the OLD version, which looks successful to
+  // the user but changed nothing. Neither case is silently "handled"
+  // anymore: no waiting worker, or no controllerchange within a
+  // reasonable window, now surfaces an explicit error instead of a
+  // reload that lies about what happened.
+  const waiting=_swWaitingWorker||(_swRegistration&&_swRegistration.waiting);
+  const showUpdateError=(msg)=>{
+    const sub=document.getElementById('ub-sub');
+    if(sub) sub.textContent=msg;
+    const btn=document.getElementById('ub-update');
+    if(btn){ btn.textContent=(L==='fa'?'به‌روزرسانی':'Update now'); btn.disabled=false; }
+    const laterBtn=document.getElementById('ub-later');
+    if(laterBtn) laterBtn.style.display='';
   };
-
-  // Run cleanup steps best-effort, then reload no matter what.
-  const tasks=[];
-  // 1) Clear Cache Storage (old PWA caches)
-  if('caches' in window){
-    tasks.push(caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).catch(()=>{}));
+  if(!waiting){
+    showUpdateError(L==='fa'
+      ?'نسخه‌ی جدید هنوز آماده نیست — چند لحظه صبر کن و دوباره امتحان کن.'
+      :'The new version isn\u2019t ready yet — wait a moment and try again.');
+    return;
   }
-  // 2) Unregister any stale service workers that could serve old HTML
-  if('serviceWorker' in navigator){
-    tasks.push(navigator.serviceWorker.getRegistrations()
-      .then(regs=>Promise.all(regs.map(r=>r.unregister()))).catch(()=>{}));
+  let settled=false;
+  const onControllerChange=()=>{
+    if(settled)return; settled=true;
+    try{ navigator.serviceWorker.removeEventListener('controllerchange',onControllerChange); }catch(e){}
+    location.reload();
+  };
+  try{ navigator.serviceWorker.addEventListener('controllerchange',onControllerChange); }catch(e){}
+  try{ waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){
+    settled=true;
+    showUpdateError(L==='fa'?'به‌روزرسانی ناموفق بود — دوباره امتحان کن.':'Update failed — please try again.');
+    return;
   }
-  // Safety: never let cleanup hang the update — reload after 1.5s regardless
-  let done=false;
-  const go=()=>{if(done)return;done=true;reload();};
-  Promise.all(tasks).then(go).catch(go);
-  setTimeout(go,1500);
+  setTimeout(()=>{
+    if(settled)return; settled=true;
+    try{ navigator.serviceWorker.removeEventListener('controllerchange',onControllerChange); }catch(e){}
+    showUpdateError(L==='fa'?'به‌روزرسانی کامل نشد — دوباره امتحان کن.':'Update didn\u2019t complete — please try again.');
+  },8000);
 }
 
 // Automatic background check
@@ -24946,12 +24960,6 @@ async function checkForUpdate(){
   _lastAutomaticUpdateCheckAt=Date.now();
   try{
     const ver=await fetchRemoteVersion();
-    // v529: diagnostic-only — logs every check's real outcome to the
-    // persisted buffer (deduped so it only logs when the outcome
-    // actually CHANGES, not every single check) so a persistent banner
-    // can be traced to an actual repeated remote-version mismatch
-    // (supporting the CDN-delay explanation) or ruled out in favor of
-    // something else, instead of being asserted either way.
     try{
       const outcomeSig=(ver||'null')+'|'+APP_VERSION;
       if(_lastUpdateCheckOutcome!==outcomeSig){
@@ -24964,7 +24972,28 @@ async function checkForUpdate(){
     }catch(e){}
     if(!ver||ver===APP_VERSION)return;          // already on the latest version
     if(_updDismissedSession===ver)return;        // "Later" hides it for THIS session only
-    showUpdateBanner(ver);                        // otherwise show it (every launch until updated)
+    // v548: a text-version mismatch alone is no longer sufficient to show
+    // the banner — the service worker must have ACTUALLY finished
+    // downloading the new shell and be sitting in 'waiting'. Ask it to
+    // check now, then give it a short window to reach that state before
+    // deciding. This is what makes the banner correspond to a real,
+    // ready-to-activate update rather than just a version string that
+    // happened to differ (which is also more resilient to the CDN-delay
+    // scenario documented above — if the SW's own fetch also hits a
+    // stale CDN copy, it simply won't find anything new to install, and
+    // no banner appears, instead of appearing and then failing to help).
+    try{ if(_swRegistration) await _swRegistration.update(); }catch(e){}
+    const waitForWaiting=async(maxMs)=>{
+      const start=Date.now();
+      while(Date.now()-start<maxMs){
+        if(_swWaitingWorker || (_swRegistration&&_swRegistration.waiting)) return true;
+        await new Promise(r=>setTimeout(r,300));
+      }
+      return false;
+    };
+    const ready=await waitForWaiting(6000);
+    if(!ready) return; // nothing actually ready yet — stay quiet, a later check will catch it
+    showUpdateBanner(ver);
   }catch(e){}
 }
 function scheduleAutomaticUpdateCheck(force){
@@ -24978,9 +25007,19 @@ async function manualCheckForUpdate(){
   try{
     const ver=await fetchRemoteVersion();
     if(ver&&ver!==APP_VERSION){
-      // Manual check overrides a session dismissal for this version
-      _updDismissedSession=null;
-      showUpdateBanner(ver);
+      try{ if(_swRegistration) await _swRegistration.update(); }catch(e){}
+      const start=Date.now();
+      let ready=false;
+      while(Date.now()-start<6000){
+        if(_swWaitingWorker || (_swRegistration&&_swRegistration.waiting)){ ready=true; break; }
+        await new Promise(r=>setTimeout(r,300));
+      }
+      if(ready){
+        _updDismissedSession=null; // manual check overrides a session dismissal for this version
+        showUpdateBanner(ver);
+      } else {
+        toast(L==='fa'?'نسخه جدید در حال آماده‌سازی است — کمی بعد دوباره بررسی کنید':'New version is preparing — check again shortly');
+      }
     }else if(ver){
       toast(L==='fa'?'برنامه به‌روز است ✓':'You’re up to date ✓');
     }else{
@@ -25254,11 +25293,61 @@ function onPop(){
   }
 }
 
+// v548: rebuilt service-worker integration. _swRegistration/_swWaitingWorker
+// track the CURRENT registration and whether a new version has finished
+// downloading and is sitting in 'waiting' — the authoritative signal for
+// "an update is actually ready", replacing reliance on the text-based
+// version fetch alone. The worker itself never self-activates (see
+// sw.js) — only an explicit user tap sets it in motion.
+let _swRegistration=null, _swWaitingWorker=null;
+// v550: runtime fail-fast check — CACHE_NAME in sw.js is a manually
+// maintained string (no build step exists to derive it automatically),
+// so a forgotten bump on some future release would silently reintroduce
+// the exact "worker overwrites the active cache" bug fixed in v549. This
+// fetches sw.js's own source and verifies its embedded cache version
+// matches APP_VERSION on every load — if they ever drift, it's surfaced
+// immediately and persistently, not discovered later from a user report.
+async function _swVerifyCacheVersionMatch(){
+  try{
+    const res=await fetch('sw.js?_=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) return;
+    const text=await res.text();
+    const m=text.match(/CACHE_NAME\s*=\s*'mbm-life-shell-(v\d+)'/);
+    if(!m){
+      console.error('[sw-version-check] could not find a versioned CACHE_NAME in sw.js — this check itself may be out of date');
+      return;
+    }
+    const swVer=m[1];
+    if(swVer!==APP_VERSION){
+      const msg='[sw-version-check] MISMATCH: sw.js CACHE_NAME is '+swVer+' but index.html APP_VERSION is '+APP_VERSION+' — a release forgot to bump one of them. This can silently let a new worker overwrite the active version'+"'"+'s cache.';
+      console.error(msg);
+      try{ if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('sw_cache_version_mismatch',{swVer,appVersion:APP_VERSION}); }catch(e){}
+    }
+  }catch(e){ /* offline or blocked — not itself an error worth surfacing */ }
+}
+function _swTrackWaiting(reg){
+  if(!reg) return;
+  _swRegistration=reg;
+  if(reg.waiting){ _swWaitingWorker=reg.waiting; }
+  reg.addEventListener('updatefound',()=>{
+    const installing=reg.installing;
+    if(!installing) return;
+    installing.addEventListener('statechange',()=>{
+      if(installing.state==='installed' && navigator.serviceWorker.controller){
+        // A controller already existed before this install finished — this
+        // is a genuine UPDATE (not the very first install), so the new
+        // worker is now sitting in 'waiting'.
+        _swWaitingWorker=installing;
+      }
+    });
+  });
+}
 // Register app service worker (relative path → scope stays under /mbm-life/).
 // Required for a full standalone install (WebAPK) on Android Chrome.
 if('serviceWorker' in navigator){
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
+    navigator.serviceWorker.register('sw.js').then(_swTrackWaiting).catch(function(){});
+    _swVerifyCacheVersionMatch();
   });
 }
 
