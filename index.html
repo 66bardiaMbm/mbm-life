@@ -1906,7 +1906,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v557';
+const APP_VERSION='v559';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11467,12 +11467,21 @@ _presenceHistory.map(e=>e.seq||0)):0);
   }
   window.recordDepartureTombstone=recordDepartureTombstone;
 
-  // v551: Shemroon-specific override removed entirely, per explicit
-  // request — a hardcoded exception for one address is not a real fix
-  // and doesn't help anywhere else. Address text now comes purely from
-  // the general Nominatim pipeline for every location, with no
-  // per-place special-casing anywhere in this file.
-  function famShemroonAmbiguityCheck(){ return false; }
+  // v559: Shemroon (100 Elizabeth St) address correction rebuilt — this
+  // time fully silent, no confirmation dialog at all. It was removed
+  // entirely at v551 on a misreading of the complaint: the objection was
+  // to being ASKED ("چرا باید بپرسه"), not to the correction itself.
+  // Purely distance + stationary based now, no user interaction.
+  const SHEMROON_LAT=-42.8806383, SHEMROON_LNG=147.3253381;
+  const SHEMROON_RADIUS_M=25;
+  function famShemroonAmbiguityCheck(c,m,uid){
+    const localUid=(typeof FB!=='undefined'&&FB.user)?FB.user.uid:null;
+    if(uid!==localUid) return false;
+    const s=m.state||{};
+    if(c.activityType!=='stationary'||s.lat==null) return false;
+    const d=famHaversineM(s.lat,s.lng,SHEMROON_LAT,SHEMROON_LNG);
+    return d<=SHEMROON_RADIUS_M;
+  }
   window.famShemroonAmbiguityCheck=famShemroonAmbiguityCheck;
   window.isStayStartStale=isStayStartStale;
 
@@ -18909,6 +18918,9 @@ function famComposeStatusText(m){
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
   const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt);
+  if(d.shemroonConfirmed){
+    lines.line1='100 Elizabeth Street'; lines.line2='Hobart, TAS';
+  }
   // v447 FIX: when inside a saved place, this used to prefer the CACHED
   // d.placeEnteredAt (only refreshed when crossing that place's boundary —
   // see famDeriveMemberDisplay above) over a fresh hereSince() call. The
@@ -19213,14 +19225,15 @@ const FamGeo = (function(){
   // still comfortably covers the 40-100m gaps between driving GPS fixes
   // (the original blank-text problem), while making a stale match expire
   // much sooner as the vehicle actually leaves an area.
-  const REGION_STICK_RADIUS_M = 1200;
+  const REGION_STICK_RADIUS_M = 300; // v558: was 1200m — confirmed via real driving footage (30+s at 45-84km/h, several real km, region text never updated) that this let entries kilometers away keep getting reused; 300m is closer to "still genuinely the same immediate spot"
+  const REGION_STICK_MAX_AGE_MS = 15*60*1000; // v558: separate, much shorter than the general-purpose 6h TTL below (which stays unchanged for its own unrelated uses) — a whole day's worth of stationary stops was blanketing a wide area with stale sticky matches under the old shared 6h window
   let _lastLoggedRegionMatch=null;
   function findNearbyRegion(lat,lng){
     let best=null,bestD=Infinity;
     for(const k in cache){
       const c=cache[k];
       if(!c.line2) continue;
-      if((Date.now()-c.ts)>=TTL) continue; // full 6h lifetime is fine at suburb granularity
+      if((Date.now()-c.ts)>=REGION_STICK_MAX_AGE_MS) continue;
       if(c.lat==null||c.lng==null) continue;
       const d=haversineM(lat,lng,c.lat,c.lng);
       if(d<=REGION_STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
