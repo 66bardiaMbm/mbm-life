@@ -1,44 +1,51 @@
-// MBM Life — service worker LOADER (v1)
+// MBM Life — service worker (v565, closes the "served without consent" gap)
 //
-// ARCHITECTURE (agreed with Bahman, replaces the per-release-versioned
-// sw.js used through v565):
+// PURPOSE: a new worker CAN activate without SKIP_WAITING once all clients
+// of the OLD worker are closed — standard spec behavior, cannot be
+// suppressed from inside a worker script. So activation alone must NEVER
+// change what content is served. The version the USER EXPLICITLY ACCEPTED
+// is tracked in IndexedDB, and — as of v565 — its actual BYTES live in one
+// FIXED-NAME cache bucket (ACCEPTED_SHELL_CACHE, never a versioned name).
 //
-// This file is intentionally CONTENT-AGNOSTIC. It does not know or care
-// what APP_VERSION currently exists — its only job is:
-//   1. Serve whichever release folder (/releases/<id>/) the DEVICE has
-//      actually accepted (IndexedDB `acceptedReleaseVersion`), for shell
-//      navigation requests.
-//   2. Never change that on its own. The only writer of
-//      `acceptedReleaseVersion` is the page itself, in direct response to
-//      the user's own "Update now" tap (see applyUpdate() in index.html).
+// v564 BUG (found by Bahman, confirmed by re-reading this file): serving
+// was keyed to `caches.open(accepted || CACHE_NAME)` where `accepted` was a
+// VERSIONED cache name read from IndexedDB. If that exact named cache was
+// missing the requested entry for ANY reason (Cache Storage eviction under
+// browser storage pressure, a naming skew across app updates, or any other
+// gap between IndexedDB's record and what Cache Storage actually still
+// holds) AND this worker was not itself the accepted version, the code fell
+// through to a raw fetch(req) — a live network request that returns
+// whatever is CURRENTLY deployed, i.e. exactly the unaccepted content the
+// whole mechanism exists to withhold. The code's own comment called this
+// "fail closed"; it was actually fail-OPEN — a network fetch is not a
+// safe fallback here, it is the one response that must never be served
+// without explicit consent.
 //
-// Because each release lives at its OWN immutable, never-overwritten URL
-// (/releases/<id>/index.html), a network fetch to that EXACT url can never
-// return a different version's content by construction — the old class of
-// bug (falling back to a network fetch that silently serves whatever is
-// newest) is closed at the root, not patched around.
+// v565 FIX: stop keying storage to a versioned name at all. ONE fixed
+// cache bucket (ACCEPTED_SHELL_CACHE) holds whatever content the user has
+// actually accepted, full stop — it is written in exactly two places: (a)
+// the SKIP_WAITING handler, in direct response to the user's own "Update
+// now" tap, and (b) a true first-ever load, when nothing has been accepted
+// yet (self-heal, not an upgrade — there is nothing to protect the user
+// FROM on a first load). If a fetch ever finds this bucket missing the
+// entry for any other reason, it now falls back to THIS WORKER'S OWN
+// already-installed cache (CACHE_NAME, populated entirely at install time,
+// before any user interaction) instead of the network — worst case the
+// user sees their own currently-controlling worker's shell again, never a
+// silently-newer one.
 //
-// Routine content releases therefore never need to replace THIS file —
-// only version.json and a new /releases/<id>/ folder. This file only needs
-// to change for loader-logic changes, which is rare and still goes through
-// the browser's normal install→waiting→(explicit skipWaiting) lifecycle,
-// same as before.
-//
-// MIGRATION: any device that had already accepted a release under the OLD
-// single-cache-name scheme (CACHE_NAME-style string in `acceptedVersion`,
-// e.g. 'mbm-life-shell-v563') keeps seeing that exact same version — this
-// worker parses the version number out of that old value on first
-// activation and adopts it as `acceptedReleaseVersion`, NEVER defaulting
-// to `latest`. Only a genuinely first-ever install (neither key present)
-// defaults to DEFAULT_RELEASE below.
+// SCOPE: only ever intercepts the app shell itself (navigation requests
+// and the root/index.html document). Firebase/Firestore, Google Maps,
+// Nominatim, and every other network request pass straight through
+// untouched — this file has no way to interfere with Family sync or any
+// other live data.
 
-const LOADER_VERSION='L1';
-const DEFAULT_RELEASE='v566'; // bundled default for a true first-ever install only — bumped by CI alongside each release, never used to override an existing acceptedReleaseVersion
-const DB_NAME='mbm-life-sw-meta';
-const STORE_NAME='meta';
-const ACCEPTED_KEY='acceptedReleaseVersion';       // new schema: plain release id, e.g. 'v566'
-const LEGACY_ACCEPTED_KEY='acceptedVersion';        // old schema: cache-name string, e.g. 'mbm-life-shell-v563'
-const RELEASES_BASE='./releases/';
+const CACHE_NAME = 'mbm-life-shell-v565'; // this worker's OWN version identity — bump together with APP_VERSION every release
+const ACCEPTED_SHELL_CACHE = 'mbm-life-accepted-shell'; // v565: fixed name, NEVER versioned — see header
+const SHELL_URLS = ['./', './index.html'];
+const DB_NAME = 'mbm-life-sw-meta';
+const STORE_NAME = 'meta';
+const ACCEPTED_KEY = 'acceptedVersion';
 
 function openMetaDB(){
   return new Promise((resolve,reject)=>{
@@ -48,68 +55,82 @@ function openMetaDB(){
     req.onerror=()=>reject(req.error);
   });
 }
-async function idbGet(key){
+async function getAcceptedVersion(){
   try{
     const db=await openMetaDB();
     return await new Promise((resolve,reject)=>{
       const tx=db.transaction(STORE_NAME,'readonly');
-      const req=tx.objectStore(STORE_NAME).get(key);
+      const req=tx.objectStore(STORE_NAME).get(ACCEPTED_KEY);
       req.onsuccess=()=>resolve(req.result||null);
       req.onerror=()=>reject(req.error);
     });
   }catch(e){ return null; }
 }
-async function idbSet(key,val){
+async function setAcceptedVersion(v){
   const db=await openMetaDB();
   return new Promise((resolve,reject)=>{
     const tx=db.transaction(STORE_NAME,'readwrite');
-    tx.objectStore(STORE_NAME).put(val,key);
+    tx.objectStore(STORE_NAME).put(v,ACCEPTED_KEY);
     tx.oncomplete=()=>resolve();
     tx.onerror=()=>reject(tx.error);
   });
 }
-
-// Resolve the device's accepted release id, migrating the legacy scheme
-// forward EXACTLY ONCE, without ever jumping to latest.
-async function getAcceptedReleaseId(){
-  const direct=await idbGet(ACCEPTED_KEY);
-  if(direct) return direct;
-  const legacy=await idbGet(LEGACY_ACCEPTED_KEY);
-  if(legacy){
-    const m=(''+legacy).match(/v(\d+)/);
-    if(m){
-      const migrated='v'+m[1];
-      try{ await idbSet(ACCEPTED_KEY,migrated); }catch(e){}
-      return migrated;
-    }
-  }
-  // True first-ever install — nothing to protect the user from yet.
-  try{ await idbSet(ACCEPTED_KEY,DEFAULT_RELEASE); }catch(e){}
-  return DEFAULT_RELEASE;
+// v565: copy this worker's own already-cached shell into the fixed
+// ACCEPTED_SHELL_CACHE bucket. Used in exactly two places (see header) —
+// never called just because a worker happened to activate.
+async function acceptOwnShell(){
+  const own=await caches.open(CACHE_NAME);
+  const accepted=await caches.open(ACCEPTED_SHELL_CACHE);
+  await Promise.all(SHELL_URLS.map(async(url)=>{
+    const res=await own.match(url);
+    if(res) await accepted.put(url,res.clone());
+  }));
 }
 
 self.addEventListener('install',(event)=>{
-  // No skipWaiting() — same reasoning as before: sits in 'waiting' until
-  // an explicit user action (only relevant for loader-logic changes now).
-  event.waitUntil(self.skipWaiting ? Promise.resolve() : Promise.resolve());
+  // Deliberately NO self.skipWaiting() call here — a newly-installed
+  // worker sits in 'waiting' until explicitly told to take over.
+  event.waitUntil((async()=>{
+    const cache=await caches.open(CACHE_NAME);
+    await Promise.all(SHELL_URLS.map((url)=>
+      fetch(url,{cache:'reload'}).then((res)=>{ if(res&&res.ok) return cache.put(url,res); }).catch(()=>{})
+    ));
+    // Only a TRUE first-ever install (no accepted version recorded at
+    // all yet) self-heals the accepted-shell bucket from its own fetch —
+    // this is NOT an unauthorized upgrade, there is nothing accepted yet
+    // to protect the user from. Any later install must NOT touch
+    // ACCEPTED_SHELL_CACHE just by existing.
+    const accepted=await getAcceptedVersion();
+    if(!accepted){
+      try{ await setAcceptedVersion(CACHE_NAME); await acceptOwnShell(); }catch(e){}
+    }
+  })());
 });
 
 self.addEventListener('activate',(event)=>{
   event.waitUntil((async()=>{
     await self.clients.claim();
-    // Nothing content-related to migrate here beyond ensuring the key
-    // exists — getAcceptedReleaseId() does the actual migration lazily on
-    // first fetch, which is simpler and avoids doing IndexedDB writes on
-    // every activation for devices that already have a valid key.
+    // v565: only two caches are ever worth keeping now — the fixed
+    // ACCEPTED_SHELL_CACHE (whatever the user actually accepted) and this
+    // worker's OWN versioned cache (its install-time snapshot, used only
+    // as a same-worker fallback, see fetch handler below). No other named
+    // cache can ever be the "accepted" one anymore, so there is nothing
+    // else to protect by name — simpler and no longer dependent on
+    // IndexedDB's record staying in sync with Cache Storage's actual keys.
+    const keep=new Set([ACCEPTED_SHELL_CACHE, CACHE_NAME]);
+    const names=await caches.keys();
+    await Promise.all(names.filter((n)=>!keep.has(n)).map((n)=>caches.delete(n)));
   })());
 });
 
+// The ONLY way a waiting worker's version is ever accepted: an explicit
+// message from the page, sent exactly when the user taps "Update now".
 self.addEventListener('message',(event)=>{
-  // Reserved for rare loader-level updates only (see header) — content
-  // updates never send this anymore, they just write acceptedReleaseVersion
-  // directly from the page and reload.
   if(event.data && event.data.type==='SKIP_WAITING'){
-    event.waitUntil((async()=>{ self.skipWaiting(); })());
+    event.waitUntil((async()=>{
+      try{ await acceptOwnShell(); await setAcceptedVersion(CACHE_NAME); }catch(e){}
+      self.skipWaiting();
+    })());
   }
 });
 
@@ -118,78 +139,54 @@ function isShellRequest(request){
   try{
     const url=new URL(request.url);
     if(url.origin!==self.location.origin) return false; // never touch cross-origin (Firebase/Maps/Nominatim/etc.)
-    return url.pathname==='/' || url.pathname.endsWith('/index.html')
-      ? !url.pathname.includes('/releases/') // don't re-intercept our own release fetches below
-      : false;
+    return url.pathname==='/' || url.pathname.endsWith('/index.html');
   }catch(e){ return false; }
-}
-
-// Fetch release.json for this id and return its expected sha256 for
-// index.html, or null if the manifest itself can't be read (network
-// failure / bad JSON) — verification is skipped (not failed) only in
-// that case, since the manifest is a DIFFERENT file than the content
-// being verified and its own absence isn't evidence of corrupt content.
-async function getExpectedHash(releaseId){
-  try{
-    const res=await fetch(RELEASES_BASE+releaseId+'/release.json',{cache:'no-store'});
-    if(!res.ok) return null;
-    const manifest=await res.json();
-    return (manifest&&manifest.files&&manifest.files['index.html']&&manifest.files['index.html'].sha256)||null;
-  }catch(e){ return null; }
-}
-async function sha256Hex(buf){
-  const digest=await crypto.subtle.digest('SHA-256',buf);
-  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-function recoveryResponse(){
-  // Truly unavailable (network failure, bad HTTP status, or a hash that
-  // doesn't match what release.json says it should be) AND nothing
-  // trustworthy cached for this release — show the recovery message,
-  // never silently substitute a different version or unverified content.
-  return new Response(
-    '<!doctype html><html><body style="font-family:sans-serif;padding:32px;text-align:center">'
-    +'<h2>Version unavailable</h2>'
-    +'<p>Could not load the saved version of the app and no offline copy exists yet. '
-    +'Please reconnect and reopen the app.</p>'
-    +'</body></html>',
-    {status:503, headers:{'Content-Type':'text/html; charset=utf-8'}}
-  );
 }
 
 self.addEventListener('fetch',(event)=>{
   const req=event.request;
-  if(req.method!=='GET' || !isShellRequest(req)) return; // let the browser handle everything else normally, INCLUDING direct /releases/<id>/... requests (those are immutable and safe to let the browser's normal HTTP cache handle)
+  if(req.method!=='GET' || !isShellRequest(req)) return; // let the browser handle everything else normally
 
   event.respondWith((async()=>{
-    const releaseId=await getAcceptedReleaseId();
-    const releaseUrl=RELEASES_BASE+releaseId+'/index.html';
-    const cacheName='mbm-life-release-'+releaseId; // one cache per release id — never shared, never reused for a different id, so there is no name-skew class of bug to guard against
-    const cache=await caches.open(cacheName);
-    const cached=await cache.match(releaseUrl);
-    if(cached) return cached; // already verified once, when it was first cached below
+    // v565: always read/write the ONE fixed accepted-shell bucket — never
+    // a versioned name. A cache-busted request (fetchRemoteVersion's own
+    // update-check fetch, which deliberately appends a random query string
+    // to defeat HTTP caching) still matches here because {ignoreSearch:true}
+    // explicitly ignores the query string for this lookup — that fetch only
+    // ever reads a version string out of the response text; it must never
+    // be treated as "the accepted content changed".
+    const acceptedCache=await caches.open(ACCEPTED_SHELL_CACHE);
+    const acceptedHit=await acceptedCache.match(req,{ignoreSearch:true});
+    if(acceptedHit) return acceptedHit;
 
-    // Cache miss: fetch the release's OWN immutable, version-pinned URL.
-    // Safe in principle (this exact URL can never MEAN a different
-    // version — releases are never overwritten) but the BYTES actually
-    // received still need verifying: a 200 OK with corrupted or
-    // tampered content is a real, distinct failure mode from a network
-    // error, and res.ok alone says nothing about it.
-    try{
-      const res=await fetch(releaseUrl,{cache:'no-store'});
-      if(!res || !res.ok) throw new Error('release fetch not ok: '+(res&&res.status));
-      const buf=await res.arrayBuffer();
-      const expectedHash=await getExpectedHash(releaseId);
-      if(expectedHash){
-        const actualHash=await sha256Hex(buf);
-        if(actualHash!==expectedHash){
-          throw new Error('hash mismatch for '+releaseUrl+': expected '+expectedHash+' got '+actualHash);
+    const accepted=await getAcceptedVersion();
+    if(!accepted || accepted===CACHE_NAME){
+      // We ARE the accepted version (or nothing has ever been accepted —
+      // true first load) and the fixed bucket somehow doesn't have this
+      // entry yet. Fetch it once, serve it, and self-heal the bucket so
+      // this doesn't repeat.
+      try{
+        const res=await fetch(req);
+        if(res && res.ok){
+          const copy=res.clone();
+          acceptedCache.put(req,copy).catch(()=>{});
         }
+        return res;
+      }catch(e){
+        const own=await caches.open(CACHE_NAME);
+        return (await own.match('./index.html')) || Response.error();
       }
-      const verified=new Response(buf,{status:res.status,statusText:res.statusText,headers:res.headers});
-      cache.put(releaseUrl,verified.clone()).catch(()=>{});
-      return verified;
-    }catch(e){
-      return recoveryResponse();
     }
+    // We are NOT the accepted version, and the accepted-shell bucket is
+    // missing this entry — this should be rare now (it's only written by
+    // acceptOwnShell(), never left to skew), but if it ever happens, the
+    // ONLY safe fallback is THIS WORKER'S OWN cache, populated entirely at
+    // install time before any user interaction — never a fresh network
+    // fetch, which would silently serve unaccepted content again (the
+    // exact v564 bug).
+    const own=await caches.open(CACHE_NAME);
+    const ownHit=await own.match(req,{ignoreSearch:true});
+    if(ownHit) return ownHit;
+    return (await own.match('./index.html')) || Response.error();
   })());
 });
