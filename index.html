@@ -1941,7 +1941,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v567';
+const APP_VERSION='v569';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12096,10 +12096,20 @@ _presenceHistory.map(e=>e.seq||0)):0);
         const thisGapMs=priorFixGapMs!=null?priorFixGapMs:Infinity;
         const isCloseFollowUp=thisGapMs<=RECONFIRM_GAP_CREDIT_CAP_MS;
         if(!isCloseFollowUp){
-          // Only a genuinely sparse gap (even by background-tracking
-          // standards) restarts the accumulator — never ordinary GPS
-          // jitter, since isAwayNow (anchor-distance) already gated entry
-          // into this branch.
+          // v569 (reverted the v567/v568 "instant confirm" attempt —
+          // Bahman correctly pointed out it could silently paper over a
+          // genuine departure-and-return to the SAME spot during a gap
+          // with zero data, which this function has no way to
+          // distinguish from "never left" without more evidence). The
+          // real fix is at the DISPLAY layer (famComposeStatusText): it
+          // now shows the CURRENT position (independent of continuity)
+          // with an honest "duration unknown" label instead of blocking
+          // on this accumulator at all — so this branch goes back to its
+          // original, evidence-based behavior. The accumulator here
+          // still exists for eventually confirming a genuinely NEW,
+          // continuous stayStart if real close-together evidence
+          // accumulates; it no longer needs to control what the UI shows
+          // in the meantime.
           try{
             if(typeof window!=='undefined'&&window.reconfirmEvalPush) window.reconfirmEvalPush({
               kind:'reset', uid, fixId:fix.fixId||null, priorFixGapMs, radiusM:Math.round(radius),
@@ -19107,15 +19117,28 @@ function famComposeStatusText(m){
   // gap-size re-check belongs here.
   const hasUnconfirmedGap=!!(s._presence && s._presence.uncertainSince);
   if(hasUnconfirmedGap && since2){
-    // v528 FIX (real bug, confirmed): this used to show "Last confirmed:
-    // <old timestamp>" in the map callout, right next to the CURRENT
-    // (correct, fresh) address. That timestamp belongs to whatever place
-    // was confirmed BEFORE the gap — which may be a completely different
-    // location. Pairing them implied a false connection ("confirmed HERE
-    // since <old time>") that the underlying data never claimed. Both
-    // lines now show neutral, non-committal text instead — accurate
-    // regardless of whether the prior confirmation was at this same spot
-    // or somewhere else entirely.
+    // v569 (redesigned, Bahman): a data gap alone proves nothing either
+    // way about whether the person left and came back — not even 60s of
+    // fresh evidence after reopening proves continuity THROUGH the gap,
+    // only that they're here NOW. So this no longer tries to "resolve"
+    // the gap at all (classifyMovement reverted to its original,
+    // evidence-only accumulator). Instead: evaluate the CURRENT position
+    // on its own — independent of whether continuity is proven — against
+    // the anchor that was steady before the gap. If it still matches,
+    // that's real, current information worth showing honestly, just
+    // without fabricating a duration. "Confirming location…" is reserved
+    // for when we don't even have that much: no anchor to compare
+    // against, or the current position doesn't match it (genuinely
+    // uncertain where they are, not just for how long).
+    const anchorLat=s._presence.anchorLat, anchorLng=s._presence.anchorLng;
+    const stillAtAnchor=(anchorLat!=null&&anchorLng!=null&&s.lat!=null&&s.lng!=null)
+      && famHaversineM(anchorLat,anchorLng,s.lat,s.lng) < 60; // same steady-radius used throughout presence.js
+    if(stillAtAnchor){
+      const atThisPlaceLabel=L==='fa'?'در این مکان':'At this location';
+      const durationUnknownLabel=L==='fa'?'مدت حضور نامشخص':'Duration unknown';
+      console.debug('[presence] display: current position independently confirmed at the pre-gap anchor — showing honest "duration unknown" instead of either a fabricated duration or "Confirming location…"', {uid:m.uid, anchorLat, anchorLng, curLat:s.lat, curLng:s.lng});
+      return { l1:lines.line1, region:lines.line2||'', l2:durationUnknownLabel, calloutL2:atThisPlaceLabel, calloutParts:{label:atThisPlaceLabel,value:durationUnknownLabel}, since:since2, activityType:'stationary', place:!!d.currentPlaceId, uncertain:true };
+    }
     const unconfirmedLabel=L==='fa'?'حضور تأیید نشده':'Presence unconfirmed';
     const confirmingLabel=L==='fa'?'در حالِ تأیید موقعیت…':'Confirming location…';
     console.debug('[presence] display: showing uncertainty, not a confirmed duration', {uid:m.uid, priorFixGapMs:priorGapMs, since2, lastPresenceConfirmedAt:s.lastPresenceConfirmedAt, stayStartUnchanged:s.stayStart});
