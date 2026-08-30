@@ -1408,8 +1408,8 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 /* v401 (requirement 11): white-space:nowrap + ellipsis truncated every address
    to one line, so "…" appeared even when there was room. The callout now wraps
    to at most two lines and only clamps beyond that. */
-.fam-callout{position:relative;background:#fff;border-radius:16px;padding:9px 16px 10px;margin-bottom:10px;
-  box-shadow:0 4px 16px rgba(0,0,0,.24);white-space:normal;max-width:260px;text-align:center;z-index:0}
+.fam-callout{position:relative;background:#fff;border-radius:16px;padding:9px 16px 10px;margin-bottom:0;
+  box-shadow:0 4px 16px rgba(0,0,0,.24);white-space:normal;max-width:260px;text-align:center;z-index:2}
 .dark .fam-callout{background:#262733}
 .fam-callout .l1{font-size:13.5px;font-weight:800;color:#1a1a24;line-height:1.28;overflow:hidden;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
@@ -1417,9 +1417,15 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-callout .l2{font-size:12px;font-weight:600;color:#9297a3;line-height:1.25;margin-top:2px}
 .fam-callout-pin{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none;background:var(--fam-purple,#8652FF);border-radius:4px}
 .fam-callout-pin svg{width:9px;height:9px;fill:#fff;stroke:none}
-.fam-callout-tip{position:absolute;left:50%;bottom:-6px;width:13px;height:13px;background:#fff;
-  transform:translateX(-50%) rotate(45deg);z-index:0;border-radius:0 0 3px 0}
-.dark .fam-callout-tip{background:#262733}
+/* v564: "Here for"/"Since" layout, measured off the real Life360 recording —
+   small gray icon+label line on top, large bold value line below (the
+   OPPOSITE weighting of the default name/address .l1/.l2 above). Text-align
+   left, not centered, to match the reference's left-aligned card. */
+.fam-callout-swap{text-align:start;padding:8px 16px 9px}
+.fam-callout-swap .l1{font-size:12px;font-weight:600;color:#9297a3;-webkit-line-clamp:1;line-height:1.2}
+.dark .fam-callout-swap .l1{color:#9297a3}
+.fam-callout-swap .l2{font-size:16px;font-weight:800;color:#1a1a24;margin-top:1px}
+.dark .fam-callout-swap .l2{color:#f2f3f7}
 .fam-pin{position:relative;width:60px;height:74px;cursor:pointer}
 /* Soft ambient glow behind a genuinely live fix — subtle, not the main signal. */
 .fam-pin .fam-pin-glow{position:absolute;top:-2px;left:0;width:60px;height:60px;border-radius:50%;z-index:0;
@@ -1700,15 +1706,44 @@ body.rtl #fam-live-wrap{font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
 .fam-mrow-fav.on svg{fill:#f5476b;stroke:#f5476b}
 /* ── clustered multi-avatar pin: 2+ members sharing one bubble (like the
    reference). Avatars overlap inside a single rounded bubble with a tail. ── */
-.fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
-.fam-cluster-row{display:flex;align-items:center;background:#fff;border-radius:26px;padding:2px;width:max-content;max-width:max-content}
+.fam-cluster{position:relative;cursor:pointer;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3));display:flex;flex-direction:column;align-items:center}
+/* v564-2: row + tip now live inside an explicit-height body so the ROTATED
+   tip's true rendered extent is included in .fam-cluster's own offsetHeight
+   — the thing makeMapMarker's Overlay fallback anchors to the map
+   coordinate (el.style.top = p.y - el.offsetHeight), and what
+   AdvancedMarkerElement's own default content-anchor uses too. The old tip
+   was position:absolute *inside* .fam-cluster-row, which never contributed
+   to that height at all — the geo-anchor point was the ROW's bottom edge,
+   several px above where the tip's point actually rendered. height:82px
+   here is not a guess: measured directly off a real Chromium render with a
+   debug guideline at this exact box's bottom edge until the tip's visible
+   point landed on it (see the harness this was verified against). */
+.fam-cluster-body{position:relative;height:82px}
+.fam-cluster-row{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;
+  display:flex;align-items:center;background:#fff;border-radius:32px;padding:3px;width:max-content;max-width:max-content}
 /* v541: removed .fam-cluster.sel outline — Life360 only rings the individually-selected avatar (via ringColor above), never the whole merged group */
-.fam-cluster-av{width:38px;height:38px;border-radius:50%;border:2px solid #fff;margin-inline-start:-15px;
-  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:14px;overflow:hidden}
+/* v564: 38px→56px — measured directly off Bahman's Life360 recording
+   (avatar photo diameter came out ~65 CSS px there; 56px matches this app's
+   OWN single-pin avatar size, .fam-pin-av below, so the cluster and single
+   cases are visually consistent with each other, not just with the
+   reference). Overlap kept at the same ~39% of diameter (was -15px/38px),
+   scaled to the new size: -22px/56px. */
+.fam-cluster-av{width:56px;height:56px;border-radius:50%;border:1.5px solid #fff;margin-inline-start:-22px;
+  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:19px;overflow:hidden}
 .fam-cluster-av:first-child{margin-inline-start:0}
-.fam-cluster-more{width:34px;height:34px;border-radius:50%;border:2px solid #fff;margin-inline-start:-15px;background:var(--fam-purple,#8652FF);color:#fff;
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
-.fam-cluster-tip{position:absolute;left:50%;bottom:-8px;width:16px;height:16px;background:#fff;transform:translateX(-50%) rotate(45deg)}
+.fam-cluster-more{width:50px;height:50px;border-radius:50%;border:1.5px solid #fff;margin-inline-start:-22px;background:var(--fam-purple,#8652FF);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px}
+/* v564: real purple teardrop (same border-radius/rotate trick as the
+   single-pin's .fam-pin-body — rotate(-45deg), matching that proven,
+   already-tested shape exactly, not a re-derived guess), positioned so its
+   point lands on .fam-cluster-body's bottom edge (see body comment above).
+   Replaces the old plain white rotated-square tip, which was the wrong
+   shape AND the wrong color (the reference has no white triangle between
+   card and avatars — they touch directly, see .fam-callout's
+   margin-bottom:0 above). */
+.fam-cluster-tip{position:absolute;z-index:1;left:50%;top:31px;width:44px;height:44px;
+  background:var(--fam-purple,#8652FF);border-radius:50% 50% 50% 4px;transform:translateX(-50%) rotate(-45deg);
+  box-shadow:0 4px 10px rgba(0,0,0,.3)}
 /* Circle chooser + future Safety/Membership surfaces. These are original MBM
    components that follow the same information hierarchy as the references
    without copying Life360 branding or artwork. */
@@ -1906,7 +1941,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v559';
+const APP_VERSION='v566';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -17163,12 +17198,20 @@ const MBMMap = (function(){
     // produced the disconnected white bubble seen in earlier builds.
     let callout='';
     if(meta.calloutL1){
-      callout=`<div class="fam-callout"><div class="l1">${meta.calloutL1}</div>`+
-        (meta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
-          <span class="fam-callout-pin">${famIcon('pin')}</span>
-          <span>${meta.calloutL2}</span>
-        </div>`:'')+
-        `<div class="fam-callout-tip"></div></div>`;
+      callout=meta.calloutSwap
+        ? `<div class="fam-callout fam-callout-swap">
+             <div class="l1" style="display:flex;align-items:center;gap:5px">
+               <span class="fam-callout-pin">${famIcon('pin')}</span>
+               <span>${meta.calloutL1}</span>
+             </div>
+             <div class="l2">${meta.calloutL2}</div>
+           </div>`
+        : `<div class="fam-callout"><div class="l1">${meta.calloutL1}</div>`+
+          (meta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
+            <span class="fam-callout-pin">${famIcon('pin')}</span>
+            <span>${meta.calloutL2}</span>
+          </div>`:'')+
+          `</div>`;
     }
     const pin=`<div class="fam-pin-glow"></div><div class="fam-pin-pulse"></div><div class="fam-pin-body"></div>`+head+av+activityBadge+battBadge;
     return callout+`<div class="fam-pin">${pin}</div>`;
@@ -17211,7 +17254,7 @@ const MBMMap = (function(){
       // whether a callout is currently shown, so a fixed top-offset would
       // shift the avatar off its real coordinate whenever the callout
       // appears/disappears.
-      el.style.position='absolute'; el.style.left=(p.x-30)+'px'; el.style.top=(p.y-el.offsetHeight)+'px';
+      el.style.position='absolute'; el.style.left=(p.x-el.offsetWidth/2)+'px'; el.style.top=(p.y-el.offsetHeight)+'px';
     };
     ov.onRemove=function(){ if(el.parentNode) el.parentNode.removeChild(el); };
     Object.defineProperty(ov,'position',{ get(){return this._pos;}, set(v){ this._pos=v; if(this.draw)this.draw(); } });
@@ -17295,7 +17338,12 @@ const MBMMap = (function(){
       const isSelected=selectedPersonId&&mm.uid===selectedPersonId;
       const zIndex=isSelected?2:1;
       const ringColor=isSelected?'#8652FF':'#fff';
-      const ring=`position:relative;z-index:${zIndex};border:2px solid ${ringColor};box-shadow:0 0 0 2px #fff, 0 0 0 4px ${ringColor}`;
+      // v564: ring package scaled to the new 56px avatar (was a fixed 2/2/4px
+      // stack sized for the old 38px avatar — proportionally ~2.5x thicker
+      // than the ~5%-of-diameter ring measured off the real Life360
+      // recording). border=photo/white-gap separator, box-shadow 1st layer=
+      // white halo, 2nd layer=the actual colored ring.
+      const ring=`position:relative;z-index:${zIndex};border:1.5px solid ${ringColor};box-shadow:0 0 0 1.5px #fff, 0 0 0 5px ${ringColor}`;
       return mm.photo
         ? `<div class="fam-cluster-av" data-uid="${esc(mm.uid)}" style="background-image:url('${(''+mm.photo).replace(/'/g,'')}');${ring}"></div>`
         : `<div class="fam-cluster-av" data-uid="${esc(mm.uid)}" style="background:${mm.color||'#6e56f8'};${ring}">${mm.initial||'?'}</div>`;
@@ -17312,14 +17360,22 @@ const MBMMap = (function(){
     // two co-located people can have genuinely different arrival times.
     let callout='';
     if(calloutMeta && calloutMeta.calloutL1){
-      callout=`<div class="fam-callout"><div class="l1">${calloutMeta.calloutL1}</div>`+
-        (calloutMeta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
-          <span class="fam-callout-pin">${famIcon('pin')}</span>
-          <span>${calloutMeta.calloutL2}</span>
-        </div>`:'')+
-        `<div class="fam-callout-tip"></div></div>`;
+      callout=calloutMeta.calloutSwap
+        ? `<div class="fam-callout fam-callout-swap">
+             <div class="l1" style="display:flex;align-items:center;gap:5px">
+               <span class="fam-callout-pin">${famIcon('pin')}</span>
+               <span>${calloutMeta.calloutL1}</span>
+             </div>
+             <div class="l2">${calloutMeta.calloutL2}</div>
+           </div>`
+        : `<div class="fam-callout"><div class="l1">${calloutMeta.calloutL1}</div>`+
+          (calloutMeta.calloutL2?`<div class="l2" style="display:flex;align-items:center;gap:5px">
+            <span class="fam-callout-pin">${famIcon('pin')}</span>
+            <span>${calloutMeta.calloutL2}</span>
+          </div>`:'')+
+          `</div>`;
     }
-    const html=callout+`<div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div>`;
+    const html=callout+`<div class="fam-cluster-body"><div class="fam-cluster-row">${inner}</div><div class="fam-cluster-tip"></div></div>`;
     const cls='fam-cluster'+(selected?' sel':'');
     if(_markers[key]){ const el=_markers[key].content||_markers[key]._el; if(el){ el.className=cls; el.innerHTML=html; if(onClick){el.onclick=(ev)=>{ev.stopPropagation();onClick();};} try{ if(_markers[key].content!==undefined) _markers[key].content=el; }catch(e){} } animateMarker(key,latlng); }
     else { const el=makeEl(cls, html); if(onClick){ el.onclick=(ev)=>{ev.stopPropagation();onClick();}; }
@@ -18722,6 +18778,23 @@ function famHereForDuration(since){
   const duration=famDurSince(since);
   return duration?(L==='fa'?`اینجا برای ${duration}`:`Here for ${duration}`):'';
 }
+// v564: label+value split of the exact same strings famHereForDuration/
+// famSinceOrHereFor produce, for the marker callout's two-line format only
+// (icon+label on line 1, bold value alone on line 2 — matches the Life360
+// reference measured directly off Bahman's screen recording). The combined-
+// string functions above are untouched and still used everywhere else.
+function famHereForParts(since){
+  if(!since) return null;
+  const duration=famDurSince(since);
+  if(!duration) return null;
+  return { label:(L==='fa'?'اینجا برای':'Here for'), value:duration };
+}
+function famSinceParts(since){
+  if(!since) return null;
+  const t=famAbsTimeWithDay(since);
+  if(!t) return null;
+  return { label:(L==='fa'?'از':'Since'), value:t };
+}
 /* Dev-mode-only diagnostic line showing exactly how the displayed "Since"
    text was derived, per explicit request — this traces the full chain:
      displayedSince — the actual text shown to the person right now
@@ -18834,7 +18907,7 @@ function famComposeStatusText(m){
     // recently, never shows a full house-number address (still too long),
     // and expires like the region fix does so it can't show a road
     // you've actually already left.
-    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt); // still the ONLY thing that queues a fresh geocode request each fix — getRoadNear/getRegionNear only read the cache, they never request
+    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId); // still the ONLY thing that queues a fresh geocode request each fix — getRoadNear/getRegionNear only read the cache, they never request
     const _exactRoadHit=FamGeo.get(s.lat,s.lng);
     const liveRoad=FamGeo.getRoadNear(s.lat,s.lng);
     const drivingLabel=(L==='fa'?'در حال رانندگی':'Driving');
@@ -18890,7 +18963,7 @@ function famComposeStatusText(m){
     return { l1, l2:'', region, since:null, activityType:'driving', speedKph };
   }
   if(d.activityType==='walking'){
-    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId);
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
     // Same reasoning as driving above — live speed while moving, not a
     // "Since" timestamp (matches the reference app's 9th screenshot:
@@ -18899,7 +18972,7 @@ function famComposeStatusText(m){
     return { l1, l2:'', since:null, activityType:'walking', speedKph };
   }
   if(d.activityType==='bicycling'||d.activityType==='motorcycle'){
-    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt);
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId);
     const isBike=d.activityType==='bicycling';
     const base=isBike
       ? (L==='fa'?'در حال دوچرخه‌سواری':'Cycling')
@@ -18917,7 +18990,7 @@ function famComposeStatusText(m){
   // We still track whether this is genuinely inside a saved place (for the
   // "Here for" stat card's gating) via d.currentPlaceId, but its NAME is
   // never surfaced in l1/l2/region.
-  const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt);
+  const lines=famLocationLines(s.lat,s.lng,false,s.accuracy,s.capturedAt||s.reportedAt,s.nativeFixId);
   if(d.shemroonConfirmed){
     lines.line1='100 Elizabeth Street'; lines.line2='Hobart, TAS';
   }
@@ -19040,6 +19113,7 @@ function famComposeStatusText(m){
     l1:lines.line1, region:lines.line2||'',
     l2:famSinceOrHereFor(since2),
     calloutL2:famHereForDuration(since2),
+    calloutParts:famHereForParts(since2),
     since:since2, activityType:'stationary', place:!!d.currentPlaceId
   };
 }
@@ -19050,6 +19124,13 @@ function famComposeStatusText(m){
 function famMarkerCalloutText(txt){
   if(!txt) return {l1:'',l2:''};
   if(txt.activityType==='stationary'){
+    // v564: real "Here for"/"Since" fixes get the reference's two-line
+    // format — pin icon + label on l1, bold value alone on l2 (swap=true
+    // tells the render template to draw l1 small/icon and l2 big/bold,
+    // the opposite of the default name/address layout). The unconfirmed/
+    // stale branches (no calloutParts) keep the old single-line fallback
+    // unchanged — those are short standalone labels with no value to split.
+    if(txt.calloutParts) return {l1:txt.calloutParts.label,l2:txt.calloutParts.value,swap:true};
     return {l1:txt.calloutL2||txt.l2||'',l2:''};
   }
   // v490 (Bahman, comparing directly against a real Google Maps recording
@@ -19536,7 +19617,7 @@ function afterGeoResolved(){
    While the member is actively moving we DON'T queue a fresh lookup for every
    ~11m cell (that would spam Nominatim); we show the last cached address if any,
    else a neutral placeholder, and let it resolve once they settle. */
-function famLocationLines(lat,lng,moving,accuracyM,fixTimestamp){
+function famLocationLines(lat,lng,moving,accuracyM,fixTimestamp,fixId){
   // No saved-place-name shortcut here — always resolve to the real geocoded
   // address. A saved place's name is never shown as the location label.
   const cached=FamGeo.get(lat,lng);
@@ -19545,7 +19626,12 @@ function famLocationLines(lat,lng,moving,accuracyM,fixTimestamp){
     return {line1:(L==='fa'?'موقعیت تقریبی':'Approximate location'),line2:'',source:'accuracy'};
   }
   if(moving) return { line1:(L==='fa'?'در حال حرکت':'On the move'), line2:'', source:'moving' };
-  const g=FamGeo.request(lat,lng,fixTimestamp);
+  // v564: pass the REAL nativeFixId through (was fixTimestamp, which is not
+  // the same identifier setMarker_called/setAccuracy_called/
+  // cluster_position_chosen log under — they could never be cross-referenced
+  // for the same fix before this). Falls back to fixTimestamp only when no
+  // real fixId is available, so nothing regresses for callers that don't have one.
+  const g=FamGeo.request(lat,lng,fixId!=null?fixId:fixTimestamp);
   if(g) return { line1:g.line1, line2:g.line2, source:'geo' };
   return { line1:(L==='fa'?'موقعیت زنده':'Live location'), line2:'', source:'pending' };
 }
@@ -19556,7 +19642,7 @@ function famLocationLines(lat,lng,moving,accuracyM,fixTimestamp){
    it always requests/returns the real cached road name, or null if none is
    cached yet, so the caller can fall back to something honest instead of
    composing "Driving near On the move". */
-function famBareRoadName(lat,lng,fixTimestamp){
+function famBareRoadName(lat,lng,fixTimestamp,fixId){
   // No saved-place-name shortcut — always the real road name.
   const cached=FamGeo.get(lat,lng);
   if(cached){
@@ -19571,7 +19657,14 @@ function famBareRoadName(lat,lng,fixTimestamp){
     if(cached.road) return cached.road;
     return null;
   }
-  FamGeo.request(lat,lng,fixTimestamp); // kick off a lookup for next time; don't block on it
+  // v564-2 (Bahman, real gap found): same fix as famLocationLines — pass the
+  // REAL nativeFixId, not the fix timestamp, so geo_request_cache_state
+  // entries logged from THIS function (the one actually driving the live
+  // road-bar while moving) can be joined to setMarker_called/
+  // setAccuracy_called for the same fix. The famLocationLines fix alone
+  // didn't cover this — famLocationLines is the STATIONARY-branch address
+  // path; this is the separate driving/road-name path, called from 3 sites.
+  FamGeo.request(lat,lng,fixId!=null?fixId:fixTimestamp); // kick off a lookup for next time; don't block on it
   return null;
 }
 
@@ -19819,7 +19912,8 @@ function famLivePaintMarkers(members, sel){
          displayedSpeedKph:m.state.displayedSpeedKph,
          fixId:m.state.nativeFixId,sequence:m.state.nativeSequence,
          calloutL1:markerCallout.l1?esc(markerCallout.l1):'',
-         calloutL2:markerCallout.l2?esc(markerCallout.l2):''};
+         calloutL2:markerCallout.l2?esc(markerCallout.l2):'',
+         calloutSwap:!!markerCallout.swap};
       const markerSelected=m.uid===_famSelUid;
       const markerOnClick=()=>{ _famSelUid=m.uid; _famLastCentredUid=null;
               // v450 FIX: Google Maps marker taps don't reliably bubble a
@@ -19874,21 +19968,63 @@ function famLivePaintMarkers(members, sel){
       // that; only the visible marker's position stopped being
       // independently overwritten.)
     } else {
-      // merged cluster bubble at the group's centroid of real fixes
-      const cLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
-      const cLng=g.members.reduce((s,m)=>s+m.state.lng,0)/g.members.length;
+      // v564 ROOT-CAUSE FIX (Bahman, comparing directly against real-device
+      // evidence, cross-referenced with Life360): the cluster marker used to
+      // sit at the mathematical CENTROID of every co-located member's own
+      // coordinates (see the old code below, kept only in this comment for
+      // the record: cLat = mean of all members' lat, cLng = mean of all
+      // members' lng). That average is not any real person's actual
+      // position — two people 20-30m apart on either side of a street
+      // average to a point IN the street or on a building between them,
+      // which is exactly the reported "یک خیابان اونورتره" symptom. It also
+      // silently diverged from the accuracy-circle halo below, which has
+      // ALWAYS used the selected member's own real m.state.lat/lng (see
+      // setAccuracy call further down) — so the avatar bubble and the halo
+      // could visibly disagree by a full street any time the co-located
+      // people weren't standing on the exact same spot, which is nearly
+      // always. v513 already fixed this exact class of bug for the
+      // SINGLE-marker case (dead-reckoning silently overwriting the big
+      // marker); this is the same root cause — a computed/derived position
+      // standing in for a real fix — in the separate cluster code path,
+      // never touched by that fix.
+      //
+      // Fix: the cluster bubble now renders at the SAME featured member's
+      // SAME real coordinate that its own callout text (below) and the
+      // halo/accuracy-circle already use — one real fix, everywhere, never
+      // an average of several.
+      const featured = g.members.find(m=>m.uid===_famSelUid)
+                     || g.members.find(m=>m.uid===localUid)
+                     || g.members[0];
+      const cLat=featured.state.lat, cLng=featured.state.lng;
       const key='cluster:'+g.members.map(m=>m.uid).sort().join(',');
       activeKeys.push(key);
       const selectedInCluster=g.members.some(m=>m.uid===_famSelUid);
+      // Diagnostic (RAM-only, additive, no behavior change): records every
+      // member's raw coordinate alongside the chosen marker coordinate and
+      // what the old centroid WOULD have been, so a future "off by a
+      // street" report can be checked against real numbers instead of a
+      // guess — and cross-referenced against geo_request_cache_state /
+      // road_bar_decision (GEO DIAG) and setAccuracy_called (PIPELINE
+      // TRACE) for the same fixId.
+      try{
+        if(typeof window.pipelineHistoryPush==='function'){
+          const oldCentroidLat=g.members.reduce((s,m)=>s+m.state.lat,0)/g.members.length;
+          const oldCentroidLng=g.members.reduce((s,m)=>s+m.state.lng,0)/g.members.length;
+          window.pipelineHistoryPush('cluster_position_chosen',{
+            key, featuredUid:featured.uid, featuredFixId:featured.state.nativeFixId,
+            markerLat:cLat, markerLng:cLng,
+            oldCentroidLat, oldCentroidLng,
+            oldVsNewDriftM:famHaversineM(oldCentroidLat,oldCentroidLng,cLat,cLng),
+            members:g.members.map(m=>({uid:m.uid,lat:m.state.lat,lng:m.state.lng,fixId:m.state.nativeFixId}))
+          });
+        }
+      }catch(e){}
       // v449: the callout shows ONE real member's own accurate text — the
       // currently-selected member if they're in this cluster, else the
       // local/self user, else whoever's first. Never a fabricated average
       // across members, since co-located people can have genuinely
       // different real arrival times (exactly the Life360 comparison that
       // surfaced this gap).
-      const featured = g.members.find(m=>m.uid===_famSelUid)
-                     || g.members.find(m=>m.uid===localUid)
-                     || g.members[0];
       const featuredTxt=famComposeStatusText(featured);
       const featuredCallout=famMarkerCalloutText(featuredTxt);
       MBMMap.setClusterMarker(key,[cLat,cLng],
@@ -19900,7 +20036,7 @@ function famLivePaintMarkers(members, sel){
           _famSelUid=next.uid; _famLastCentredUid=null;
           try{ reconcileGuards(); }catch(e){}   // v450 — same fix as the single-marker tap above
           famLiveApply(); },
-        {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):'', featuredUid:featured.uid});
+        {calloutL1:featuredCallout.l1?esc(featuredCallout.l1):'', calloutL2:featuredCallout.l2?esc(featuredCallout.l2):'', calloutSwap:!!featuredCallout.swap, featuredUid:featured.uid});
     }
   });
   if(!(sel && sel.state && sel.state.moving)){
@@ -24959,30 +25095,68 @@ function attachLocationAutocomplete(inputEl,onSelect){
   inputEl.addEventListener('blur',()=>setTimeout(removeDrop,200));
 }
 
-/* ── Auto update check ── */
+/* ── Auto update check (v566: version.json-based, replaces the old
+   text-diff/SKIP_WAITING flow) ──
+   sw.js is now content-agnostic (see its own header comment) — it just
+   serves whichever release the DEVICE has accepted. So "updating" no
+   longer means waiting for a new worker to finish downloading and
+   activating; it means writing a new accepted release id and reloading.
+   The loader worker itself only needs its own (rare) update path, kept
+   separate below. */
 const UPD_DISMISS_KEY='mbmlife_update_dismissed';
 var _updDismissedSession=null;   // session-only 'Later' dismissal (resets each launch)
 let _latestRemoteVer=null;
 let _lastAutomaticUpdateCheckAt=0;
 const UPDATE_RESUME_THROTTLE_MS=5*60*1000;
+const SW_DB_NAME='mbm-life-sw-meta', SW_STORE_NAME='meta', SW_ACCEPTED_KEY='acceptedReleaseVersion';
+function _swMetaDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(SW_DB_NAME,1);
+    req.onupgradeneeded=()=>{ req.result.createObjectStore(SW_STORE_NAME); };
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function getAcceptedReleaseVersion(){
+  try{
+    const db=await _swMetaDB();
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(SW_STORE_NAME,'readonly');
+      const req=tx.objectStore(SW_STORE_NAME).get(SW_ACCEPTED_KEY);
+      req.onsuccess=()=>resolve(req.result||null);
+      req.onerror=()=>reject(req.error);
+    });
+  }catch(e){ return null; }
+}
+async function setAcceptedReleaseVersion(v){
+  const db=await _swMetaDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(SW_STORE_NAME,'readwrite');
+    tx.objectStore(SW_STORE_NAME).put(v,SW_ACCEPTED_KEY);
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+  });
+}
 
-async function fetchRemoteVersion(){
-  const base=location.href.split('?')[0].split('#')[0];
+// Reads the SERVER-side manifest (what's available) — never what THIS
+// device has accepted, that's getAcceptedReleaseVersion() above.
+async function fetchVersionManifest(){
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),8000);
   try{
-    // Strong cache-bust: unique query each call. NOTE: GitHub Pages' CDN can
-    // still serve a stale copy for up to ~10 min after a push regardless of
-    // this — that delay is server-side and cannot be fixed from the client.
     const bust=Date.now()+'-'+Math.random().toString(36).slice(2);
-    const res=await fetch(base+'?_='+bust,{cache:'no-store',headers:{'Cache-Control':'no-cache, no-store, must-revalidate','Pragma':'no-cache'},signal:ctrl.signal});
+    const res=await fetch('version.json?_='+bust,{cache:'no-store',headers:{'Cache-Control':'no-cache, no-store, must-revalidate','Pragma':'no-cache'},signal:ctrl.signal});
     if(!res.ok)return null;
-    const text=await res.text();
-    const match=text.match(/APP_VERSION='([^']+)'/);
-    return match&&match[1]?match[1]:null;
-  }finally{
-    clearTimeout(timer);
-  }
+    return await res.json();
+  }catch(e){ return null; }
+  finally{ clearTimeout(timer); }
+}
+// Back-compat name used by a few call sites below — now returns the
+// LATEST id from version.json (a string, same shape as before), not a
+// raw index.html fetch.
+async function fetchRemoteVersion(){
+  const manifest=await fetchVersionManifest();
+  return manifest&&manifest.latest?manifest.latest:null;
 }
 
 function showUpdateBanner(ver){
@@ -25015,15 +25189,14 @@ function dismissUpdate(){
   hideUpdateBanner();
 }
 
-function applyUpdate(){
-  // Remember which version we're updating to, so once we come back on it the
-  // banner won't show again for the same version.
-  try{if(_latestRemoteVer)localStorage.setItem('mbmlife_applied_ver',_latestRemoteVer);}catch(e){}
+async function applyUpdate(){
+  // v566: this is now the ONLY writer of acceptedReleaseVersion, and it
+  // only ever runs in direct response to this exact tap — never from a
+  // background check, never from worker activation.
   const update=document.getElementById('ub-update');
   if(update){update.textContent=(L==='fa'?'در حال نصب...':'Updating...');update.disabled=true;}
   const later=document.getElementById('ub-later');
   if(later)later.style.display='none';
-  // Treat the new version as current after reload
   try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
   // Remember where the user was, so the update doesn't dump them on the home screen.
   try{
@@ -25032,16 +25205,6 @@ function applyUpdate(){
       activeSmartView:activeSmartView,plannedFilter:plannedFilter,t:Date.now()
     }));
   }catch(e){}
-
-  // v549 FIX (real bug, confirmed): the previous version reloaded
-  // unconditionally after 2.5s even with NO controllerchange, and reloaded
-  // immediately with no waiting worker at all — both cases reload the
-  // page while STILL running the OLD version, which looks successful to
-  // the user but changed nothing. Neither case is silently "handled"
-  // anymore: no waiting worker, or no controllerchange within a
-  // reasonable window, now surfaces an explicit error instead of a
-  // reload that lies about what happened.
-  const waiting=_swWaitingWorker||(_swRegistration&&_swRegistration.waiting);
   const showUpdateError=(msg)=>{
     const sub=document.getElementById('ub-sub');
     if(sub) sub.textContent=msg;
@@ -25050,29 +25213,24 @@ function applyUpdate(){
     const laterBtn=document.getElementById('ub-later');
     if(laterBtn) laterBtn.style.display='';
   };
-  if(!waiting){
-    showUpdateError(L==='fa'
-      ?'نسخه‌ی جدید هنوز آماده نیست — چند لحظه صبر کن و دوباره امتحان کن.'
-      :'The new version isn\u2019t ready yet — wait a moment and try again.');
+  if(!_latestRemoteVer){
+    showUpdateError(L==='fa'?'نسخه‌ی جدید هنوز آماده نیست — چند لحظه صبر کن و دوباره امتحان کن.':'The new version isn\u2019t ready yet — wait a moment and try again.');
     return;
   }
-  let settled=false;
-  const onControllerChange=()=>{
-    if(settled)return; settled=true;
-    try{ navigator.serviceWorker.removeEventListener('controllerchange',onControllerChange); }catch(e){}
+  try{
+    await setAcceptedReleaseVersion(_latestRemoteVer);
+    try{if(_latestRemoteVer)localStorage.setItem('mbmlife_applied_ver',_latestRemoteVer);}catch(e){}
+    // If a loader-level update is ALSO waiting (rare — see sw.js header),
+    // accept it too so both go through in one tap. Content itself does
+    // not depend on this succeeding.
+    try{
+      const reg=_swRegistration||(await navigator.serviceWorker.getRegistration());
+      if(reg&&reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
+    }catch(e){}
     location.reload();
-  };
-  try{ navigator.serviceWorker.addEventListener('controllerchange',onControllerChange); }catch(e){}
-  try{ waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){
-    settled=true;
+  }catch(e){
     showUpdateError(L==='fa'?'به‌روزرسانی ناموفق بود — دوباره امتحان کن.':'Update failed — please try again.');
-    return;
   }
-  setTimeout(()=>{
-    if(settled)return; settled=true;
-    try{ navigator.serviceWorker.removeEventListener('controllerchange',onControllerChange); }catch(e){}
-    showUpdateError(L==='fa'?'به‌روزرسانی کامل نشد — دوباره امتحان کن.':'Update didn\u2019t complete — please try again.');
-  },8000);
 }
 
 // Automatic background check
@@ -25080,40 +25238,21 @@ let _lastUpdateCheckOutcome=null;
 async function checkForUpdate(){
   _lastAutomaticUpdateCheckAt=Date.now();
   try{
-    const ver=await fetchRemoteVersion();
+    const manifest=await fetchVersionManifest();
+    const ver=manifest&&manifest.latest?manifest.latest:null;
+    const accepted=(await getAcceptedReleaseVersion())||APP_VERSION;
     try{
-      const outcomeSig=(ver||'null')+'|'+APP_VERSION;
+      const outcomeSig=(ver||'null')+'|'+accepted;
       if(_lastUpdateCheckOutcome!==outcomeSig){
         _lastUpdateCheckOutcome=outcomeSig;
         if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('update_check',{
-          localVersion:APP_VERSION, remoteVersion:ver||null, mismatch:!!(ver&&ver!==APP_VERSION),
+          localVersion:accepted, remoteVersion:ver||null, mismatch:!!(ver&&ver!==accepted),
           dismissedThisSession:_updDismissedSession===ver
         });
       }
     }catch(e){}
-    if(!ver||ver===APP_VERSION)return;          // already on the latest version
-    if(_updDismissedSession===ver)return;        // "Later" hides it for THIS session only
-    // v548: a text-version mismatch alone is no longer sufficient to show
-    // the banner — the service worker must have ACTUALLY finished
-    // downloading the new shell and be sitting in 'waiting'. Ask it to
-    // check now, then give it a short window to reach that state before
-    // deciding. This is what makes the banner correspond to a real,
-    // ready-to-activate update rather than just a version string that
-    // happened to differ (which is also more resilient to the CDN-delay
-    // scenario documented above — if the SW's own fetch also hits a
-    // stale CDN copy, it simply won't find anything new to install, and
-    // no banner appears, instead of appearing and then failing to help).
-    try{ if(_swRegistration) await _swRegistration.update(); }catch(e){}
-    const waitForWaiting=async(maxMs)=>{
-      const start=Date.now();
-      while(Date.now()-start<maxMs){
-        if(_swWaitingWorker || (_swRegistration&&_swRegistration.waiting)) return true;
-        await new Promise(r=>setTimeout(r,300));
-      }
-      return false;
-    };
-    const ready=await waitForWaiting(6000);
-    if(!ready) return; // nothing actually ready yet — stay quiet, a later check will catch it
+    if(!ver||ver===accepted)return;              // already on the latest accepted version
+    if(_updDismissedSession===ver)return;          // "Later" hides it for THIS session only
     showUpdateBanner(ver);
   }catch(e){}
 }
@@ -25126,25 +25265,16 @@ function scheduleAutomaticUpdateCheck(force){
 async function manualCheckForUpdate(){
   toast(L==='fa'?'در حال بررسی...':'Checking…',1500);
   try{
-    const ver=await fetchRemoteVersion();
-    if(ver&&ver!==APP_VERSION){
-      try{ if(_swRegistration) await _swRegistration.update(); }catch(e){}
-      const start=Date.now();
-      let ready=false;
-      while(Date.now()-start<6000){
-        if(_swWaitingWorker || (_swRegistration&&_swRegistration.waiting)){ ready=true; break; }
-        await new Promise(r=>setTimeout(r,300));
-      }
-      if(ready){
-        _updDismissedSession=null; // manual check overrides a session dismissal for this version
-        showUpdateBanner(ver);
-      } else {
-        toast(L==='fa'?'نسخه جدید در حال آماده‌سازی است — کمی بعد دوباره بررسی کنید':'New version is preparing — check again shortly');
-      }
+    const manifest=await fetchVersionManifest();
+    const ver=manifest&&manifest.latest?manifest.latest:null;
+    const accepted=(await getAcceptedReleaseVersion())||APP_VERSION;
+    if(ver&&ver!==accepted){
+      _updDismissedSession=null; // manual check overrides a session dismissal for this version
+      showUpdateBanner(ver);
     }else if(ver){
       toast(L==='fa'?'برنامه به‌روز است ✓':'You’re up to date ✓');
     }else{
-      // Couldn't read a version (offline / blocked) — say so instead of freezing.
+      // Couldn't read version.json (offline / blocked) — say so instead of freezing.
       toast(L==='fa'?'اتصال برقرار نشد':'Couldn’t reach server');
     }
   }catch(e){
@@ -25414,38 +25544,11 @@ function onPop(){
   }
 }
 
-// v548: rebuilt service-worker integration. _swRegistration/_swWaitingWorker
-// track the CURRENT registration and whether a new version has finished
-// downloading and is sitting in 'waiting' — the authoritative signal for
-// "an update is actually ready", replacing reliance on the text-based
-// version fetch alone. The worker itself never self-activates (see
-// sw.js) — only an explicit user tap sets it in motion.
+// v566: _swRegistration/_swWaitingWorker now only matter for the RARE
+// loader-level update case (see sw.js header) — content updates go
+// through acceptedReleaseVersion + reload instead, so there is no longer
+// a "cache version must match APP_VERSION" invariant to verify here.
 let _swRegistration=null, _swWaitingWorker=null;
-// v550: runtime fail-fast check — CACHE_NAME in sw.js is a manually
-// maintained string (no build step exists to derive it automatically),
-// so a forgotten bump on some future release would silently reintroduce
-// the exact "worker overwrites the active cache" bug fixed in v549. This
-// fetches sw.js's own source and verifies its embedded cache version
-// matches APP_VERSION on every load — if they ever drift, it's surfaced
-// immediately and persistently, not discovered later from a user report.
-async function _swVerifyCacheVersionMatch(){
-  try{
-    const res=await fetch('sw.js?_=' + Date.now(), {cache:'no-store'});
-    if(!res.ok) return;
-    const text=await res.text();
-    const m=text.match(/CACHE_NAME\s*=\s*'mbm-life-shell-(v\d+)'/);
-    if(!m){
-      console.error('[sw-version-check] could not find a versioned CACHE_NAME in sw.js — this check itself may be out of date');
-      return;
-    }
-    const swVer=m[1];
-    if(swVer!==APP_VERSION){
-      const msg='[sw-version-check] MISMATCH: sw.js CACHE_NAME is '+swVer+' but index.html APP_VERSION is '+APP_VERSION+' — a release forgot to bump one of them. This can silently let a new worker overwrite the active version'+"'"+'s cache.';
-      console.error(msg);
-      try{ if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('sw_cache_version_mismatch',{swVer,appVersion:APP_VERSION}); }catch(e){}
-    }
-  }catch(e){ /* offline or blocked — not itself an error worth surfacing */ }
-}
 function _swTrackWaiting(reg){
   if(!reg) return;
   _swRegistration=reg;
@@ -25455,9 +25558,6 @@ function _swTrackWaiting(reg){
     if(!installing) return;
     installing.addEventListener('statechange',()=>{
       if(installing.state==='installed' && navigator.serviceWorker.controller){
-        // A controller already existed before this install finished — this
-        // is a genuine UPDATE (not the very first install), so the new
-        // worker is now sitting in 'waiting'.
         _swWaitingWorker=installing;
       }
     });
@@ -25468,7 +25568,6 @@ function _swTrackWaiting(reg){
 if('serviceWorker' in navigator){
   window.addEventListener('load',function(){
     navigator.serviceWorker.register('sw.js').then(_swTrackWaiting).catch(function(){});
-    _swVerifyCacheVersionMatch();
   });
 }
 
