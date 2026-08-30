@@ -1941,7 +1941,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v565';
+const APP_VERSION='v567';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -11489,17 +11489,46 @@ _presenceHistory.map(e=>e.seq||0)):0);
     }catch(e){ return {}; }
   })();
   function _saveStayStartTombstones(){ try{ localStorage.setItem(STAYSTART_TOMBSTONE_KEY, JSON.stringify(_stayStartTombstones)); }catch(e){} }
-  function recordDepartureTombstone(uid,departedAtIso){
+  // v567 (root-cause rework, real report + diagnostics confirmed): now
+  // records WHERE the departure happened, not just when. A tombstone by
+  // time alone can't tell "native re-asserting the OLD place's stayStart"
+  // apart from "native correctly reporting a NEW place's stayStart that
+  // merely has an early timestamp" — the captured case had a genuine new
+  // arrival rejected purely because it was 1 SECOND before the recorded
+  // departure. Distance from the actual departed anchor is what the
+  // tombstone is really trying to express; comparing that directly closes
+  // the gap instead of papering over one bad case with a tolerance window.
+  function recordDepartureTombstone(uid,departedAtIso,anchorLat,anchorLng){
     if(!uid||!departedAtIso) return;
-    _stayStartTombstones[uid]=departedAtIso;
+    _stayStartTombstones[uid]={at:departedAtIso,lat:(anchorLat!=null?anchorLat:null),lng:(anchorLng!=null?anchorLng:null)};
     _saveStayStartTombstones();
   }
-  function isStayStartStale(uid,nativeStayStartIso){
+  // curLat/curLng: the position of the CURRENT fix being evaluated (not
+  // the departed anchor) — used to tell whether the device is even still
+  // near where it departed from. Old-format tombstones (a bare ISO string,
+  // from before this rework) have no coordinates and fall back to the
+  // previous time-only check, so nothing already stored is broken by this
+  // change.
+  function isStayStartStale(uid,nativeStayStartIso,curLat,curLng){
     if(!uid||!nativeStayStartIso) return false;
     const tomb=_stayStartTombstones[uid];
     if(!tomb) return false;
-    return Date.parse(nativeStayStartIso)<=Date.parse(tomb);
+    const tombAt=(typeof tomb==='string')?tomb:tomb.at;
+    if(!tombAt) return false;
+    if(Date.parse(nativeStayStartIso)>Date.parse(tombAt)) return false; // strictly after the departure — never stale regardless of position
+    const tombLat=(typeof tomb==='object')?tomb.lat:null, tombLng=(typeof tomb==='object')?tomb.lng:null;
+    if(tombLat==null||tombLng==null||curLat==null||curLng==null){
+      return true; // no position to check against (old-format tombstone, or no current fix yet) — fall back to the original time-only rule
+    }
+    try{
+      const R=6371000,toR=x=>x*Math.PI/180;
+      const dLat=toR(curLat-tombLat),dLng=toR(curLng-tombLng);
+      const s=Math.sin(dLat/2)**2+Math.cos(toR(tombLat))*Math.cos(toR(curLat))*Math.sin(dLng/2)**2;
+      const d=2*R*Math.asin(Math.min(1,Math.sqrt(s)));
+      return d<STAYSTART_TOMBSTONE_RADIUS_M; // still near the departed place → this really is the stale leftover; already elsewhere → it's a new visit, trust it
+    }catch(e){ return true; }
   }
+  const STAYSTART_TOMBSTONE_RADIUS_M=60; // same steady-radius the rest of the presence engine uses
   window.recordDepartureTombstone=recordDepartureTombstone;
 
   // v559: Shemroon (100 Elizabeth St) address correction rebuilt — this
@@ -12215,7 +12244,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
           // departure moment — any native stayStart at or before `nowAt`
           // is a leftover from the visit that JUST ended and must not be
           // allowed to resurrect it (or bleed into whatever comes next).
-          if(typeof window!=='undefined'&&window.recordDepartureTombstone) window.recordDepartureTombstone(uid,nowAt);
+          if(typeof window!=='undefined'&&window.recordDepartureTombstone) window.recordDepartureTombstone(uid,nowAt,presence.anchorLat,presence.anchorLng);
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.since, priorFixGapMs,
@@ -12528,7 +12557,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // correctly confirmed departure — not just briefly, but (per real
       // report) carrying it through into an unrelated later visit at a
       // different place, since nothing ever invalidated it before now.
-      const nativeStale=(typeof window!=='undefined'&&window.isStayStartStale)?window.isStayStartStale(uid,raw.stayStart):false;
+      const nativeStale=(typeof window!=='undefined'&&window.isStayStartStale)?window.isStayStartStale(uid,raw.stayStart,nextLat,nextLng):false;
       const trustedStay=(raw.stayStart!=null&&!nativeStale)?raw.stayStart:mv.stayStart;
       // v505 (diagnostic-only, zero behavior change): this line is exactly
       // where a THIRD possible source of a stale "Since" lives — separate
