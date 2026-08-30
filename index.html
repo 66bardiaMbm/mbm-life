@@ -1941,7 +1941,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v566';
+const APP_VERSION='v565';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -25095,68 +25095,30 @@ function attachLocationAutocomplete(inputEl,onSelect){
   inputEl.addEventListener('blur',()=>setTimeout(removeDrop,200));
 }
 
-/* ── Auto update check (v566: version.json-based, replaces the old
-   text-diff/SKIP_WAITING flow) ──
-   sw.js is now content-agnostic (see its own header comment) — it just
-   serves whichever release the DEVICE has accepted. So "updating" no
-   longer means waiting for a new worker to finish downloading and
-   activating; it means writing a new accepted release id and reloading.
-   The loader worker itself only needs its own (rare) update path, kept
-   separate below. */
+/* ── Auto update check ── */
 const UPD_DISMISS_KEY='mbmlife_update_dismissed';
 var _updDismissedSession=null;   // session-only 'Later' dismissal (resets each launch)
 let _latestRemoteVer=null;
 let _lastAutomaticUpdateCheckAt=0;
 const UPDATE_RESUME_THROTTLE_MS=5*60*1000;
-const SW_DB_NAME='mbm-life-sw-meta', SW_STORE_NAME='meta', SW_ACCEPTED_KEY='acceptedReleaseVersion';
-function _swMetaDB(){
-  return new Promise((resolve,reject)=>{
-    const req=indexedDB.open(SW_DB_NAME,1);
-    req.onupgradeneeded=()=>{ req.result.createObjectStore(SW_STORE_NAME); };
-    req.onsuccess=()=>resolve(req.result);
-    req.onerror=()=>reject(req.error);
-  });
-}
-async function getAcceptedReleaseVersion(){
-  try{
-    const db=await _swMetaDB();
-    return await new Promise((resolve,reject)=>{
-      const tx=db.transaction(SW_STORE_NAME,'readonly');
-      const req=tx.objectStore(SW_STORE_NAME).get(SW_ACCEPTED_KEY);
-      req.onsuccess=()=>resolve(req.result||null);
-      req.onerror=()=>reject(req.error);
-    });
-  }catch(e){ return null; }
-}
-async function setAcceptedReleaseVersion(v){
-  const db=await _swMetaDB();
-  return new Promise((resolve,reject)=>{
-    const tx=db.transaction(SW_STORE_NAME,'readwrite');
-    tx.objectStore(SW_STORE_NAME).put(v,SW_ACCEPTED_KEY);
-    tx.oncomplete=()=>resolve();
-    tx.onerror=()=>reject(tx.error);
-  });
-}
 
-// Reads the SERVER-side manifest (what's available) — never what THIS
-// device has accepted, that's getAcceptedReleaseVersion() above.
-async function fetchVersionManifest(){
+async function fetchRemoteVersion(){
+  const base=location.href.split('?')[0].split('#')[0];
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),8000);
   try{
+    // Strong cache-bust: unique query each call. NOTE: GitHub Pages' CDN can
+    // still serve a stale copy for up to ~10 min after a push regardless of
+    // this — that delay is server-side and cannot be fixed from the client.
     const bust=Date.now()+'-'+Math.random().toString(36).slice(2);
-    const res=await fetch('version.json?_='+bust,{cache:'no-store',headers:{'Cache-Control':'no-cache, no-store, must-revalidate','Pragma':'no-cache'},signal:ctrl.signal});
+    const res=await fetch(base+'?_='+bust,{cache:'no-store',headers:{'Cache-Control':'no-cache, no-store, must-revalidate','Pragma':'no-cache'},signal:ctrl.signal});
     if(!res.ok)return null;
-    return await res.json();
-  }catch(e){ return null; }
-  finally{ clearTimeout(timer); }
-}
-// Back-compat name used by a few call sites below — now returns the
-// LATEST id from version.json (a string, same shape as before), not a
-// raw index.html fetch.
-async function fetchRemoteVersion(){
-  const manifest=await fetchVersionManifest();
-  return manifest&&manifest.latest?manifest.latest:null;
+    const text=await res.text();
+    const match=text.match(/APP_VERSION='([^']+)'/);
+    return match&&match[1]?match[1]:null;
+  }finally{
+    clearTimeout(timer);
+  }
 }
 
 function showUpdateBanner(ver){
@@ -25189,14 +25151,15 @@ function dismissUpdate(){
   hideUpdateBanner();
 }
 
-async function applyUpdate(){
-  // v566: this is now the ONLY writer of acceptedReleaseVersion, and it
-  // only ever runs in direct response to this exact tap — never from a
-  // background check, never from worker activation.
+function applyUpdate(){
+  // Remember which version we're updating to, so once we come back on it the
+  // banner won't show again for the same version.
+  try{if(_latestRemoteVer)localStorage.setItem('mbmlife_applied_ver',_latestRemoteVer);}catch(e){}
   const update=document.getElementById('ub-update');
   if(update){update.textContent=(L==='fa'?'در حال نصب...':'Updating...');update.disabled=true;}
   const later=document.getElementById('ub-later');
   if(later)later.style.display='none';
+  // Treat the new version as current after reload
   try{localStorage.removeItem(UPD_DISMISS_KEY);}catch(e){}
   // Remember where the user was, so the update doesn't dump them on the home screen.
   try{
@@ -25205,6 +25168,16 @@ async function applyUpdate(){
       activeSmartView:activeSmartView,plannedFilter:plannedFilter,t:Date.now()
     }));
   }catch(e){}
+
+  // v549 FIX (real bug, confirmed): the previous version reloaded
+  // unconditionally after 2.5s even with NO controllerchange, and reloaded
+  // immediately with no waiting worker at all — both cases reload the
+  // page while STILL running the OLD version, which looks successful to
+  // the user but changed nothing. Neither case is silently "handled"
+  // anymore: no waiting worker, or no controllerchange within a
+  // reasonable window, now surfaces an explicit error instead of a
+  // reload that lies about what happened.
+  const waiting=_swWaitingWorker||(_swRegistration&&_swRegistration.waiting);
   const showUpdateError=(msg)=>{
     const sub=document.getElementById('ub-sub');
     if(sub) sub.textContent=msg;
@@ -25213,24 +25186,29 @@ async function applyUpdate(){
     const laterBtn=document.getElementById('ub-later');
     if(laterBtn) laterBtn.style.display='';
   };
-  if(!_latestRemoteVer){
-    showUpdateError(L==='fa'?'نسخه‌ی جدید هنوز آماده نیست — چند لحظه صبر کن و دوباره امتحان کن.':'The new version isn\u2019t ready yet — wait a moment and try again.');
+  if(!waiting){
+    showUpdateError(L==='fa'
+      ?'نسخه‌ی جدید هنوز آماده نیست — چند لحظه صبر کن و دوباره امتحان کن.'
+      :'The new version isn\u2019t ready yet — wait a moment and try again.');
     return;
   }
-  try{
-    await setAcceptedReleaseVersion(_latestRemoteVer);
-    try{if(_latestRemoteVer)localStorage.setItem('mbmlife_applied_ver',_latestRemoteVer);}catch(e){}
-    // If a loader-level update is ALSO waiting (rare — see sw.js header),
-    // accept it too so both go through in one tap. Content itself does
-    // not depend on this succeeding.
-    try{
-      const reg=_swRegistration||(await navigator.serviceWorker.getRegistration());
-      if(reg&&reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
-    }catch(e){}
+  let settled=false;
+  const onControllerChange=()=>{
+    if(settled)return; settled=true;
+    try{ navigator.serviceWorker.removeEventListener('controllerchange',onControllerChange); }catch(e){}
     location.reload();
-  }catch(e){
+  };
+  try{ navigator.serviceWorker.addEventListener('controllerchange',onControllerChange); }catch(e){}
+  try{ waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){
+    settled=true;
     showUpdateError(L==='fa'?'به‌روزرسانی ناموفق بود — دوباره امتحان کن.':'Update failed — please try again.');
+    return;
   }
+  setTimeout(()=>{
+    if(settled)return; settled=true;
+    try{ navigator.serviceWorker.removeEventListener('controllerchange',onControllerChange); }catch(e){}
+    showUpdateError(L==='fa'?'به‌روزرسانی کامل نشد — دوباره امتحان کن.':'Update didn\u2019t complete — please try again.');
+  },8000);
 }
 
 // Automatic background check
@@ -25238,21 +25216,40 @@ let _lastUpdateCheckOutcome=null;
 async function checkForUpdate(){
   _lastAutomaticUpdateCheckAt=Date.now();
   try{
-    const manifest=await fetchVersionManifest();
-    const ver=manifest&&manifest.latest?manifest.latest:null;
-    const accepted=(await getAcceptedReleaseVersion())||APP_VERSION;
+    const ver=await fetchRemoteVersion();
     try{
-      const outcomeSig=(ver||'null')+'|'+accepted;
+      const outcomeSig=(ver||'null')+'|'+APP_VERSION;
       if(_lastUpdateCheckOutcome!==outcomeSig){
         _lastUpdateCheckOutcome=outcomeSig;
         if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('update_check',{
-          localVersion:accepted, remoteVersion:ver||null, mismatch:!!(ver&&ver!==accepted),
+          localVersion:APP_VERSION, remoteVersion:ver||null, mismatch:!!(ver&&ver!==APP_VERSION),
           dismissedThisSession:_updDismissedSession===ver
         });
       }
     }catch(e){}
-    if(!ver||ver===accepted)return;              // already on the latest accepted version
-    if(_updDismissedSession===ver)return;          // "Later" hides it for THIS session only
+    if(!ver||ver===APP_VERSION)return;          // already on the latest version
+    if(_updDismissedSession===ver)return;        // "Later" hides it for THIS session only
+    // v548: a text-version mismatch alone is no longer sufficient to show
+    // the banner — the service worker must have ACTUALLY finished
+    // downloading the new shell and be sitting in 'waiting'. Ask it to
+    // check now, then give it a short window to reach that state before
+    // deciding. This is what makes the banner correspond to a real,
+    // ready-to-activate update rather than just a version string that
+    // happened to differ (which is also more resilient to the CDN-delay
+    // scenario documented above — if the SW's own fetch also hits a
+    // stale CDN copy, it simply won't find anything new to install, and
+    // no banner appears, instead of appearing and then failing to help).
+    try{ if(_swRegistration) await _swRegistration.update(); }catch(e){}
+    const waitForWaiting=async(maxMs)=>{
+      const start=Date.now();
+      while(Date.now()-start<maxMs){
+        if(_swWaitingWorker || (_swRegistration&&_swRegistration.waiting)) return true;
+        await new Promise(r=>setTimeout(r,300));
+      }
+      return false;
+    };
+    const ready=await waitForWaiting(6000);
+    if(!ready) return; // nothing actually ready yet — stay quiet, a later check will catch it
     showUpdateBanner(ver);
   }catch(e){}
 }
@@ -25265,16 +25262,25 @@ function scheduleAutomaticUpdateCheck(force){
 async function manualCheckForUpdate(){
   toast(L==='fa'?'در حال بررسی...':'Checking…',1500);
   try{
-    const manifest=await fetchVersionManifest();
-    const ver=manifest&&manifest.latest?manifest.latest:null;
-    const accepted=(await getAcceptedReleaseVersion())||APP_VERSION;
-    if(ver&&ver!==accepted){
-      _updDismissedSession=null; // manual check overrides a session dismissal for this version
-      showUpdateBanner(ver);
+    const ver=await fetchRemoteVersion();
+    if(ver&&ver!==APP_VERSION){
+      try{ if(_swRegistration) await _swRegistration.update(); }catch(e){}
+      const start=Date.now();
+      let ready=false;
+      while(Date.now()-start<6000){
+        if(_swWaitingWorker || (_swRegistration&&_swRegistration.waiting)){ ready=true; break; }
+        await new Promise(r=>setTimeout(r,300));
+      }
+      if(ready){
+        _updDismissedSession=null; // manual check overrides a session dismissal for this version
+        showUpdateBanner(ver);
+      } else {
+        toast(L==='fa'?'نسخه جدید در حال آماده‌سازی است — کمی بعد دوباره بررسی کنید':'New version is preparing — check again shortly');
+      }
     }else if(ver){
       toast(L==='fa'?'برنامه به‌روز است ✓':'You’re up to date ✓');
     }else{
-      // Couldn't read version.json (offline / blocked) — say so instead of freezing.
+      // Couldn't read a version (offline / blocked) — say so instead of freezing.
       toast(L==='fa'?'اتصال برقرار نشد':'Couldn’t reach server');
     }
   }catch(e){
@@ -25544,11 +25550,38 @@ function onPop(){
   }
 }
 
-// v566: _swRegistration/_swWaitingWorker now only matter for the RARE
-// loader-level update case (see sw.js header) — content updates go
-// through acceptedReleaseVersion + reload instead, so there is no longer
-// a "cache version must match APP_VERSION" invariant to verify here.
+// v548: rebuilt service-worker integration. _swRegistration/_swWaitingWorker
+// track the CURRENT registration and whether a new version has finished
+// downloading and is sitting in 'waiting' — the authoritative signal for
+// "an update is actually ready", replacing reliance on the text-based
+// version fetch alone. The worker itself never self-activates (see
+// sw.js) — only an explicit user tap sets it in motion.
 let _swRegistration=null, _swWaitingWorker=null;
+// v550: runtime fail-fast check — CACHE_NAME in sw.js is a manually
+// maintained string (no build step exists to derive it automatically),
+// so a forgotten bump on some future release would silently reintroduce
+// the exact "worker overwrites the active cache" bug fixed in v549. This
+// fetches sw.js's own source and verifies its embedded cache version
+// matches APP_VERSION on every load — if they ever drift, it's surfaced
+// immediately and persistently, not discovered later from a user report.
+async function _swVerifyCacheVersionMatch(){
+  try{
+    const res=await fetch('sw.js?_=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) return;
+    const text=await res.text();
+    const m=text.match(/CACHE_NAME\s*=\s*'mbm-life-shell-(v\d+)'/);
+    if(!m){
+      console.error('[sw-version-check] could not find a versioned CACHE_NAME in sw.js — this check itself may be out of date');
+      return;
+    }
+    const swVer=m[1];
+    if(swVer!==APP_VERSION){
+      const msg='[sw-version-check] MISMATCH: sw.js CACHE_NAME is '+swVer+' but index.html APP_VERSION is '+APP_VERSION+' — a release forgot to bump one of them. This can silently let a new worker overwrite the active version'+"'"+'s cache.';
+      console.error(msg);
+      try{ if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('sw_cache_version_mismatch',{swVer,appVersion:APP_VERSION}); }catch(e){}
+    }
+  }catch(e){ /* offline or blocked — not itself an error worth surfacing */ }
+}
 function _swTrackWaiting(reg){
   if(!reg) return;
   _swRegistration=reg;
@@ -25558,6 +25591,9 @@ function _swTrackWaiting(reg){
     if(!installing) return;
     installing.addEventListener('statechange',()=>{
       if(installing.state==='installed' && navigator.serviceWorker.controller){
+        // A controller already existed before this install finished — this
+        // is a genuine UPDATE (not the very first install), so the new
+        // worker is now sitting in 'waiting'.
         _swWaitingWorker=installing;
       }
     });
@@ -25568,6 +25604,7 @@ function _swTrackWaiting(reg){
 if('serviceWorker' in navigator){
   window.addEventListener('load',function(){
     navigator.serviceWorker.register('sw.js').then(_swTrackWaiting).catch(function(){});
+    _swVerifyCacheVersionMatch();
   });
 }
 
