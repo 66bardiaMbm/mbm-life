@@ -1941,7 +1941,7 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v569';
+const APP_VERSION='v570';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -13891,7 +13891,32 @@ _presenceHistory.map(e=>e.seq||0)):0);
 
       q.samples.push(sample);
       const sess=sessionById(uid,q.sessionId);
-      if(!sess){ q.sessionId=null; q.samples=[]; try{persistDB();}catch(e){} return; }
+      if(!sess){
+        // v570 (Bahman, real report — camera/road-bar/panel all froze mid-
+        // drive while raw GPS fixes kept arriving fine, confirmed via
+        // diagnostics: dead-reckoning's _drFix age grew unbounded, target
+        // never moved). Traced to here: this is the ONLY place a live
+        // driving session ends without an explicit stop/departure event —
+        // a silent lookup miss, not a crash. Once this fires,
+        // activeSession(uid) starts returning null, which is exactly what
+        // makes FamilyMapCamera.drivingState take its `!id` branch and
+        // call _drStop() — freezing the camera at whatever position it
+        // last had, forever, even though the general fix-acceptance
+        // pipeline (writeMyFix) keeps running completely normally. WHY the
+        // session record goes missing here isn't proven yet — this log
+        // captures everything needed to find out next time it happens,
+        // instead of guessing at a fix for a mechanism that's still only
+        // 90% confirmed.
+        try{
+          const uidMap=sessionMap()[uid];
+          if(typeof window!=='undefined'&&window.pipelineHistoryPush) window.pipelineHistoryPush('driving_session_vanished',{
+            uid, expectedSessionId:q.sessionId,
+            uidSessionMapExists:!!uidMap, uidSessionMapKeys:uidMap?Object.keys(uidMap):[],
+            samplesInQueueAtLoss:q.samples.length, fixLat:sample.lat, fixLng:sample.lng, fixT:sample.t
+          });
+        }catch(e){}
+        q.sessionId=null; q.samples=[]; try{persistDB();}catch(e){} return;
+      }
 
       try{
         const evs=detectEvents(uid,sess.id,prevSample,sample);
