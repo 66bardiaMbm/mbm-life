@@ -139,6 +139,16 @@ function isShellRequest(request){
   try{
     const url=new URL(request.url);
     if(url.origin!==self.location.origin) return false; // never touch cross-origin (Firebase/Maps/Nominatim/etc.)
+    // v570-2 (Bahman, real report — new index.html uploaded, app never
+    // offered the update): a request carrying a query string is the
+    // update-check's own cache-busted fetch (fetchRemoteVersion), never a
+    // real navigation — real navigations to '/' or '/index.html' don't
+    // carry one. That fetch exists specifically to see the TRUE current
+    // server content, so it must never be intercepted and answered from
+    // the cached shell (which is exactly what {ignoreSearch:true} below
+    // was doing to it) — excluded here, it now reaches the network like
+    // any other honest fetch.
+    if(url.search) return false;
     return url.pathname==='/' || url.pathname.endsWith('/index.html');
   }catch(e){ return false; }
 }
