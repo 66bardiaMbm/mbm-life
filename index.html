@@ -11463,6 +11463,224 @@ _presenceHistory.map(e=>e.seq||0)):0);
   function geoDiagHistoryClear(){ _geoDiagHistory.length=0; }
   window.geoDiagHistoryPush=geoDiagHistoryPush;
   window.geoDiagHistoryGet=geoDiagHistoryGet;
+  // ══════════════════════════════════════════════════════════════════
+  // v572-diag: PERSISTENT geo-diag ring buffer (IndexedDB-backed).
+  // Diagnostics-only. Nothing in this block is ever read by any render,
+  // decision, or UI logic anywhere else in the app — it only WRITES
+  // observations. Distinct from _geoDiagHistory above (which is RAM-only
+  // and lost on reload) specifically so a trace survives exit/re-entry,
+  // since that's exactly the boundary the reported bug's "temporary
+  // recovery" happens across.
+  //
+  // Session model: one sessionId per page load (crypto-random, timestamp-
+  // prefixed for readability). On load, whatever was "current" becomes
+  // "previous" (anything older than that is dropped) and a fresh
+  // "current" begins — so Export always has exactly the last two runs.
+  // Ring buffer: capped per session; oldest entries evicted first.
+  const GeoDiagPersist = (function(){
+    const DB_NAME='mbmlife_geo_diag_persist_v1';
+    const STORE_ENTRIES='entries';
+    const STORE_META='meta';
+    const CAP_PER_SESSION=4000;
+    const FLUSH_INTERVAL_MS=2000;
+    const FLUSH_BATCH_MAX=200;
+    let sessionId=null, prevSessionId=null;
+    let buffer=[];
+    let flushTimer=null;
+    let flushInProgress=null; // v572-diag fix: single-flight lock for flush() — see header comment on the bug this closes
+    let dbPromise=null;
+    let seq=0;
+
+    function openDB(){
+      if(dbPromise) return dbPromise;
+      dbPromise=new Promise((resolve,reject)=>{
+        try{
+          const req=indexedDB.open(DB_NAME,1);
+          req.onupgradeneeded=()=>{
+            const db=req.result;
+            if(!db.objectStoreNames.contains(STORE_ENTRIES)){
+              const os=db.createObjectStore(STORE_ENTRIES,{keyPath:'_id',autoIncrement:true});
+              os.createIndex('bySession','sessionId',{unique:false});
+            }
+            if(!db.objectStoreNames.contains(STORE_META)) db.createObjectStore(STORE_META);
+          };
+          req.onsuccess=()=>resolve(req.result);
+          req.onerror=()=>reject(req.error);
+        }catch(e){ reject(e); }
+      });
+      return dbPromise;
+    }
+    async function getMeta(){
+      try{
+        const db=await openDB();
+        return await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_META,'readonly');
+          const req=tx.objectStore(STORE_META).get('sessions');
+          req.onsuccess=()=>resolve(req.result||null);
+          req.onerror=()=>reject(req.error);
+        });
+      }catch(e){ return null; }
+    }
+    async function setMeta(val){
+      try{
+        const db=await openDB();
+        return await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_META,'readwrite');
+          tx.objectStore(STORE_META).put(val,'sessions');
+          tx.oncomplete=()=>resolve();
+          tx.onerror=()=>reject(tx.error);
+        });
+      }catch(e){}
+    }
+    async function deleteEntriesForSession(sid){
+      try{
+        const db=await openDB();
+        await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_ENTRIES,'readwrite');
+          const idx=tx.objectStore(STORE_ENTRIES).index('bySession');
+          const req=idx.openCursor(IDBKeyRange.only(sid));
+          req.onsuccess=()=>{
+            const cur=req.result;
+            if(cur){ cur.delete(); cur.continue(); } else resolve();
+          };
+          req.onerror=()=>reject(req.error);
+        });
+      }catch(e){}
+    }
+    async function countForSession(sid){
+      try{
+        const db=await openDB();
+        return await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_ENTRIES,'readonly');
+          const idx=tx.objectStore(STORE_ENTRIES).index('bySession');
+          const req=idx.count(IDBKeyRange.only(sid));
+          req.onsuccess=()=>resolve(req.result||0);
+          req.onerror=()=>reject(req.error);
+        });
+      }catch(e){ return 0; }
+    }
+    async function trimOldestForSession(sid,overBy){
+      try{
+        const db=await openDB();
+        await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_ENTRIES,'readwrite');
+          const idx=tx.objectStore(STORE_ENTRIES).index('bySession');
+          const req=idx.openCursor(IDBKeyRange.only(sid)); // cursor over the index walks in ascending _id order per session insert order
+          let deleted=0;
+          req.onsuccess=()=>{
+            const cur=req.result;
+            if(cur && deleted<overBy){ cur.delete(); deleted++; cur.continue(); }
+            else resolve();
+          };
+          req.onerror=()=>reject(req.error);
+        });
+      }catch(e){}
+    }
+    const MAX_GENERATIONS=5; // v572-diag fix: was 2 (current+previous only) — real risk flagged: opening the app even twice before exporting silently lost the actual driving session. 5 gives real safety margin while still bounded.
+    async function init(){
+      const meta=(await getMeta())||{history:[]};
+      const history=Array.isArray(meta.history)?meta.history.slice():(meta.current?[meta.current,meta.previous].filter(Boolean):[]);
+      sessionId='s'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+      history.unshift(sessionId);
+      while(history.length>MAX_GENERATIONS){
+        const dropped=history.pop();
+        await deleteEntriesForSession(dropped);
+      }
+      prevSessionId=history[1]||null;
+      await setMeta({history});
+      scheduleFlush();
+    }
+    function scheduleFlush(){
+      if(flushTimer) return;
+      flushTimer=setTimeout(async()=>{
+        flushTimer=null;
+        await flush();
+        if(buffer.length) scheduleFlush();
+      },FLUSH_INTERVAL_MS);
+    }
+    async function flushOnce(){
+      if(!sessionId || !buffer.length) return;
+      const batch=buffer.splice(0,FLUSH_BATCH_MAX);
+      try{
+        const db=await openDB();
+        await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_ENTRIES,'readwrite');
+          const os=tx.objectStore(STORE_ENTRIES);
+          for(const rec of batch) os.add(rec);
+          tx.oncomplete=()=>resolve();
+          tx.onerror=()=>reject(tx.error);
+        });
+        const count=await countForSession(sessionId);
+        if(count>CAP_PER_SESSION) await trimOldestForSession(sessionId,count-CAP_PER_SESSION);
+      }catch(e){}
+    }
+    // v572-diag FIX (real bug, found via testing — see test_geodiag_risks.js):
+    // concurrent flush() calls each independently read a stale count and
+    // independently trimmed CAP_PER_SESSION worth of "oldest" entries — the
+    // trims stacked instead of coordinating, and a burst of pushes (e.g.
+    // exportBoth() racing the periodic timer) could wipe an entire session
+    // down to zero. This lock ensures only one flush cycle actually runs at
+    // a time; anyone else calling flush() while one is in progress just
+    // awaits the SAME in-flight promise instead of starting a second one.
+    // It also now drains the buffer in a loop (not just one 200-record
+    // batch), so a single flush() call reliably empties whatever was
+    // pending, which is what exportBoth() needs to be correct.
+    async function flush(){
+      if(flushInProgress) return flushInProgress;
+      flushInProgress=(async()=>{
+        while(buffer.length) await flushOnce();
+      })();
+      try{ await flushInProgress; }
+      finally{ flushInProgress=null; }
+    }
+    function push(record){
+      if(!sessionId) return; // init() hasn't resolved yet — drop silently rather than block the render path
+      seq++;
+      buffer.push(Object.assign({sessionId,seq,t:Date.now(),tIso:new Date().toISOString()},record));
+      if(buffer.length>=FLUSH_BATCH_MAX) flush();
+      else scheduleFlush();
+    }
+    async function exportSession(sid){
+      if(!sid) return [];
+      try{
+        const db=await openDB();
+        return await new Promise((resolve,reject)=>{
+          const tx=db.transaction(STORE_ENTRIES,'readonly');
+          const idx=tx.objectStore(STORE_ENTRIES).index('bySession');
+          const req=idx.getAll(IDBKeyRange.only(sid));
+          req.onsuccess=()=>resolve(req.result||[]);
+          req.onerror=()=>reject(req.error);
+        });
+      }catch(e){ return []; }
+    }
+    async function exportBoth(){
+      await flush(); // make sure anything still buffered is on disk before reading it back
+      const current=await exportSession(sessionId);
+      const previous=await exportSession(prevSessionId);
+      return { currentSessionId:sessionId, previousSessionId:prevSessionId, current, previous };
+    }
+    async function listGenerations(){
+      const meta=(await getMeta())||{history:[]};
+      return Array.isArray(meta.history)?meta.history.slice():[];
+    }
+    async function exportGeneration(sid){
+      await flush();
+      return await exportSession(sid);
+    }
+    init().catch(()=>{});
+    return { push, exportBoth, listGenerations, exportGeneration, getSessionIds:()=>({current:sessionId,previous:prevSessionId}) };
+  })();
+  window.GeoDiagPersist=GeoDiagPersist;
+  // v572-diag: tracks each uid's last-seen activityType so the unconditional
+  // render_entry trace can flag a transition (e.g. driving->stationary) —
+  // diagnostic-only, read/written nowhere else.
+  const _geoDiagLastActivityType={};
+  // v572-diag round 3: tracks each uid's most recently COMPUTED display
+  // output (l1/region/activityType/fixId) so the DOM-vs-computed check
+  // inside afterGeoResolved can compare against it WITHOUT re-calling
+  // famComposeStatusText (which would trigger a second, real FamGeo.request
+  // side effect — not safe to do purely for diagnostics).
+  const _geoDiagLastComposedOutput={};
   window.geoDiagHistoryClear=geoDiagHistoryClear;
 
   // v506: stayStart tombstone — fixes the race where native keeps
@@ -14942,7 +15160,9 @@ function famDiagView(){
         <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`نادر: ظرفیت ۵۰۰، persisted، هر push یه‌بار localStorage می‌نویسه (ایمن چون واقعاً نادره). hereSince: ظرفیت ۸۰۰۰، فقط RAM. reconfirm: ظرفیت ۴۰۰۰، فقط RAM — چون می‌تونه هر فیکس fire بشه، عمداً هیچ‌وقت localStorage نمی‌نویسه.`:`Rare: cap 500, persisted, writes localStorage once per push (safe — genuinely rare). hereSince: cap 8000, RAM-only. reconfirm: cap 4000, RAM-only — deliberately never touches localStorage since it can fire every fix.`}</div>
         <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${L==='fa'?`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} ارزیابی — فقط RAM، با refresh از بین می‌ره. reconfirm: ${(typeof reconfirmEvalGet==='function'?reconfirmEvalGet().length:0)} رکورد — فقط RAM. geo-diag: ${(typeof geoDiagHistoryGet==='function'?geoDiagHistoryGet().length:0)}/2000 رکورد (road_bar_decision, region_sticky_match, geo_request_cache_state) — فقط RAM، هیچ‌وقت localStorage نمی‌نویسه.`:`hereSince: ${(typeof hereSinceEvalHistoryGet==='function'?hereSinceEvalHistoryGet().length:0)} evaluations — RAM-only, lost on refresh. reconfirm: ${(typeof reconfirmEvalGet==='function'?reconfirmEvalGet().length:0)} records — RAM-only. geo-diag: ${(typeof geoDiagHistoryGet==='function'?geoDiagHistoryGet().length:0)}/2000 records (road_bar_decision, region_sticky_match, geo_request_cache_state) — RAM-only, never writes localStorage.`}</div>
         <button class="btn" data-fam="geodiag-export" style="width:100%;margin-top:6px">${L==='fa'?'Export بافرِ geo-diag':'Export geo-diag buffer'}</button>
-        <div style="max-height:200px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px">
+        <div style="font-size:10px;color:var(--ink3);margin-top:10px;margin-bottom:6px">${L==='fa'?'geo-diag ماندگار (IndexedDB): این ساخت تشخیصی، هر render حینِ رانندگی رو کاملاً ثبت می‌کنه (وضعیتِ فعالیت، lat/lng، منبعِ road/region، سنِ fallback، وضعیتِ HTTP، صف/inflight) — با یه شناسه‌ی مشترک. بعدِ خروج/ورود هم می‌مونه؛ جلسه‌ی فعلی و قبلی رو جدا نگه می‌داره. هیچ تصمیمی از رویِ این داده گرفته نمی‌شه.':'Persistent geo-diag (IndexedDB): this diagnostic build fully records every render while driving (activity state, lat/lng, road/region source, fallback age, HTTP status, queue/inflight) — all under one shared id. Survives exit/re-entry; keeps the current and previous session separately. Nothing anywhere reads this data to make a decision.'}</div>
+        <button class="btn" data-fam="geodiag-persist-export" style="width:100%;margin-top:2px">${L==='fa'?'Export geo-diag ماندگار (جلسه‌ی فعلی + قبلی)':'Export persistent geo-diag (current + previous session)'}</button>
+        <div style="max-height:200px;overflow:auto;font-family:monospace;font-size:10px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px;margin-top:8px">
           ${prows||'<div>'+(L==='fa'?'هنوز تغییری ثبت نشده':'no transitions recorded yet')+'</div>'}
         </div>`;
       })()}
@@ -18946,6 +19166,25 @@ function famRoadWithFallback(uid, freshRoad){
 const _lastRoadBarOutcome={};
 function famComposeStatusText(m){
   const d=famDeriveMemberDisplay(m);
+  // v572-diag: unconditional entry trace, before any branch/early-return,
+  // so an activity transition (e.g. driving -> stationary, exactly the
+  // moment the reported freeze could be happening) is always captured —
+  // the previous version of this instrumentation only logged inside the
+  // driving branch and went silent the instant activityType changed away
+  // from it, which could hide the actual moment of failure.
+  try{
+    if(typeof window!=='undefined'&&window.GeoDiagPersist){
+      const st=m.state||{};
+      const prevAct=_geoDiagLastActivityType[m.uid];
+      window.GeoDiagPersist.push({
+        kind:'render_entry', uid:m.uid||null, fixId:st.nativeFixId||null, capturedAt:st.capturedAt||st.reportedAt||null,
+        lat:st.lat!=null?st.lat:null, lng:st.lng!=null?st.lng:null,
+        activityType:d.activityType, previousActivityType:prevAct||null,
+        activityChanged:(prevAct!=null && prevAct!==d.activityType)
+      });
+      _geoDiagLastActivityType[m.uid]=d.activityType;
+    }
+  }catch(e){}
   const fb=(typeof FamilyBackend!=='undefined')?FamilyBackend:null;
   if(d.activityType==='offline'){
     return { l1:(L==='fa'?'آفلاین':'Offline'), l2:'', since:null, activityType:'offline' };
@@ -18971,7 +19210,7 @@ function famComposeStatusText(m){
     // recently, never shows a full house-number address (still too long),
     // and expires like the region fix does so it can't show a road
     // you've actually already left.
-    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId); // still the ONLY thing that queues a fresh geocode request each fix — getRoadNear/getRegionNear only read the cache, they never request
+    famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId,m.uid); // still the ONLY thing that queues a fresh geocode request each fix — getRoadNear/getRegionNear only read the cache, they never request
     const _exactRoadHit=FamGeo.get(s.lat,s.lng);
     const liveRoad=FamGeo.getRoadNear(s.lat,s.lng);
     const drivingLabel=(L==='fa'?'در حال رانندگی':'Driving');
@@ -19022,12 +19261,47 @@ function famComposeStatusText(m){
     }
     const cachedGeo=FamGeo.getRegionNear(s.lat,s.lng);
     const region=famRegionWithFallback(m.uid, cachedGeo?cachedGeo.line2:'');
+    // v572-diag: single comprehensive, additive render-time trace record.
+    // Reads only values already computed by the unmodified logic above —
+    // changes nothing about what gets displayed.
+    try{
+      if(typeof window!=='undefined'&&window.GeoDiagPersist){
+        const roadFb=_famLastKnownRoad[m.uid];
+        const regionFb=_famLastKnownRegion[m.uid];
+        const nowMs2=Date.now();
+        let roadBarHideReason=null;
+        if(l1===drivingLabel){
+          roadBarHideReason=(!liveRoad)?'no_cache_hit_within_radius'
+            :(!liveRoad.road?'cache_hit_no_road_field':'unknown');
+        } else if(roadWithFallback && !( _exactRoadHit||liveRoad) ){
+          roadBarHideReason='shown_via_stale_fallback';
+        }
+        window.GeoDiagPersist.push({
+          kind:'render', uid:m.uid, fixId:s.nativeFixId||null, capturedAt:s.capturedAt||s.reportedAt||null,
+          activityType:'driving', lat:s.lat, lng:s.lng,
+          road:{
+            exactCacheHit:!!_exactRoadHit, exactCacheEntry:_exactRoadHit?{road:_exactRoadHit.road,ts:_exactRoadHit.ts}:null,
+            stickyEntry:liveRoad?{road:liveRoad.road,ts:liveRoad.ts,lat:liveRoad.lat,lng:liveRoad.lng}:null,
+            fallbackText:roadFb?roadFb.text:null, fallbackAgeMs:roadFb?(nowMs2-roadFb.at):null,
+            displayed:l1, showedGenericLabel:(l1===drivingLabel), hideReason:roadBarHideReason
+          },
+          region:{
+            cacheEntry:cachedGeo?{line2:cachedGeo.line2,ts:cachedGeo.ts,lat:cachedGeo.lat,lng:cachedGeo.lng}:null,
+            fallbackText:regionFb?regionFb.text:null, fallbackAgeMs:regionFb?(nowMs2-regionFb.at):null,
+            displayed:region
+          },
+          famGeoSnapshot:(FamGeo._diagSnapshot?FamGeo._diagSnapshot():null),
+          composedOutput:{ l1, region, activityType:'driving', speedKph }
+        });
+        _geoDiagLastComposedOutput[m.uid]={ l1, region, activityType:'driving', fixId:s.nativeFixId||null, atMs:Date.now() };
+      }
+    }catch(e){}
     // Status text must remain plain text. The car icon is rendered by the
     // marker's dedicated safe SVG badge, never embedded into a text string.
     return { l1, l2:'', region, since:null, activityType:'driving', speedKph };
   }
   if(d.activityType==='walking'){
-    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId);
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId,m.uid);
     const l1=road?(L==='fa'?`در حال پیاده‌روی نزدیک ${road}`:`Walking near ${road}`):(L==='fa'?'در حال پیاده‌روی':'Walking');
     // Same reasoning as driving above — live speed while moving, not a
     // "Since" timestamp (matches the reference app's 9th screenshot:
@@ -19036,7 +19310,7 @@ function famComposeStatusText(m){
     return { l1, l2:'', since:null, activityType:'walking', speedKph };
   }
   if(d.activityType==='bicycling'||d.activityType==='motorcycle'){
-    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId);
+    const road=famBareRoadName(s.lat,s.lng,s.capturedAt||s.reportedAt,s.nativeFixId,m.uid);
     const isBike=d.activityType==='bicycling';
     const base=isBike
       ? (L==='fa'?'در حال دوچرخه‌سواری':'Cycling')
@@ -19544,13 +19818,22 @@ const FamGeo = (function(){
       const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
       const requestedAt=Date.now();
       fetch(url,{headers:{'Accept':'application/json'}})
-        .then(r=>r.json())
+        .then(r=>{
+          try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+            kind:'http_response', fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
+            httpStatus:r.status, httpOk:r.ok, queueLengthAtResponse:queue.length, pendingKeysAtResponse:Object.keys(pending).length
+          }); }catch(e){}
+          return r.json();
+        })
         .then(async res=>{
           const respondedAt=Date.now();
           if(inflight[k]!==job.fixId){
             // A newer fix superseded this request while it was in flight.
             // Discard: never let a stale response overwrite the current fix.
             console.debug('[FamGeo.diag] discarded stale response',{key:k,requestedFixId:job.fixId,currentFixId:inflight[k]});
+            try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+              kind:'discard_stale', key:k, fixId:job.fixId, uid:job.uid||null, currentInflightFixId:inflight[k]||null
+            }); }catch(e){}
             return;
           }
           if(res && (res.address || res.display_name)){
@@ -19566,11 +19849,27 @@ const FamGeo = (function(){
               lastCall=Date.now();
               try{
                 const adminUrl=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=14&lat=${job.lat}&lon=${job.lng}`;
-                const adminRes=await fetch(adminUrl,{headers:{'Accept':'application/json'}}).then(r=>r.json());
+                const adminReqAt=Date.now();
+                const adminRawRes=await fetch(adminUrl,{headers:{'Accept':'application/json'}});
+                try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+                  kind:'admin_fetch', fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
+                  httpStatus:adminRawRes.status, httpOk:adminRawRes.ok, responseTimeMs:Date.now()-adminReqAt
+                }); }catch(e){}
+                const adminRes=await adminRawRes.json();
                 administrativeAddress=(adminRes&&adminRes.address)||null;
-              }catch(e){ /* retain the detailed result's honest city fallback */ }
+              }catch(e){
+                try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+                  kind:'admin_fetch_error', fixId:job.fixId, uid:job.uid||null, errorMessage:e&&e.message?String(e.message):String(e)
+                }); }catch(e2){}
+                /* retain the detailed result's honest city fallback */
+              }
             }
-            if(inflight[k]!==job.fixId) return;
+            if(inflight[k]!==job.fixId){
+              try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+                kind:'discard_stale', key:k, fixId:job.fixId, uid:job.uid||null, currentInflightFixId:inflight[k]||null, afterAdminFetch:true
+              }); }catch(e){}
+              return;
+            }
             const f=format(addr,res.display_name,administrativeAddress);
             const selected=localitySelection(addr,administrativeAddress);
             const selectedField=selected?(selected.source==='administrative'?'administrative.':'')+selected.field:null;
@@ -19598,14 +19897,30 @@ const FamGeo = (function(){
               rawAddress:res.address||null,
               displayName:res.display_name||null
             });
+            try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+              kind:'commit', key:k, fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
+              resultRoad:f.road||null, resultLine2:f.line2||null, responseTimeMs:respondedAt-requestedAt
+            }); }catch(e){}
           }
         })
-        .catch(()=>{ /* keep whatever we had; no fabricated address */ })
+        .catch((err)=>{
+          try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+            kind:'fetch_error', fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
+            errorMessage:err&&err.message?String(err.message):String(err)
+          }); }catch(e){}
+          /* keep whatever we had; no fabricated address */
+        })
         .then(()=>{
           delete pending[k]; delete inflight[k];
           const newer=superseding[k]; delete superseding[k];
           if(newer){ pending[k]=true; queue.push(newer); }
-          if(typeof afterGeoResolved==='function')afterGeoResolved();
+          try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+            kind:'pump_cycle_end', key:k, fixId:job.fixId, uid:job.uid||null, requeued:!!newer, queueLengthAfter:queue.length
+          }); }catch(e){}
+          if(typeof afterGeoResolved==='function'){
+            try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({ kind:'after_geo_resolved_called', key:k, fixId:job.fixId, uid:job.uid||null }); }catch(e){}
+            afterGeoResolved();
+          }
           if(queue.length)pump();
         });
     }, wait);
@@ -19617,7 +19932,7 @@ const FamGeo = (function(){
   // coordinates by definition — no separate id needed). Kept as an explicit
   // parameter so a caller can pass a monotonic token if it ever has two
   // in-flight fixes with numerically identical coordinates.
-  function request(lat,lng,fixId){
+  function request(lat,lng,fixId,uid){
     if(lat==null||lng==null) return null;
     const k=key(lat,lng);
     const c=cache[k];
@@ -19647,7 +19962,7 @@ const FamGeo = (function(){
     }
     const resolvedFixId=fixId!=null?fixId:k;
     if(!pending[k]){
-      pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId});
+      pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId,uid:uid||null});
       // v497: drop the OLDEST queued jobs once the cap is exceeded — keeps
       // the queue chasing the CURRENT position instead of wastefully
       // working through an ever-growing backlog of passed-by positions.
@@ -19657,7 +19972,13 @@ const FamGeo = (function(){
       // marked "pending" for a job that will now never run.
       while(queue.length>MAX_QUEUE_DEPTH){
         const dropped=queue.shift();
-        if(dropped) delete pending[dropped.key];
+        if(dropped){
+          delete pending[dropped.key];
+          try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+            kind:'queue_drop', droppedKey:dropped.key, droppedFixId:dropped.fixId, droppedUid:dropped.uid||null,
+            droppedLat:dropped.lat, droppedLng:dropped.lng, queueLengthAfter:queue.length
+          }); }catch(e){}
+        }
       }
       pump();
     }
@@ -19666,25 +19987,72 @@ const FamGeo = (function(){
       // follow-up request.  The old code invalidated without re-queueing,
       // leaving the cell blank/stale until some unrelated later render.
       inflight[k]=resolvedFixId;
-      superseding[k]={key:k,lat,lng,fixId:resolvedFixId};
+      superseding[k]={key:k,lat,lng,fixId:resolvedFixId,uid:uid||null};
     }
     return null;
   }
   function famGeoDiagnosticInfo(){ return _lastLookup; }
   return { request, get, getRegionNear, getRoadNear, format, _key:key,
     _needsAdministrativeLocality:needsAdministrativeLocality,
-    famGeoDiagnosticInfo };
+    famGeoDiagnosticInfo,
+    // v572-diag: read-only snapshot for the persistent trace — does not
+    // participate in any decision, purely observational.
+    _diagSnapshot:()=>({ queueLength:queue.length, pendingKeys:Object.keys(pending), inflightKeys:Object.keys(inflight), inflightFixIds:Object.assign({},inflight) })
+  };
 })();
 // Re-render the Family surface when a reverse-geocode resolves (throttled by
 // the queue itself). Only touches the live/members screens.
 let _geoRerenderT=null;
 function afterGeoResolved(){
+  try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+    kind:'after_geo_resolved_entry', debounceTimerAlreadyPending:!!_geoRerenderT
+  }); }catch(e){}
   if(_geoRerenderT) return;
   _geoRerenderT=setTimeout(()=>{ _geoRerenderT=null;
-    if(typeof render==='function' && screen==='module' && currentModule==='family'){
-      if((famView==='live'||famView==='dashboard') && typeof famLiveApply==='function') famLiveApply();
-      else if(famView==='members') render();
+    const gateRenderFn=(typeof render==='function');
+    const gateScreen=(screen==='module');
+    const gateModule=(currentModule==='family');
+    const allGatesPassed=gateRenderFn&&gateScreen&&gateModule;
+    let actionTaken='none';
+    if(allGatesPassed){
+      if((famView==='live'||famView==='dashboard') && typeof famLiveApply==='function'){ actionTaken='famLiveApply'; famLiveApply(); }
+      else if(famView==='members'){ actionTaken='render'; render(); }
     }
+    try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
+      kind:'after_geo_resolved_fired',
+      gates:{ renderFnExists:gateRenderFn, screenIsModule:gateScreen, currentModuleIsFamily:gateModule, allGatesPassed },
+      famView:(typeof famView!=='undefined'?famView:null), actionTaken
+    }); }catch(e){}
+    // v572-diag: read-only DOM check, right after the real render action
+    // (if any) actually ran — compares what's ACTUALLY on screen against
+    // the last thing famComposeStatusText computed for each uid we have a
+    // record for. Never recomputes famComposeStatusText itself (that would
+    // trigger a real FamGeo.request side effect) — purely reads the DOM
+    // and an already-stored value.
+    try{
+      if(typeof window!=='undefined'&&window.GeoDiagPersist&&typeof document!=='undefined'){
+        for(const uid in _geoDiagLastComposedOutput){
+          const expected=_geoDiagLastComposedOutput[uid];
+          let domRow=null;
+          try{ domRow=document.querySelector('[data-arg="'+uid+'"] .info'); }catch(e){}
+          if(domRow){
+            const stDivs=domRow.querySelectorAll('.st');
+            const domFirstLine=stDivs&&stDivs[0]?stDivs[0].textContent.trim():null;
+            const domLastLine=stDivs&&stDivs.length?stDivs[stDivs.length-1].textContent.trim():null;
+            window.GeoDiagPersist.push({
+              kind:'dom_vs_computed', uid, actionTaken,
+              domFound:true, domFirstLine, domLastLine,
+              expectedL1:expected.l1, expectedRegion:expected.region, expectedFixId:expected.fixId,
+              l1MatchesDomFirstLine:(domFirstLine!=null && expected.l1 && domFirstLine.indexOf(expected.l1)>=0),
+              regionMatchesDomLastLine:(domLastLine!=null && expected.region && domLastLine.indexOf(expected.region)>=0),
+              expectedAgeMs:Date.now()-expected.atMs
+            });
+          } else {
+            window.GeoDiagPersist.push({ kind:'dom_vs_computed', uid, actionTaken, domFound:false, expectedL1:expected.l1, expectedRegion:expected.region, expectedFixId:expected.fixId, expectedAgeMs:Date.now()-expected.atMs });
+          }
+        }
+      }
+    }catch(e){}
   }, 120);
 }
 /* Resolve the best display lines for a member's current fix, Life360-style:
@@ -19719,7 +20087,7 @@ function famLocationLines(lat,lng,moving,accuracyM,fixTimestamp,fixId){
    it always requests/returns the real cached road name, or null if none is
    cached yet, so the caller can fall back to something honest instead of
    composing "Driving near On the move". */
-function famBareRoadName(lat,lng,fixTimestamp,fixId){
+function famBareRoadName(lat,lng,fixTimestamp,fixId,uid){
   // No saved-place-name shortcut — always the real road name.
   const cached=FamGeo.get(lat,lng);
   if(cached){
@@ -19741,7 +20109,7 @@ function famBareRoadName(lat,lng,fixTimestamp,fixId){
   // setAccuracy_called for the same fix. The famLocationLines fix alone
   // didn't cover this — famLocationLines is the STATIONARY-branch address
   // path; this is the separate driving/road-name path, called from 3 sites.
-  FamGeo.request(lat,lng,fixId!=null?fixId:fixTimestamp); // kick off a lookup for next time; don't block on it
+  FamGeo.request(lat,lng,fixId!=null?fixId:fixTimestamp,uid); // kick off a lookup for next time; don't block on it
   return null;
 }
 
@@ -21413,6 +21781,26 @@ async function famAction(act,arg,ev){
           console.error('[geodiag-export] all strategies failed',e);
           toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
           famShowJsonExportModal(entries,'mbm-geo-diag');
+        }
+      })();
+      return;
+    }
+    case 'geodiag-persist-export':{
+      (async()=>{
+        try{
+          const genIds=await window.GeoDiagPersist.listGenerations();
+          const generations=[];
+          for(let i=0;i<genIds.length;i++){
+            const entries=await window.GeoDiagPersist.exportGeneration(genIds[i]);
+            generations.push({ generationIndex:i, sessionId:genIds[i], isCurrent:(i===0), entryCount:entries.length, entries });
+          }
+          const payload={ exportedAt:new Date().toISOString(), generationCount:generations.length, generations };
+          const r=await famExportJsonRobust(payload,'mbm-geo-diag-persist-all-generations');
+          toast((L==='fa'?`${generations.length} نسل، ${generations.reduce((s,g)=>s+g.entryCount,0)} رکورد — `:`${generations.length} generations, ${generations.reduce((s,g)=>s+g.entryCount,0)} records — `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified') famShowJsonExportModal(payload,'mbm-geo-diag-persist-all-generations');
+        }catch(e){
+          console.error('[geodiag-persist-export] failed',e);
+          toast(L==='fa'?'خروجی‌گیری ناموفق بود':'Export failed');
         }
       })();
       return;
