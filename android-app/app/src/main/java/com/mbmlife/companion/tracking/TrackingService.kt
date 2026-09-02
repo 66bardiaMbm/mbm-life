@@ -147,6 +147,13 @@ class TrackingService : Service() {
         fused = LocationServices.getFusedLocationProviderClient(this)
         activityRecognition = ActivityRecognition.getClient(this)
         createNotificationChannel()
+        repository.logger().info(
+            "ServiceLifecycle",
+            "onCreate",
+            JSONObject()
+                .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
+                .put("atMs", System.currentTimeMillis())
+        )
         serviceScope.launch {
             for (queued in locationChannel) processLocation(queued)
         }
@@ -449,6 +456,21 @@ class TrackingService : Service() {
             app.preferences.stayStartAtMs = 0
         } else if (output.arrivalAtMs != null) {
             app.preferences.stayStartAtMs = output.arrivalAtMs
+        } else if (app.preferences.stayStartAtMs <= 0L && movement.stateStartedAtMs > 0L) {
+            // v461b FIX: only fills in a genuinely UNSET stayStartAtMs. Do
+            // NOT unconditionally sync from movement.stateStartedAtMs on
+            // every stationary sample — MovementStateDetector.ingest()'s own
+            // "verified_trip_ended" branch records sample.capturedAtMs (the
+            // fix that happened to observe the trip had ended), not the
+            // Trip's real arrivalAtMs; those two times are only equal on
+            // the exact fix where the trip closes. An unconditional
+            // fallback would overwrite the correct arrivalAtMs (just set by
+            // the branch above, on THIS fix) with that mismatched internal
+            // value on the very NEXT stationary fix. Guarding on
+            // "not already set" makes this fallback strictly additive: it
+            // only ever fills a real gap (the no-trip / lost-trip case this
+            // fix targets), never corrects a value that's already correct.
+            app.preferences.stayStartAtMs = movement.stateStartedAtMs
         }
         repository.logSpeed(stableOutput.sample)
         repository.logger().info(
@@ -608,6 +630,7 @@ class TrackingService : Service() {
                     ?: JSONObject.NULL
             )
             .put("nativeTrackingActive", true)
+            .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
             .put("nativeCallbackAtMs", nativeCallbackAtMs)
             .put("acceptedAtMs", acceptedAtMs)
             .put("localStateUpdatedAtMs", localStateUpdatedAtMs)
@@ -757,7 +780,58 @@ class TrackingService : Service() {
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val wasTracking = trackingStartRequested
+        try {
+            repository.logger().info(
+                "ServiceLifecycle",
+                "onTaskRemoved",
+                JSONObject()
+                    .put("wasTracking", wasTracking)
+                    .put("isRunning", isRunning)
+                    .put("atMs", System.currentTimeMillis())
+            )
+        } catch (_: Exception) { /* logger may not be ready this early in a rare race; restart must not be blocked by it */ }
+        if (wasTracking) {
+            // v461-bg FIX (real root cause, confirmed by review — no override
+            // existed at all): the app being swiped from Recents is not, on
+            // its own, supposed to kill a foreground service on stock
+            // Android — but several OEM skins (Samsung's own sleep/"unused
+            // app" management included) treat task removal as a strong hint
+            // to tear the process down regardless of the standard battery
+            // permission being set to Unrestricted. Immediately requesting a
+            // fresh foreground start here is the standard mitigation: it
+            // gives the OS an explicit "this must keep running" signal at
+            // the exact moment it would otherwise be most likely to kill us,
+            // rather than relying solely on START_STICKY's after-the-fact
+            // restart (which still loses every fix that arrives during the
+            // dead window, and only happens at all if the OS honors it).
+            val restartIntent = startIntent(this)
+            try {
+                startForegroundService(restartIntent)
+            } catch (e: Exception) {
+                try {
+                    repository.logger().error(
+                        "ServiceLifecycle",
+                        "onTaskRemoved restart failed",
+                        e.toString()
+                    )
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     override fun onDestroy() {
+        try {
+            repository.logger().info(
+                "ServiceLifecycle",
+                "onDestroy",
+                JSONObject()
+                    .put("wasTracking", trackingStartRequested)
+                    .put("atMs", System.currentTimeMillis())
+            )
+        } catch (_: Exception) { }
         isRunning = false
         stopReevaluationJob?.cancel()
         stopReevaluationJob = null
