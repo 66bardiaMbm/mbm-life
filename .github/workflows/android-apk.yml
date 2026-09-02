@@ -1,3 +1,128 @@
+name: Build v461 background tracking test APKs
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "android-app/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-v461-bg-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and build v461 background tracking APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        working-directory: android-app
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        working-directory: android-app
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v461-bg-test-unit-reports
+          path: |
+            android-app/app/build/reports/tests/testDebugUnitTest/**
+            android-app/app/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enable KVM access
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Run instrumented Android tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          working-directory: android-app
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
+
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v461-bg-test-instrumented-reports
+          path: |
+            android-app/app/build/reports/androidTests/connected/**
+            android-app/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Restore stable APK signing key
+        env:
+          MBM_ANDROID_KEYSTORE_B64: ${{ secrets.MBM_ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$MBM_ANDROID_KEYSTORE_B64"
+          printf '%s' "$MBM_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbm-life-ci.p12"
+
+      - name: Assemble signed v461 background tracking debug and release APKs
+        working-directory: android-app
+        env:
+          MBM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mbm-life-ci.p12
+          MBM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBM_ANDROID_KEYSTORE_PASSWORD }}
+          MBM_ANDROID_KEY_ALIAS: ${{ secrets.MBM_ANDROID_KEY_ALIAS }}
+          MBM_ANDROID_KEY_PASSWORD: ${{ secrets.MBM_ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleDebug
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Verify APK signatures and record certificates
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          DEBUG_APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="android-app/app/build/outputs/apk/release/app-release.apk"
+          test -f "$DEBUG_APK"
+          test -f "$RELEASE_APK"
+          echo "=== v461 background tracking debug certificate ==="
+          "$APKSIGNER" verify --print-certs "$DEBUG_APK"
+          echo "=== v461 background tracking release-test certificate ==="
+          "$APKSIGNER" verify --print-certs "$RELEASE_APK"
+          mkdir -p "$RUNNER_TEMP/v461-bg-apks"
+          cp "$DEBUG_APK" "$RUNNER_TEMP/v461-bg-apks/MBM-Life-v461-bg-test-debug.apk"
+          cp "$RELEASE_APK" "$RUNNER_TEMP/v461-bg-apks/MBM-Life-v461-bg-test-release.apk"
+
+      - name: Upload v461 background tracking debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v461-bg-test-debug
+          path: ${{ runner.temp }}/v461-bg-apks/MBM-Life-v461-bg-test-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload v461 background tracking release-test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MBM-Life-v461-bg-test-release
+          path: ${{ runner.temp }}/v461-bg-apks/MBM-Life-v461-bg-test-release.apk
+          if-no-files-found: error
+          retention-days: 14
 name: Build v460 diagnostics test APKs
 
 on:
