@@ -164,7 +164,10 @@ class MovementStateDetector(
             candidateSamples >= requiredSamples &&
             sample.capturedAtMs - candidateSinceMs >= requiredMs
         ) {
-            commit(proposed, sample.capturedAtMs, "candidate_confirmed")
+            // Preserve the first continuous evidence timestamp. For a
+            // stationary transition this is the real arrival evidence, not
+            // the later sample that happens to cross the confirmation window.
+            commit(proposed, candidateSinceMs, "candidate_confirmed")
         } else {
             unchanged(true, "candidate_pending")
         }
