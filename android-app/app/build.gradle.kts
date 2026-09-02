@@ -13,8 +13,8 @@ android {
         applicationId = "com.mbmlife.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.2.0-v460-test"
+        versionCode = 23
+        versionName = "1.2.0-v461-bg-test"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
