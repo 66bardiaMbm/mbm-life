@@ -15,6 +15,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -70,6 +71,26 @@ class MainActivity : AppCompatActivity() {
     private val backgroundPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             advanceTrackingSetup()
+        }
+
+    // Holds the WebView's getUserMedia() permission request while the
+    // RECORD_AUDIO runtime permission dialog is open, resolved (granted or
+    // denied) when the user answers. Without this, the WebView has no way
+    // to ever actually get microphone access even after RECORD_AUDIO is
+    // granted at the OS level — WebChromeClient.onPermissionRequest must be
+    // explicitly answered per-request; the default (unoverridden) behavior
+    // is to silently deny every media request.
+    private var pendingMicPermissionRequest: PermissionRequest? = null
+    private val micPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val request = pendingMicPermissionRequest
+            pendingMicPermissionRequest = null
+            if (request == null) return@registerForActivityResult
+            if (granted) {
+                request.grant(request.resources)
+            } else {
+                request.deny()
+            }
         }
 
     // Holds the WebView's callback while the system photo/file picker is
@@ -253,6 +274,31 @@ class MainActivity : AppCompatActivity() {
                 // The native foreground service is the sole location producer.
                 callback?.invoke(origin, false, false)
                 logger.info("WebView", "PWA geolocation request denied; native service is authoritative")
+            }
+
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                val wantsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+                val onlyKnownResources = request.resources.all { it == PermissionRequest.RESOURCE_AUDIO_CAPTURE }
+                if (!wantsAudio || !onlyKnownResources) {
+                    // No camera / protected-media use case in this app; deny
+                    // anything that isn't purely a microphone request rather
+                    // than silently mis-granting an unrelated resource.
+                    request.deny()
+                    return
+                }
+                val alreadyGranted = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (alreadyGranted) {
+                    request.grant(request.resources)
+                    return
+                }
+                // Only one getUserMedia() prompt can be in flight at a time;
+                // deny anything still pending rather than leaking it.
+                pendingMicPermissionRequest?.deny()
+                pendingMicPermissionRequest = request
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
 
             override fun onShowFileChooser(
