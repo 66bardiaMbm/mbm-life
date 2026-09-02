@@ -343,6 +343,7 @@ class MainActivity : AppCompatActivity() {
                                     ?: JSONObject.NULL
                             )
                             .put("nativeTrackingActive", app.preferences.trackingEnabled)
+                            .put("nativeAppVersion", BuildConfig.VERSION_NAME)
                         injectNativeFix(json.toString())
                     }
                 }
