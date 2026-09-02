@@ -121,6 +121,7 @@ class TrackingRepository(private val context: Context) {
                     ?.let { Instant.ofEpochMilli(it).toString() }
             )
             .put("nativeTrackingActive", trackingActive)
+            .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
             .put("nativeProducerUid", sample.uid)
             .put("nativeHeartbeatAt", Instant.ofEpochMilli(now).toString())
             .put("reportedAt", Instant.ofEpochMilli(now).toString())
