@@ -20,7 +20,7 @@ android {
         buildConfigField(
             "String",
             "PWA_URL",
-            "\"https://66bardiambm.github.io/mbm-life/?source=android&asset=v418\""
+            "\"https://66bardiambm.github.io/mbm-life/?source=android\""
         )
     }
 
@@ -39,7 +39,6 @@ android {
 
     buildTypes {
         getByName("debug") {
-            buildConfigField("String", "PWA_URL", "\"file:///android_asset/index.html\"")
             signingConfigs.findByName("ciSigning")?.let { signingConfig = it }
         }
         getByName("release") {
