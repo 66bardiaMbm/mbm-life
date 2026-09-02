@@ -21,7 +21,6 @@ import androidx.core.location.LocationCompat
 import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
@@ -61,11 +60,13 @@ class TrackingService : Service() {
         const val ACTION_START = "com.mbmlife.companion.action.START_TRACKING"
         const val ACTION_STOP = "com.mbmlife.companion.action.STOP_TRACKING"
         const val ACTION_ACTIVITY_UPDATE = "com.mbmlife.companion.action.ACTIVITY_UPDATE"
+        const val ACTION_LOCATION_UPDATE = "com.mbmlife.companion.action.LOCATION_UPDATE"
         const val ACTION_NATIVE_FIX = "com.mbmlife.companion.action.NATIVE_FIX"
         const val EXTRA_FIX_JSON = "fix_json"
         private const val CHANNEL_ID = "mbm_native_tracking"
         private const val NOTIFICATION_ID = 4101
         private const val ACTIVITY_REQUEST_CODE = 4102
+        private const val LOCATION_REQUEST_CODE = 4103
         private const val STOP_REEVALUATION_INTERVAL_MS = 10_000L
         private const val ACTIVITY_FRESH_MS = 30_000L
         // v425: the v424 fast/slow GPS mode switch (SLOW_INTERVAL_MS etc.)
@@ -110,34 +111,9 @@ class TrackingService : Service() {
     private var locationRequestFastMode: Boolean? = null
     private var activityUpdatesRequested = false
     private var stopReevaluationJob: Job? = null
+    private var initializationJob: Job? = null
+    private var explicitStopRequested = false
     private val detectorMutex = Mutex()
-
-    private val locationCallback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            val callbackAt = System.currentTimeMillis()
-            result.locations.sortedBy { it.time }.forEach { location ->
-                val sequence = fixSequence.incrementAndGet()
-                // Stable across the bridge, Room/outbox and Firestore so one
-                // physical fix can be followed through every timing stage.
-                val fixId = "native-${location.elapsedRealtimeNanos}"
-                repository.logger().info(
-                    "LocationTiming",
-                    "Native location callback",
-                    JSONObject()
-                        .put("fixId", fixId)
-                        .put("sequence", sequence)
-                        .put("capturedAtMs", location.time)
-                        .put("nativeCallbackAtMs", callbackAt)
-                        .put("lat", location.latitude)
-                        .put("lng", location.longitude)
-                        .put("accuracyM", if (location.hasAccuracy()) location.accuracy else JSONObject.NULL)
-                        .put("rawSpeedMps", if (location.hasSpeed()) location.speed else JSONObject.NULL)
-                        .toString()
-                )
-                locationChannel.trySend(QueuedLocation(location, fixId, sequence, callbackAt))
-            }
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
@@ -147,16 +123,34 @@ class TrackingService : Service() {
         fused = LocationServices.getFusedLocationProviderClient(this)
         activityRecognition = ActivityRecognition.getClient(this)
         createNotificationChannel()
+        logLifecycle("service_created")
         serviceScope.launch {
             for (queued in locationChannel) processLocation(queued)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        logLifecycle(
+            "start_command",
+            JSONObject()
+                .put("action", intent?.action ?: "sticky_restart")
+                .put("flags", flags)
+                .put("startId", startId)
+        )
         when (intent?.action) {
             ACTION_STOP -> {
                 stopTracking()
                 return START_NOT_STICKY
+            }
+            ACTION_LOCATION_UPDATE -> {
+                if (!app.preferences.trackingEnabled) {
+                    logLifecycle("location_delivery_ignored_tracking_disabled")
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+                startForegroundSafely(buildNotification())
+                startTracking("location_pending_intent", enableTracking = false)
+                acceptLocationIntent(intent)
             }
             ACTION_ACTIVITY_UPDATE -> {
                 // v424: a fresh Activity Recognition result arrived
@@ -164,42 +158,76 @@ class TrackingService : Service() {
                 // does not start/stop tracking, does not touch trip state.
                 // requestLocationUpdates() no-ops if the mode hasn't
                 // actually changed.
+                if (app.preferences.trackingEnabled) {
+                    startForegroundSafely(buildNotification())
+                    startTracking("activity_recognition_wakeup", enableTracking = false)
+                }
                 if (trackingStartRequested) requestLocationUpdates()
                 logActivityDiagnostic()
             }
-            ACTION_START, null -> startTracking()
+            ACTION_START -> startTracking("explicit_start", enableTracking = true)
+            null -> {
+                if (app.preferences.trackingEnabled) {
+                    startTracking("sticky_restart", enableTracking = false)
+                } else {
+                    logLifecycle("sticky_restart_ignored_tracking_disabled")
+                    stopSelf(startId)
+                }
+            }
         }
         return START_STICKY
     }
 
-    private fun startTracking() {
+    private fun startTracking(reason: String, enableTracking: Boolean) {
+        if (enableTracking) app.preferences.trackingEnabled = true
+        if (!app.preferences.trackingEnabled) return
         if (trackingStartRequested) {
-            repository.logger().info("Service", "Duplicate start ignored")
+            logLifecycle("duplicate_start_ignored", JSONObject().put("reason", reason))
             return
         }
         trackingStartRequested = true
+        explicitStopRequested = false
         startForegroundSafely(buildNotification())
-        val uid = FirebaseAuth.getInstance().currentUser?.uid
-        val familyId = app.preferences.familyId
-        if (uid == null || familyId.isNullOrBlank()) {
-            repository.logger().error(
-                "Service",
-                "Tracking refused: Firebase user or family context missing"
-            )
-            stopTracking()
-            return
-        }
         if (!hasForegroundLocationPermission()) {
             repository.logger().error("Service", "Tracking refused: location permission missing")
             stopTracking()
             return
         }
 
-        app.preferences.trackingEnabled = true
         app.preferences.serviceStartedAtMs = System.currentTimeMillis()
-        serviceScope.launch {
-            val active = repository.activeTrip(uid)
-            val recent = repository.recentSamples(uid)
+        requestLocationUpdates()
+        requestActivityUpdates()
+        initializationJob?.cancel()
+        initializationJob = serviceScope.launch {
+            var identity: TrackingIdentity? = null
+            for (attempt in 0 until 30) {
+                val authUid = FirebaseAuth.getInstance().currentUser?.uid
+                if (!authUid.isNullOrBlank()) app.preferences.webUid = authUid
+                identity = TrackingRecoveryPolicy.resolveIdentity(
+                    authUid,
+                    app.preferences.webUid,
+                    app.preferences.familyId
+                )
+                if (identity != null) break
+                if (attempt == 0 || attempt == 9 || attempt == 29) {
+                    logLifecycle(
+                        "tracking_context_wait",
+                        JSONObject()
+                            .put("attempt", attempt + 1)
+                            .put("hasPersistedUid", !app.preferences.webUid.isNullOrBlank())
+                            .put("hasFamilyId", !app.preferences.familyId.isNullOrBlank())
+                    )
+                }
+                delay(1_000L)
+            }
+            val resolved = identity
+            if (resolved == null) {
+                trackingStartRequested = false
+                logLifecycle("tracking_context_unavailable_background_delivery_kept")
+                return@launch
+            }
+            val active = repository.activeTrip(resolved.uid)
+            val recent = repository.recentSamples(resolved.uid)
             detector = DrivingDetector(active, recent)
             movementDetector = MovementStateDetector(
                 MovementState.fromWireValue(app.preferences.movementState),
@@ -210,15 +238,13 @@ class TrackingService : Service() {
                 "Service",
                 "Foreground tracking started",
                 JSONObject()
-                    .put("uid", uid)
-                    .put("familyId", familyId)
+                    .put("uid", resolved.uid)
+                    .put("familyId", resolved.familyId)
                     .put("recoveredTripId", active?.id)
+                    .put("startReason", reason)
                     .toString()
             )
-            withContext(Dispatchers.Main) {
-                requestLocationUpdates()
-                requestActivityUpdates()
-            }
+            logLifecycle("tracking_ready", JSONObject().put("startReason", reason))
             startStopReevaluation()
         }
     }
@@ -230,7 +256,7 @@ class TrackingService : Service() {
             locationRequestFastMode == true
         ) return
         if (locationUpdatesRequested) {
-            try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+            try { fused.removeLocationUpdates(locationPendingIntent()) } catch (_: Exception) {}
             locationUpdatesRequested = false
         }
         val builder = LocationRequest.Builder(
@@ -248,7 +274,14 @@ class TrackingService : Service() {
         locationUpdatesRequested = true
         locationRequestFastMode = true
         try {
-            fused.requestLocationUpdates(request, locationCallback, mainLooper)
+            // PendingIntent delivery is intentionally used here instead of a
+            // process-bound LocationCallback. Google Play services can wake
+            // this service and deliver fixes after Android has killed the app
+            // process, which is the required closed-app tracking path.
+            fused.requestLocationUpdates(request, locationPendingIntent())
+                .addOnSuccessListener {
+                    logLifecycle("location_pending_intent_registered")
+                }
                 .addOnFailureListener { error ->
                     locationUpdatesRequested = false
                     locationRequestFastMode = null
@@ -263,6 +296,38 @@ class TrackingService : Service() {
             locationRequestFastMode = null
             repository.logger().error("Location", "SecurityException", error.toString())
             stopTracking()
+        }
+    }
+
+    private fun acceptLocationIntent(intent: Intent) {
+        val result = LocationResult.extractResult(intent)
+        if (result == null) {
+            logLifecycle("location_pending_intent_missing_result")
+            return
+        }
+        val callbackAt = System.currentTimeMillis()
+        logLifecycle(
+            "location_pending_intent_received",
+            JSONObject().put("locationCount", result.locations.size)
+        )
+        result.locations.sortedBy { it.time }.forEach { location ->
+            val sequence = fixSequence.incrementAndGet()
+            val fixId = "native-${location.elapsedRealtimeNanos}"
+            repository.logger().info(
+                "LocationTiming",
+                "Native location pending-intent delivery",
+                JSONObject()
+                    .put("fixId", fixId)
+                    .put("sequence", sequence)
+                    .put("capturedAtMs", location.time)
+                    .put("nativeCallbackAtMs", callbackAt)
+                    .put("lat", location.latitude)
+                    .put("lng", location.longitude)
+                    .put("accuracyM", if (location.hasAccuracy()) location.accuracy else JSONObject.NULL)
+                    .put("rawSpeedMps", if (location.hasSpeed()) location.speed else JSONObject.NULL)
+                    .toString()
+            )
+            locationChannel.trySend(QueuedLocation(location, fixId, sequence, callbackAt))
         }
     }
 
@@ -389,8 +454,25 @@ class TrackingService : Service() {
 
     private suspend fun processLocation(queued: QueuedLocation) {
         val location = queued.location
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        val familyId = app.preferences.familyId ?: return
+        val authUid = FirebaseAuth.getInstance().currentUser?.uid
+        if (!authUid.isNullOrBlank()) app.preferences.webUid = authUid
+        val identity = TrackingRecoveryPolicy.resolveIdentity(
+            authUid,
+            app.preferences.webUid,
+            app.preferences.familyId
+        )
+        if (identity == null) {
+            logLifecycle(
+                "location_deferred_missing_identity",
+                JSONObject()
+                    .put("capturedAtMs", location.time)
+                    .put("hasPersistedUid", !app.preferences.webUid.isNullOrBlank())
+                    .put("hasFamilyId", !app.preferences.familyId.isNullOrBlank())
+            )
+            return
+        }
+        val uid = identity.uid
+        val familyId = identity.familyId
         val engine = detector ?: run {
             val active = repository.activeTrip(uid)
             DrivingDetector(active, repository.recentSamples(uid)).also { detector = it }
@@ -445,11 +527,12 @@ class TrackingService : Service() {
         val stableOutput = output.copy(
             sample = output.sample.copy(activityType = movement.state.wireValue)
         )
-        if (movement.state != MovementState.STATIONARY) {
-            app.preferences.stayStartAtMs = 0
-        } else if (output.arrivalAtMs != null) {
-            app.preferences.stayStartAtMs = output.arrivalAtMs
-        }
+        app.preferences.stayStartAtMs = TrackingRecoveryPolicy.nextStayStartAtMs(
+            currentStayStartAtMs = app.preferences.stayStartAtMs,
+            stationary = movement.state == MovementState.STATIONARY,
+            arrivalAtMs = output.arrivalAtMs,
+            movementStartedAtMs = movement.stateStartedAtMs
+        )
         repository.logSpeed(stableOutput.sample)
         repository.logger().info(
             "Movement",
@@ -608,6 +691,7 @@ class TrackingService : Service() {
                     ?: JSONObject.NULL
             )
             .put("nativeTrackingActive", true)
+            .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
             .put("nativeCallbackAtMs", nativeCallbackAtMs)
             .put("acceptedAtMs", acceptedAtMs)
             .put("localStateUpdatedAtMs", localStateUpdatedAtMs)
@@ -631,7 +715,18 @@ class TrackingService : Service() {
         .put("seq", diagnosticSequence.incrementAndGet())
         .put("wallTimestampMs", System.currentTimeMillis())
         .put("monoTimestampMs", SystemClock.elapsedRealtime())
+        .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
         .put("eventType", eventType)
+
+    private fun logLifecycle(event: String, details: JSONObject = JSONObject()) {
+        val payload = diagnosticBase("lifecycle")
+            .put("lifecycleEvent", event)
+            .put("trackingEnabled", app.preferences.trackingEnabled)
+            .put("isRunning", isRunning)
+            .put("locationPendingIntentRegistered", locationUpdatesRequested)
+        details.keys().forEach { key -> payload.put(key, details.opt(key)) }
+        repository.logger().info("NativeDecision", "lifecycle", payload.toString())
+    }
 
     private fun logActivityDiagnostic() {
         val drive = detector?.diagnosticSnapshot()
@@ -665,9 +760,12 @@ class TrackingService : Service() {
     }
 
     private fun stopTracking() {
+        explicitStopRequested = true
+        initializationJob?.cancel()
+        initializationJob = null
         stopReevaluationJob?.cancel()
         stopReevaluationJob = null
-        try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+        try { fused.removeLocationUpdates(locationPendingIntent()) } catch (_: Exception) {}
         try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
         locationUpdatesRequested = false
         locationRequestFastMode = null
@@ -678,8 +776,17 @@ class TrackingService : Service() {
             runBlocking(Dispatchers.IO) { repository.markTrackingStopped(uid) }
         }
         repository.logger().info("Service", "Foreground tracking stopped by user/system")
+        logLifecycle("explicit_stop")
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun locationPendingIntent(): PendingIntent {
+        val intent = Intent(this, TrackingService::class.java)
+            .setAction(ACTION_LOCATION_UPDATE)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getService(this, LOCATION_REQUEST_CODE, intent, flags)
     }
 
     private fun activityPendingIntent(): PendingIntent {
@@ -757,15 +864,41 @@ class TrackingService : Service() {
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        logLifecycle("task_removed")
+        if (TrackingRecoveryPolicy.shouldKeepBackgroundDelivery(
+                app.preferences.trackingEnabled,
+                explicitStopRequested
+            )
+        ) {
+            // Keep the already-registered PendingIntent delivery alive. This
+            // is a no-op while Play services still holds the same request.
+            requestLocationUpdates()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        val keepBackgroundDelivery = TrackingRecoveryPolicy.shouldKeepBackgroundDelivery(
+            app.preferences.trackingEnabled,
+            explicitStopRequested
+        )
+        logLifecycle(
+            if (keepBackgroundDelivery) "service_destroyed_delivery_preserved"
+            else "service_destroyed_tracking_stopped"
+        )
         isRunning = false
+        initializationJob?.cancel()
+        initializationJob = null
         stopReevaluationJob?.cancel()
         stopReevaluationJob = null
-        try { fused.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
-        try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
-        locationUpdatesRequested = false
-        locationRequestFastMode = null
-        activityUpdatesRequested = false
+        if (!keepBackgroundDelivery) {
+            try { fused.removeLocationUpdates(locationPendingIntent()) } catch (_: Exception) {}
+            try { activityRecognition.removeActivityUpdates(activityPendingIntent()) } catch (_: Exception) {}
+            locationUpdatesRequested = false
+            locationRequestFastMode = null
+            activityUpdatesRequested = false
+        }
         trackingStartRequested = false
         locationChannel.close()
         serviceScope.cancel()
