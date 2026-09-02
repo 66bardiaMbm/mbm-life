@@ -8,6 +8,19 @@ import org.junit.Test
 
 class MovementStateDetectorTest {
     @Test
+    fun diagnosticSnapshotReportsCandidateWithoutChangingDecision() {
+        val detector = MovementStateDetector()
+        detector.ingest(sample(1_000L, speed = 1.1), false)
+
+        val snapshot = detector.diagnosticSnapshot()
+
+        assertEquals(MovementState.STATIONARY, snapshot.currentState)
+        assertEquals(MovementState.WALKING, snapshot.candidateState)
+        assertEquals(1, snapshot.candidateSamples)
+        assertEquals(1_000L, snapshot.lastSampleAtMs)
+    }
+
+    @Test
     fun oneWalkingOutlierDoesNotChangeStationaryState() {
         val detector = MovementStateDetector()
         val decision = detector.ingest(sample(5_000L, speed = 1.2), false)
@@ -158,6 +171,151 @@ class MovementStateDetectorTest {
         }
 
         assertEquals(MovementState.CYCLING, decision?.state)
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // v461: candidate_confirmed must record the FIRST continuous evidence
+    // (candidateSinceMs), not the sample that happened to cross the
+    // confirmation threshold. Real report: a native no-trip stationary
+    // arrival was recorded up to STATIONARY_CONFIRM_MS (20s) later than the
+    // person actually stopped, compounding with a separate TrackingService
+    // bug (see TrackingService.kt processLocation()) into a much larger
+    // real-world gap between the true arrival and what the app displayed.
+    // ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun noTripStationaryConfirmationRecordsFirstEvidenceNotConfirmingSample() {
+        // Starting the detector already-STATIONARY would take the
+        // state_confirmed path (proposed==current) on every sample, never
+        // candidate_confirmed — the exact branch this fix targets. Start
+        // from WALKING so confirming STATIONARY is a genuine transition.
+        val detector = MovementStateDetector(MovementState.WALKING, 1_000L)
+        val firstEvidenceAt = 100_000L
+        detector.ingest(sample(firstEvidenceAt, speed = 0.1), verifiedTripActive = false)
+        detector.ingest(sample(firstEvidenceAt + 6_000, speed = 0.1), verifiedTripActive = false)
+        detector.ingest(sample(firstEvidenceAt + 13_000, speed = 0.1), verifiedTripActive = false)
+        val decision = detector.ingest(sample(firstEvidenceAt + 21_000, speed = 0.1), verifiedTripActive = false)
+
+        assertEquals(MovementState.STATIONARY, decision.state)
+        assertEquals("candidate_confirmed", decision.reason)
+        assertEquals(firstEvidenceAt, decision.stateStartedAtMs)
+    }
+
+    @Test
+    fun walkingToStationaryRecordsFirstStationaryEvidenceNotConfirmingSample() {
+        val detector = MovementStateDetector(MovementState.WALKING, 1_000L)
+        val firstEvidenceAt = 5_000L
+        detector.ingest(sample(firstEvidenceAt, speed = 0.1), verifiedTripActive = false)
+        detector.ingest(sample(12_000L, speed = 0.0), verifiedTripActive = false)
+        detector.ingest(sample(19_000L, speed = 0.0), verifiedTripActive = false)
+        val decision = detector.ingest(sample(26_000L, speed = 0.0), verifiedTripActive = false)
+
+        assertEquals(MovementState.STATIONARY, decision.state)
+        assertEquals(firstEvidenceAt, decision.stateStartedAtMs)
+        assertTrue(
+            "recorded start must NOT equal the confirming sample's own timestamp",
+            decision.stateStartedAtMs != 26_000L
+        )
+    }
+
+    @Test
+    fun restartMidCandidateDoesNotFabricateStationaryArrival() {
+        // A fresh detector, seeded exactly like TrackingService re-seeds one
+        // from persisted (committed) state after a process restart — the
+        // in-flight, never-confirmed candidate from before the restart is
+        // legitimately gone, by design (nothing persists an uncommitted
+        // candidate). It must NOT be treated as if it had confirmed.
+        val detector = MovementStateDetector(MovementState.WALKING, 1_000L)
+        val decision = detector.ingest(sample(5_500L, speed = 0.1), verifiedTripActive = false)
+
+        assertEquals(MovementState.WALKING, decision.state)
+        assertFalse(decision.changed)
+    }
+
+    @Test
+    fun restartLoseCandidateButNewCandidateStillConfirmsCorrectlyAfterward() {
+        val detector = MovementStateDetector(MovementState.WALKING, 1_000L)
+        // Post-restart: a brand new candidate must still be able to confirm
+        // normally, using ITS OWN first-evidence sample as the start time.
+        val firstEvidenceAt = 5_500L
+        detector.ingest(sample(firstEvidenceAt, speed = 0.1), verifiedTripActive = false)
+        detector.ingest(sample(13_000L, speed = 0.0), verifiedTripActive = false)
+        detector.ingest(sample(20_000L, speed = 0.0), verifiedTripActive = false)
+        val decision = detector.ingest(sample(27_000L, speed = 0.0), verifiedTripActive = false)
+
+        assertEquals(MovementState.STATIONARY, decision.state)
+        assertEquals(firstEvidenceAt, decision.stateStartedAtMs)
+    }
+
+    @Test
+    fun badFixesBetweenGoodEvidenceDoNotShiftTheRecordedArrivalTime() {
+        val detector = MovementStateDetector()
+        val firstEvidenceAt = 200_000L
+        detector.ingest(sample(firstEvidenceAt, speed = 0.1), verifiedTripActive = false)
+        // rejected (not accepted)
+        detector.ingest(sample(firstEvidenceAt + 3_000, speed = 5.0, accepted = false), verifiedTripActive = false)
+        // stale / non-monotonic
+        detector.ingest(sample(firstEvidenceAt - 500, speed = 0.1), verifiedTripActive = false)
+        // inaccurate
+        detector.ingest(sample(firstEvidenceAt + 6_000, speed = 0.1, accuracy = 200f), verifiedTripActive = false)
+        // good evidence resumes
+        detector.ingest(sample(firstEvidenceAt + 13_000, speed = 0.1), verifiedTripActive = false)
+        val decision = detector.ingest(sample(firstEvidenceAt + 21_000, speed = 0.1), verifiedTripActive = false)
+
+        assertEquals(MovementState.STATIONARY, decision.state)
+        assertEquals(
+            "bad fixes in between must not shift the recorded arrival away from the true first good evidence",
+            firstEvidenceAt,
+            decision.stateStartedAtMs
+        )
+    }
+
+    @Test
+    fun tripEndedArrivalTimeIsStillPreservedExactlyAsBefore() {
+        // requirement #3: the Driving Trip path must be completely
+        // unaffected by the candidateSinceMs fix — it never goes through
+        // the candidate_confirmed branch at all.
+        val detector = MovementStateDetector()
+        detector.ingest(sample(1_000L, speed = 10.0), verifiedTripActive = true)
+        val arrivalAtMs = 50_000L
+
+        val decision = detector.confirmVerifiedTripEnded(arrivalAtMs)
+
+        assertEquals(MovementState.STATIONARY, decision.state)
+        assertEquals(arrivalAtMs, decision.stateStartedAtMs)
+    }
+
+    @Test
+    fun verifiedTripEndedInternalTimestampIsTheClosingFixNotTheRealArrival() {
+        // This is the exact fact that makes TrackingService's stayStartAtMs
+        // fallback dangerous if unguarded (real bug found on review, fixed
+        // by only filling a genuinely UNSET stayStartAtMs — see
+        // TrackingService.kt processLocation()). ingest()'s own
+        // "verified_trip_ended" branch (as opposed to
+        // confirmVerifiedTripEnded(), the timer path) records the CLOSING
+        // FIX's own capturedAtMs as stateStartedAtMs — NOT the trip's real
+        // arrival time, which TrackingService gets separately from
+        // DrivingOutput.arrivalAtMs and which can genuinely differ.
+        val detector = MovementStateDetector()
+        detector.ingest(sample(1_000L, speed = 10.0), verifiedTripActive = true)
+        val closingFixAtMs = 55_000L
+        val realArrivalAtMs = 50_000L // what DrivingOutput.arrivalAtMs would actually be — earlier than the closing fix
+
+        val decision = detector.ingest(
+            sample(closingFixAtMs, speed = 0.0),
+            verifiedTripActive = false,
+            verifiedTripEnded = true
+        )
+
+        assertEquals(MovementState.STATIONARY, decision.state)
+        assertEquals("verified_trip_ended", decision.reason)
+        assertEquals(closingFixAtMs, decision.stateStartedAtMs)
+        assertTrue(
+            "the detector's own internal timestamp must NOT be assumed equal to the trip's real arrivalAtMs " +
+                "(they differ here: $closingFixAtMs vs $realArrivalAtMs) — a caller must use DrivingOutput.arrivalAtMs " +
+                "directly for the true arrival time, never movement.stateStartedAtMs from this particular path",
+            decision.stateStartedAtMs != realArrivalAtMs
+        )
     }
 
     private fun sample(

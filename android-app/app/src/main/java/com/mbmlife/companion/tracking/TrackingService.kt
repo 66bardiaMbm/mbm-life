@@ -13,6 +13,7 @@ import android.location.Location
 import android.os.Build
 import android.os.BatteryManager
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -48,6 +49,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 class TrackingService : Service() {
@@ -93,6 +95,8 @@ class TrackingService : Service() {
     // finished; an obsolete queued fix is replaced rather than rendered late.
     private val locationChannel = Channel<QueuedLocation>(Channel.CONFLATED)
     private val fixSequence = AtomicLong(0L)
+    private val diagnosticSequence = AtomicLong(0L)
+    private val diagnosticSessionId = UUID.randomUUID().toString()
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var activityRecognition: ActivityRecognitionClient
     private lateinit var repository: TrackingRepository
@@ -143,6 +147,14 @@ class TrackingService : Service() {
         fused = LocationServices.getFusedLocationProviderClient(this)
         activityRecognition = ActivityRecognition.getClient(this)
         createNotificationChannel()
+        repository.logger().info(
+            "ServiceLifecycle",
+            "onCreate",
+            JSONObject()
+                .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
+                .put("atMs", System.currentTimeMillis())
+                .toString()
+        )
         serviceScope.launch {
             for (queued in locationChannel) processLocation(queued)
         }
@@ -161,6 +173,7 @@ class TrackingService : Service() {
                 // requestLocationUpdates() no-ops if the mode hasn't
                 // actually changed.
                 if (trackingStartRequested) requestLocationUpdates()
+                logActivityDiagnostic()
             }
             ACTION_START, null -> startTracking()
         }
@@ -303,19 +316,27 @@ class TrackingService : Service() {
         val now = System.currentTimeMillis()
         val activityAt = app.preferences.lastActivityAtMs
         if (activityAt <= 0L || now - activityAt !in 0..ACTIVITY_FRESH_MS) return
-        val closure = detectorMutex.withLock {
-            detector?.reevaluateStop(
+        val drivingEngine = detector ?: return
+        val timerCycle = detectorMutex.withLock {
+            val before = drivingEngine.diagnosticSnapshot()
+            val result = drivingEngine.reevaluateStop(
                 nowMs = now,
                 activityType = app.preferences.lastActivityType,
                 activityConfidence = app.preferences.lastActivityConfidence
             )
-        } ?: return
+            Triple(before, result, drivingEngine.diagnosticSnapshot())
+        }
+        val driveBefore = timerCycle.first
+        val closure = timerCycle.second ?: return
+        val driveAfter = timerCycle.third
 
         val movementEngine = movementDetector ?: MovementStateDetector(
             MovementState.fromWireValue(app.preferences.movementState),
             app.preferences.movementStateStartedAtMs
         ).also { movementDetector = it }
+        val movementBefore = movementEngine.diagnosticSnapshot()
         val movement = movementEngine.confirmVerifiedTripEnded(closure.arrivalAtMs)
+        val movementAfter = movementEngine.diagnosticSnapshot()
         app.preferences.movementState = movement.state.wireValue
         app.preferences.movementStateStartedAtMs = closure.arrivalAtMs
         app.preferences.movementDecisionAtMs = now
@@ -354,6 +375,24 @@ class TrackingService : Service() {
                 .put("activityConfidence", app.preferences.lastActivityConfidence)
                 .toString()
         )
+        repository.logger().info(
+            "NativeDecision",
+            "timer_transition",
+            diagnosticBase("timer_transition")
+                .put("fixId", JSONObject.NULL)
+                .put("lastAcceptedFixId", driveBefore.lastAcceptedFixId ?: JSONObject.NULL)
+                .put("elapsedSinceTriggerFixMs", driveBefore.lastAcceptedAtMs?.let { now - it } ?: JSONObject.NULL)
+                .put("activityHint", app.preferences.lastActivityType)
+                .put("activityConfidence", app.preferences.lastActivityConfidence)
+                .put("movementStateBefore", movementBefore.currentState.wireValue)
+                .put("movementStateAfter", movementAfter.currentState.wireValue)
+                .put("activeTripIdBefore", driveBefore.activeTripId ?: JSONObject.NULL)
+                .put("activeTripIdAfter", driveAfter.activeTripId ?: JSONObject.NULL)
+                .put("tripTransition", TripTransition.ENDED.name)
+                .put("decisionReason", movement.reason)
+                .put("transitionReason", closure.trip.closeReason ?: "sustained_stop_activity_timer")
+                .toString()
+        )
     }
 
     private suspend fun processLocation(queued: QueuedLocation) {
@@ -384,18 +423,27 @@ class TrackingService : Service() {
             activityConfidence = if (activityIsFresh) app.preferences.lastActivityConfidence else 0
         )
         val acceptedAtMs = System.currentTimeMillis()
-        val output = detectorMutex.withLock { engine.ingest(fix) }
+        val driveCycle = detectorMutex.withLock {
+            val before = engine.diagnosticSnapshot()
+            val result = engine.ingest(fix)
+            Triple(before, result, engine.diagnosticSnapshot())
+        }
+        val driveBefore = driveCycle.first
+        val output = driveCycle.second
+        val driveAfter = driveCycle.third
         readBatteryState()
         val nativeDriving = output.trip?.status == "active"
         val movementEngine = movementDetector ?: MovementStateDetector(
             MovementState.fromWireValue(app.preferences.movementState),
             app.preferences.movementStateStartedAtMs
         ).also { movementDetector = it }
+        val movementBefore = movementEngine.diagnosticSnapshot()
         val movement = movementEngine.ingest(
             output.sample,
             verifiedTripActive = nativeDriving,
             verifiedTripEnded = output.transition == TripTransition.ENDED
         )
+        val movementAfter = movementEngine.diagnosticSnapshot()
         val movementStartedAt =
             output.arrivalAtMs?.takeIf { movement.state == MovementState.STATIONARY }
                 ?: movement.stateStartedAtMs
@@ -409,6 +457,21 @@ class TrackingService : Service() {
             app.preferences.stayStartAtMs = 0
         } else if (output.arrivalAtMs != null) {
             app.preferences.stayStartAtMs = output.arrivalAtMs
+        } else if (app.preferences.stayStartAtMs <= 0L && movement.stateStartedAtMs > 0L) {
+            // v461b FIX: only fills in a genuinely UNSET stayStartAtMs. Do
+            // NOT unconditionally sync from movement.stateStartedAtMs on
+            // every stationary sample — MovementStateDetector.ingest()'s own
+            // "verified_trip_ended" branch records sample.capturedAtMs (the
+            // fix that happened to observe the trip had ended), not the
+            // Trip's real arrivalAtMs; those two times are only equal on
+            // the exact fix where the trip closes. An unconditional
+            // fallback would overwrite the correct arrivalAtMs (just set by
+            // the branch above, on THIS fix) with that mismatched internal
+            // value on the very NEXT stationary fix. Guarding on
+            // "not already set" makes this fallback strictly additive: it
+            // only ever fills a real gap (the no-trip / lost-trip case this
+            // fix targets), never corrects a value that's already correct.
+            app.preferences.stayStartAtMs = movement.stateStartedAtMs
         }
         repository.logSpeed(stableOutput.sample)
         repository.logger().info(
@@ -421,6 +484,53 @@ class TrackingService : Service() {
                 .put("evidenceAccepted", movement.evidenceAccepted)
                 .put("reason", movement.reason)
                 .put("sampleAtMs", capturedAt)
+                .toString()
+        )
+        val distanceFromLastValidFixM = if (
+            driveBefore.lastAcceptedLat != null && driveBefore.lastAcceptedLng != null
+        ) {
+            com.mbmlife.companion.engine.Geo.distanceM(
+                driveBefore.lastAcceptedLat,
+                driveBefore.lastAcceptedLng,
+                fix.latitude,
+                fix.longitude
+            )
+        } else null
+        repository.logger().info(
+            "NativeDecision",
+            "fix_decision",
+            diagnosticBase("fix_decision")
+                .put("fixId", queued.fixId)
+                .put("nativeSequence", queued.sequence)
+                .put("provider", location.provider ?: JSONObject.NULL)
+                .put("capturedAtMs", capturedAt)
+                .put("elapsedRealtimeNanos", location.elapsedRealtimeNanos)
+                .put("accuracyM", fix.accuracyM ?: JSONObject.NULL)
+                .put("rawSpeedMps", output.sample.rawSpeedMps ?: JSONObject.NULL)
+                .put("filteredSpeedMps", output.sample.filteredSpeedMps ?: JSONObject.NULL)
+                .put("fallbackSpeedMps", output.sample.fallbackSpeedMps ?: JSONObject.NULL)
+                .put("distanceFromLastValidFixM", distanceFromLastValidFixM ?: JSONObject.NULL)
+                .put("dtFromLastValidFixMs", driveBefore.lastAcceptedAtMs?.let { capturedAt - it } ?: JSONObject.NULL)
+                .put("accepted", output.sample.accepted)
+                .put("rejectReason", output.sample.rejectionReason ?: JSONObject.NULL)
+                .put("candidateStateBefore", movementBefore.candidateState?.wireValue ?: JSONObject.NULL)
+                .put("candidateStateAfter", movementAfter.candidateState?.wireValue ?: JSONObject.NULL)
+                .put("candidateCountBefore", movementBefore.candidateSamples)
+                .put("candidateCountAfter", movementAfter.candidateSamples)
+                .put("movementStateBefore", movementBefore.currentState.wireValue)
+                .put("movementStateAfter", movementAfter.currentState.wireValue)
+                .put("decisionReason", movement.reason)
+                .put("evidenceAccepted", movement.evidenceAccepted)
+                .put("activeTripIdBefore", driveBefore.activeTripId ?: JSONObject.NULL)
+                .put("activeTripIdAfter", driveAfter.activeTripId ?: JSONObject.NULL)
+                .put("tripTransition", output.transition.name)
+                .put("transitionReason", output.trip?.closeReason ?: JSONObject.NULL)
+                .put("driveCandidateSinceMsBefore", driveBefore.driveCandidateSinceMs ?: JSONObject.NULL)
+                .put("driveCandidateSinceMsAfter", driveAfter.driveCandidateSinceMs ?: JSONObject.NULL)
+                .put("stopCandidateSinceMsBefore", driveBefore.stopCandidateSinceMs ?: JSONObject.NULL)
+                .put("stopCandidateSinceMsAfter", driveAfter.stopCandidateSinceMs ?: JSONObject.NULL)
+                .put("activityHint", fix.activityType)
+                .put("activityConfidence", fix.activityConfidence)
                 .toString()
         )
         app.preferences.lastFixAtMs = capturedAt
@@ -521,6 +631,7 @@ class TrackingService : Service() {
                     ?: JSONObject.NULL
             )
             .put("nativeTrackingActive", true)
+            .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
             .put("nativeCallbackAtMs", nativeCallbackAtMs)
             .put("acceptedAtMs", acceptedAtMs)
             .put("localStateUpdatedAtMs", localStateUpdatedAtMs)
@@ -537,6 +648,35 @@ class TrackingService : Service() {
         val manager = getSystemService(BatteryManager::class.java) ?: return null
         return manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             .takeIf { it in 0..100 }
+    }
+
+    private fun diagnosticBase(eventType: String) = JSONObject()
+        .put("diagnosticSessionId", diagnosticSessionId)
+        .put("seq", diagnosticSequence.incrementAndGet())
+        .put("wallTimestampMs", System.currentTimeMillis())
+        .put("monoTimestampMs", SystemClock.elapsedRealtime())
+        .put("eventType", eventType)
+
+    private fun logActivityDiagnostic() {
+        val drive = detector?.diagnosticSnapshot()
+        val movement = movementDetector?.diagnosticSnapshot()
+        repository.logger().info(
+            "NativeDecision",
+            "activity_update",
+            diagnosticBase("activity_update")
+                .put("fixId", JSONObject.NULL)
+                .put("lastAcceptedFixId", drive?.lastAcceptedFixId ?: JSONObject.NULL)
+                .put("activityHint", app.preferences.lastActivityType)
+                .put("activityConfidence", app.preferences.lastActivityConfidence)
+                .put("movementStateBefore", movement?.currentState?.wireValue ?: JSONObject.NULL)
+                .put("movementStateAfter", movement?.currentState?.wireValue ?: JSONObject.NULL)
+                .put("activeTripIdBefore", drive?.activeTripId ?: JSONObject.NULL)
+                .put("activeTripIdAfter", drive?.activeTripId ?: JSONObject.NULL)
+                .put("tripTransition", TripTransition.NONE.name)
+                .put("decisionReason", "activity_observed_no_state_decision")
+                .put("transitionReason", JSONObject.NULL)
+                .toString()
+        )
     }
 
     private fun readBatteryState() {
@@ -641,7 +781,60 @@ class TrackingService : Service() {
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val wasTracking = trackingStartRequested
+        try {
+            repository.logger().info(
+                "ServiceLifecycle",
+                "onTaskRemoved",
+                JSONObject()
+                    .put("wasTracking", wasTracking)
+                    .put("isRunning", isRunning)
+                    .put("atMs", System.currentTimeMillis())
+                    .toString()
+            )
+        } catch (_: Exception) { /* logger may not be ready this early in a rare race; restart must not be blocked by it */ }
+        if (wasTracking) {
+            // v461-bg FIX (real root cause, confirmed by review — no override
+            // existed at all): the app being swiped from Recents is not, on
+            // its own, supposed to kill a foreground service on stock
+            // Android — but several OEM skins (Samsung's own sleep/"unused
+            // app" management included) treat task removal as a strong hint
+            // to tear the process down regardless of the standard battery
+            // permission being set to Unrestricted. Immediately requesting a
+            // fresh foreground start here is the standard mitigation: it
+            // gives the OS an explicit "this must keep running" signal at
+            // the exact moment it would otherwise be most likely to kill us,
+            // rather than relying solely on START_STICKY's after-the-fact
+            // restart (which still loses every fix that arrives during the
+            // dead window, and only happens at all if the OS honors it).
+            val restartIntent = startIntent(this)
+            try {
+                startForegroundService(restartIntent)
+            } catch (e: Exception) {
+                try {
+                    repository.logger().error(
+                        "ServiceLifecycle",
+                        "onTaskRemoved restart failed",
+                        e.toString()
+                    )
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     override fun onDestroy() {
+        try {
+            repository.logger().info(
+                "ServiceLifecycle",
+                "onDestroy",
+                JSONObject()
+                    .put("wasTracking", trackingStartRequested)
+                    .put("atMs", System.currentTimeMillis())
+                    .toString()
+            )
+        } catch (_: Exception) { }
         isRunning = false
         stopReevaluationJob?.cancel()
         stopReevaluationJob = null

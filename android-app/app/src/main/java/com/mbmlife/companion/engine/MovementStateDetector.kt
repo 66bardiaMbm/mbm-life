@@ -22,6 +22,17 @@ data class MovementDecision(
     val reason: String
 )
 
+/** Read-only diagnostic state. It must never participate in a decision. */
+data class MovementDiagnosticSnapshot(
+    val currentState: MovementState,
+    val currentStateStartedAtMs: Long,
+    val lastSampleAtMs: Long,
+    val candidateState: MovementState?,
+    val candidateSinceMs: Long,
+    val candidateSamples: Int,
+    val credibleHistorySize: Int
+)
+
 /**
  * Converts accepted native location samples into one persisted movement state.
  *
@@ -56,6 +67,16 @@ class MovementStateDetector(
     private var candidateSinceMs = 0L
     private var candidateSamples = 0
     private val credibleHistory = ArrayDeque<LocationSampleEntity>()
+
+    fun diagnosticSnapshot() = MovementDiagnosticSnapshot(
+        currentState = current,
+        currentStateStartedAtMs = currentStartedAtMs,
+        lastSampleAtMs = lastSampleAtMs,
+        candidateState = candidate,
+        candidateSinceMs = candidateSinceMs,
+        candidateSamples = candidateSamples,
+        credibleHistorySize = credibleHistory.size
+    )
 
     fun ingest(
         sample: LocationSampleEntity,
@@ -143,7 +164,15 @@ class MovementStateDetector(
             candidateSamples >= requiredSamples &&
             sample.capturedAtMs - candidateSinceMs >= requiredMs
         ) {
-            commit(proposed, sample.capturedAtMs, "candidate_confirmed")
+            // v461 FIX: use the FIRST continuous piece of evidence
+            // (candidateSinceMs), not the confirming sample's own timestamp.
+            // The old `commit(proposed, sample.capturedAtMs, ...)` recorded
+            // whichever sample happened to cross the confirmation threshold
+            // as the moment the state "started" — for STATIONARY that is up
+            // to STATIONARY_CONFIRM_MS (20s) after the person actually
+            // stopped, and it compounds with the TrackingService-level bug
+            // (see stayStartAtMs there) into a much larger real-world gap.
+            commit(proposed, candidateSinceMs, "candidate_confirmed")
         } else {
             unchanged(true, "candidate_pending")
         }

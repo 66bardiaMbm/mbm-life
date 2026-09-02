@@ -10,6 +10,21 @@ class DrivingDetectorTest {
     private val familyId = "test-family"
 
     @Test
+    fun diagnosticSnapshotReportsDrivingCandidateAndLastFix() {
+        val detector = DrivingDetector()
+        val output = detector.ingest(
+            fix(timeMs = 1_000L, lat = -42.7, lng = 147.25, speed = 10f)
+        )
+
+        val snapshot = detector.diagnosticSnapshot()
+
+        assertEquals(output.sample.id, snapshot.lastAcceptedFixId)
+        assertEquals(1_000L, snapshot.lastAcceptedAtMs)
+        assertEquals(1_000L, snapshot.driveCandidateSinceMs)
+        assertEquals(null, snapshot.activeTripId)
+    }
+
+    @Test
     fun fallbackSpeedIsCalculatedWhenProviderSpeedIsMissing() {
         val detector = DrivingDetector()
         detector.ingest(fix(timeMs = 1_000L, lat = -42.7, lng = 147.25, speed = null))
