@@ -153,6 +153,7 @@ class TrackingService : Service() {
             JSONObject()
                 .put("nativeAppVersion", com.mbmlife.companion.BuildConfig.VERSION_NAME)
                 .put("atMs", System.currentTimeMillis())
+                .toString()
         )
         serviceScope.launch {
             for (queued in locationChannel) processLocation(queued)
@@ -791,6 +792,7 @@ class TrackingService : Service() {
                     .put("wasTracking", wasTracking)
                     .put("isRunning", isRunning)
                     .put("atMs", System.currentTimeMillis())
+                    .toString()
             )
         } catch (_: Exception) { /* logger may not be ready this early in a rare race; restart must not be blocked by it */ }
         if (wasTracking) {
@@ -830,6 +832,7 @@ class TrackingService : Service() {
                 JSONObject()
                     .put("wasTracking", trackingStartRequested)
                     .put("atMs", System.currentTimeMillis())
+                    .toString()
             )
         } catch (_: Exception) { }
         isRunning = false
