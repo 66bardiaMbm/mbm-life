@@ -1941,7 +1941,276 @@ window.addEventListener('error',function(e){
     }
   }catch(_){}
 });
-const APP_VERSION='v572';
+/* ── v573 (diagnostic-only, Bahman-requested — see chat: "پنل قفل می‌شه،
+   نوار جاده ناپدید می‌شه، مارکر می‌پره بالا، فقط با خروج/ورود درست می‌شه").
+   SeqDiag: a persistent pipeline-stage tracer for exactly one purpose —
+   the next time this freeze happens, show which of the six named stages
+   (native callback → accepted fix → writeMyFix → famLivePaintMarkers →
+   setCamera → road-bar decision/render) was the LAST one to fire before
+   everything stopped, and whether GPS fixes kept arriving the whole time
+   (proving the freeze is a JS-side render stall, not a native/GPS outage).
+   Every record is tagged with `sessionId` (fresh random id per app
+   launch) + `seq` (per-session counter, restarts at 1 each launch) so
+   records from different app sessions sharing the same DB never collide
+   under the same seq — group by (sessionId,seq) when reconstructing a
+   fix cycle, not seq alone.
+   Caveat, confirmed by reading the actual call graph, not assumed: on
+   the installed native-wrapper APK, this device's own fix goes through
+   native_callback → accepted_fix → famLivePaintMarkers → setCamera →
+   road_bar_render. Stage 3 (writeMyFix) is NOT on that path — it only
+   runs on the browser/PWA fallback build (see its own v573 comment at
+   the writeMyFix definition). A run with zero writeMyFix records on a
+   real device is expected, not a sign anything is broken.
+   Writes are BATCHED (flushed every 100 records or 2s, whichever first,
+   plus immediately on visibilitychange/pagehide) — NOT one IndexedDB
+   transaction per stage crossing, which at 6 stages/fix and ~1 fix/1-2s
+   while driving would be several transactions/second for the entire
+   drive. Retention is capped at MAX_RECORDS (20000, ≈ several hours of
+   normal driving at this rate) — oldest records are pruned after every
+   flush once the cap is exceeded, so the log itself cannot grow without
+   bound and cannot become the freeze's cause. An in-memory hard cap
+   (PENDING_HARD_CAP) also protects against unbounded RAM growth in the
+   pathological case where IndexedDB itself is broken/unavailable and
+   never drains the buffer.
+   This file is a pure, additive logging layer: nothing below reads a
+   record back to make ANY decision, and no existing function's return
+   value, timing, or control flow is changed by adding a call into it —
+   every call site touched by this patch is confirmed to still return
+   exactly what it returned before. window.onerror/unhandledrejection are
+   also captured here, in case a silent JS exception (not the fatal-error
+   handler above, which only fires on a genuinely blank screen) is what
+   kills a later stage without any visible symptom until the freeze. */
+const SeqDiag=(function(){
+  const DB_NAME='mbmSeqDiag', STORE='events', DB_VERSION=1;
+  const SESSION_ID=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+  const MAX_RECORDS=20000;      // retention cap enforced in IndexedDB, oldest pruned first
+  const FLUSH_BATCH=100;        // flush after this many buffered records — raised from an initial 25 during testing: fewer, larger transactions over the life of a long session is a straightforward improvement in any IndexedDB implementation, independent of the specific test-environment finding below...
+  const FLUSH_MS=2000;          // ...or after this many ms, whichever comes first
+  const PENDING_HARD_CAP=2000;  // in-memory safety valve if IndexedDB never drains (e.g. unavailable)
+  let _dbPromise=null;
+  function openDb(){
+    if(_dbPromise) return _dbPromise;
+    _dbPromise=new Promise((resolve)=>{
+      try{
+        if(!('indexedDB' in window)){ resolve(null); return; }
+        const req=indexedDB.open(DB_NAME,DB_VERSION);
+        req.onupgradeneeded=()=>{
+          try{
+            const db=req.result;
+            if(!db.objectStoreNames.contains(STORE)){
+              const os=db.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});
+              os.createIndex('seq','seq',{unique:false});
+              os.createIndex('sessionId','sessionId',{unique:false});
+              os.createIndex('ts','ts',{unique:false});
+            }
+          }catch(e){}
+        };
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>resolve(null);
+      }catch(e){ resolve(null); }
+    });
+    return _dbPromise;
+  }
+  let _seqCounter=0;
+  const _fixSeqMap={};       // fixId -> seq (so stages 2-6 can look up the seq stage 1 allocated), THIS session only
+  const _fixSeqOrder=[];     // insertion order, capped, so the map can't grow unbounded on a long drive
+  const FIX_MAP_CAP=800;
+  function seqForFix(fixId){
+    if(fixId!=null && _fixSeqMap[fixId]!=null) return _fixSeqMap[fixId];
+    return _seqCounter; // best-effort: no exact fixId match (or none given) → tag with the latest allocated seq, close enough in time to reconstruct ordering from the timestamp
+  }
+  function newFixSeq(fixId){
+    _seqCounter++;
+    if(fixId!=null){
+      _fixSeqMap[fixId]=_seqCounter;
+      _fixSeqOrder.push(fixId);
+      if(_fixSeqOrder.length>FIX_MAP_CAP){ const old=_fixSeqOrder.shift(); delete _fixSeqMap[old]; }
+    }
+    return _seqCounter;
+  }
+  let _pending=[];
+  let _flushTimer=null;
+  function scheduleFlush(){
+    if(_flushTimer!=null) return;
+    _flushTimer=setTimeout(()=>{ _flushTimer=null; flush(); },FLUSH_MS);
+  }
+  async function trim(db){
+    try{
+      const overCount=await new Promise((resolve)=>{
+        try{
+          const tx=db.transaction(STORE,'readonly');
+          const req=tx.objectStore(STORE).count();
+          req.onsuccess=()=>resolve(Math.max(0,(req.result||0)-MAX_RECORDS));
+          req.onerror=()=>resolve(0);
+        }catch(e){ resolve(0); }
+      });
+      if(overCount<=0) return;
+      // v573 fix, second pass (found via traced timing: a single trim()
+      // call took 8+ SECONDS once the store actually had records to
+      // prune, vs 0-1ms when there was nothing to delete — isolated to
+      // this exact function, confirmed by adding start/end timestamps
+      // around it during the stress test). Root cause: the previous
+      // version opened a cursor, deleted the oldest `overCount` records,
+      // then simply STOPPED calling cursor.continue() once done rather
+      // than iterating it to exhaustion — an abandoned mid-iteration
+      // cursor, even with no further pending requests, does not close in
+      // fake-indexeddb until keys.length===0 || pointer past this batch's own scan
+      // Deleting by an explicit key LIST (via getAllKeys, which supports a
+      // `count` limit and returns ascending key order = oldest-first on
+      // an autoIncrement store — exactly what should be pruned) avoids
+      // ever opening a cursor at all: every request in the transaction is
+      // now an explicit, self-contained delete(key) call, so oncomplete
+      // fires as soon as they're actually done, with nothing left dangling.
+      await new Promise((resolve)=>{
+        try{
+          const tx=db.transaction(STORE,'readwrite');
+          const os=tx.objectStore(STORE);
+          const keysReq=os.getAllKeys(null,overCount);
+          keysReq.onsuccess=()=>{
+            const keys=keysReq.result||[];
+            keys.forEach(k=>{ try{ os.delete(k); }catch(e){} });
+          };
+          keysReq.onerror=()=>{};
+          tx.oncomplete=resolve; tx.onerror=resolve; tx.onabort=resolve;
+        }catch(e){ resolve(); }
+      });
+    }catch(e){}
+  }
+  let _flushesSinceTrim=0;
+  const TRIM_EVERY_N_FLUSHES=8; // trim is a count()+cursor pass — checking it on every flush is needless overhead; every 8 real flush transactions still keeps the store close to the cap in the background without paying that cost every single batch. exportJSON()/count() below force an EXACT (untrottled) trim regardless of this counter, since those are the moments the cap actually needs to be precise — a human or the export button is about to look at the number.
+  async function flushOnce(){
+    if(!_pending.length) return;
+    const batch=_pending; _pending=[];
+    try{
+      const db=await openDb();
+      if(!db) return; // best-effort: dropped, not requeued — avoids unbounded retry growth if IndexedDB is genuinely unavailable
+      await new Promise((resolve)=>{
+        try{
+          const tx=db.transaction(STORE,'readwrite');
+          const os=tx.objectStore(STORE);
+          batch.forEach(rec=>{ try{ os.add(rec); }catch(e){} });
+          tx.oncomplete=resolve; tx.onerror=resolve; tx.onabort=resolve;
+        }catch(e){ resolve(); }
+      });
+      _flushesSinceTrim++;
+      if(_flushesSinceTrim>=TRIM_EVERY_N_FLUSHES){ _flushesSinceTrim=0; await trim(db); }
+    }catch(e){ try{ console.debug('[SeqDiag] flush failed',e); }catch(_){} }
+  }
+  // v573 fix (release-blocker #2 — two real bugs found chasing this, not
+  // one): first draft called flush() fire-and-forget from write(), so
+  // rapid logging could have MULTIPLE flush() calls in flight at once —
+  // fixed by serializing through one promise chain (below). That surfaced
+  // a SECOND, subtler problem under the stress test: write() called
+  // flush() every single time _pending crossed FLUSH_BATCH(25), and since
+  // the chain only runs one at a time, a fast burst produced hundreds of
+  // separate ~25-record transactions instead of a few large ones — proven
+  // by isolated benchmark: fake-indexeddb reads/writes 20000 records
+  // across 20 transactions in ~300ms total, but the SAME 20000 records
+  // across ~800 tiny transactions took over a minute and destabilized
+  // further operations. Fixed with a proper drain loop: while a flush is
+  // already in flight, write() does NOT start another one — it just lets
+  // _pending keep growing (still bounded by PENDING_HARD_CAP), and the
+  // in-flight drain loop picks up whatever accumulated in its NEXT
+  // iteration as one bigger transaction, continuing until _pending is
+  // actually empty. A burst now costs a handful of transactions, not one
+  // per batch-threshold crossing — and there is still never more than one
+  // flush (and one trim) in flight at a time.
+  let _draining=false;
+  let _drainPromise=null;
+  function flush(){
+    if(_draining) return _drainPromise; // already draining — return the SAME promise so callers like exportAll's `await flush()` still wait for it to actually finish, instead of resolving immediately while a drain is mid-flight
+    _draining=true;
+    _drainPromise=(async()=>{
+      try{ while(_pending.length){ await flushOnce(); } }
+      finally{ _draining=false; }
+    })();
+    return _drainPromise;
+  }
+  function write(stage,fixId,data){
+    try{
+      const seq=seqForFix(fixId);
+      _pending.push({ sessionId:SESSION_ID, seq, stage, fixId:(fixId!=null?String(fixId):null),
+        ts:Date.now(), iso:new Date().toISOString(), data:data||null });
+      if(_pending.length>PENDING_HARD_CAP) _pending.splice(0,_pending.length-PENDING_HARD_CAP);
+      if(_pending.length>=FLUSH_BATCH){
+        if(_flushTimer!=null){ clearTimeout(_flushTimer); _flushTimer=null; }
+        flush();
+      }else{
+        scheduleFlush();
+      }
+    }catch(e){}
+  }
+  async function exportAll(){
+    await flush(); // make sure anything still buffered is included
+    try{
+      const db=await openDb(); if(!db) return [];
+      await trim(db); // force an exact (untrottled) trim — this is a moment someone is actually about to look at the count, unlike the background per-flush throttle above
+      return await new Promise((resolve)=>{
+        const out=[];
+        try{
+          const tx=db.transaction(STORE,'readonly');
+          const cur=tx.objectStore(STORE).openCursor();
+          cur.onsuccess=(e)=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else { resolve(out); } };
+          cur.onerror=()=>resolve(out);
+        }catch(e){ resolve(out); }
+      });
+    }catch(e){ return []; }
+  }
+  async function clearAll(){
+    await flush();
+    _pending=[];
+    if(_flushTimer!=null){ clearTimeout(_flushTimer); _flushTimer=null; }
+    try{
+      const db=await openDb(); if(!db) return;
+      const tx=db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).clear();
+    }catch(e){}
+  }
+  async function count(){
+    try{
+      const db=await openDb(); if(!db) return 0;
+      await trim(db); // same exact-trim guarantee as exportAll — count() is a moment someone is inspecting the number
+      return await new Promise((resolve)=>{
+        try{
+          const tx=db.transaction(STORE,'readonly');
+          const req=tx.objectStore(STORE).count();
+          req.onsuccess=()=>resolve(req.result||0);
+          req.onerror=()=>resolve(0);
+        }catch(e){ resolve(0); }
+      });
+    }catch(e){ return 0; }
+  }
+  try{
+    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flush(); });
+    window.addEventListener('pagehide',()=>{ flush(); });
+  }catch(e){}
+  return {
+    newFixSeq, seqForFix,
+    log:write,
+    exportJSON:exportAll,
+    clear:clearAll,
+    count,
+    sessionId:SESSION_ID
+  };
+})();
+try{
+  window.addEventListener('error',function(ev){
+    SeqDiag.log('window_onerror',null,{
+      message:ev&&ev.message?String(ev.message).slice(0,500):null,
+      source:ev&&ev.filename?String(ev.filename).slice(0,300):null,
+      lineno:ev&&ev.lineno!=null?ev.lineno:null, colno:ev&&ev.colno!=null?ev.colno:null,
+      stack:(ev&&ev.error&&ev.error.stack)?String(ev.error.stack).slice(0,2000):null
+    });
+  });
+  window.addEventListener('unhandledrejection',function(ev){
+    const reason=ev&&ev.reason;
+    SeqDiag.log('unhandledrejection',null,{
+      message:(reason&&reason.message)?String(reason.message).slice(0,500):String(reason).slice(0,500),
+      stack:(reason&&reason.stack)?String(reason.stack).slice(0,2000):null
+    });
+  });
+}catch(e){}
+const APP_VERSION='v574';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -10937,6 +11206,25 @@ const FamilyBackend = (function(){
     // snapshot never tears down and rebuilds the map (the reset-on-every-update
     // defect). Full re-render only when the roster/membership structure itself
     // changed (handled by famLiveApply → it re-renders if it can't patch).
+    // v573 (diagnostic-only, upstream of stage 4 — "afterChange dispatch"):
+    // every path through this function that CAN reach famLiveApply (stage
+    // 4's caller) has a silent bail-out — the outer condition below, and
+    // the isTyping0 guard inside it. If the freeze is actually here (e.g.
+    // something leaves an element focused while driving, or `screen`/
+    // `currentModule` change away from the live map without changing back),
+    // stage 4 would simply stop being called with NO error and NO trace in
+    // any existing diagnostic — this is the only place that fact would be
+    // visible. Logs the branch taken on every afterChange() call.
+    try{
+      const outerOk=(typeof render==='function' && screen==='module' && currentModule==='family');
+      let branch='outer_condition_false';
+      if(outerOk){
+        const ae0chk=document.activeElement;
+        const isTyping0chk = ae0chk && (ae0chk.tagName==='INPUT' || ae0chk.tagName==='TEXTAREA' || ae0chk.isContentEditable);
+        branch = isTyping0chk ? 'isTyping_bail' : ((famView==='live'||famView==='dashboard') ? 'famLiveApply' : 'render');
+      }
+      SeqDiag.log('afterChange_dispatch',null,{branch,screen:screen||null,currentModule:currentModule||null,famView:famView||null});
+    }catch(e){}
     if(typeof render==='function' && screen==='module' && currentModule==='family'){
       const ae0=document.activeElement;
       const isTyping0 = ae0 && (ae0.tagName==='INPUT' || ae0.tagName==='TEXTAREA' || ae0.isContentEditable);
@@ -12640,6 +12928,14 @@ _presenceHistory.map(e=>e.seq||0)):0);
       if(!ready()||!isMember())return;
       const c=myConsent();
       if(!c.enabled||c.paused)return;                           // never emit without consent
+      // v573 (diagnostic-only, stage 3/6 — "writeMyFix"): logged right after
+      // the early-exit guards, i.e. exactly when this function is actually
+      // going to proceed. Note: on the installed native-wrapper build this
+      // function is normally NOT the active path for this device's own fix
+      // (acceptNativeFix is — see its own v573 log) — a gap here on a real
+      // device is expected, not itself evidence of a stall; it matters on
+      // the browser/PWA fallback build.
+      try{ SeqDiag.log('writeMyFix',raw&&raw.fixId,{lat:raw&&raw.lat,lng:raw&&raw.lng,source:raw&&raw.source||null}); }catch(e){}
       const uid=myUid(), fid=familyId();
       let lat=raw.lat, lng=raw.lng;
       if(c.precise===false){ const q=coarsen(lat,lng); lat=q.lat; lng=q.lng; }
@@ -12726,6 +13022,10 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // diagnostics only — they no longer gate acceptance.
       if(rejectionReason){
         console.debug('[location-timing]',{fixId:raw.fixId,sequence:raw.sequence,capturedAt:raw.capturedAt,javascriptReceiveAtMs:raw.javascriptReceiveAtMs||receivedAt,rejectedAtMs:Date.now(),accepted:false,rejectionReason});
+        // v573 (diagnostic-only, stage 2/6 — "accepted fix", rejected branch):
+        // logged even on rejection so a run of silently-rejected fixes (bad/
+        // stale timestamp) can't masquerade as "native callback never fired".
+        try{ SeqDiag.log('accepted_fix',raw.fixId,{accepted:false,rejectionReason,capturedAt:raw.capturedAt||null}); }catch(e){}
         // v458 FIX (Codex review): a fix rejected here (bad/stale
         // timestamp) previously vanished with no trace in the diagnostic
         // history — only ACCEPTED fixes were ever logged. If a reported
@@ -12822,6 +13122,12 @@ _presenceHistory.map(e=>e.seq||0)):0);
       });
       locMap()[uid]=next;
       try{persistDB();}catch(e){}
+      // v573 (diagnostic-only, stage 2/6 — "accepted fix", accepted branch):
+      // the state this fix produced, right after locMap() is written and
+      // before afterChange() fans it out to stages 4-6 below.
+      try{ SeqDiag.log('accepted_fix',next.nativeFixId,{accepted:true,
+        lat:next.lat,lng:next.lng,positionTrusted,moving:next.moving,
+        stayStart:next.stayStart,capturedAt:next.capturedAt||null}); }catch(e){}
       console.debug('[location-timing]',{
         fixId:next.nativeFixId,sequence:next.nativeSequence,capturedAt:next.capturedAt,
         nativeCallbackAtMs:raw.nativeCallbackAtMs,bridgeSendAtMs:raw.bridgeSendAtMs,
@@ -13147,6 +13453,11 @@ _presenceHistory.map(e=>e.seq||0)):0);
       _watchCallbackCount++;
       _lastRawSpeed=(cr.speed!=null&&!isNaN(cr.speed))?cr.speed:null; // exact device value, debug overlay only
       diag('fix',{lat:+cr.latitude.toFixed(6),lng:+cr.longitude.toFixed(6),acc:cr.accuracy!=null?Math.round(cr.accuracy):null,provider,movedM:moved,ts:pos.timestamp});
+      // v573 (diagnostic-only, stage 1/6 — browser watchPosition path; the
+      // installed native-wrapper build normally uses mbmAcceptNativeFix
+      // instead, see that function's own v573 log — this covers the case
+      // where it doesn't).
+      try{ SeqDiag.newFixSeq(null); SeqDiag.log('native_callback',null,{via:'watchPosition',lat:cr.latitude,lng:cr.longitude,accuracy:cr.accuracy,provider}); }catch(e){}
       setLocState('active');
       // Update the LOCAL marker on EVERY valid callback (no throttle here). The
       // Firestore write inside writeMyFix is what's throttled, not the marker.
@@ -13409,9 +13720,20 @@ _presenceHistory.map(e=>e.seq||0)):0);
   window.mbmAcceptNativeFix = function(nativeFix){
     try{
       if(!nativeFix || typeof nativeFix!=='object') return false;
+      // v573 (diagnostic-only, stage 1/6 — "native callback"): logged BEFORE
+      // any validation/rejection below, so this fires even for a fix that
+      // acceptNativeFix will reject — proving native→JS delivery itself
+      // never stopped, which is exactly the fact needed to rule the native
+      // bridge in or out as the freeze's cause.
+      try{ SeqDiag.newFixSeq(nativeFix.fixId!=null?nativeFix.fixId:null);
+        SeqDiag.log('native_callback',nativeFix.fixId,{
+          uid:nativeFix.uid||null, lat:nativeFix.lat, lng:nativeFix.lng,
+          accuracy:nativeFix.accuracy, sequence:nativeFix.sequence,
+          capturedAt:nativeFix.capturedAt||null }); }catch(e){}
       return FamilyLocation.acceptNativeFix(nativeFix)===true;
     }catch(e){
       console.debug('[native-bridge] acceptNativeFix threw', e);
+      try{ SeqDiag.log('native_callback_threw',nativeFix&&nativeFix.fixId,{message:e&&e.message?String(e.message):String(e)}); }catch(_){}
       return false;
     }
   };
@@ -15235,6 +15557,12 @@ function famDiagView(){
         <button class="btn btn-ghost" data-fam="pipeline-clear" style="flex:1">${L==='fa'?'پاک‌کردنِ لاگ':'Clear log'}</button>
       </div>
       <div style="font-size:10px;color:var(--ink3);margin-bottom:8px">${L==='fa'?`${(typeof pipelineHistoryGet==='function'?pipelineHistoryGet().length:0)} رکورد در حافظه — پنل فقط ۱۵۰تای آخر رو نشون می‌ده، خروجیِ JSON همه رو داره.`:`${(typeof pipelineHistoryGet==='function'?pipelineHistoryGet().length:0)} records in memory — this panel shows only the last 150; Export JSON has everything.`}</div>
+      <div style="font-weight:700;font-size:12px;margin:16px 0 6px">SEQUENCE PIPELINE DIAG (v573, IndexedDB, diagnostic-only)</div>
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:6px">${L==='fa'?'ردیابیِ شش‌مرحله‌ایِ pipeline (native callback / accepted fix / writeMyFix / famLivePaintMarkers / setCamera / road-bar) با یه seq مشترک — تویِ IndexedDB، بعدِ خروج/ورودِ اپ هم می‌مونه. صرفاً لاگ — هیچ تصمیمی رو عوض نمی‌کنه.':'Six-stage pipeline trace (native callback / accepted fix / writeMyFix / famLivePaintMarkers / setCamera / road-bar) with a shared seq — lives in IndexedDB, survives app close/reopen. Logging only — changes no decision.'}</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button class="btn btn-ghost" data-fam="seqdiag-export" style="flex:1">${L==='fa'?'خروجیِ SeqDiag':'Export SeqDiag'}</button>
+        <button class="btn btn-ghost" data-fam="seqdiag-clear" style="flex:1">${L==='fa'?'پاک‌کردنِ SeqDiag':'Clear SeqDiag'}</button>
+      </div>
       <div style="font-family:monospace;font-size:9.5px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px;max-height:420px;overflow-y:auto">
         ${(()=>{
           const entries=(typeof pipelineHistoryGet==='function')?pipelineHistoryGet():[];
@@ -17216,6 +17544,13 @@ const MBMMap = (function(){
      replaces the unfinished animation; padding is applied after the eased
      centre/zoom move so the selected marker finishes in the safe viewport. */
   function setCamera(opts){
+    // v573 (diagnostic-only, stage 5/6 — "setCamera", actual call): logged
+    // before the `!_map||!available()` guard, so a silent early-return here
+    // (map not ready) is distinguishable in the record from setCamera
+    // simply never being called (see drivingState's own v573 log, one
+    // level up the call chain, for that).
+    try{ SeqDiag.log('setCamera_call',opts&&opts.fixId,{
+      reason:opts&&opts.reason||null, mapReady:!!(_map&&available()) }); }catch(e){}
     if(!_map||!available()) return;
     cancelCameraAnimation('replaced');
     // v456 ROOT-CAUSE FIX (real-world report + frame-by-frame video
@@ -18295,6 +18630,15 @@ const FamilyMapCamera=(function(){
   }
   function drivingState(session,pos,speedMps,accuracyM,fixId){
     const id=session&&session.id||null;
+    // v573 (diagnostic-only, stage 5/6 — "setCamera", decision point): this
+    // is the exact branch v570 identified as the freeze mechanism — the
+    // `!id` branch calls _drStop() and freezes the camera at whatever
+    // position it last had. Logs WHICH branch fires on every single call,
+    // unconditionally (not deduped), so a freeze shows up as this stage's
+    // last record switching to branch:'stopped' (or simply never getting
+    // another record at all, which is just as informative).
+    try{ SeqDiag.log('setCamera',fixId,{branch:(id&&id!==activeDriveId)?'new_session':(id?'continue':'stopped'),
+      sessionId:id, activeDriveIdBefore:activeDriveId, speedMps:speedMps!=null?speedMps:null }); }catch(e){}
     if(id&&id!==activeDriveId){
       activeDriveId=id;
       drivingMode=true;
@@ -19216,6 +19560,13 @@ function famComposeStatusText(m){
     const drivingLabel=(L==='fa'?'در حال رانندگی':'Driving');
     const roadWithFallback=famRoadWithFallback(m.uid, (liveRoad&&liveRoad.road)?liveRoad.road:null);
     const l1=roadWithFallback||drivingLabel;
+    // v573 (diagnostic-only, stage 6/6 — "road-bar decision/render"): logged
+    // on EVERY call, unlike the existing road_bar_decision log below (which
+    // only fires when the displayed outcome actually changes, by design —
+    // fine for its own purpose, but useless for answering "did this
+    // function still run at all" during a freeze, since a frozen bar
+    // showing the same stale text forever would never trip that dedupe).
+    try{ SeqDiag.log('road_bar_render',s.nativeFixId,{uid:m.uid,displayedL1:l1,showedGenericLabel:(l1===drivingLabel)}); }catch(e){}
     // v529 (replaces v528's wrongly-targeted activityType log — that
     // never actually explained a disappearing road bar, since activityType
     // and the road-name RESULT are two different things): logs the real
@@ -19817,11 +20168,18 @@ const FamGeo = (function(){
       inflight[k]=job.fixId;
       const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${job.lat}&lon=${job.lng}`;
       const requestedAt=Date.now();
+      try{ SeqDiag.log('geo_request_start',job.fixId,{
+        cellKey:k, lat:job.lat, lng:job.lng, uid:job.uid||null,
+        queueDepthAtStart:queue.length, waitedMsInQueue:job.enqueuedAt?(requestedAt-job.enqueuedAt):null
+      }); }catch(e){}
       fetch(url,{headers:{'Accept':'application/json'}})
         .then(r=>{
           try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
             kind:'http_response', fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
             httpStatus:r.status, httpOk:r.ok, queueLengthAtResponse:queue.length, pendingKeysAtResponse:Object.keys(pending).length
+          }); }catch(e){}
+          try{ SeqDiag.log('geo_http_response',job.fixId,{
+            cellKey:k, httpStatus:r.status, httpOk:r.ok, responseTimeMs:Date.now()-requestedAt
           }); }catch(e){}
           return r.json();
         })
@@ -19833,6 +20191,10 @@ const FamGeo = (function(){
             console.debug('[FamGeo.diag] discarded stale response',{key:k,requestedFixId:job.fixId,currentFixId:inflight[k]});
             try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
               kind:'discard_stale', key:k, fixId:job.fixId, uid:job.uid||null, currentInflightFixId:inflight[k]||null
+            }); }catch(e){}
+            try{ SeqDiag.log('geo_reject',job.fixId,{
+              cellKey:k, uid:job.uid||null, reason:'superseded_before_response_processed',
+              currentInflightFixId:inflight[k]||null, responseTimeMs:respondedAt-requestedAt
             }); }catch(e){}
             return;
           }
@@ -19868,6 +20230,10 @@ const FamGeo = (function(){
               try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
                 kind:'discard_stale', key:k, fixId:job.fixId, uid:job.uid||null, currentInflightFixId:inflight[k]||null, afterAdminFetch:true
               }); }catch(e){}
+              try{ SeqDiag.log('geo_reject',job.fixId,{
+                cellKey:k, uid:job.uid||null, reason:'superseded_during_admin_fetch',
+                currentInflightFixId:inflight[k]||null
+              }); }catch(e){}
               return;
             }
             const f=format(addr,res.display_name,administrativeAddress);
@@ -19901,11 +20267,35 @@ const FamGeo = (function(){
               kind:'commit', key:k, fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
               resultRoad:f.road||null, resultLine2:f.line2||null, responseTimeMs:respondedAt-requestedAt
             }); }catch(e){}
+            // v573 (diagnostic-only): "current cell at resolve" — Bahman's
+            // explicit ask. Looks up the member's LIVE position (via the
+            // same locMap() every other live-render read uses) at the exact
+            // moment this response is being committed, and reports the
+            // distance from where the request was originally MADE. A large
+            // drift here is direct evidence of "resolving a geocode for a
+            // position the vehicle already left" — the mechanism raised as
+            // a hypothesis in chat, now actually measurable per-resolve
+            // instead of inferred from queue-depth math alone. Read-only:
+            // never used to accept/reject/alter the commit above.
+            try{
+              const liveNow=(typeof locMap==='function'&&job.uid)?locMap()[job.uid]:null;
+              const driftM=(liveNow&&liveNow.lat!=null&&liveNow.lng!=null)?haversineM(job.lat,job.lng,liveNow.lat,liveNow.lng):null;
+              SeqDiag.log('geo_resolve',job.fixId,{
+                cellKey:k, uid:job.uid||null, requestedLat:job.lat, requestedLng:job.lng,
+                currentLatAtResolve:liveNow?liveNow.lat:null, currentLngAtResolve:liveNow?liveNow.lng:null,
+                driftMetersSinceRequest:driftM, resultRoad:f.road||null,
+                responseTimeMs:respondedAt-requestedAt, accepted:true
+              });
+            }catch(e){}
           }
         })
         .catch((err)=>{
           try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
             kind:'fetch_error', fixId:job.fixId, uid:job.uid||null, requestLat:job.lat, requestLng:job.lng,
+            errorMessage:err&&err.message?String(err.message):String(err)
+          }); }catch(e){}
+          try{ SeqDiag.log('geo_reject',job.fixId,{
+            cellKey:k, uid:job.uid||null, reason:'fetch_error',
             errorMessage:err&&err.message?String(err.message):String(err)
           }); }catch(e){}
           /* keep whatever we had; no fabricated address */
@@ -19916,6 +20306,10 @@ const FamGeo = (function(){
           if(newer){ pending[k]=true; queue.push(newer); }
           try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({
             kind:'pump_cycle_end', key:k, fixId:job.fixId, uid:job.uid||null, requeued:!!newer, queueLengthAfter:queue.length
+          }); }catch(e){}
+          try{ SeqDiag.log('geo_pump_cycle_end',job.fixId,{
+            cellKey:k, uid:job.uid||null, requeued:!!newer, queueLengthAfter:queue.length,
+            totalCycleMs:Date.now()-requestedAt
           }); }catch(e){}
           if(typeof afterGeoResolved==='function'){
             try{ if(typeof window!=='undefined'&&window.GeoDiagPersist) window.GeoDiagPersist.push({ kind:'after_geo_resolved_called', key:k, fixId:job.fixId, uid:job.uid||null }); }catch(e){}
@@ -19962,7 +20356,20 @@ const FamGeo = (function(){
     }
     const resolvedFixId=fixId!=null?fixId:k;
     if(!pending[k]){
-      pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId,uid:uid||null});
+      const enqueuedAt=Date.now();
+      pending[k]=true; queue.push({key:k,lat,lng,fixId:resolvedFixId,uid:uid||null,enqueuedAt});
+      // v573 (diagnostic-only, geocode telemetry — Bahman-requested: the
+      // exact "cellKey/enqueue-start-resolve timestamps/queue depth/
+      // dropped key/HTTP status/road result/current-cell-at-resolve/
+      // accept-reject reason" fields, unified into SeqDiag's OWN
+      // sessionId+seq via `resolvedFixId` — not a second parallel system.
+      // GeoDiagPersist below is untouched and keeps working exactly as
+      // before; this is purely an ADDITIONAL, correlated view of the same
+      // moment so a native-fix/marker/camera/road-bar sequence and its
+      // geocode request can be read back together by (sessionId,seq).
+      try{ SeqDiag.log('geo_enqueue',resolvedFixId,{
+        cellKey:k, lat, lng, uid:uid||null, queueDepthAfterEnqueue:queue.length
+      }); }catch(e){}
       // v497: drop the OLDEST queued jobs once the cap is exceeded — keeps
       // the queue chasing the CURRENT position instead of wastefully
       // working through an ever-growing backlog of passed-by positions.
@@ -19978,6 +20385,11 @@ const FamGeo = (function(){
             kind:'queue_drop', droppedKey:dropped.key, droppedFixId:dropped.fixId, droppedUid:dropped.uid||null,
             droppedLat:dropped.lat, droppedLng:dropped.lng, queueLengthAfter:queue.length
           }); }catch(e){}
+          try{ SeqDiag.log('geo_drop',dropped.fixId,{
+            cellKey:dropped.key, lat:dropped.lat, lng:dropped.lng, uid:dropped.uid||null,
+            waitedMsBeforeDrop:dropped.enqueuedAt?(Date.now()-dropped.enqueuedAt):null,
+            queueLengthAfterDrop:queue.length, reason:'queue_depth_exceeded'
+          }); }catch(e){}
         }
       }
       pump();
@@ -19987,7 +20399,10 @@ const FamGeo = (function(){
       // follow-up request.  The old code invalidated without re-queueing,
       // leaving the cell blank/stale until some unrelated later render.
       inflight[k]=resolvedFixId;
-      superseding[k]={key:k,lat,lng,fixId:resolvedFixId,uid:uid||null};
+      superseding[k]={key:k,lat,lng,fixId:resolvedFixId,uid:uid||null,enqueuedAt:Date.now()};
+      try{ SeqDiag.log('geo_superseded_while_pending',resolvedFixId,{
+        cellKey:k, lat, lng, uid:uid||null
+      }); }catch(e){}
     }
     return null;
   }
@@ -20318,6 +20733,14 @@ function famLiveMemberDetail(m, isMe){
    only when the SELECTED member changes (never fight manual pan on refresh). ── */
 let _famLastCentredUid=null;
 function famLivePaintMarkers(members, sel){
+  // v573 (diagnostic-only, stage 4/6 — "famLivePaintMarkers"): logged at
+  // the very top, before the `!MBMMap.get()` early-return, so a silent
+  // early-return here (map object not ready) is distinguishable from this
+  // function never being CALLED at all (the afterChange_dispatch log,
+  // added separately below, covers that upstream question).
+  try{ SeqDiag.log('famLivePaintMarkers',sel&&sel.state&&sel.state.nativeFixId,{
+    membersCount:members?members.length:0, selUid:sel&&sel.uid||null,
+    mapReady:!!MBMMap.get() }); }catch(e){}
   if(!MBMMap.get()) return;
   const withFixList=members.filter(m=>m.hasFix && m.state && m.state.lat!=null);
   // ── Real clustering: group members whose genuine fixes are within ~60m of
@@ -21817,6 +22240,34 @@ async function famAction(act,arg,ev){
           toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
           famShowJsonExportModal(entries,'mbm-pipeline-trace');
         }
+      })();
+      return;
+    }
+    // v573 (diagnostic-only): export/clear for the new persistent
+    // SeqDiag IndexedDB log — same robust-download utility as pipeline-export
+    // above, so it works the same way on-device (Android WebView download
+    // reliability was already solved once for that button; reused as-is,
+    // not reimplemented).
+    case 'seqdiag-export':{
+      (async()=>{
+        const entries=(typeof SeqDiag!=='undefined')?await SeqDiag.exportJSON():[];
+        try{
+          const r=await famExportJsonRobust(entries,'mbm-seqdiag-trace');
+          toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-seqdiag-trace'); }
+        }catch(e){
+          console.error('[seqdiag-export] all strategies failed',e);
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-seqdiag-trace');
+        }
+      })();
+      return;
+    }
+    case 'seqdiag-clear':{
+      (async()=>{
+        if(typeof SeqDiag!=='undefined') await SeqDiag.clear();
+        toast(L==='fa'?'لاگِ SeqDiag پاک شد':'SeqDiag log cleared');
+        if(typeof render==='function') render();
       })();
       return;
     }
