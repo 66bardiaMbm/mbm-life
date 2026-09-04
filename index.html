@@ -2210,7 +2210,7 @@ try{
     });
   });
 }catch(e){}
-const APP_VERSION='v575';
+const APP_VERSION='v577';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -18418,13 +18418,67 @@ const FamilyMapCamera=(function(){
     if(opts.follow===true){follow=true;pausedByGesture=false;}
     apply(!!opts.force,'request');
   }
-  function requestDriving(pos,speedMps,accuracyM,headingDeg,fixId){
+  function requestDriving(pos,speedMps,accuracyM,headingDeg,fixId,capturedAt,opts){
     if(!pos||pos[0]==null||pos[1]==null)return;
+    opts=opts||{};
+    // v576 REAL FIX (root cause traced and confirmed in the prior session,
+    // reproduced in test_drfix_stale_repro.mjs): _drFix has exactly one
+    // writer — this function. drivingState() used to call this only when
+    // session.id matched its own activeDriveId, and called the sibling
+    // request() (which never touches _drFix) on every session
+    // transition instead. If activeSession(uid) ever returns a
+    // different id between consecutive accepted fixes during the SAME
+    // ongoing drive — for any reason upstream, not diagnosed here —
+    // every one of those fixes silently skipped _drFix entirely, while
+    // native_callback/accepted_fix kept firing normally and the camera
+    // kept visibly moving (via request()'s own apply() call), making the
+    // staleness invisible from the UI alone. Fix: requestDriving() is now
+    // the ONLY entry point drivingState() calls whenever a session id
+    // exists at all — every accepted fix in driving state refreshes
+    // _drFix exactly once, unconditionally, regardless of whether the
+    // session id just changed. Session CHANGE itself is now purely an
+    // animation/framing concern (activeDriveId/drivingMode/follow/
+    // pausedByGesture/zoom reset in drivingState(), see there) and no
+    // longer diverts the fix away from this function.
+    //
+    // v577 REAL FIX (Bahman caught a real gap in v576 before installing
+    // it — a known-recurring camera-jump path): the v576 order-guard
+    // only protected _drFix itself. lastTarget and the camera apply()
+    // call below still ran UNCONDITIONALLY even for a rejected stale
+    // fix — meaning an out-of-order fix could still briefly yank the
+    // camera to the wrong place even though _drFix (and therefore dead
+    // reckoning) correctly ignored it. A stale/out-of-order fix must
+    // change NOTHING: not _drFix, not lastTarget, not the camera. It is
+    // now a full early return before any of those are touched.
+    //
+    // Also fixed here: an INVALID/unparseable capturedAt (Date.parse
+    // returning NaN) must never be stored into _drFix.capturedAtMs — a
+    // stored NaN would make every future `capturedAtMs<_drFix.capturedAtMs`
+    // comparison evaluate to false (NaN comparisons are always false),
+    // silently DISABLING the order-guard for every fix after it,
+    // permanently, until the next full session reset. An invalid
+    // timestamp is instead treated as "this fix carries no ordering
+    // information" — the position/speed/heading data is still trusted
+    // and applied, but _drFix.capturedAtMs is left at whatever valid
+    // value it already held (never regressed to null/NaN by a broken
+    // fix), so the guard stays fully armed for the NEXT fix.
+    const _parsedCapturedAtMs = capturedAt!=null ? Date.parse(capturedAt) : null;
+    const capturedAtMs = (_parsedCapturedAtMs!=null && Number.isFinite(_parsedCapturedAtMs)) ? _parsedCapturedAtMs : null;
+    const drFixIsStaleOrOutOfOrder = _drFix && capturedAtMs!=null && _drFix.capturedAtMs!=null && capturedAtMs<_drFix.capturedAtMs;
+    if(drFixIsStaleOrOutOfOrder){
+      try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drfix_rejected_stale',{fixId,capturedAtMs,currentDrFixCapturedAtMs:_drFix.capturedAtMs,currentDrFixFixId:_drFix.fixId}); }catch(e){}
+      return; // full reject: _drFix, lastTarget, and the camera are ALL left exactly as they were
+    }
     // v466: capture the real fix as the dead-reckoning baseline every time
     // one arrives — this is what keeps extrapolation error bounded, since
     // it's always reset to a fresh real point rather than compounding.
-    _drFix={lat:pos[0],lng:pos[1],speedMps,headingDeg:(headingDeg!=null&&!isNaN(headingDeg))?headingDeg:null,atMs:Date.now(),fixId};
-    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drfix_updated',{fixId,lat:pos[0],lng:pos[1],speedMps,headingDeg,accuracyM}); }catch(e){}
+    // capturedAtMs here is only overwritten with a value THIS fix actually
+    // proved — an invalid timestamp on an otherwise-accepted fix keeps the
+    // previous valid capturedAtMs (see the v577 comment above) instead of
+    // wiping it to null.
+    const nextCapturedAtMs = capturedAtMs!=null ? capturedAtMs : (_drFix ? _drFix.capturedAtMs : null);
+    _drFix={lat:pos[0],lng:pos[1],speedMps,headingDeg:(headingDeg!=null&&!isNaN(headingDeg))?headingDeg:null,atMs:Date.now(),capturedAtMs:nextCapturedAtMs,fixId};
+    try{ if(typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drfix_updated',{fixId,lat:pos[0],lng:pos[1],speedMps,headingDeg,accuracyM,capturedAtMs:nextCapturedAtMs}); }catch(e){}
     _drStart();
     // v407: pass the CURRENT zoom so drivingZoomFor can apply hysteresis
     // instead of recomputing from a single hard threshold on every fix.
@@ -18441,7 +18495,7 @@ const FamilyMapCamera=(function(){
     // expires the camera resumes on THIS latest point, not the old drag-start
     // point.
     if(!follow||pausedByGesture)return;
-    if(!unchanged) apply(false,'driving-follow');
+    if(!unchanged || opts.forceApply) apply(!!opts.forceApply,'driving-follow');
   }
   function fit(points){
     if(!points||!points.length)return;
@@ -18598,7 +18652,7 @@ const FamilyMapCamera=(function(){
   function drFixDiag(){
     if(!_drFix) return null;
     return { lat:_drFix.lat, lng:_drFix.lng, speedMps:_drFix.speedMps, headingDeg:_drFix.headingDeg,
-             atMs:_drFix.atMs, ageMs:Date.now()-_drFix.atMs, fixId:_drFix.fixId };
+             atMs:_drFix.atMs, ageMs:Date.now()-_drFix.atMs, fixId:_drFix.fixId, capturedAtMs:_drFix.capturedAtMs!=null?_drFix.capturedAtMs:null };
   }
   function _drTick(){
     _drTimer=null;
@@ -18628,30 +18682,36 @@ const FamilyMapCamera=(function(){
     try{ if(_drFix && typeof window.pipelineHistoryPush==='function') window.pipelineHistoryPush('drfix_cleared',{lastLat:_drFix.lat,lastLng:_drFix.lng,ageAtClearMs:Date.now()-_drFix.atMs}); }catch(e){}
     _drFix=null;
   }
-  function drivingState(session,pos,speedMps,accuracyM,fixId){
+  function drivingState(session,pos,speedMps,accuracyM,fixId,capturedAt){
     const id=session&&session.id||null;
-    // v573 (diagnostic-only, stage 5/6 — "setCamera", decision point): this
-    // is the exact branch v570 identified as the freeze mechanism — the
-    // `!id` branch calls _drStop() and freezes the camera at whatever
-    // position it last had. Logs WHICH branch fires on every single call,
-    // unconditionally (not deduped), so a freeze shows up as this stage's
-    // last record switching to branch:'stopped' (or simply never getting
-    // another record at all, which is just as informative).
+    // v576 REAL FIX: every accepted fix while a session id exists now
+    // reaches requestDriving() — and therefore _drFix — exactly once,
+    // unconditionally. A session id CHANGE (new drive, or an id churning
+    // for the same ongoing drive — the latter's own root cause is a
+    // separate, still-open question upstream of this function) now only
+    // resets ANIMATION/FRAMING state (activeDriveId, drivingMode, follow,
+    // pausedByGesture, zoom) — it no longer diverts the fix itself to
+    // request(), which never touched _drFix. setDeadReckonMarkerSync's
+    // registration (_drSyncCb/_drSyncCbUid) is untouched here, exactly as
+    // before — nothing in this function ever wrote to it.
     try{ SeqDiag.log('setCamera',fixId,{branch:(id&&id!==activeDriveId)?'new_session':(id?'continue':'stopped'),
       sessionId:id, activeDriveIdBefore:activeDriveId, speedMps:speedMps!=null?speedMps:null }); }catch(e){}
-    if(id&&id!==activeDriveId){
-      activeDriveId=id;
-      drivingMode=true;
-      follow=true;
-      pausedByGesture=false;
-      _famFollow=true;
-      lastZoom=drivingZoomFor(speedMps,accuracyM);
-      request(pos,{force:true});
-    }else if(id){
-      // requestDriving updates lastTarget even during the temporary
-      // gesture-pause, but only moves the camera when follow is active.
-      requestDriving(pos,speedMps,accuracyM,undefined,fixId);
-    }else if(!id){
+    if(id){
+      const isNewSession=(id!==activeDriveId);
+      if(isNewSession){
+        activeDriveId=id;
+        drivingMode=true;
+        follow=true;
+        pausedByGesture=false;
+        _famFollow=true;
+        lastZoom=drivingZoomFor(speedMps,accuracyM);
+      }
+      // isNewSession forces an immediate (non-debounced) apply, matching
+      // the snap-to-driver framing a fresh drive always had — the only
+      // behavior difference from before is that _drFix is ALSO written
+      // on this exact call now, not skipped.
+      requestDriving(pos,speedMps,accuracyM,undefined,fixId,capturedAt,{forceApply:isNewSession});
+    }else{
       activeDriveId=null;
       drivingMode=false;
       _drStop();
@@ -21038,7 +21098,8 @@ function famLivePaintMarkers(members, sel){
         [sel.state.lat,sel.state.lng],
         sel.state.speed,
         sel.state.accuracy,
-        sel.state.nativeFixId
+        sel.state.nativeFixId,
+        sel.state.capturedAt||sel.state.reportedAt
       );
     }else{
       FamilyMapCamera.drivingState(null,null);
@@ -21060,7 +21121,7 @@ function famLivePaintMarkers(members, sel){
       // keeps refreshing directly from it, regardless of whether the
       // separate driving-session record exists.
       if(sel.state.moving){
-        FamilyMapCamera.requestDriving([sel.state.lat,sel.state.lng], sel.state.speed, sel.state.accuracy, undefined, sel.state.nativeFixId);
+        FamilyMapCamera.requestDriving([sel.state.lat,sel.state.lng], sel.state.speed, sel.state.accuracy, undefined, sel.state.nativeFixId, sel.state.capturedAt||sel.state.reportedAt);
       }else{
         // Always refresh lastTarget. request() only moves the camera when
         // follow is active, so a temporary gesture pause is respected.
