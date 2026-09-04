@@ -2210,7 +2210,7 @@ try{
     });
   });
 }catch(e){}
-const APP_VERSION='v574';
+const APP_VERSION='v575';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -18339,7 +18339,7 @@ const MBMMap = (function(){
     });
   }
   return { available, mounted, tilesLoaded, init, setProvider, tileError, setView, panTo, fitAll, invalidate,
-           setCamera, cancelCameraAnimation,
+           setCamera, cancelCameraAnimation, animateMarker,
            hasMarker, markerLatLng, markerRenderPos, setMarker, setClusterMarker, setArrivedBubble, clearArrivedBubble, clearMarkersExcept,
            setAccuracy, setHeadingCone, drawRoute, applyLifeStyle, destroy, get, showFatal, clearFatal, showStale, tileDiagLog, setPadding,
            setHeadingRotationEnabled, isHeadingRotationEnabled, setMapHeading, renderingType,
@@ -20056,6 +20056,25 @@ const FamGeo = (function(){
   // 1.2km region radius, so it can't casually claim a road you've
   // genuinely turned off of, but with real headroom for request lag.
   const ROAD_STICK_RADIUS_M = 900;
+  // v575 REAL FIX (task B — road bar flapping between Gunn St / Midland
+  // Hwy / Brooker Hwy while driving). Root cause, found by reading this
+  // function: at a genuine multi-road interchange (which is exactly what
+  // that intersection is — Brooker Hwy becomes Midland Hwy there, with
+  // Gunn St crossing nearby), several DIFFERENT recent geocode results
+  // for DIFFERENT real roads can all legitimately sit within
+  // ROAD_STICK_RADIUS_M(900m)/STICK_TTL(3min) of the current position at
+  // the same time. The old tie-break picked whichever cached entry was
+  // geometrically CLOSEST — but as the vehicle moves even a few metres,
+  // which entry is closest can flip between them, so the displayed name
+  // flapped between all three even though none of them was necessarily
+  // wrong at the moment it was resolved. Tie-breaking by MOST RECENT
+  // resolution instead of closest distance means the display always
+  // tracks the latest real answer the geocoder actually gave for
+  // wherever the vehicle currently is, so it advances cleanly through an
+  // interchange (Gunn St → Brooker Hwy → Midland Hwy, in whatever order
+  // they were genuinely resolved) instead of oscillating. Radius/TTL
+  // bounds are UNCHANGED — only which of the (possibly several) entries
+  // inside those bounds wins.
   function findNearbyRoad(lat,lng){
     let best=null,bestD=Infinity;
     for(const k in cache){
@@ -20077,7 +20096,8 @@ const FamGeo = (function(){
       if((Date.now()-c.ts)>=STICK_TTL) continue;
       if(c.lat==null||c.lng==null) continue;
       const d=haversineM(lat,lng,c.lat,c.lng);
-      if(d<=ROAD_STICK_RADIUS_M && d<bestD){ best=c; bestD=d; }
+      if(d>ROAD_STICK_RADIUS_M) continue;
+      if(!best || c.ts>best.ts){ best=c; bestD=d; }
     }
     return best;
   }
@@ -20909,6 +20929,21 @@ function famLivePaintMarkers(members, sel){
   });
   if(!(sel && sel.state && sel.state.moving)){
     try{ FamilyMapCamera.setDeadReckonMarkerSync(null); }catch(e){}
+  }else{
+    // v575 REAL FIX (task A, part 1 of 2 — was diagnosed, not fixed, in
+    // v574): setDeadReckonMarkerSync() was defined and correctly wired
+    // into _drTick() (see its own comment) but had exactly ONE call site
+    // in the entire file, and it always passed null — so _drSyncCb was
+    // permanently falsy and dead-reckoning ticks (every 200ms) only ever
+    // moved the CAMERA, never the marker itself, which sat still until
+    // the next real accepted fix. This registers the missing real
+    // callback: MBMMap.animateMarker is the exact same primitive
+    // setMarker() already uses to move an existing marker smoothly (see
+    // its own definition) — reusing it here, rather than rebuilding
+    // meta/HTML on every 200ms tick, is the minimal correct fix.
+    try{ FamilyMapCamera.setDeadReckonMarkerSync((pos,tickId)=>{
+      try{ MBMMap.animateMarker(sel.uid,[pos.lat,pos.lng]); }catch(e){}
+    }, sel.uid); }catch(e){}
   }
   MBMMap.clearMarkersExcept(activeKeys);
   if(sel && sel.state && sel.state.lat!=null){
@@ -21007,9 +21042,30 @@ function famLivePaintMarkers(members, sel){
       );
     }else{
       FamilyMapCamera.drivingState(null,null);
-      // Always refresh lastTarget. request() only moves the camera when
-      // follow is active, so a temporary gesture pause is respected.
-      FamilyMapCamera.request([sel.state.lat,sel.state.lng],{});
+      // v575 REAL FIX (task A, part 2 of 2 — the ~169m marker lag / 50s-
+      // stale _drFix from context #2): this branch runs whenever
+      // activeSession(uid) is falsy — including the still-unproven
+      // 'driving_session_vanished' mechanism (see FamilyDriving above)
+      // where the session bookkeeping silently drops an ongoing drive
+      // while accepted fixes keep arriving completely normally. The old
+      // code ONLY called request() here, which never touches _drFix
+      // (only requestDriving() does — see its own definition) — so once
+      // activeSession() went null mid-drive, _drFix would freeze at
+      // whatever it last was and dead-reckoning would extrapolate from
+      // an ever-more-stale point forever, even though real GPS was fine.
+      // This does NOT fix WHY activeSession() goes null — that specific
+      // mechanism is still open (see the comment at its source) — but it
+      // decouples _drFix's freshness from that fragile lookup entirely:
+      // as long as the accepted fix says the person is moving, _drFix
+      // keeps refreshing directly from it, regardless of whether the
+      // separate driving-session record exists.
+      if(sel.state.moving){
+        FamilyMapCamera.requestDriving([sel.state.lat,sel.state.lng], sel.state.speed, sel.state.accuracy, undefined, sel.state.nativeFixId);
+      }else{
+        // Always refresh lastTarget. request() only moves the camera when
+        // follow is active, so a temporary gesture pause is respected.
+        FamilyMapCamera.request([sel.state.lat,sel.state.lng],{});
+      }
     }
   }else{
     FamilyMapCamera.drivingState(null,null);
