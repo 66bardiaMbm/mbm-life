@@ -80,5 +80,13 @@ interface TrackingDao {
     suspend fun recentLogs(limit: Int = 200): List<DiagnosticLogEntity>
 
     @Query("DELETE FROM diagnostic_logs WHERE id NOT IN (SELECT id FROM diagnostic_logs ORDER BY timestampMs DESC LIMIT :keep)")
-    suspend fun trimLogs(keep: Int = 1000)
+    // v[next]: was 1000. "Native location callback" logs on EVERY accepted
+    // GPS fix (every 1-2s while tracking) and dominates this shared cap —
+    // at the old 1000-row limit, that alone purges the WHOLE table's
+    // history in under ~30 minutes of normal driving, discarding the far
+    // rarer, far more diagnostically important events (service start,
+    // movement-state changes, stayStart set/clear) long before anyone
+    // gets a chance to export them after an incident. Raised enough to
+    // retain several hours of realistic mixed activity.
+    suspend fun trimLogs(keep: Int = 5000)
 }

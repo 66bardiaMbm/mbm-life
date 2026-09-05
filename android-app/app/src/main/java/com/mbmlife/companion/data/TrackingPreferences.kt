@@ -59,6 +59,17 @@ class TrackingPreferences(context: Context) {
         get() = prefs.getLong("stay_start_at", 0)
         set(value) = prefs.edit().putLong("stay_start_at", value).apply()
 
+    // v[next]: mirrors DrivingDetector's arrivalUncertain — true when
+    // stayStartAtMs was recovered right after a data gap this device had
+    // zero visibility into (GPS throttled while stationary+backgrounded,
+    // then resumed at the same place). The exact time in that case is
+    // genuinely not knowable to be precise; this lets the WebView/JS
+    // layer show that honestly instead of asserting false precision —
+    // see approximateStayStart on the JS side, which this feeds.
+    var stayStartApproximate: Boolean
+        get() = prefs.getBoolean("stay_start_approximate", false)
+        set(value) = prefs.edit().putBoolean("stay_start_approximate", value).apply()
+
     var batteryPct: Int?
         get() = if (prefs.contains("battery_pct")) prefs.getInt("battery_pct", -1)
             .takeIf { it in 0..100 } else null
