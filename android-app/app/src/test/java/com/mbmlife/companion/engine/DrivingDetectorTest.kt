@@ -249,6 +249,168 @@ class DrivingDetectorTest {
         assertEquals(TripTransition.NONE, output?.transition)
     }
 
+    // ── Background-arrival-time fix (real report: MBM recorded an
+    // app-reopen time instead of the true, hours-earlier arrival time
+    // after a GPS gap while the phone was stationary and backgrounded).
+    // Root cause: STOP_EVIDENCE_GAP_TOLERANCE_MS (45s) wiped the stop
+    // candidate on any gap that long, discarding real arrival evidence.
+    // Fix: the candidate still always restarts fresh after a gap (a
+    // same-place resume is NOT trusted to mean "never left" — that would
+    // hide a genuine departure-and-return) but a same-place resume is
+    // flagged arrivalUncertain=true rather than asserted as a precise,
+    // confident time. ──
+
+    private val homeLat = -42.8000
+    private val homeLng = 147.3000
+    private val awayLat = -42.9000
+    private val awayLng = 147.5000
+
+    /** Physically continuous drive from away to home (never an instant
+     * teleport, which would trip the impossible-speed-spike rejection). */
+    private fun driveToHome(detector: DrivingDetector, startT: Long): Long {
+        var t = startT
+        var lat = awayLat
+        var lng = awayLng
+        val steps = 40
+        val dLat = (homeLat - awayLat) / steps
+        val dLng = (homeLng - awayLng) / steps
+        for (i in 0 until steps) {
+            t += 2000
+            lat += dLat
+            lng += dLng
+            detector.ingest(fix(t, lat, lng, 25f, "IN_VEHICLE"))
+        }
+        return t
+    }
+
+    /** Feeds stationary fixes until isSustainedStopEvidence's own
+     * STOP_MIN_SAMPLES/STOP_MIN_WINDOW_MS requirements are satisfied. */
+    private fun establishStationary(detector: DrivingDetector, startT: Long, lat: Double, lng: Double, count: Int = 20): Long {
+        var t = startT
+        for (i in 0 until count) {
+            t += 2000
+            detector.ingest(fix(t, lat, lng, 0f, "STILL"))
+        }
+        return t
+    }
+
+    /** Keeps feeding stationary fixes until the trip confirms ENDED. */
+    private fun runUntilEnded(detector: DrivingDetector, startT: Long, lat: Double, lng: Double, maxTries: Int = 100): Pair<Long, DrivingOutput?> {
+        var t = startT
+        var tries = 0
+        while (tries < maxTries) {
+            t += 2000
+            tries++
+            val out = detector.ingest(fix(t, lat, lng, 0f, "STILL"))
+            if (out.transition == TripTransition.ENDED) return Pair(t, out)
+        }
+        return Pair(t, null)
+    }
+
+    @Test
+    fun continuousTrackingConfirmsArrivalAtTrueTimeNeverUncertain() {
+        val detector = DrivingDetector()
+        val afterDrive = driveToHome(detector, 0L)
+        val trueArrivalMs = afterDrive + 2000
+        val lastEstablish = establishStationary(detector, afterDrive, homeLat, homeLng)
+        val (_, out) = runUntilEnded(detector, lastEstablish, homeLat, homeLng)
+
+        assertNotNull(out)
+        assertTrue(Math.abs(out!!.arrivalAtMs!! - trueArrivalMs) <= 20_000L)
+        assertEquals(false, out.arrivalUncertain)
+    }
+
+    @Test
+    fun reopeningWithNoRealGapDoesNotCorruptOrDelayArrival() {
+        // Simulates: a candidate already mid-accumulation, then the SAME
+        // detector instance keeps receiving fixes without interruption —
+        // exactly what continuous background tracking means. Reopening
+        // the UI does not change what ingest() sees.
+        val detector = DrivingDetector()
+        val afterDrive = driveToHome(detector, 0L)
+        val trueArrivalMs = afterDrive + 2000
+        val lastEstablish = establishStationary(detector, afterDrive, homeLat, homeLng, count = 5)
+        val (_, out) = runUntilEnded(detector, lastEstablish, homeLat, homeLng)
+
+        assertNotNull(out)
+        assertTrue(Math.abs(out!!.arrivalAtMs!! - trueArrivalMs) <= 20_000L)
+        assertEquals(false, out.arrivalUncertain)
+    }
+
+    @Test
+    fun gpsGapWhileStationaryIsHonestlyFlaggedUncertainNotSilentlyWrong() {
+        val detector = DrivingDetector()
+        val afterDrive = driveToHome(detector, 0L)
+        val lastEstablish = establishStationary(detector, afterDrive, homeLat, homeLng)
+        val gapMs = 51 * 60_000L
+        val (_, out) = runUntilEnded(detector, lastEstablish + gapMs, homeLat, homeLng)
+
+        assertNotNull(out)
+        assertEquals(true, out!!.arrivalUncertain)
+    }
+
+    @Test
+    fun genuineObservedDepartureAndReturnGetsNewArrivalNotFlaggedUncertain() {
+        // Critical case: a REAL departure and return, with the drive
+        // itself actually observed (only the STATIONARY periods had
+        // gaps — driving generates frequent GPS activity, unlike a
+        // parked phone) must still produce a NEW, confident arrival —
+        // never silently reuse the old one.
+        val detector = DrivingDetector()
+        val afterDrive = driveToHome(detector, 0L)
+        val firstStopMs = establishStationary(detector, afterDrive, homeLat, homeLng)
+        val (endedAtFirst, firstOut) = runUntilEnded(detector, firstStopMs, homeLat, homeLng)
+        assertNotNull(firstOut)
+        val firstArrival = firstOut!!.arrivalAtMs!!
+
+        val gapMs = 20 * 60_000L
+        val departT = driveToHome(detector, endedAtFirst + gapMs)
+        val secondStopMs = establishStationary(detector, departT, homeLat, homeLng)
+        val (_, secondOut) = runUntilEnded(detector, secondStopMs, homeLat, homeLng)
+
+        assertNotNull(secondOut)
+        val secondArrival = secondOut!!.arrivalAtMs!!
+        assertTrue(secondArrival > firstArrival + 60_000L)
+        assertEquals(false, secondOut.arrivalUncertain)
+    }
+
+    @Test
+    fun totalBlackoutAcrossAPossibleRoundTripFabricatesNoSecondConfirmation() {
+        // The genuinely unanswerable case: zero fixes for the ENTIRE
+        // possible round trip, including the drive itself. With no
+        // driving evidence ever arriving, ingest() has no trip to close
+        // a second time — this documents that limit rather than
+        // fabricating a confirmation in either direction.
+        val detector = DrivingDetector()
+        val afterDrive = driveToHome(detector, 0L)
+        val firstStopMs = establishStationary(detector, afterDrive, homeLat, homeLng)
+        val (endedAtFirst, firstOut) = runUntilEnded(detector, firstStopMs, homeLat, homeLng)
+        assertNotNull(firstOut)
+
+        val gapMs = 90 * 60_000L
+        var t = endedAtFirst + gapMs
+        var sawEnded = false
+        for (i in 0 until 30) {
+            t += 2000
+            val out = detector.ingest(fix(t, homeLat, homeLng, 0f, "STILL"))
+            if (out.transition == TripTransition.ENDED) sawEnded = true
+        }
+        assertEquals(false, sawEnded)
+    }
+
+    @Test
+    fun gapEndingAtAClearlyDifferentPlaceIsUnambiguousNotFlaggedUncertain() {
+        val detector = DrivingDetector()
+        val afterDrive = driveToHome(detector, 0L)
+        val lastEstablish = establishStationary(detector, afterDrive, homeLat, homeLng)
+        val gapMs = 51 * 60_000L
+        val elsewhereLat = homeLat + 0.01 // ~1.1km away — clearly not the same spot
+        val (_, out) = runUntilEnded(detector, lastEstablish + gapMs, elsewhereLat, homeLng)
+
+        assertNotNull(out)
+        assertEquals(false, out!!.arrivalUncertain)
+    }
+
     private fun fix(
         timeMs: Long,
         lat: Double,
