@@ -320,6 +320,25 @@ class TrackingService : Service() {
         app.preferences.movementStateStartedAtMs = closure.arrivalAtMs
         app.preferences.movementDecisionAtMs = now
         app.preferences.stayStartAtMs = closure.arrivalAtMs
+        app.preferences.stayStartApproximate = closure.arrivalUncertain
+        // Same explicit checkpoint as the main per-fix ingest() path
+        // (search "stayStart recorded" below) — this is the OTHER place
+        // stayStartAtMs gets written (the periodic Activity-Recognition-
+        // driven timer path, reevaluateStop(), for when GPS itself has
+        // paused but a fresh STILL activity confirms the stop). Without
+        // this, an export could show GPS/movement evidence going quiet
+        // with no visible record of stayStart actually being set via
+        // THIS path, making it look like stayStart was lost when it
+        // was actually written here instead of the per-fix path.
+        repository.logger().info(
+            "StayStart",
+            "stayStart recorded",
+            JSONObject()
+                .put("arrivalAtMs", closure.arrivalAtMs)
+                .put("arrivalUncertain", closure.arrivalUncertain)
+                .put("source", "activity_timer")
+                .toString()
+        )
 
         val stationarySample = closure.lastSample.copy(
             rawSpeedMps = 0f,
@@ -406,9 +425,43 @@ class TrackingService : Service() {
             sample = output.sample.copy(activityType = movement.state.wireValue)
         )
         if (movement.state != MovementState.STATIONARY) {
+            // Only log an actual transition (was set, now clearing) — this
+            // branch runs on EVERY moving fix, so logging unconditionally
+            // here would flood the log with a "cleared" entry every 1-2
+            // seconds throughout an entire drive, drowning out the
+            // genuinely rare, meaningful events. Coverage of the CLEAR
+            // path, without the noise.
+            val wasSet = app.preferences.stayStartAtMs > 0L
             app.preferences.stayStartAtMs = 0
+            app.preferences.stayStartApproximate = false
+            if (wasSet) {
+                repository.logger().info(
+                    "StayStart",
+                    "stayStart cleared",
+                    JSONObject().put("reason", "movement_resumed").toString()
+                )
+            }
         } else if (output.arrivalAtMs != null) {
             app.preferences.stayStartAtMs = output.arrivalAtMs
+            app.preferences.stayStartApproximate = output.arrivalUncertain
+            // Explicit checkpoint (was previously silent — the value only
+            // showed up implicitly via the "Movement state decision" log
+            // below, with no direct record of WHEN stayStart itself was
+            // (re)written or whether it was flagged uncertain). Needed to
+            // compare service-start / last-callback / movement-state /
+            // stayStart timestamps against each other from one exported
+            // log, to tell apart: the service dying, GPS reception
+            // stopping while the service stayed alive, or stayStart being
+            // lost/reset despite fixes still arriving.
+            repository.logger().info(
+                "StayStart",
+                "stayStart recorded",
+                JSONObject()
+                    .put("arrivalAtMs", output.arrivalAtMs)
+                    .put("arrivalUncertain", output.arrivalUncertain)
+                    .put("fixCapturedAtMs", capturedAt)
+                    .toString()
+            )
         }
         repository.logSpeed(stableOutput.sample)
         repository.logger().info(
@@ -503,6 +556,7 @@ class TrackingService : Service() {
                     ?.let { java.time.Instant.ofEpochMilli(it).toString() }
                     ?: JSONObject.NULL
             )
+            .put("approximateStayStart", app.preferences.stayStartAtMs > 0L && app.preferences.stayStartApproximate)
             .put("reportedAt", java.time.Instant.ofEpochMilli(reportedAtMs).toString())
             .put("source", "companion")
             .put("moving", sample.activityType != MovementState.STATIONARY.wireValue)
