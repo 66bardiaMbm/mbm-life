@@ -29,13 +29,21 @@ data class DrivingOutput(
     val transition: TripTransition,
     val trip: TripEntity?,
     val startWindow: List<LocationSampleEntity> = emptyList(),
-    val arrivalAtMs: Long? = null
+    val arrivalAtMs: Long? = null,
+    // True when arrivalAtMs was recovered right after a data gap this
+    // detector had zero visibility into — genuinely unknowable whether
+    // the person was stationary the whole time or left and came back to
+    // the same place. Never claim precision the underlying data doesn't
+    // support; downstream (TrackingPreferences/WebView) must surface
+    // this rather than silently presenting arrivalAtMs as exact.
+    val arrivalUncertain: Boolean = false
 )
 
 data class TimedStopClosure(
     val trip: TripEntity,
     val lastSample: LocationSampleEntity,
-    val arrivalAtMs: Long
+    val arrivalAtMs: Long,
+    val arrivalUncertain: Boolean = false
 )
 
 /**
@@ -76,6 +84,16 @@ class DrivingDetector(
     private var driveCandidateSince: Long? = null
     private var lastDriveEvidenceAt: Long? = null
     private var stopCandidateSince: Long? = null
+    private var stopCandidateAnchorLat: Double? = null
+    private var stopCandidateAnchorLng: Double? = null
+    // True once, right when a NEW candidate is established, if it follows
+    // a wipe caused by an unmonitored data gap AND resumes at the same
+    // place — see the FIX comment at the establishment site below.
+    private var stopCandidateFollowsAmbiguousGap: Boolean = false
+    // Set at the moment a gap-triggered wipe happens; consumed (and reset)
+    // the next time a candidate is (re)established, whether that happens
+    // on this same call or a later one.
+    private var pendingAmbiguousGapAtReestablish: Boolean = false
     private var lastStopEvidenceAt: Long? = null
 
     init {
@@ -83,6 +101,8 @@ class DrivingDetector(
         if (active != null && latest != null && isSustainedStopEvidence(latest)) {
             stopCandidateSince = max(active!!.startedAtMs, latest.capturedAtMs - STOP_WINDOW_MS)
             lastStopEvidenceAt = latest.capturedAtMs
+            stopCandidateAnchorLat = latest.latitude
+            stopCandidateAnchorLng = latest.longitude
         }
     }
 
@@ -194,14 +214,72 @@ class DrivingDetector(
                     current.startedAtMs,
                     fix.capturedAtMs - STOP_MIN_WINDOW_MS
                 )
+                stopCandidateAnchorLat = sample.latitude
+                stopCandidateAnchorLng = sample.longitude
+                // FIX (real report: a 51-minute gap while genuinely
+                // stationary at home discarded a correct ~14:16 arrival
+                // candidate and replaced it with ~15:07 — whenever GPS
+                // fixes resumed, matching exactly when the app was
+                // reopened. Reproduced end-to-end via a real compiled
+                // Kotlin test. An EARLIER version of this fix tried to
+                // suppress the wipe outright whenever the resumed
+                // position matched the old one — but that can just as
+                // easily hide a genuine departure-and-return to the same
+                // place, silently keeping the OLD arrival time for what
+                // is actually a brand new visit. Neither "always trust
+                // the old time" nor "always trust the new time" is
+                // correct here — the honest answer is that a data gap
+                // this large makes it genuinely UNKNOWABLE which one is
+                // true. So: the candidate always restarts fresh (same as
+                // before this whole investigation), but if it restarts
+                // at the SAME place a just-wiped candidate was tracking,
+                // the resulting confirmed arrival is marked
+                // arrivalUncertain — never silently presented as a
+                // precise fact when it might be off by the length of an
+                // unmonitored gap. This mirrors, deliberately, the
+                // approximateStayStart flag already shipped on the
+                // WebView/JS side for the exact same reason.
+                stopCandidateFollowsAmbiguousGap = pendingAmbiguousGapAtReestablish
             }
             lastStopEvidenceAt = fix.capturedAtMs
+            pendingAmbiguousGapAtReestablish = false
         } else if (
             lastStopEvidenceAt == null ||
             fix.capturedAtMs - lastStopEvidenceAt!! > STOP_EVIDENCE_GAP_TOLERANCE_MS
         ) {
+            // A data gap alone — GPS simply not delivering fixes for a
+            // while, which is ORDINARY once a device goes stationary+
+            // backgrounded (the platform throttles location updates to
+            // save battery right when a stop begins) — is not proof the
+            // person moved, but it is also not proof they didn't. Record
+            // whether the fix ending the gap is still near where the
+            // wiped candidate was tracking (ambiguous — genuinely cannot
+            // tell "never left" from "left and came back") before
+            // discarding it; a clearly DIFFERENT position, or no prior
+            // candidate to compare against, is unambiguous and carries no
+            // uncertainty forward.
+            //
+            // BUG FOUND WHILE TESTING (before shipping): this branch keeps
+            // firing on every subsequent call while `stopped` stays false
+            // waiting for the post-gap window to refill — with
+            // stopCandidateSince already null from the FIRST such call,
+            // every one of those LATER calls was recomputing
+            // pendingAmbiguousGapAtReestablish from scratch and
+            // clobbering it back to false before establishment ever got a
+            // chance to consume the true value. Only compute it the one
+            // time there is actually something being wiped right now.
+            if (stopCandidateSince != null) {
+                val anchorLat = stopCandidateAnchorLat
+                val anchorLng = stopCandidateAnchorLng
+                pendingAmbiguousGapAtReestablish = anchorLat != null && anchorLng != null &&
+                    Geo.distanceM(anchorLat, anchorLng, sample.latitude, sample.longitude) <=
+                        max(STOP_NET_DISTANCE_M, (sample.accuracyM?.toDouble() ?: 0.0) + 8.0) &&
+                    (sample.rawSpeedMps?.toDouble() ?: 0.0) < DRIVE_ENTER_MPS
+            }
             stopCandidateSince = null
             lastStopEvidenceAt = null
+            stopCandidateAnchorLat = null
+            stopCandidateAnchorLng = null
         }
 
         if (
@@ -210,6 +288,7 @@ class DrivingDetector(
             fix.capturedAtMs - stopCandidateSince!! >= END_HYSTERESIS_MS
         ) {
             val arrivalAt = stopCandidateSince!!
+            val arrivalWasUncertain = stopCandidateFollowsAmbiguousGap
             val ended = current.copy(
                 endedAtMs = arrivalAt,
                 status = "ended",
@@ -220,12 +299,16 @@ class DrivingDetector(
             active = null
             stopCandidateSince = null
             lastStopEvidenceAt = null
+            stopCandidateAnchorLat = null
+            stopCandidateAnchorLng = null
+            stopCandidateFollowsAmbiguousGap = false
             preWindow.clear()
             return DrivingOutput(
                 sample = sample,
                 transition = TripTransition.ENDED,
                 trip = ended,
-                arrivalAtMs = arrivalAt
+                arrivalAtMs = arrivalAt,
+                arrivalUncertain = arrivalWasUncertain
             )
         }
         return DrivingOutput(sample, TripTransition.UPDATED, current)
@@ -263,11 +346,15 @@ class DrivingDetector(
             closeReason = "sustained_stop_activity_timer",
             updatedAtMs = nowMs
         )
+        val arrivalWasUncertain = stopCandidateFollowsAmbiguousGap
         active = null
         stopCandidateSince = null
         lastStopEvidenceAt = null
+        stopCandidateAnchorLat = null
+        stopCandidateAnchorLng = null
+        stopCandidateFollowsAmbiguousGap = false
         preWindow.clear()
-        return TimedStopClosure(ended, last, candidateAt)
+        return TimedStopClosure(ended, last, candidateAt, arrivalWasUncertain)
     }
 
     private fun rejectionReason(fix: RawLocationFix): String? {
