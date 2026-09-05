@@ -2210,7 +2210,7 @@ try{
     });
   });
 }catch(e){}
-const APP_VERSION='v577';
+const APP_VERSION='v582';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -12788,7 +12788,28 @@ _presenceHistory.map(e=>e.seq||0)):0);
         return {
           moving:true, stayStart:null, placeArrivedAt:null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
-          _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt,candidateAccumMs:0})
+          // v578 (real report: MBM recorded 15:07 for an arrival Life360 —
+          // and Bahman — confirmed was actually 14:16; the app was simply
+          // closed/backgrounded that whole time). Root-caused via a full
+          // trace + real test, not guessed: this function only ever sees
+          // the fixes it's actually called with — if native/the bridge
+          // delivers NOTHING between 14:16 and 15:06 (whether because
+          // native itself doesn't track while backgrounded, or because
+          // the fixes exist but never reach this function until the
+          // WebView resumes — NOT distinguishable from JS alone, needs
+          // the Kotlin source or a stayStart_source export from the real
+          // incident to say which), this branch has no way to know
+          // arrival happened earlier than the first fix it's given. It is
+          // NOT rewriting a correct value — there is no correct value in
+          // scope yet. This flags that fact (candidateApprox) rather than
+          // silently asserting the reopen moment as a precise, confirmed
+          // arrival time — the SAME kind of large gap that already makes
+          // famComposeStatusText show "Duration unknown" for the
+          // already-steady case (see hadPriorGap above) genuinely applies
+          // here too, just on a DIFFERENT presence state, so it is now
+          // recorded rather than lost.
+          _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt,candidateAccumMs:0,
+            candidateApprox:(priorFixGapMs!=null && priorFixGapMs>UNCERTAIN_GAP_MS)})
         };
       }
       const dFromCandidate=haversine({lat:presence.candidateLat,lng:presence.candidateLng},{lat:fix.lat,lng:fix.lng});
@@ -12832,7 +12853,8 @@ _presenceHistory.map(e=>e.seq||0)):0);
           return {
             moving:true, stayStart:null, placeArrivedAt:null,
             lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
-            _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt,candidateAccumMs:0,farLat:null,farLng:null,farSince:null,farAccumMs:0})
+            _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt,candidateAccumMs:0,farLat:null,farLng:null,farSince:null,farAccumMs:0,
+              candidateApprox:(priorFixGapMs!=null && priorFixGapMs>UNCERTAIN_GAP_MS)})
           };
         }
         // Still accumulating far-evidence — candidate/timer untouched,
@@ -12860,10 +12882,31 @@ _presenceHistory.map(e=>e.seq||0)):0);
       const candidateGapMs=priorFixGapMs!=null?priorFixGapMs:Infinity;
       const isCloseCandidateFollowUp=candidateGapMs<=FIX_CADENCE_CREDIT_CAP_MS;
       if(!isCloseCandidateFollowUp){
+        // v578 (the exact mechanism of the reported bug: MBM recorded
+        // 15:07 — app-reopen time — for an arrival Life360 and Bahman
+        // both independently confirmed was really 14:16). candidateGapMs
+        // being this large means classifyMovement was NOT called at all
+        // for the whole gap — there is no fix in between for it to have
+        // seen, whether because native itself wasn't tracking while the
+        // app was closed/backgrounded, or because fixes existed but never
+        // reached this function until the WebView resumed (the two are
+        // not distinguishable from this side — needs the native/Kotlin
+        // source or a live stayStart_source export to tell apart).
+        // candidateSince is still correctly set to THIS fix's own
+        // capturedAt (never Date.now(), never fabricated) — that part was
+        // always right. What was missing: nothing marked the eventual
+        // confirmed stayStart as approximate when it demonstrably starts
+        // from a fix that follows a data gap this large, so the UI
+        // asserted a precise, confident time it had no way to actually
+        // know. candidateApprox carries that honesty forward to
+        // arrival_confirmed below — it changes no timing, no threshold,
+        // no state transition, only an additive flag for the display
+        // layer to use later.
         return {
           moving:true, stayStart:null, placeArrivedAt:null,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:prev.lastPresenceConfirmedAt||null, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
-          _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt,candidateAccumMs:0})
+          _presence:Object.assign({},presence,{candidateLat:fix.lat,candidateLng:fix.lng,candidateSince:nowAt,candidateAccumMs:0,
+            candidateApprox:(priorFixGapMs!=null && priorFixGapMs>UNCERTAIN_GAP_MS)})
         };
       }
       const candidateAccum=(presence.candidateAccumMs||0)+candidateGapMs;
@@ -12879,10 +12922,16 @@ _presenceHistory.map(e=>e.seq||0)):0);
           lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null,
           source:fix.source||'gps'
         });
-        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('arrival_confirmed',{uid,fixId:fix.fixId||null,newAnchorLat:presence.candidateLat,newAnchorLng:presence.candidateLng,stateBefore:presence.state,stateAfter:'steady',stayStartBefore:prev.stayStart,stayStartAfter:presence.candidateSince,previousDepartedAt:presence.departedAt||prev.lastDepartureAt||null});
+        if(typeof window!=='undefined'&&window.presenceHistoryPush) window.presenceHistoryPush('arrival_confirmed',{uid,fixId:fix.fixId||null,newAnchorLat:presence.candidateLat,newAnchorLng:presence.candidateLng,stateBefore:presence.state,stateAfter:'steady',stayStartBefore:prev.stayStart,stayStartAfter:presence.candidateSince,previousDepartedAt:presence.departedAt||prev.lastDepartureAt||null,approximateStayStart:!!presence.candidateApprox});
         return {
           moving:false, stayStart:presence.candidateSince, placeArrivedAt:presence.candidateSince,
           lastAcceptedFixAt:nowAt, lastPresenceConfirmedAt:nowAt, lastDepartureAt:presence.departedAt||prev.lastDepartureAt||null, priorFixGapMs,
+          // v578: carries forward whether candidateSince itself originated
+          // right after a data gap too large for classifyMovement to have
+          // seen anything earlier — an honest signal that this stayStart,
+          // while genuinely the earliest evidence available, may not be
+          // the TRUE arrival time. Does not change stayStart's VALUE.
+          approximateStayStart:!!presence.candidateApprox,
           _presence:{anchorLat:presence.candidateLat,anchorLng:presence.candidateLng,state:'steady',since:presence.candidateSince}
         };
       }
@@ -13087,6 +13136,39 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // different place, since nothing ever invalidated it before now.
       const nativeStale=(typeof window!=='undefined'&&window.isStayStartStale)?window.isStayStartStale(uid,raw.stayStart,nextLat,nextLng):false;
       const trustedStay=(raw.stayStart!=null&&!nativeStale)?raw.stayStart:mv.stayStart;
+      // v578: approximateStayStart only ever means something when THIS
+      // (mv.stayStart, the JS-computed candidate) is actually the value
+      // being trusted. If native supplied a real, non-stale stayStart, it
+      // wins outright and JS's own uncertainty about ITS OWN candidate is
+      // irrelevant — native's presumed-more-authoritative continuous
+      // background tracking (see v494 above) is exactly the case this
+      // flag must NOT second-guess.
+      const usingJsStayStart=(trustedStay===mv.stayStart);
+      // v578 fix (found while testing): mv.approximateStayStart is only
+      // ever explicitly set by classifyMovement at the exact moment a
+      // stayStart is newly confirmed — every ORDINARY subsequent fix
+      // (already steady, nothing changed) returns stayStart:prev.stayStart
+      // unchanged but says nothing about approximateStayStart at all
+      // (undefined). Using `!!mv.approximateStayStart` directly would
+      // silently flip an already-flagged approximate stayStart back to
+      // false on the very next fix after confirmation, discarding the
+      // flag almost immediately. When classifyMovement is explicit about
+      // it (a real confirmation/reset event just happened), trust that;
+      // otherwise, if stayStart hasn't actually changed since the last
+      // persisted fix, inherit whatever flag was already persisted.
+      const stayStartUnchanged=(trustedStay===prev.stayStart);
+      // v[next]: native (DrivingDetector.kt) can now report its OWN
+      // arrivalUncertain — set exactly when ITS candidate was recovered
+      // right after a data gap it had zero visibility into, at the same
+      // place. This is no longer forced to false when native wins — that
+      // was correct back when native could only ever report a stayStart
+      // with no way to flag its own uncertainty, but native reporting a
+      // value is not the same as native being CERTAIN of it, and this
+      // must not silently upgrade an honest "roughly around here" into a
+      // confident-looking precise timestamp.
+      const approximateStayStart = usingJsStayStart
+        ? (mv.approximateStayStart!=null ? !!mv.approximateStayStart : (stayStartUnchanged && !!prev.approximateStayStart))
+        : !!raw.approximateStayStart;
       // v505 (diagnostic-only, zero behavior change): this line is exactly
       // where a THIRD possible source of a stale "Since" lives — separate
       // from both leaving_reverted_snapback and hereSince_arrival_eval,
@@ -13097,7 +13179,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
       // fix, which would flood exactly like hereSince_arrival_eval did.
       try{
         if(typeof window!=='undefined'&&window.presenceSourceHistoryPush){
-          window.presenceSourceHistoryPush(uid,{nativeStayStart:raw.stayStart||null,jsStayStart:mv.stayStart||null,trustedStay,nativeStale,fixId:raw.nativeFixId||null});
+          window.presenceSourceHistoryPush(uid,{nativeStayStart:raw.stayStart||null,jsStayStart:mv.stayStart||null,trustedStay,nativeStale,fixId:raw.nativeFixId||null,approximateStayStart});
         }
       }catch(e){}
       const next=Object.assign({},prev,raw,{
@@ -13105,6 +13187,7 @@ _presenceHistory.map(e=>e.seq||0)):0);
         lng:nextLng,
         speed:displayedSpeed!=null?Number(displayedSpeed):null,
         stayStart:trustedStay,
+        approximateStayStart,
         placeArrivedAt:mv.placeArrivedAt,
         lastPresenceConfirmedAt:mv.lastPresenceConfirmedAt,
         lastDepartureAt:mv.lastDepartureAt,
@@ -15562,6 +15645,11 @@ function famDiagView(){
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <button class="btn btn-ghost" data-fam="seqdiag-export" style="flex:1">${L==='fa'?'خروجیِ SeqDiag':'Export SeqDiag'}</button>
         <button class="btn btn-ghost" data-fam="seqdiag-clear" style="flex:1">${L==='fa'?'پاک‌کردنِ SeqDiag':'Clear SeqDiag'}</button>
+      </div>
+      <div style="font-weight:700;font-size:12px;margin:16px 0 6px">NATIVE SERVICE LOG (v[next], SQLite via TrackingDao, diagnostic-only)</div>
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:6px">${L==='fa'?'لاگِ خودِ سرویسِ پس‌زمینه‌ی Android — شروعِ سرویس، هر callbackِ GPS، تغییرِ وضعیتِ حرکت، و ثبتِ stayStart، همه با timestamp قابلِ‌مقایسه. فقط تویِ اپِ نصب‌شده‌ی Android در دسترسه (نه مرورگر).':`The Android background service's own log — service start, every GPS callback, movement-state changes, and stayStart recording, all with comparable timestamps. Only available inside the installed Android app (not the browser).`}</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button class="btn btn-ghost" data-fam="native-log-export" style="flex:1">${L==='fa'?'خروجیِ لاگِ Native':'Export Native Log'}</button>
       </div>
       <div style="font-family:monospace;font-size:9.5px;color:var(--ink3);background:var(--s2);border-radius:8px;padding:8px;max-height:420px;overflow-y:auto">
         ${(()=>{
@@ -19438,9 +19526,10 @@ function nowISOSafe(){ try{ return new Date().toISOString(); }catch(e){ return n
 /* Build the exact callout/sheet text (L1/L2 + machine "since" ISO) from the
    derived activity/place state. THE ONLY place this text is composed, so the
    marker callout and the sheet body can never disagree. */
-function famSinceOrHereFor(since){
+function famSinceOrHereFor(since,approximate){
   if(!since) return '';
-  return `${L==='fa'?'از':'Since'} ${famAbsTimeWithDay(since)}`;
+  const prefix=approximate?'~':'';
+  return `${L==='fa'?'از':'Since'} ${prefix}${famAbsTimeWithDay(since)}`;
 }
 /* Same as famAbsTime, but appends the weekday name once the timestamp falls
    on an earlier calendar day than today — matches Life360's own "Since
@@ -19461,21 +19550,24 @@ function famAbsTimeWithDay(iso){
   const dayStr=d.toLocaleDateString(L==='fa'?'fa-IR':'en-AU',{weekday:'long'});
   return `${timeStr} ${dayStr}`;
 }
-function famHereForDuration(since){
+function famHereForDuration(since,approximate){
   if(!since)return '';
   const duration=famDurSince(since);
-  return duration?(L==='fa'?`اینجا برای ${duration}`:`Here for ${duration}`):'';
+  if(!duration) return '';
+  const prefix=approximate?'~':'';
+  return L==='fa'?`اینجا برای ${prefix}${duration}`:`Here for ${prefix}${duration}`;
 }
 // v564: label+value split of the exact same strings famHereForDuration/
 // famSinceOrHereFor produce, for the marker callout's two-line format only
 // (icon+label on line 1, bold value alone on line 2 — matches the Life360
 // reference measured directly off Bahman's screen recording). The combined-
 // string functions above are untouched and still used everywhere else.
-function famHereForParts(since){
+function famHereForParts(since,approximate){
   if(!since) return null;
   const duration=famDurSince(since);
   if(!duration) return null;
-  return { label:(L==='fa'?'اینجا برای':'Here for'), value:duration };
+  const prefix=approximate?'~':'';
+  return { label:(L==='fa'?'اینجا برای':'Here for'), value:`${prefix}${duration}` };
 }
 function famSinceParts(since){
   if(!since) return null;
@@ -19873,10 +19965,20 @@ function famComposeStatusText(m){
   }
   return {
     l1:lines.line1, region:lines.line2||'',
-    l2:famSinceOrHereFor(since2),
-    calloutL2:famHereForDuration(since2),
-    calloutParts:famHereForParts(since2),
-    since:since2, activityType:'stationary', place:!!d.currentPlaceId
+    l2:famSinceOrHereFor(since2,!!s.approximateStayStart),
+    calloutL2:famHereForDuration(since2,!!s.approximateStayStart),
+    calloutParts:famHereForParts(since2,!!s.approximateStayStart),
+    since:since2, activityType:'stationary', place:!!d.currentPlaceId,
+    // v[next]: surfaces DrivingDetector/classifyMovement's honest
+    // uncertainty flag (see index.orig diff / native.diff) all the way to
+    // the actual rendered text — the field existed and was persisted and
+    // merged correctly before this, but nothing in the display path ever
+    // read it, so the UI still looked exactly as confidently precise as a
+    // real confirmed time. approximate:true here is what the "~" prefix
+    // above is driven by; also exposed as its own key for any caller that
+    // wants to style it differently (e.g. a tooltip) without re-parsing
+    // the string.
+    approximate:!!s.approximateStayStart
   };
 }
 /* The marker and the detail sheet intentionally present the same state in
@@ -22385,6 +22487,55 @@ async function famAction(act,arg,ev){
         if(typeof SeqDiag!=='undefined') await SeqDiag.clear();
         toast(L==='fa'?'لاگِ SeqDiag پاک شد':'SeqDiag log cleared');
         if(typeof render==='function') render();
+        // ^ unchanged sibling case, marker for insertion below
+      })();
+      return;
+    }
+    case 'native-log-export':{
+      (async()=>{
+        // v[next]: the native Android service's own diagnostic log
+        // (TrackingDao.recentLogs, already existed) — bridged out via
+        // window.MbmNativeDiag.exportRecentLogs (new), only present
+        // inside the installed Android app, never in a plain browser.
+        // Includes: "Foreground tracking started" (service start),
+        // "Native location callback" (every GPS callback received —
+        // the LATEST one is the last callback), "Movement state
+        // decision" (every movement-state transition), and
+        // "stayStart recorded" (every time stayStart itself is
+        // written, with arrivalUncertain). Comparing these timestamps
+        // directly is what actually distinguishes the service dying,
+        // GPS reception stopping while the service stays alive, or
+        // stayStart being lost despite fixes still arriving — logging
+        // only, changes no decision.
+        if(typeof window.MbmNativeDiag==='undefined' || typeof window.MbmNativeDiag.exportRecentLogs!=='function'){
+          toast(L==='fa'?'این فقط تویِ اپِ نصب‌شده‌ی Android در دسترسه':'Only available inside the installed Android app');
+          return;
+        }
+        let entries=[];
+        try{
+          // v[next]: was 500 — "Native location callback" alone logs
+          // every 1-2s, so 500 rows covered well under 20 minutes,
+          // nowhere near enough to span a gap investigation like the
+          // 51-minute one this whole export exists for. Matches the
+          // native side's trimLogs cap (also raised, see native.diff).
+          const raw=window.MbmNativeDiag.exportRecentLogs(5000);
+          const parsed=JSON.parse(raw);
+          if(parsed && parsed.error){ toast((L==='fa'?'خطا: ':'Error: ')+parsed.error); return; }
+          entries=parsed;
+        }catch(e){
+          console.error('[native-log-export] bridge call failed',e);
+          toast(L==='fa'?'خواندنِ لاگِ Native شکست خورد':'Reading the native log failed');
+          return;
+        }
+        try{
+          const r=await famExportJsonRobust(entries,'mbm-native-service-log');
+          toast((L==='fa'?`${r.count} رکورد — روش: `:`${r.count} records — method: `)+famExportMethodLabel(r.method));
+          if(r.method==='download-unverified'){ famShowJsonExportModal(entries,'mbm-native-service-log'); }
+        }catch(e){
+          console.error('[native-log-export] all export strategies failed',e);
+          toast(L==='fa'?'روش‌های خودکار شکست خورد — نمایشِ دستی باز شد':'Automated methods failed — showing manual fallback');
+          famShowJsonExportModal(entries,'mbm-native-service-log');
+        }
       })();
       return;
     }
@@ -23705,9 +23856,30 @@ const VOICE={
   baseText:'',         // text locked in before the current session
   sessionFull:'',      // transcript produced in the current session
   restartTimer:null,   // pending auto-restart timer id (nullable)
+  recentSegments:[],   // v578: last few inserted segments (normalized text), for restart-boundary dedup only
+  _checkRestartDup:false, // v578: true only for the first final result right after an auto-restart
+  _restartCount:0,     // v578: restarts within the current _restartWindowStart window, for the safety cap
+  _restartWindowStart:0,
   DEBUG:false,         // flip on to emit lifecycle logs
   log(...a){ if(this.state==='__never__'){} if(VOICE.DEBUG){ try{console.log('[VOICE]','gen='+VOICE.gen,'state='+VOICE.state,...a);}catch(_){}} if(window.__voiceLog){window.__voiceLog.push('gen='+VOICE.gen+' state='+VOICE.state+' '+a.join(' '));} }
 };
+// v578: normalize for restart-boundary dedup comparison only — trim, lowercase,
+// collapse whitespace, strip a few common trailing punctuation marks so minor
+// ASR punctuation differences don't defeat the match.
+function _voiceNormalizeSegment(seg){
+  return (seg||'').trim().toLowerCase().replace(/\s+/g,' ').replace(/[.,!?،؛٫]+$/,'');
+}
+function _voiceIsDuplicateOfRecent(seg){
+  const norm=_voiceNormalizeSegment(seg);
+  if(!norm) return false;
+  return VOICE.recentSegments.indexOf(norm)!==-1;
+}
+function _voiceRememberSegment(seg){
+  const norm=_voiceNormalizeSegment(seg);
+  if(!norm) return;
+  VOICE.recentSegments.push(norm);
+  if(VOICE.recentSegments.length>3) VOICE.recentSegments.shift();
+}
 let _voiceRecog=null,_voiceActiveBtn=null; // legacy aliases kept in sync for any external checks
 // User-selectable speech-recognition language (falls back to app language).
 const VOICE_LANGS=[
@@ -23778,6 +23950,8 @@ function attachVoiceInput(micId,inputId,onText){
     // dictation flows from the cursor instead of always appending to the end.
     VOICE.insertPos = (typeof _node.selectionStart==='number') ? _node.selectionStart : (_node.value||'').length;
     VOICE.interimLen = 0;   // length of the currently-shown interim preview
+    VOICE.recentSegments = [];       // v578: fresh dictation — no restart-boundary history to compare against
+    VOICE._checkRestartDup = false;  // v578: the FIRST session of a dictation never needs the dedup check
     // Follow the user's cursor during dictation: if they tap elsewhere or type
     // manually (which moves the caret), the next voice text inserts THERE.
     // Skipped while an interim preview is on screen (its removal math depends on
@@ -23815,8 +23989,6 @@ function voiceStartSession(SR,inputId,fallbackNode){
   VOICE.rec=rec; _voiceRecog=rec; _voiceActiveBtn=VOICE.btn;
   rec.lang=voiceLang(); rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
   let committedCount=0;   // finalized result entries already inserted (this session)
-  const wasRestart=!!VOICE._restarted; VOICE._restarted=false;
-  let restartSeeded=!wasRestart;   // if restarted, seed committedCount on first event
 
   // Insert `text` into the LIVE field at VOICE.insertPos, advance the anchor and
   // the cursor. Reads the live value each call so manual edits are preserved.
@@ -23866,23 +24038,35 @@ function voiceStartSession(SR,inputId,fallbackNode){
   rec.onresult=(e)=>{
     if(myGen!==VOICE.gen){VOICE.log('onresult IGNORED (stale gen='+myGen+')');return;}   // stale callback guard
     const node=liveInput();
-    // On a restarted session, the engine may carry over the previous session's
-    // finalized results. Seed committedCount past them ONCE so they're not
-    // reinserted — only new speech after the restart is appended.
-    if(!restartSeeded){
-      let finals=0;
-      for(let i=0;i<e.results.length;i++){ if(e.results[i].isFinal)finals=i+1; else break; }
-      committedCount=finals;
-      restartSeeded=true;
-      VOICE.log('restart seeded committedCount='+committedCount);
-    }
     // Remove any interim preview before inserting finals, so it can't be double-counted.
     if(VOICE.interimLen>0){ showInterim(node,''); }
     // Insert each NEW finalized result exactly once (tracked by index).
     for(let i=committedCount;i<e.results.length;i++){
       if(e.results[i].isFinal){
         const seg=(e.results[i][0].transcript||'').trim();
-        if(seg) insertAtAnchor(node,seg);
+        if(seg){
+          // v578 REAL FIX (root cause, not a rollback of the old auto-restart):
+          // the engine can occasionally re-deliver the tail end of the
+          // PREVIOUS session's speech as the first final result of a freshly
+          // restarted session. The old code avoided this by blindly skipping
+          // a guessed number of leading result INDICES on every restart
+          // (fragile — it had no way to know if that guess was right, and
+          // wrong guesses either duplicated text or silently ate a real
+          // word) — which is why auto-restart was disabled entirely rather
+          // than trusted. This checks the actual TEXT instead: only the
+          // very first final result immediately after a restart is compared
+          // against the last few segments already inserted, and is skipped
+          // ONLY on an exact match. Every other final result, in every
+          // session, is inserted unconditionally — a user genuinely saying
+          // the same word twice mid-session is never affected.
+          if(VOICE._checkRestartDup && _voiceIsDuplicateOfRecent(seg)){
+            VOICE.log('skipped duplicate segment right after restart: "'+seg+'"');
+          }else{
+            insertAtAnchor(node,seg);
+            _voiceRememberSegment(seg);
+          }
+          VOICE._checkRestartDup=false; // only the first final result after a restart is ever checked
+        }
         committedCount=i+1;
       }
     }
@@ -23912,14 +24096,42 @@ function voiceStartSession(SR,inputId,fallbackNode){
     // Drop any trailing interim that never finalized.
     const node=liveInput();
     if(VOICE.interimLen>0){ showInterim(node,''); }
-    VOICE.log('onend -> finalize (no auto-restart)');
-    // NO AUTO-RESTART. The session ends here (engine silence/timeout or user stop).
-    // Because we never restart, the engine can never re-deliver previously
-    // recognized words — repetition is structurally impossible. To keep dictating,
-    // the user taps the mic again (a fresh session starts from the cursor).
     try{ rec.onresult=null; rec.onend=null; rec.onstart=null; rec.onerror=null; }catch(_){}
     VOICE.rec=null;
-    _voiceFinalize(inputId);
+    // v578 REAL FIX: reaching this point with a matching gen means the
+    // recognizer ended on its own (platform silence/timeout) — a manual
+    // stop (voiceStop/voiceHardStop) ALWAYS detaches onend and bumps gen
+    // BEFORE calling stop()/abort(), so it can never reach here. This is
+    // therefore always the "engine cut me off, not the user" case, and is
+    // exactly what was cutting dictation every few seconds and forcing a
+    // manual re-tap. Auto-restart seamlessly instead of finalizing —
+    // anti-duplication is the content-based check in onresult above, not
+    // an index guess, so this is safe against the exact bug that got
+    // auto-restart disabled before.
+    VOICE.log('onend -> auto-restart');
+    const now=Date.now();
+    if(!VOICE._restartWindowStart || now-VOICE._restartWindowStart>10000){
+      VOICE._restartWindowStart=now; VOICE._restartCount=0;
+    }
+    VOICE._restartCount++;
+    if(VOICE._restartCount>15){
+      // Safety valve: something is genuinely wrong (mic permission
+      // flapping, engine repeatedly failing instantly, etc.) — stop
+      // trying instead of looping forever and draining the battery.
+      VOICE.log('restart safety cap hit, giving up');
+      VOICE.state='IDLE';
+      if(VOICE.btn) VOICE.btn.classList.remove('recording');
+      toast(L==='fa'?'میکروفون بارها قطع شد؛ دوباره لمس کنید':'Microphone kept cutting out — tap to resume');
+      _voiceFinalize(inputId);
+      return;
+    }
+    VOICE.state='RESTART_PENDING';
+    VOICE.restartTimer=setTimeout(()=>{
+      VOICE.restartTimer=null;
+      if(VOICE.state!=='RESTART_PENDING') return; // stopped/changed while the timer was pending
+      VOICE._checkRestartDup=true; // only the NEXT session's first final gets the dedup check
+      voiceStartSession(SR,inputId,node);
+    },250);
   };
   try{ rec.start(); }
   catch(err){ VOICE.log('start() threw '+ (err&&err.message)); }
