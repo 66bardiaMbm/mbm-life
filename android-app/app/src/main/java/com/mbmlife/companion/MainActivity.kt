@@ -15,6 +15,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -37,9 +38,11 @@ import com.mbmlife.companion.data.FamilyResolver
 import com.mbmlife.companion.databinding.ActivityMainBinding
 import com.mbmlife.companion.tracking.TrackingService
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 import org.json.JSONTokener
 import org.json.JSONObject
+import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -67,6 +70,34 @@ class MainActivity : AppCompatActivity() {
     private val backgroundPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             advanceTrackingSetup()
+        }
+
+    // Holds the WebView's getUserMedia() permission request while the
+    // RECORD_AUDIO runtime permission dialog is open, resolved (granted or
+    // denied) when the user answers. Without this, the WebView has no way
+    // to ever actually get microphone access even after RECORD_AUDIO is
+    // granted at the OS level — WebChromeClient.onPermissionRequest must be
+    // explicitly answered per-request; the default (unoverridden) behavior
+    // is to silently deny every media request.
+    // (Restored verbatim from a prior session's verified fix — Build #113
+    // confirmed this exact implementation working. It had been lost from
+    // this file by the time this session started, before any change made
+    // today — a previous upload somewhere overwrote it with an older
+    // version that never had this fix. This session's own first attempt
+    // at fixing the same gap used a different, unverified pattern
+    // (requesting RECORD_AUDIO up front at app launch instead of
+    // on-demand via this launcher) — replaced with the proven one here.)
+    private var pendingMicPermissionRequest: PermissionRequest? = null
+    private val micPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val request = pendingMicPermissionRequest
+            pendingMicPermissionRequest = null
+            if (request == null) return@registerForActivityResult
+            if (granted) {
+                request.grant(request.resources)
+            } else {
+                request.deny()
+            }
         }
 
     // Holds the WebView's callback while the system photo/file picker is
@@ -110,6 +141,34 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun appVersionName(): String = BuildConfig.VERSION_NAME
+    }
+
+    // v[next]: makes the background service's own diagnostic log
+    // (TrackingDao.recentLogs — already existed, had no export path from
+    // inside the app) reachable from the WebView's existing Diagnostics
+    // screen. @JavascriptInterface methods run off the main thread (per
+    // Android's own WebView contract), so a runBlocking call to the
+    // suspend DAO query here is safe — it does not freeze the UI.
+    private inner class NativeDiagBridge {
+        @JavascriptInterface
+        fun exportRecentLogs(limit: Int): String {
+            return try {
+                val logs = runBlocking { app.database.trackingDao().recentLogs(limit) }
+                JSONArray(
+                    logs.map { log ->
+                        JSONObject()
+                            .put("timestampMs", log.timestampMs)
+                            .put("iso", java.time.Instant.ofEpochMilli(log.timestampMs).toString())
+                            .put("level", log.level)
+                            .put("tag", log.tag)
+                            .put("message", log.message)
+                            .put("details", log.detailsJson?.let { JSONTokener(it).nextValue() } ?: JSONObject.NULL)
+                    }
+                ).toString()
+            } catch (e: Exception) {
+                JSONObject().put("error", e.toString()).toString()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -226,6 +285,38 @@ class MainActivity : AppCompatActivity() {
                 logger.info("WebView", "PWA geolocation request denied; native service is authoritative")
             }
 
+            // v[next]: grants the WebView's own microphone requests (Web
+            // Speech API / SpeechRecognition, used by the Notes module's
+            // dictation mic). Restored verbatim from a prior session's
+            // verified fix (Build #113) — see the launcher declaration
+            // above for why this replaced this session's own first
+            // attempt. Checks/requests the real RECORD_AUDIO runtime
+            // permission (Android 6+) and only grants the WebView-level
+            // resource once that's actually held; anything other than a
+            // pure microphone request is explicitly denied — this app has
+            // no camera use case and no CAMERA permission declared.
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                val wantsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+                val onlyKnownResources = request.resources.all { it == PermissionRequest.RESOURCE_AUDIO_CAPTURE }
+                if (!wantsAudio || !onlyKnownResources) {
+                    request.deny()
+                    return
+                }
+                val alreadyGranted = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (alreadyGranted) {
+                    request.grant(request.resources)
+                    return
+                }
+                // Only one getUserMedia() prompt can be in flight at a time;
+                // deny anything still pending rather than leaking it.
+                pendingMicPermissionRequest?.deny()
+                pendingMicPermissionRequest = request
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -289,6 +380,7 @@ class MainActivity : AppCompatActivity() {
                                     ?.let { java.time.Instant.ofEpochMilli(it).toString() }
                                     ?: JSONObject.NULL
                             )
+                            .put("approximateStayStart", app.preferences.stayStartAtMs > 0L && app.preferences.stayStartApproximate)
                             // This is a replay of Room's last accepted sample,
                             // not a new GPS callback.  Giving it "now" made an
                             // hours-old coordinate look live after every page
@@ -320,6 +412,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.webView.addJavascriptInterface(NativeAuthBridge(), "MbmNativeAuth")
+        binding.webView.addJavascriptInterface(NativeDiagBridge(), "MbmNativeDiag")
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         binding.webView.clearCache(true)
         binding.webView.loadUrl(BuildConfig.PWA_URL)
@@ -565,6 +658,12 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) add(Manifest.permission.POST_NOTIFICATIONS)
+        // RECORD_AUDIO is deliberately NOT requested up front here — the
+        // proven pattern (restored above, see pendingMicPermissionRequest/
+        // micPermissionLauncher) requests it on-demand, exactly when the
+        // WebView's own getUserMedia() call needs it, via
+        // WebChromeClient.onPermissionRequest. Requesting it here too
+        // would just prompt twice for the same permission.
     }
 
     private fun openAppSettings() {
