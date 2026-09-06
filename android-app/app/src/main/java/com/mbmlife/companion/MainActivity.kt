@@ -658,12 +658,25 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) add(Manifest.permission.POST_NOTIFICATIONS)
-        // RECORD_AUDIO is deliberately NOT requested up front here — the
-        // proven pattern (restored above, see pendingMicPermissionRequest/
-        // micPermissionLauncher) requests it on-demand, exactly when the
-        // WebView's own getUserMedia() call needs it, via
-        // WebChromeClient.onPermissionRequest. Requesting it here too
-        // would just prompt twice for the same permission.
+        // REAL-DEVICE FINDING (not in the Sep 2 session, which only
+        // confirmed the build compiled, never confirmed dictation
+        // actually worked on-device): the WebView's SpeechRecognition
+        // engine checks the app's OWN RECORD_AUDIO runtime permission
+        // directly and fails immediately with a plain "not-allowed"
+        // error if it isn't ALREADY granted — it does not reliably
+        // trigger WebChromeClient.onPermissionRequest first the way a
+        // raw getUserMedia() audio-only call does. onPermissionRequest
+        // (kept above) still matters for that getUserMedia case; this
+        // upfront request is what makes SpeechRecognition itself work,
+        // confirmed necessary from an actual failed attempt on-device
+        // where no system dialog appeared at all before the "not-
+        // allowed" error.
+        if (
+            ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) add(Manifest.permission.RECORD_AUDIO)
     }
 
     private fun openAppSettings() {
