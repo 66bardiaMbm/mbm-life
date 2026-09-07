@@ -54,7 +54,6 @@ class MainActivity : AppCompatActivity() {
     private var receiverRegistered = false
     private var foregroundPermissionRequested = false
     private var secondaryPermissionsRequested = false
-    private var micPermissionRequestedThisProcess = false
     private var backgroundPermissionRequested = false
     private var familyResolutionInFlight = false
 
@@ -261,28 +260,6 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         advanceTrackingSetup()
-        // v[next] TARGETED FIX: RECORD_AUDIO is also requested as part of
-        // missingSecondaryPermissions() above, but that whole batch is
-        // gated by secondaryPermissionsRequested — a flag that may
-        // already be true from a much earlier session (when only
-        // ACTIVITY_RECOGNITION/POST_NOTIFICATIONS existed, before
-        // RECORD_AUDIO was ever added to the list), which would silently
-        // skip the batch forever afterward, on every future app open,
-        // with no way for the user to ever be asked. This check is
-        // completely independent of that flag and its own "only once"
-        // state — every request only happens the first time IT sees
-        // RECORD_AUDIO ungranted per process, using its own separate
-        // flag, so it can't inherit a stale "already handled" state from
-        // the older, unrelated permission batch.
-        if (
-            !micPermissionRequestedThisProcess &&
-            ContextCompat.checkSelfPermission(
-                this, Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            micPermissionRequestedThisProcess = true
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
     }
 
     @Suppress("SetJavaScriptEnabled")
@@ -681,25 +658,6 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) add(Manifest.permission.POST_NOTIFICATIONS)
-        // REAL-DEVICE FINDING (not in the Sep 2 session, which only
-        // confirmed the build compiled, never confirmed dictation
-        // actually worked on-device): the WebView's SpeechRecognition
-        // engine checks the app's OWN RECORD_AUDIO runtime permission
-        // directly and fails immediately with a plain "not-allowed"
-        // error if it isn't ALREADY granted — it does not reliably
-        // trigger WebChromeClient.onPermissionRequest first the way a
-        // raw getUserMedia() audio-only call does. onPermissionRequest
-        // (kept above) still matters for that getUserMedia case; this
-        // upfront request is what makes SpeechRecognition itself work,
-        // confirmed necessary from an actual failed attempt on-device
-        // where no system dialog appeared at all before the "not-
-        // allowed" error.
-        if (
-            ContextCompat.checkSelfPermission(
-                this@MainActivity,
-                Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED
-        ) add(Manifest.permission.RECORD_AUDIO)
     }
 
     private fun openAppSettings() {
