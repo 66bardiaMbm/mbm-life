@@ -41,6 +41,15 @@ jobs:
         working-directory: android-app
         run: ./gradlew --no-daemon testDebugUnitTest
 
+      - name: Upload unit test report (always, even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: android-app/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Enable KVM access
         run: sudo chmod 666 /dev/kvm
 
@@ -51,6 +60,15 @@ jobs:
           arch: x86_64
           working-directory: android-app
           script: ./gradlew --no-daemon connectedDebugAndroidTest
+
+      - name: Upload instrumented test report (always, even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-test-report
+          path: android-app/app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Restore stable APK signing key
         env:
@@ -73,13 +91,171 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           "$APKSIGNER" verify --print-certs android-app/app/build/outputs/apk/release/app-release.apk
 
-      - name: Name v453 APK
-        run: cp android-app/app/build/outputs/apk/release/app-release.apk android-app/app/build/outputs/apk/release/MBM-Life-v453-release.apk
+      - name: Compute short commit SHA for artifact naming
+        id: shortsha
+        run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
-      - name: Upload v453 APK
+      - name: Name release APK (commit-stamped, unambiguous)
+        run: cp android-app/app/build/outputs/apk/release/app-release.apk "android-app/app/build/outputs/apk/release/MBM-Life-release-${{ steps.shortsha.outputs.sha }}.apk"
+
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: MBM-Life-v453-release
-          path: android-app/app/build/outputs/apk/release/MBM-Life-v453-release.apk
+          name: MBM-Life-release-${{ github.sha }}
+          path: android-app/app/build/outputs/apk/release/MBM-Life-release-${{ steps.shortsha.outputs.sha }}.apk
           if-no-files-found: error
           retention-days: 14
+
+  # v[next]: independent of the `build` job above (no `needs:`) — runs
+  # regardless of whether that job's tests pass or fail. Within THIS job,
+  # ordering was deliberately changed again after review: the debug
+  # manifest check must not wait on the signing key or the release build
+  # at all (it needs neither), so it now runs immediately after
+  # assembleDebug, before the signing key is even touched. The release
+  # check is fully separate — its own assemble step, its own dump, its
+  # own upload, its own pass/fail — so a debug-side problem never hides
+  # or blocks the release-side report. Every dump is written to a file
+  # and uploaded as an artifact BEFORE any pass/fail assertion is made on
+  # it, so a failing assertion never costs the evidence that would
+  # explain why.
+  manifest-check:
+    name: Verify merged manifest (debug + release, independent of tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        working-directory: android-app
+        run: chmod +x gradlew
+
+      # ── DEBUG: runs first, needs no signing key, not gated on release ──
+
+      - name: Assemble debug APK
+        working-directory: android-app
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Dump debug manifest + permissions (immediately, before anything release-related)
+        if: always()
+        run: |
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          {
+            echo "commit: ${{ github.sha }}"
+            echo "workflow run: ${{ github.run_id }}"
+            echo "variant: debug"
+            echo "expected path: $APK"
+            echo ""
+            if [ ! -f "$APK" ]; then
+              echo "RESULT (debug): expected APK not found at this path -- assembleDebug did not produce it."
+            else
+              echo "-- package / applicationId / versionCode --"
+              "$AAPT" dump badging "$APK" | grep -E "^package:"
+              echo ""
+              echo "-- full requested-permissions list --"
+              "$AAPT" dump permissions "$APK"
+              echo ""
+              if "$AAPT" dump permissions "$APK" | grep -q "android.permission.RECORD_AUDIO"; then
+                echo "RESULT (debug): RECORD_AUDIO IS present in this variant's final merged manifest."
+              else
+                echo "RESULT (debug): RECORD_AUDIO IS NOT present in this variant's final merged manifest. This shows it is missing from the merge OUTPUT only -- compare against the source AndroidManifest.xml (uploaded separately below) to see whether it was ever declared for this build."
+              fi
+            fi
+            echo ""
+            echo "== source AndroidManifest.xml, for direct comparison =="
+            cat android-app/app/src/main/AndroidManifest.xml
+          } | tee debug-manifest-check.txt
+
+      - name: Upload debug manifest check result (always, before any assertion below)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-check-debug-${{ github.sha }}
+          path: debug-manifest-check.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Assert debug variant is sound (evidence already saved above regardless of this result)
+        run: |
+          APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -f "$APK" || { echo "FAIL: debug APK missing at expected path, see manifest-check-debug artifact"; exit 1; }
+          "$AAPT" dump permissions "$APK" | grep -q "android.permission.RECORD_AUDIO" || { echo "FAIL: RECORD_AUDIO missing from debug merged manifest, see manifest-check-debug artifact"; exit 1; }
+          echo "PASS: debug variant has RECORD_AUDIO in its merged manifest."
+
+      # ── RELEASE: fully separate from the debug section above ──
+
+      - name: Restore stable APK signing key
+        if: always()
+        env:
+          MBM_ANDROID_KEYSTORE_B64: ${{ secrets.MBM_ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$MBM_ANDROID_KEYSTORE_B64"
+          printf '%s' "$MBM_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbm-life-ci.p12"
+
+      - name: Assemble release APK
+        if: always()
+        working-directory: android-app
+        env:
+          MBM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mbm-life-ci.p12
+          MBM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBM_ANDROID_KEYSTORE_PASSWORD }}
+          MBM_ANDROID_KEY_ALIAS: ${{ secrets.MBM_ANDROID_KEY_ALIAS }}
+          MBM_ANDROID_KEY_PASSWORD: ${{ secrets.MBM_ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Dump release manifest + permissions (separate report from debug)
+        if: always()
+        run: |
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          APK="android-app/app/build/outputs/apk/release/app-release.apk"
+          {
+            echo "commit: ${{ github.sha }}"
+            echo "workflow run: ${{ github.run_id }}"
+            echo "variant: release"
+            echo "expected path: $APK"
+            echo ""
+            if [ ! -f "$APK" ]; then
+              echo "RESULT (release): expected APK not found at this path -- assembleRelease did not produce it."
+            else
+              echo "-- package / applicationId / versionCode --"
+              "$AAPT" dump badging "$APK" | grep -E "^package:"
+              echo ""
+              echo "-- full requested-permissions list --"
+              "$AAPT" dump permissions "$APK"
+              echo ""
+              if "$AAPT" dump permissions "$APK" | grep -q "android.permission.RECORD_AUDIO"; then
+                echo "RESULT (release): RECORD_AUDIO IS present in this variant's final merged manifest."
+              else
+                echo "RESULT (release): RECORD_AUDIO IS NOT present in this variant's final merged manifest. This shows it is missing from the merge OUTPUT only -- compare against the source AndroidManifest.xml (uploaded with the debug report) to see whether it was ever declared for this build."
+              fi
+            fi
+          } | tee release-manifest-check.txt
+
+      - name: Upload release manifest check result (always, before any assertion below)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-check-release-${{ github.sha }}
+          path: release-manifest-check.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Assert release variant is sound (evidence already saved above regardless of this result)
+        if: always()
+        run: |
+          APK="android-app/app/build/outputs/apk/release/app-release.apk"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -f "$APK" || { echo "FAIL: release APK missing at expected path, see manifest-check-release artifact"; exit 1; }
+          "$AAPT" dump permissions "$APK" | grep -q "android.permission.RECORD_AUDIO" || { echo "FAIL: RECORD_AUDIO missing from release merged manifest, see manifest-check-release artifact"; exit 1; }
+          echo "PASS: release variant has RECORD_AUDIO in its merged manifest."
