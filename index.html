@@ -2211,7 +2211,7 @@ try{
     });
   });
 }catch(e){}
-const APP_VERSION='v583';
+const APP_VERSION='v584';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -2577,37 +2577,82 @@ async function cloudBackupWriteProgress(uid, state, extra){
   }catch(e){ console.error('cloudBackupWriteProgress failed (non-fatal):', e); }
 }
 
-// Uploads one attachment's dataUrl (already extracted by
-// cloudBackupExtractAttachments) to Storage as raw bytes — never as a
-// data: URL string, so it counts against Storage quota/limits correctly
-// and downloads back as a normal blob.
+// v[next] FIX (code review, 2026-09-08): ciphertext (encryptedPayload) is
+// a BARE base64 string (see VaultCrypto.encryptObj — btoa(...), never
+// wrapped in a data: URI), NOT a data: URL like a real attachment's
+// dataUrl. Uploading it with format 'data_url' would silently corrupt or
+// reject it. isRawCiphertext now selects a DIFFERENT, correct Storage
+// putString format ('base64') — this is still just moving opaque bytes;
+// nothing here ever decodes or inspects the plaintext they represent.
 async function cloudBackupUploadAttachment(uid, attachment){
   const ref=FB.storage.ref().child(`users/${uid}/${attachment.storagePath}`);
-  // dataUrl is "data:<mime>;base64,<data>" — putString with 'data_url'
-  // format handles the decode; this never touches/transforms the bytes
-  // themselves, whether plaintext image data or opaque ciphertext.
-  await ref.putString(attachment.dataUrl, 'data_url', {contentType:attachment.mime});
+  if(attachment.isRawCiphertext){
+    await ref.putString(attachment.dataUrl, 'base64', {contentType:attachment.mime||'application/octet-stream'});
+  }else{
+    await ref.putString(attachment.dataUrl, 'data_url', {contentType:attachment.mime});
+  }
   return ref.fullPath;
 }
 
-async function cloudBackupDownloadAttachment(uid, storagePath){
+// v[next] FIX (code review, 2026-09-08): symmetric with the upload fix
+// above — asRawCiphertext=true returns the BARE base64 string the
+// encryptedPayload/vaultItem fields actually need (matching what
+// VaultCrypto.decryptObj's unb64()/atob() expects), not a data: URL.
+// Getting this wrong would silently break every restored Vault item and
+// every restored secure document, without any obvious error at restore
+// time — decryption would just fail later, when the user tries to open
+// one.
+// Pure — extracted so the exact byte↔base64 round-trip used for
+// ciphertext download can be unit-tested without any Firebase call.
+function cloudBackupBytesToBase64(bytes){
+  let binary='';
+  for(let i=0;i<bytes.length;i++) binary+=String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+async function cloudBackupDownloadAttachment(uid, storagePath, asRawCiphertext){
   const ref=FB.storage.ref().child(`users/${uid}/${storagePath}`);
   const url=await ref.getDownloadURL();
   const resp=await fetch(url);
   const blob=await resp.blob();
+  if(asRawCiphertext){
+    const buf=await blob.arrayBuffer();
+    return cloudBackupBytesToBase64(new Uint8Array(buf));
+  }
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
-    reader.onload=()=>resolve(reader.result); // back to a data: URL string
+    reader.onload=()=>resolve(reader.result); // a data: URL string
     reader.onerror=reject;
     reader.readAsDataURL(blob);
   });
 }
 
-// v[next]: the full push flow. Returns {ok:true, version} or
-// {ok:false, reason}. NEVER call this without cloudBackupCanPush()
-// having already returned allowed:true — this function itself
-// re-checks as a second, independent guard (defense in depth), since
-// the cost of getting this specific check wrong is real user data loss.
+// v[next] FIX (code review, 2026-09-08): every module's user-facing
+// SETTINGS, not just vault/theme/lang. Whitelisted deliberately (not a
+// blacklist) — anything auth-derived (userId/displayName/email/photoURL)
+// or device-local sync bookkeeping (cloudBackup itself) is excluded by
+// simply never being in this list, which stays safe even if a new
+// meta field is added later and someone forgets to update an exclusion
+// list.
+const CLOUD_BACKUP_META_FIELDS=['theme','lang','viewSort','viewOrder','addOnTop','starTop','soundOn','confirmDel','accent','showDueMyDay','recogniseDates','removeDates','weekStart','smartShow','autoHideSmart','pushEnabled','notifPrefs','vault'];
+
+function cloudBackupBuildMetaPayload(meta){
+  const out={};
+  for(const k of CLOUD_BACKUP_META_FIELDS){ if(k in (meta||{})) out[k]=meta[k]; }
+  return out;
+}
+
+// v[next] FIX (code review, 2026-09-08): REAL versioning. Every push now
+// writes entity data and attachments under a version-numbered path
+// (backupVersions/{version}/...) that a PREVIOUS, already-complete
+// version's path never shares — so a push that fails partway through
+// simply leaves an incomplete backupVersions/{newVersion}/... lying
+// around, unreferenced by the manifest, while the last known-good
+// version's data is never touched, let alone partially overwritten. The
+// manifest is still the ONLY thing that ever tells restore "version N is
+// the one to use", and it still only gets written at the very end, after
+// every entity doc and every attachment for THIS version has been
+// uploaded successfully.
 async function cloudBackupPush(){
   const uid=cloudBackupUid();
   if(!uid) return {ok:false, reason:'not-signed-in'};
@@ -2618,26 +2663,31 @@ async function cloudBackupPush(){
 
   const gate=cloudBackupCanPush(DB, localMeta, cloudManifest);
   if(!gate.allowed){
-    // Not writing a 'failed' progress here on purpose — refusing to push
-    // because it would be UNSAFE is not the same as an error; the UI
-    // should not show this as a red error state.
     return {ok:false, reason:gate.reason};
   }
 
-  await cloudBackupWriteProgress(uid,'pushing',{startedAt:firebase.firestore.FieldValue.serverTimestamp(), lastError:null});
+  const nextVersion=(cloudManifest&&typeof cloudManifest.version==='number'?cloudManifest.version:0)+1;
+  await cloudBackupWriteProgress(uid,'pushing',{startedAt:firebase.firestore.FieldValue.serverTimestamp(), lastError:null, targetVersion:nextVersion});
 
   try{
-    const nextVersion=(cloudManifest&&typeof cloudManifest.version==='number'?cloudManifest.version:0)+1;
     const entityCounts={};
     let attachmentCount=0;
+    const versionCol=FB.db.collection('users').doc(uid).collection('backupVersions').doc(String(nextVersion)).collection('entities');
     const batch=FB.db.batch();
-    const dataCol=FB.db.collection('users').doc(uid).collection('backupData');
 
     for(const type of CLOUD_BACKUP_ENTITY_TYPES){
       const rawMap=DB.entities[type]||{};
       const strippedMap={};
       for(const id of Object.keys(rawMap)){
         const {stripped, attachments}=cloudBackupExtractAttachments(type, id, rawMap[id]);
+        // Attachment paths are version-scoped too, for the exact same
+        // isolation reason as the entity data itself.
+        for(const att of attachments){
+          att.storagePath=att.storagePath.replace(
+            `backupAttachments/${type}/${id}/`,
+            `backupAttachments/${nextVersion}/${type}/${id}/`
+          );
+        }
         strippedMap[id]=stripped;
         for(const att of attachments){
           await cloudBackupUploadAttachment(uid, att);
@@ -2647,22 +2697,21 @@ async function cloudBackupPush(){
       entityCounts[type]=Object.keys(strippedMap).length;
       const payload={items:strippedMap, updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
       cloudBackupAssertNoSecretMaterial(payload); // throws (aborting the whole push) if this ever trips
-      batch.set(dataCol.doc(type), payload);
+      batch.set(versionCol.doc(type), payload);
     }
-    // Vault's KDF parameters (salt/verifier/iter — none of them secret;
-    // see VAULT DATA MODEL) travel as part of meta, same batch, same
-    // atomicity guarantee as everything else.
-    const metaPayload={vault:DB.meta.vault||null, theme:DB.meta.theme, lang:DB.meta.lang};
+
+    const metaPayload=cloudBackupBuildMetaPayload(DB.meta);
     cloudBackupAssertNoSecretMaterial(metaPayload);
-    batch.set(dataCol.doc('_meta'), metaPayload);
+    batch.set(versionCol.doc('_meta'), metaPayload);
 
     await batch.commit();
 
-    // Only NOW, after every entity-type doc and every attachment has
-    // been written and awaited without throwing, is the manifest itself
-    // written — this ordering IS the "declared restorable only after
-    // completion and verification" guarantee; nothing before this line
-    // ever touches the manifest document.
+    // Only NOW, after every entity-type doc and every attachment for
+    // THIS version has been written and awaited without throwing, is the
+    // manifest written — pointing at THIS version. The previous
+    // version's data (still fully intact under its own path) remains
+    // exactly what any concurrent/failed restore would see until this
+    // line succeeds.
     await FB.db.collection('users').doc(uid).collection('backup').doc('manifest').set({
       version:nextVersion, status:'complete',
       savedAt:firebase.firestore.FieldValue.serverTimestamp(),
@@ -2682,8 +2731,17 @@ async function cloudBackupPush(){
   }
 }
 
-// v[next]: full restore flow. Returns {ok:true, version} or
-// {ok:false, reason}.
+// v[next] FIX (code review, 2026-09-08): reads from the version-scoped
+// path the manifest actually points to (backupVersions/{manifest.version}/
+// entities/{type}), rehydrates attachments NESTED inside documents[id]
+// .attachments[] (previously only the top-level record's own
+// backedUp/storagePath was ever checked — array entries were never
+// rehydrated at all), uses the ciphertext-aware download path for
+// encryptedPayload, applies restored meta/settings (previously only
+// vault was applied — theme/lang/etc. were silently ignored), and now
+// treats an entity-count mismatch against the manifest as a fatal
+// restore error instead of silently treating a missing document as an
+// empty collection and wiping that module's data.
 async function cloudBackupPull(){
   const uid=cloudBackupUid();
   if(!uid) return {ok:false, reason:'not-signed-in'};
@@ -2695,44 +2753,70 @@ async function cloudBackupPull(){
   if(!gate.allowed) return {ok:false, reason:gate.reason};
 
   try{
-    const dataCol=FB.db.collection('users').doc(uid).collection('backupData');
+    const versionCol=FB.db.collection('users').doc(uid).collection('backupVersions').doc(String(cloudManifest.version)).collection('entities');
     const restoredEntities={};
+
     for(const type of CLOUD_BACKUP_ENTITY_TYPES){
-      const snap=await dataCol.doc(type).get();
-      const items=snap.exists?(snap.data().items||{}):{};
+      const snap=await versionCol.doc(type).get();
+      const expectedCount=(cloudManifest.entityCounts && typeof cloudManifest.entityCounts[type]==='number')
+        ? cloudManifest.entityCounts[type] : null;
+      if(!snap.exists){
+        if(expectedCount && expectedCount>0){
+          throw new Error(`restore-integrity-error: manifest expects ${expectedCount} "${type}" records but that document is missing at version ${cloudManifest.version}`);
+        }
+        restoredEntities[type]={};
+        continue;
+      }
+      const items=snap.data().items||{};
+      const actualCount=Object.keys(items).length;
+      if(expectedCount!==null && actualCount!==expectedCount){
+        throw new Error(`restore-integrity-error: "${type}" expected ${expectedCount} records, found ${actualCount} at version ${cloudManifest.version}`);
+      }
       for(const id of Object.keys(items)){
         const rec=items[id];
-        if(rec && rec.backedUp && rec.storagePath){
-          rec.dataUrl=await cloudBackupDownloadAttachment(uid, rec.storagePath);
-          delete rec.backedUp;
+        if(!rec || typeof rec!=='object') continue;
+        // Nested attachments[] entries (real, confirmed path for
+        // documents[id].attachments[]) — each one individually rehydrated.
+        if(Array.isArray(rec.attachments)){
+          for(let i=0;i<rec.attachments.length;i++){
+            const a=rec.attachments[i];
+            if(a && a.backedUp && a.storagePath){
+              const dataUrl=await cloudBackupDownloadAttachment(uid, a.storagePath, false);
+              rec.attachments[i]=Object.assign({}, a, {dataUrl, backedUp:undefined, storagePath:undefined});
+              delete rec.attachments[i].backedUp;
+              delete rec.attachments[i].storagePath;
+            }
+          }
         }
-        if(rec && rec.encryptedPayloadBackedUp && rec.encryptedPayloadStoragePath){
-          rec.encryptedPayload=await cloudBackupDownloadAttachment(uid, rec.encryptedPayloadStoragePath);
+        // Top-level encryptedPayload (secure documents, vaultItems) —
+        // ciphertext-aware download, never the plain data: URL path.
+        if(rec.encryptedPayloadBackedUp && rec.encryptedPayloadStoragePath){
+          rec.encryptedPayload=await cloudBackupDownloadAttachment(uid, rec.encryptedPayloadStoragePath, true);
           delete rec.encryptedPayloadBackedUp;
           delete rec.encryptedPayloadStoragePath;
         }
       }
       restoredEntities[type]=items;
     }
-    const metaSnap=await dataCol.doc('_meta').get();
+
+    const metaSnap=await versionCol.doc('_meta').get();
     const restoredMeta=metaSnap.exists?metaSnap.data():{};
 
+    // Replacing DB.entities wholesale is now safe — every type above
+    // either matched its expected count exactly or threw, so there is no
+    // path left where a silently-empty collection could reach this line.
     DB.entities=Object.assign(blankDB().entities, restoredEntities);
-    if(restoredMeta.vault) DB.meta.vault=restoredMeta.vault;
+    for(const k of CLOUD_BACKUP_META_FIELDS){ if(k in restoredMeta) DB.meta[k]=restoredMeta[k]; }
     DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {cloudBackupLastSyncedVersion:cloudManifest.version, lastRestoreAt:new Date().toISOString()});
     persistDB();
+    try{ if(typeof applyTheme==='function') applyTheme(); }catch(e){}
     return {ok:true, version:cloudManifest.version};
   }catch(e){
     console.error('cloudBackupPull failed:', e);
-    return {ok:false, reason:'pull-failed', error:e};
+    return {ok:false, reason:'pull-failed', error:String(e&&e.message||e)};
   }
 }
 
-// v[next]: called once at boot, BEFORE any push logic ever runs. This
-// ordering is what satisfies "بازیابی خودکار نصب تازه باید پیش از اولین
-// آپلود انجام شود" — a fresh install checks the cloud FIRST; only if
-// there is nothing to restore (or restore fails) does normal operation
-// — including the debounced push from persistDB() — proceed.
 async function cloudBackupMaybeAutoRestoreOnBoot(){
   try{
     if(!cloudBackupIsLocalEmpty(DB)) return {ok:true, reason:'local-not-empty'};
@@ -25744,7 +25828,7 @@ function initAuth(){
     authError(L==='fa'?'سرویس ورود در دسترس نیست. اتصال اینترنت را بررسی کنید و دوباره باز کنید.':'Sign-in service unavailable. Check your connection and reopen.');
     return;
   }
-  FB.auth.onAuthStateChanged(user=>{
+  FB.auth.onAuthStateChanged(async user=>{
     if(user){
       // SECURITY: if a different account signs in on this device, discard the
       // previous user's locally cached data so it is never shown to the new
@@ -25761,11 +25845,14 @@ function initAuth(){
       DB.meta.email=user.email||null;
       DB.meta.photoURL=user.photoURL||null;
       DB.meta.provider='google';
-      // v[next]: fresh-install auto-restore — MUST be attempted before
-      // saveDB()/persistDB() below ever runs a real push. It only acts
-      // when the local DB is genuinely empty (see cloudBackupIsLocalEmpty)
-      // so this is a no-op for any account that already has local data.
-      try{ if(typeof cloudBackupMaybeAutoRestoreOnBoot==='function') cloudBackupMaybeAutoRestoreOnBoot(); }catch(e){}
+      // v[next] FIX (code review, 2026-09-08): this MUST be awaited —
+      // saveDB()/render()/startListeners() below must never run
+      // concurrently with a fresh-install restore still in flight, or the
+      // freshly-seeded EMPTY DB could get persisted/rendered/listened-on
+      // a moment before the real data arrives. Only acts when the local
+      // DB is genuinely empty (see cloudBackupIsLocalEmpty), so this is a
+      // fast no-op for any account that already has local data.
+      try{ if(typeof cloudBackupMaybeAutoRestoreOnBoot==='function') await cloudBackupMaybeAutoRestoreOnBoot(); }catch(e){ console.error('cloudBackupMaybeAutoRestoreOnBoot threw (continuing boot with local/empty state):', e); }
       saveDB();
       startListeners();
       try{ if(window._pendingFamilyInvite && typeof FamilyBackend!=='undefined'){ FamilyBackend.setPending(window._pendingFamilyInvite); currentModule='family'; screen='module'; famView='joinInvite'; } }catch(e){}
