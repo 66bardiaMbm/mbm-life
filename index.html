@@ -27216,6 +27216,7 @@ function openSettingsSheet(){
   document.body.appendChild(ov);
   {
   {
+    if(cloudBackupAccountAllowed()){
     const pushBtn=document.getElementById('cb-push');
     const pullBtn=document.getElementById('cb-pull');
     const statusEl=document.getElementById('cb-status');
@@ -27318,7 +27319,7 @@ function openSettingsSheet(){
     // — bound once on the container instead of re-attaching listeners
     // every render, so paging in more items never double-binds or drops
     // a handler.
-    historyListEl.addEventListener('click', async (e)=>{
+    if(historyListEl) historyListEl.addEventListener('click', async (e)=>{
       const moreOrRetryBtn=e.target.closest('#cb-hist-more, #cb-hist-retry');
       if(moreOrRetryBtn){
         moreOrRetryBtn.disabled=true; moreOrRetryBtn.textContent='Loading…';
@@ -27348,6 +27349,7 @@ function openSettingsSheet(){
         try{ render(); }catch(e){}
       }
     });
+    }
   }
 
   }
