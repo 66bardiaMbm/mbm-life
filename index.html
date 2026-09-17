@@ -2211,7 +2211,7 @@ try{
     });
   });
 }catch(e){}
-const APP_VERSION='v584';
+const APP_VERSION='v585';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -2434,6 +2434,32 @@ function seedDB(db){
 // family-server value at worst.
 const CLOUD_BACKUP_ENTITY_TYPES=['tasks','lists','appts','people','events','expenses','notes','places','shopLists','shopItems','noteItems','noteFolders','payments','payFolders','vaultItems','vaultFolders','documents','docFolders','trips','tripReminderDone','docReminderDone','_docPayLinks'];
 
+// ── Staged-rollout account gate (added at migration to main, 2026-09-16) ──
+// Cloud Backup is enabled for ONE account only during the initial rollout.
+// This is a client-side convenience gate; the real enforcement boundary is
+// the matching Firestore Rule (users/{uid}/backup/... restricted to this
+// same UID) — this check must NEVER be relied on alone.
+const CLOUD_BACKUP_ALLOWED_UID = '7n0neUeSTuSDe15MvXZA6yvK2ql2'; // ← replace with the real UID before any publish
+function cloudBackupAccountAllowed(){
+  const uid = cloudBackupUid();
+  return !!uid && uid === CLOUD_BACKUP_ALLOWED_UID;
+}
+
+// v[next] FIX (code review round 4, 2026-09-08, real SDK 9.23.0 caught
+// this — the hand-written fake did not, since it never checked the
+// argument type of .set() the way the real SDK genuinely does): three
+// entity types store bare scalars/arrays as their VALUES, not objects —
+// tripReminderDone/docReminderDone are {reminderId: doneISO} (a plain
+// ISO date STRING), _docPayLinks is {documentId: paymentId[]} (an
+// ARRAY). Firestore's real WriteBatch.set() requires its second
+// argument to be a plain object and rejects both a bare string and a
+// bare array outright with "Data must be an object". Every other entity
+// type already stores an object per record, so this wrap is scoped
+// exactly to these three, by name — not by guessing at an arbitrary
+// record's shape, which would risk ambiguity with a genuine object that
+// happens to have its own "value" field.
+const CLOUD_BACKUP_SCALAR_VALUE_TYPES=['tripReminderDone','docReminderDone','_docPayLinks'];
+
 // Firestore documents must stay under ~1MB. Inline base64 attachments (or
 // a sizable secure encryptedPayload string) are extracted to Storage
 // once a single field's string length exceeds this — comfortably under
@@ -2447,17 +2473,54 @@ const CLOUD_BACKUP_INLINE_FIELD_LIMIT=250000; // ~250KB of raw string
 // list of { storagePath, dataUrl, mime } to actually upload to Storage.
 // Pure function — no Firestore/Storage calls here, so this is fully
 // unit-testable without any network or auth.
-function cloudBackupExtractAttachments(entityType, entityId, record, sizeLimit){
+// v[next] FIX (code review, 2026-09-08): version is now a REQUIRED
+// parameter, used directly to build the storagePath — this replaces an
+// earlier, buggy two-step design where cloudBackupPush() built the
+// unversioned path here, then tried to patch it to a versioned path
+// AFTER extraction, only on the separate `attachments` array — the
+// `stripped` record (the thing actually persisted to Firestore, and the
+// ONLY thing restore ever reads to know where to download from) kept
+// the OLD, unversioned path, so upload and restore pointed at two
+// DIFFERENT locations. Building the final path once, here, in the one
+// place both `stripped` and `attachments` are derived from, makes that
+// class of bug structurally impossible to reintroduce.
+// v[next] FIX (code review round 3, 2026-09-08): decides extraction from
+// the RECORD's total serialized size, not each field independently. The
+// round-2 version checked each attachment's OWN length against
+// sizeLimit — six attachments each individually under that threshold
+// but summing well past it (all inside the SAME record) all stayed
+// inline, and the record as a whole still blew Firestore's real
+// per-document limit. This version measures the whole record first and,
+// if it is over budget, extracts EVERY attachment (not just the large
+// ones) — the simplest rule that is actually guaranteed to bring a
+// record back under budget regardless of how the size is distributed
+// across however many attachments it has. Nothing is ever dropped or
+// shortened — every extracted attachment's full dataUrl is still moved,
+// byte-for-byte, to Storage.
+function cloudBackupExtractAttachments(entityType, entityId, record, version, sizeLimit){
   sizeLimit = sizeLimit || CLOUD_BACKUP_INLINE_FIELD_LIMIT;
   const attachments=[];
   if(!record || typeof record!=='object') return {stripped:record, attachments};
 
+  if(JSON.stringify(record).length<=sizeLimit){
+    return {stripped:record, attachments}; // already comfortably small — nothing to do
+  }
+
   // Case 1: plain (non-secure) document attachments — real, confirmed
-  // shape: documents[id].attachments[] = {id,name,mime,kind,dataUrl,size,addedAt}
-  if(entityType==='documents' && Array.isArray(record.attachments) && record.attachments.length){
+  // shape: documents[id].attachments[] = {id,name,mime,kind,dataUrl,size,addedAt}.
+  // The record is over budget, so EVERY attachment with a dataUrl is
+  // extracted, not just individually-large ones.
+  // v[next] FIX (root-cause pass, code review round 6, 2026-09-08):
+  // generalized from `entityType==='documents'` to any entity with an
+  // attachments[] array — payments[id].attachments[] is explicitly
+  // documented as "future-ready (declared, unused)" (see PAYMENT DATA
+  // MODEL comment); hardcoding this to one entity type today would
+  // silently reopen the exact same class of bug the moment that field
+  // is ever actually populated, with nothing here to catch it.
+  if(Array.isArray(record.attachments) && record.attachments.length){
     const strippedAttachments=record.attachments.map(a=>{
-      if(a && typeof a.dataUrl==='string' && a.dataUrl.length>sizeLimit){
-        const storagePath=`backupAttachments/${entityType}/${entityId}/${a.id}`;
+      if(a && typeof a.dataUrl==='string'){
+        const storagePath=`backupAttachments/${version}/${entityType}/${entityId}/${a.id}`;
         attachments.push({storagePath, dataUrl:a.dataUrl, mime:a.mime||'application/octet-stream'});
         const {dataUrl, ...rest}=a;
         return Object.assign({}, rest, {backedUp:true, storagePath});
@@ -2467,13 +2530,64 @@ function cloudBackupExtractAttachments(entityType, entityId, record, sizeLimit){
     record=Object.assign({}, record, {attachments:strippedAttachments});
   }
 
-  // Case 2: ANY entity's encryptedPayload (secure documents, vaultItems)
-  // — already-opaque ciphertext. Extracted the exact same way, by size
-  // alone, NEVER decrypted, inspected, or transformed — just moved.
-  if(typeof record.encryptedPayload==='string' && record.encryptedPayload.length>sizeLimit){
-    const storagePath=`backupAttachments/${entityType}/${entityId}/encryptedPayload`;
+  // Case 2 (root-cause pass, code review round 6, 2026-09-08): documents
+  // carry their own edit-history INSIDE the record itself —
+  // documents[id].versions[] — and each past version snapshot ALSO
+  // carries its own encryptedPayload+iv (every version, secure or not —
+  // confirmed directly against the exact code that pushes a version:
+  // `doc.versions.push({..., encryptedPayload:doc.encryptedPayload,
+  // iv:doc.iv, attachments:doc.secure?null:(doc.attachments||[])...})`)
+  // and its own attachments[] (for versions that were non-secure at the
+  // time). None of this was ever inspected by Case 1/3 above, which only
+  // ever looked at the CURRENT top-level fields — a document with even a
+  // handful of edits could still blow the size budget through its
+  // version history alone, with the top-level fields looking perfectly
+  // small. Re-measures after Case 1 — only touches version history if
+  // still over budget.
+  if(Array.isArray(record.versions) && record.versions.length && JSON.stringify(record).length>sizeLimit){
+    const strippedVersions=record.versions.map((v, vi)=>{
+      if(!v || typeof v!=='object') return v;
+      let sv=v;
+      if(Array.isArray(sv.attachments) && sv.attachments.length){
+        const strippedAtts=sv.attachments.map(a=>{
+          if(a && typeof a.dataUrl==='string'){
+            const storagePath=`backupAttachments/${version}/${entityType}/${entityId}/versions/${vi}/${a.id}`;
+            attachments.push({storagePath, dataUrl:a.dataUrl, mime:a.mime||'application/octet-stream'});
+            const {dataUrl, ...rest}=a;
+            return Object.assign({}, rest, {backedUp:true, storagePath});
+          }
+          return a;
+        });
+        sv=Object.assign({}, sv, {attachments:strippedAtts});
+      }
+      if(typeof sv.encryptedPayload==='string'){
+        const storagePath=`backupAttachments/${version}/${entityType}/${entityId}/versions/${vi}/encryptedPayload`;
+        attachments.push({storagePath, dataUrl:sv.encryptedPayload, mime:'application/octet-stream', isRawCiphertext:true});
+        const {encryptedPayload:_omit, ...svRest}=sv;
+        sv=Object.assign({}, svRest, {encryptedPayloadBackedUp:true, encryptedPayloadStoragePath:storagePath});
+      }
+      return sv;
+    });
+    record=Object.assign({}, record, {versions:strippedVersions});
+  }
+
+  // Case 3: ANY entity's TOP-LEVEL encryptedPayload (secure documents,
+  // vaultItems) — already-opaque ciphertext. Re-measures AFTER the
+  // attachment/version strips above — only extracts this too if the
+  // record is STILL over budget, so a record whose attachments or
+  // version history alone already solved the problem doesn't needlessly
+  // also move its (possibly modest) current ciphertext.
+  if(typeof record.encryptedPayload==='string' && JSON.stringify(record).length>sizeLimit){
+    const storagePath=`backupAttachments/${version}/${entityType}/${entityId}/encryptedPayload`;
     attachments.push({storagePath, dataUrl:record.encryptedPayload, mime:'application/octet-stream', isRawCiphertext:true});
-    record=Object.assign({}, record, {encryptedPayload:undefined, encryptedPayloadBackedUp:true, encryptedPayloadStoragePath:storagePath});
+    // v[next] FIX (code review round 2, 2026-09-08): setting a field to
+    // `undefined` leaves the KEY present with value undefined — the
+    // Firestore SDK rejects writing any field with an undefined value
+    // outright (it is not the same as omitting the field). Destructuring
+    // the key out entirely, the same way the attachments[] branch above
+    // already correctly does, actually removes it.
+    const {encryptedPayload:_omitEncryptedPayload, ...recordWithoutPayload}=record;
+    record=Object.assign({}, recordWithoutPayload, {encryptedPayloadBackedUp:true, encryptedPayloadStoragePath:storagePath});
   }
 
   return {stripped:record, attachments};
@@ -2577,6 +2691,23 @@ async function cloudBackupWriteProgress(uid, state, extra){
   }catch(e){ console.error('cloudBackupWriteProgress failed (non-fatal):', e); }
 }
 
+// Pure-ish helper (only uses the standard, browser-and-Node-available
+// Web Crypto API) — computes a hex SHA-256 of raw bytes, used to verify
+// a downloaded attachment during restore actually matches what was
+// uploaded during backup, rather than trusting an HTTP 200 alone.
+async function cloudBackupSha256Hex(bytes){
+  const digest=await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+function cloudBackupDecodeToBytes(content, format){
+  const b64 = format==='data_url' ? content.slice(content.indexOf(',')+1) : content;
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+  return bytes;
+}
+
 // v[next] FIX (code review, 2026-09-08): ciphertext (encryptedPayload) is
 // a BARE base64 string (see VaultCrypto.encryptObj — btoa(...), never
 // wrapped in a data: URI), NOT a data: URL like a real attachment's
@@ -2584,14 +2715,24 @@ async function cloudBackupWriteProgress(uid, state, extra){
 // reject it. isRawCiphertext now selects a DIFFERENT, correct Storage
 // putString format ('base64') — this is still just moving opaque bytes;
 // nothing here ever decodes or inspects the plaintext they represent.
+//
+// v[next] FIX (code review round 5, 2026-09-08): now also computes and
+// returns the exact byte size and a SHA-256 of what was actually
+// uploaded — restore verifies a download against THESE, not just an
+// HTTP 200. Without this, an incomplete or corrupted download (or, as
+// reported, a server ERROR PAGE returned with a non-2xx status that the
+// old code never even checked) could silently overwrite real data
+// (Vault ciphertext, in the reported case) with garbage.
 async function cloudBackupUploadAttachment(uid, attachment){
   const ref=FB.storage.ref().child(`users/${uid}/${attachment.storagePath}`);
+  const format=attachment.isRawCiphertext?'base64':'data_url';
+  const bytes=cloudBackupDecodeToBytes(attachment.dataUrl, format);
   if(attachment.isRawCiphertext){
     await ref.putString(attachment.dataUrl, 'base64', {contentType:attachment.mime||'application/octet-stream'});
   }else{
     await ref.putString(attachment.dataUrl, 'data_url', {contentType:attachment.mime});
   }
-  return ref.fullPath;
+  return { fullPath: ref.fullPath, size: bytes.length, sha256: await cloudBackupSha256Hex(bytes) };
 }
 
 // v[next] FIX (code review, 2026-09-08): symmetric with the upload fix
@@ -2610,20 +2751,63 @@ function cloudBackupBytesToBase64(bytes){
   return btoa(binary);
 }
 
-async function cloudBackupDownloadAttachment(uid, storagePath, asRawCiphertext){
+// v[next] FIX (code review round 5, 2026-09-08): fetch() only rejects on
+// a genuine NETWORK failure — it resolves NORMALLY for an HTTP error
+// status like 503, and the old code went straight to resp.blob()
+// without ever checking resp.ok. Reproduced exactly as reported: a
+// simulated 503 with an error-page body was silently accepted as if it
+// were the real file, and its text would have overwritten real data
+// (Vault ciphertext, in the report) with a server error message. Now
+// checks the response status FIRST, and separately verifies the
+// downloaded byte length and SHA-256 against what was recorded at
+// upload time (see cloudBackupUploadAttachment) — an HTTP 200 alone is
+// not proof the bytes are actually correct or complete. Any failure
+// here throws, which (per cloudBackupPull's existing structure) aborts
+// the WHOLE restore before DB.entities/DB.meta are ever touched.
+async function cloudBackupDownloadAttachment(uid, storagePath, asRawCiphertext, expected){
   const ref=FB.storage.ref().child(`users/${uid}/${storagePath}`);
   const url=await ref.getDownloadURL();
   const resp=await fetch(url);
-  const blob=await resp.blob();
-  if(asRawCiphertext){
-    const buf=await blob.arrayBuffer();
-    return cloudBackupBytesToBase64(new Uint8Array(buf));
+  if(!resp.ok){
+    throw new Error(`restore-integrity-error: download of "${storagePath}" failed with HTTP ${resp.status} ${resp.statusText||''}`.trim());
   }
+  const blob=await resp.blob();
+  const buf=await blob.arrayBuffer();
+  const bytes=new Uint8Array(buf);
+  // v[next] FIX (code review round 7, 2026-09-08): a missing size/hash
+  // to verify against is now itself a restore-integrity error, not a
+  // silently-skipped check. The round-6 write-side bug (fixed above in
+  // cloudBackupPush) could leave a real extracted attachment with NO
+  // backupSize/backupSha256 recorded at all — and the old code here
+  // treated "nothing to compare against" as "nothing to worry about",
+  // letting a corrupted download straight through with ok:true. Every
+  // caller of this function that passes `expected` at all is asserting
+  // "this was an extracted attachment, verification data MUST exist" —
+  // treat its absence as proof something upstream already went wrong.
+  if(expected){
+    if(typeof expected.size!=='number'){
+      throw new Error(`restore-integrity-error: "${storagePath}" has no recorded size to verify against — the backup itself is incomplete`);
+    }
+    if(!expected.sha256){
+      throw new Error(`restore-integrity-error: "${storagePath}" has no recorded hash to verify against — the backup itself is incomplete`);
+    }
+    if(bytes.length!==expected.size){
+      throw new Error(`restore-integrity-error: "${storagePath}" downloaded ${bytes.length} bytes, expected ${expected.size}`);
+    }
+    const actualHash=await cloudBackupSha256Hex(bytes);
+    if(actualHash!==expected.sha256){
+      throw new Error(`restore-integrity-error: "${storagePath}" hash mismatch — downloaded content does not match what was backed up`);
+    }
+  }
+  if(asRawCiphertext){
+    return cloudBackupBytesToBase64(bytes);
+  }
+  const blobForDataUrl=new Blob([bytes], {type:blob.type});
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
     reader.onload=()=>resolve(reader.result); // a data: URL string
     reader.onerror=reject;
-    reader.readAsDataURL(blob);
+    reader.readAsDataURL(blobForDataUrl);
   });
 }
 
@@ -2656,6 +2840,7 @@ function cloudBackupBuildMetaPayload(meta){
 async function cloudBackupPush(){
   const uid=cloudBackupUid();
   if(!uid) return {ok:false, reason:'not-signed-in'};
+  if(!cloudBackupAccountAllowed()) return {ok:false, reason:'not-enabled-for-account'};
   const localMeta=(DB.meta.cloudBackup)||{};
   let cloudManifest=null;
   try{ cloudManifest=await cloudBackupReadManifest(uid); }
@@ -2666,66 +2851,210 @@ async function cloudBackupPush(){
     return {ok:false, reason:gate.reason};
   }
 
-  const nextVersion=(cloudManifest&&typeof cloudManifest.version==='number'?cloudManifest.version:0)+1;
+  // v[next] FIX (code review, 2026-09-08): version numbers are now
+  // claimed inside a Firestore transaction on a dedicated counter
+  // document, instead of "read manifest.version, add 1" — the earlier
+  // approach let two concurrent pushes both read the same current
+  // version and both compute the SAME nextVersion, so they would write
+  // to the identical backupVersions/{n}/ path and race to overwrite the
+  // manifest with whichever finished last, silently discarding the
+  // other's data. A transaction on a counter serializes concurrent
+  // claims — Firestore retries one of them automatically — so two
+  // simultaneous pushes always end up as two DIFFERENT version numbers,
+  // each writing to its own, non-overlapping path.
+  const backupRoot=FB.db.collection('users').doc(uid).collection('backup');
+  let nextVersion;
+  try{
+    nextVersion=await FB.db.runTransaction(async tx=>{
+      const counterRef=backupRoot.doc('versionCounter');
+      const snap=await tx.get(counterRef);
+      const current=snap.exists&&typeof snap.data().value==='number'?snap.data().value:0;
+      const next=current+1;
+      tx.set(counterRef,{value:next});
+      return next;
+    });
+  }catch(e){
+    await cloudBackupWriteProgress(uid,'failed',{lastError:'claim-version-failed: '+e.message});
+    return {ok:false, reason:'claim-version-failed'};
+  }
+
   await cloudBackupWriteProgress(uid,'pushing',{startedAt:firebase.firestore.FieldValue.serverTimestamp(), lastError:null, targetVersion:nextVersion});
 
   try{
     const entityCounts={};
     let attachmentCount=0;
-    const versionCol=FB.db.collection('users').doc(uid).collection('backupVersions').doc(String(nextVersion)).collection('entities');
-    const batch=FB.db.batch();
+    const versionCol=backupRoot.doc('versions').collection(String(nextVersion));
+
+    // v[next] FIX (code review round 2, 2026-09-08): each record now
+    // gets its OWN document (versionCol/{type}/records/{id}) instead of
+    // every record of a whole module being crammed into one document as
+    // items:{...}. Confirmed by the reviewer: six attachments, each
+    // individually under the 250KB extraction threshold, summed to
+    // 1.2MB — comfortably over Firestore's real ~1MB per-document limit
+    // — when they all landed in the same "tasks"/"documents" document
+    // together. One document per record bounds the problem to a single
+    // record's own fields, which is the granularity the 250KB
+    // per-FIELD threshold was actually designed around.
+    //
+    // Also splits into multiple batches of ≤500 operations — Firestore
+    // rejects a batch above that regardless of byte size, and a module
+    // with more than ~500 records would have silently failed here
+    // before this fix.
+    let batch=FB.db.batch();
+    let opsInBatch=0;
+    const MAX_BATCH_OPS=450; // headroom under Firestore's real 500 cap
+    async function queueWrite(ref, data){
+      batch.set(ref, data);
+      opsInBatch++;
+      if(opsInBatch>=MAX_BATCH_OPS){
+        await batch.commit();
+        batch=FB.db.batch();
+        opsInBatch=0;
+      }
+    }
 
     for(const type of CLOUD_BACKUP_ENTITY_TYPES){
       const rawMap=DB.entities[type]||{};
-      const strippedMap={};
+      const recordsCol=versionCol.doc(type).collection('records');
+      let count=0;
       for(const id of Object.keys(rawMap)){
-        const {stripped, attachments}=cloudBackupExtractAttachments(type, id, rawMap[id]);
-        // Attachment paths are version-scoped too, for the exact same
-        // isolation reason as the entity data itself.
+        // v[next] FIX: version passed straight in — the storagePath
+        // written into `stripped` (what gets persisted and later read by
+        // restore) and the path actually uploaded to are now guaranteed
+        // to be the exact same string, computed once, in one place.
+        const {stripped, attachments}=cloudBackupExtractAttachments(type, id, rawMap[id], nextVersion);
         for(const att of attachments){
-          att.storagePath=att.storagePath.replace(
-            `backupAttachments/${type}/${id}/`,
-            `backupAttachments/${nextVersion}/${type}/${id}/`
-          );
-        }
-        strippedMap[id]=stripped;
-        for(const att of attachments){
-          await cloudBackupUploadAttachment(uid, att);
+          const uploadResult=await cloudBackupUploadAttachment(uid, att);
           attachmentCount++;
+          // v[next] FIX (code review round 7, 2026-09-08): THE bug —
+          // this was previously an if/else-if/else-if chain keyed on
+          // whether each array merely EXISTS, not on whether a match was
+          // actually FOUND in it. A record with attachments:[] (empty —
+          // exactly what every secure document has, per docSaveSecure's
+          // own d.attachments=[] — see DOC DATA MODEL) made
+          // Array.isArray(stripped.attachments) true, consuming the
+          // branch and silently attaching nothing, while the sibling
+          // `else if` for versions[] never even ran — so a secure
+          // document's version-history attachment/ciphertext NEVER got
+          // its backupSize/backupSha256 recorded at all. Restore then
+          // had no expected size/hash to check a downloaded byte against,
+          // and a single corrupted byte in that history entry passed
+          // straight through as ok:true. Reproduced and confirmed by the
+          // reviewer against this exact code path. Fixed by searching
+          // EVERY possible location independently — trying the next one
+          // whenever the CURRENT one does not actually contain a match,
+          // not whenever its container array happens to exist.
+          let recorded=false;
+          if(stripped.encryptedPayloadStoragePath===att.storagePath){
+            stripped.encryptedPayloadBackupSize=uploadResult.size;
+            stripped.encryptedPayloadBackupSha256=uploadResult.sha256;
+            recorded=true;
+          }
+          if(!recorded && Array.isArray(stripped.attachments)){
+            // backupSize/backupSha256 — deliberately NOT named size/sha256,
+            // which would collide with the attachment's own pre-existing
+            // "size" field (the original file size, used elsewhere in the
+            // app, e.g. for display) — this is purely backup-integrity
+            // bookkeeping, never shown to the user or read by anything
+            // other than cloudBackupPull.
+            const match=stripped.attachments.find(a=>a && a.storagePath===att.storagePath);
+            if(match){ match.backupSize=uploadResult.size; match.backupSha256=uploadResult.sha256; recorded=true; }
+          }
+          if(!recorded && Array.isArray(stripped.versions)){
+            // The same match, extended to reach inside versions[] — an
+            // attachment/ciphertext extracted from a PAST edit snapshot
+            // (see cloudBackupExtractAttachments' Case 2) needs its
+            // size/hash recorded on that SAME nested object. Runs
+            // whenever the two checks above did not find a match —
+            // completely independent of whether stripped.attachments
+            // happened to exist.
+            for(const v of stripped.versions){
+              if(!v || recorded) continue;
+              if(v.encryptedPayloadStoragePath===att.storagePath){
+                v.encryptedPayloadBackupSize=uploadResult.size;
+                v.encryptedPayloadBackupSha256=uploadResult.sha256;
+                recorded=true;
+                break;
+              }
+              if(Array.isArray(v.attachments)){
+                const vMatch=v.attachments.find(a=>a && a.storagePath===att.storagePath);
+                if(vMatch){ vMatch.backupSize=uploadResult.size; vMatch.backupSha256=uploadResult.sha256; recorded=true; break; }
+              }
+            }
+          }
         }
+        cloudBackupAssertNoSecretMaterial(stripped); // throws (aborting the whole push) if this ever trips
+        // v[next] FIX (code review round 4, 2026-09-08): wrap bare
+        // scalar/array values for the three entity types that actually
+        // store them — Firestore's real .set() rejects a non-object
+        // second argument outright.
+        const toWrite=CLOUD_BACKUP_SCALAR_VALUE_TYPES.includes(type) ? {value:stripped} : stripped;
+        await queueWrite(recordsCol.doc(id), toWrite);
+        count++;
       }
-      entityCounts[type]=Object.keys(strippedMap).length;
-      const payload={items:strippedMap, updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
-      cloudBackupAssertNoSecretMaterial(payload); // throws (aborting the whole push) if this ever trips
-      batch.set(versionCol.doc(type), payload);
+      entityCounts[type]=count;
     }
 
     const metaPayload=cloudBackupBuildMetaPayload(DB.meta);
     cloudBackupAssertNoSecretMaterial(metaPayload);
-    batch.set(versionCol.doc('_meta'), metaPayload);
+    await queueWrite(versionCol.doc('_meta'), metaPayload);
 
-    await batch.commit();
+    if(opsInBatch>0) await batch.commit();
 
-    // Only NOW, after every entity-type doc and every attachment for
-    // THIS version has been written and awaited without throwing, is the
-    // manifest written — pointing at THIS version. The previous
-    // version's data (still fully intact under its own path) remains
-    // exactly what any concurrent/failed restore would see until this
-    // line succeeds.
-    await FB.db.collection('users').doc(uid).collection('backup').doc('manifest').set({
-      version:nextVersion, status:'complete',
-      savedAt:firebase.firestore.FieldValue.serverTimestamp(),
-      entityCounts, attachmentCount,
-      schemaVersion:SCHEMA, appVersion:(typeof APP_VERSION!=='undefined'?APP_VERSION:null)
+    // v[next] FIX (code review, 2026-09-08): the manifest write is now
+    // ALSO transactional and explicitly monotonic — it only ever
+    // proceeds if nextVersion is strictly greater than whatever version
+    // is currently recorded. Combined with the version-claim transaction
+    // above, this makes it structurally impossible for a slower
+    // concurrent push to finish later and stomp a newer, already-
+    // complete manifest with an older version number.
+    const manifestRef=backupRoot.doc('manifest');
+    // v[TEST BUILD] Version-history index doc path: backupRoot is itself
+    // a CollectionReference (users/{uid}/backup), which cannot take a
+    // nested .collection() call directly — Firestore only allows
+    // Collection->Document->Collection, never Collection->Collection.
+    // 'historyIndex' is a plain document that HOLDS the 'versions'
+    // subcollection, exactly like backupRoot.doc('versions') already
+    // does for the actual entity data above.
+    const historyVersionRef=backupRoot.doc('historyIndex').collection('versions').doc(String(nextVersion));
+    await FB.db.runTransaction(async tx=>{
+      const snap=await tx.get(manifestRef);
+      const currentVersion=snap.exists&&typeof snap.data().version==='number'?snap.data().version:0;
+      if(nextVersion<=currentVersion){
+        throw new Error(`stale-write-prevented: attempted to write version ${nextVersion} but manifest is already at ${currentVersion}`);
+      }
+      tx.set(manifestRef,{
+        version:nextVersion, status:'complete',
+        savedAt:firebase.firestore.FieldValue.serverTimestamp(),
+        entityCounts, attachmentCount,
+        schemaVersion:SCHEMA, appVersion:(typeof APP_VERSION!=='undefined'?APP_VERSION:null)
+      });
+      // Written in the SAME transaction as the manifest so the two can
+      // never go out of sync (e.g. manifest advances but history write
+      // silently fails, or vice versa).
+      tx.set(historyVersionRef,{
+        version:nextVersion, savedAt:firebase.firestore.FieldValue.serverTimestamp(),
+        entityCounts, attachmentCount, schemaVersion:SCHEMA,
+        appVersion:(typeof APP_VERSION!=='undefined'?APP_VERSION:null)
+      });
     });
 
     DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {cloudBackupLastSyncedVersion:nextVersion, lastPushAt:new Date().toISOString(), lastPushError:null});
+    // v[next] FIX (code review round 2, 2026-09-08): a successful push
+    // updated DB.meta.cloudBackup only in memory — with no persistDB()
+    // call here, reopening the app (a fresh JS environment reloading DB
+    // from local storage) reverted this to whatever was last actually
+    // saved, making the device look permanently "behind" its own most
+    // recent successful push and blocking every future push with
+    // local-behind-cloud. Reproduced and confirmed by the reviewer
+    // against the real code path in a simulated environment.
+    try{persistDB(true);}catch(e){} // true: this is backup STATUS bookkeeping, not a user data change — must not re-trigger cloudBackupSchedulePush (see persistDB's own comment)
     await cloudBackupWriteProgress(uid,'complete',{finishedAt:firebase.firestore.FieldValue.serverTimestamp(), lastError:null});
     return {ok:true, version:nextVersion};
   }catch(e){
     console.error('cloudBackupPush failed:', e);
     DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {lastPushError:String(e&&e.message||e), lastPushErrorAt:new Date().toISOString()});
-    try{persistDB();}catch(e2){}
+    try{persistDB(true);}catch(e2){} // true: same reason as the success path above
     await cloudBackupWriteProgress(uid,'failed',{finishedAt:firebase.firestore.FieldValue.serverTimestamp(), lastError:String(e&&e.message||e)});
     return {ok:false, reason:'push-failed', error:e};
   }
@@ -2742,9 +3071,169 @@ async function cloudBackupPush(){
 // treats an entity-count mismatch against the manifest as a fatal
 // restore error instead of silently treating a missing document as an
 // empty collection and wiping that module's data.
+// v[TEST BUILD] Shared core: fetches + rehydrates every entity type for a
+// SPECIFIC version number, verified against expectedCounts. Throws on any
+// integrity mismatch — callers must not touch DB.entities until this
+// resolves successfully, so a failure (including a dropped connection)
+// always leaves local data untouched.
+async function _cloudBackupFetchVersionEntities(uid, version, expectedCounts){
+  const versionCol=FB.db.collection('users').doc(uid).collection('backup').doc('versions').collection(String(version));
+  const restoredEntities={};
+
+  for(const type of CLOUD_BACKUP_ENTITY_TYPES){
+    const recordsSnap=await versionCol.doc(type).collection('records').get();
+    const expectedCount=(expectedCounts && typeof expectedCounts[type]==='number')
+      ? expectedCounts[type] : null;
+    const items={};
+    const isScalarType=CLOUD_BACKUP_SCALAR_VALUE_TYPES.includes(type);
+    recordsSnap.forEach(doc=>{ items[doc.id]=isScalarType ? doc.data().value : doc.data(); });
+    const actualCount=Object.keys(items).length;
+    if(expectedCount!==null && actualCount!==expectedCount){
+      throw new Error(`restore-integrity-error: "${type}" expected ${expectedCount} records, found ${actualCount} at version ${version}`);
+    }
+    for(const id of Object.keys(items)){
+      const rec=items[id];
+      if(!rec || typeof rec!=='object') continue;
+      if(Array.isArray(rec.attachments)){
+        for(let i=0;i<rec.attachments.length;i++){
+          const a=rec.attachments[i];
+          if(a && a.backedUp && a.storagePath){
+            const dataUrl=await cloudBackupDownloadAttachment(uid, a.storagePath, false, {size:a.backupSize, sha256:a.backupSha256});
+            const cleaned=Object.assign({}, a, {dataUrl});
+            delete cleaned.backedUp; delete cleaned.storagePath; delete cleaned.backupSize; delete cleaned.backupSha256;
+            rec.attachments[i]=cleaned;
+          }
+        }
+      }
+      if(rec.encryptedPayloadBackedUp && rec.encryptedPayloadStoragePath){
+        rec.encryptedPayload=await cloudBackupDownloadAttachment(uid, rec.encryptedPayloadStoragePath, true, {size:rec.encryptedPayloadBackupSize, sha256:rec.encryptedPayloadBackupSha256});
+        delete rec.encryptedPayloadBackedUp; delete rec.encryptedPayloadStoragePath; delete rec.encryptedPayloadBackupSize; delete rec.encryptedPayloadBackupSha256;
+      }
+      if(Array.isArray(rec.versions)){
+        for(let vi=0; vi<rec.versions.length; vi++){
+          const v=rec.versions[vi];
+          if(!v || typeof v!=='object') continue;
+          if(Array.isArray(v.attachments)){
+            for(let i=0;i<v.attachments.length;i++){
+              const a=v.attachments[i];
+              if(a && a.backedUp && a.storagePath){
+                const dataUrl=await cloudBackupDownloadAttachment(uid, a.storagePath, false, {size:a.backupSize, sha256:a.backupSha256});
+                const cleaned=Object.assign({}, a, {dataUrl});
+                delete cleaned.backedUp; delete cleaned.storagePath; delete cleaned.backupSize; delete cleaned.backupSha256;
+                v.attachments[i]=cleaned;
+              }
+            }
+          }
+          if(v.encryptedPayloadBackedUp && v.encryptedPayloadStoragePath){
+            v.encryptedPayload=await cloudBackupDownloadAttachment(uid, v.encryptedPayloadStoragePath, true, {size:v.encryptedPayloadBackupSize, sha256:v.encryptedPayloadBackupSha256});
+            delete v.encryptedPayloadBackedUp; delete v.encryptedPayloadStoragePath; delete v.encryptedPayloadBackupSize; delete v.encryptedPayloadBackupSha256;
+          }
+        }
+      }
+    }
+    restoredEntities[type]=items;
+  }
+
+  const metaSnap=await versionCol.doc('_meta').get();
+  if(!metaSnap.exists){
+    throw new Error(`restore-integrity-error: settings ("_meta") document is missing at version ${version}`);
+  }
+  return {restoredEntities, restoredMeta:metaSnap.data()};
+}
+
+// v[TEST BUILD BUGFIX 7] Previously chunked into multiple 400-op
+// batch.commit() calls — each commit is atomic on its OWN, but the
+// SEQUENCE of several commits is not: a later chunk failing after an
+// earlier one already landed left the server genuinely half-restored,
+// with no way to detect or undo it from here. Firestore's real
+// per-batch cap is 500 writes; this now does the ENTIRE reconcile as
+// ONE batch (all sets and deletes together) so it is genuinely
+// all-or-nothing at the server. If the total wouldn't fit in one batch,
+// this refuses BEFORE issuing a single write and says so plainly —
+// it does not attempt a partial reconcile. (This does not add any
+// cross-device write lock — a genuinely concurrent edit from another
+// signed-in device during this window is still possible and is not
+// protected against; that remains a disclosed, unresolved limitation.)
+async function _cloudBackupReconcileLiveSync(restoredEntities){
+  if(!FB.ready || !FB.user) return; // no live session to reconcile against
+  if(typeof sessionCap==='function' && !sessionCap('sync')) return;
+  const ws=wsId(FB.user.uid);
+  const db=FB.db;
+  const liveTypes=['tasks','lists','appts'];
+  let ops=[]; // {type:'set'|'delete', ref, data?} — read-only accumulation, no writes yet
+
+  for(const type of liveTypes){
+    const col=db.collection('workspaces').doc(ws).collection(type);
+    const liveSnap=await col.get();
+    const restoredMap=restoredEntities[type]||{};
+    const keepIds=new Set(Object.keys(restoredMap));
+    liveSnap.forEach(doc=>{ if(!keepIds.has(doc.id)) ops.push({type:'delete', ref:doc.ref}); });
+    for(const item of Object.values(restoredMap)){
+      if(item && item.id) ops.push({type:'set', ref:col.doc(item.id), data:item});
+    }
+  }
+
+  const FIRESTORE_BATCH_LIMIT=500;
+  if(ops.length>FIRESTORE_BATCH_LIMIT){
+    throw new Error(`restore-too-large-for-atomic-sync: this restore needs ${ops.length} live-sync changes, over the ${FIRESTORE_BATCH_LIMIT}-per-batch limit this test build restores atomically. Nothing was written. Restoring a version closer to your current data (fewer changed items) should fit.`);
+  }
+  if(ops.length===0) return; // nothing to reconcile — restored version already matches live exactly
+
+  const batch=db.batch();
+  for(const op of ops){
+    if(op.type==='delete') batch.delete(op.ref); else batch.set(op.ref, op.data);
+  }
+  await batch.commit(); // single atomic commit — all-or-nothing at the server
+}
+
+// v[TEST BUILD BUGFIX] persistDB() is fire-and-forget by design (used
+// everywhere else in the app for ordinary autosave, where that's fine).
+// For a RESTORE specifically, reporting success before the local write
+// is actually confirmed on disk is misleading — the reconcile finishing
+// says nothing about whether IndexedDB itself finished. This awaits the
+// real underlying write and returns whether it actually succeeded,
+// mirroring persistDB()'s own IndexedDB→localStorage fallback exactly.
+//
+// v[TEST BUILD BUGFIX 4] The _savedAt bump above (BUGFIX 3) only helps
+// when the device clock actually moves forward between saves — reviewer
+// reproduced the SAME failure with an equal or backward-moved clock,
+// which is a real, pre-existing fragility of comparing wall-clock
+// timestamps at all (idbMigrateAndLoad() does this for EVERY save in
+// the app, not just restores — fixing that generally needs a monotonic
+// counter shared across all saves, which is out of scope here: it's an
+// app-wide boot-comparison change, not a restore-path fix). What IS in
+// scope: make the comparison IRRELEVANT for restores specifically, by
+// keeping both stores identical. Previously localStorage was written
+// ONLY as a fallback when IndexedDB failed; now it's ALSO written right
+// after a successful IndexedDB save. When both stores hold the exact
+// same restored content, it no longer matters which one idbMigrateAndLoad()
+// picks at next boot — clock skew can no longer cause the restore to be
+// silently discarded. This does not fix the app's general timestamp-
+// comparison fragility elsewhere; it only removes it as a factor here.
+async function _cloudBackupPersistLocalAwaited(){
+  bumpSaveStamp();
+  if(idbReady && _idbHandle){
+    try{
+      await idbSet(IDB_BLOB_KEY, DB);
+      try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} // best-effort mirror — keeps loadDB()'s synchronous read in sync too
+      try{ clearSaveError(); }catch(e){}
+      return true;
+    }
+    catch(e){
+      console.error('IndexedDB save failed, falling back to localStorage:', e);
+      try{ localStorage.setItem(KEY, JSON.stringify(DB)); try{ clearSaveError(); }catch(e2){} return true; }
+      catch(e2){ try{ showSaveError(L==='fa'?'⚠ ذخیره‌سازی ناموفق بود — فضای ذخیره‌ی دستگاه پر است.':'⚠ Save failed — device storage may be full.'); }catch(e3){} return false; }
+    }
+  }else{
+    try{ localStorage.setItem(KEY, JSON.stringify(DB)); try{ clearSaveError(); }catch(e){} return true; }
+    catch(e){ try{ showSaveError(L==='fa'?'⚠ ذخیره‌سازی ناموفق بود — فضای ذخیره‌ی دستگاه پر است.':'⚠ Save failed — device storage may be full.'); }catch(e2){} return false; }
+  }
+}
+
 async function cloudBackupPull(){
   const uid=cloudBackupUid();
   if(!uid) return {ok:false, reason:'not-signed-in'};
+  if(!cloudBackupAccountAllowed()) return {ok:false, reason:'not-enabled-for-account'};
   let cloudManifest=null;
   try{ cloudManifest=await cloudBackupReadManifest(uid); }
   catch(e){ return {ok:false, reason:'read-manifest-failed'}; }
@@ -2752,72 +3241,122 @@ async function cloudBackupPull(){
   const gate=cloudBackupCanRestore(cloudManifest);
   if(!gate.allowed) return {ok:false, reason:gate.reason};
 
+  // v[TEST BUILD BUGFIX 2] Ordering fixed: reconcile the SERVER-side
+  // live-sync collections FIRST, using the restored data — and only if
+  // that fully succeeds do we touch this device's own DB.entities and
+  // local storage. Previously local state was changed BEFORE the
+  // reconcile ran, so a reconcile failure left local data already
+  // mutated (and, worse, still reported {ok:true} — the try/catch around
+  // the reconcile call swallowed its own error instead of surfacing it).
+  // Now: if reconcile throws, we return ok:false having changed NOTHING
+  // locally — restartListeners() in `finally` then re-syncs this device
+  // from whatever the server actually ended up with, so even a partially
+  // -committed server reconcile (a later batch failing after an earlier
+  // one succeeded — see _cloudBackupReconcileLiveSync's own 400-op-per-
+  // batch comment) converges this device back to the server's real state
+  // instead of leaving it stuck on a version nothing else agrees with.
+  try{ stopListeners(); }catch(e){}
   try{
-    const versionCol=FB.db.collection('users').doc(uid).collection('backupVersions').doc(String(cloudManifest.version)).collection('entities');
-    const restoredEntities={};
-
-    for(const type of CLOUD_BACKUP_ENTITY_TYPES){
-      const snap=await versionCol.doc(type).get();
-      const expectedCount=(cloudManifest.entityCounts && typeof cloudManifest.entityCounts[type]==='number')
-        ? cloudManifest.entityCounts[type] : null;
-      if(!snap.exists){
-        if(expectedCount && expectedCount>0){
-          throw new Error(`restore-integrity-error: manifest expects ${expectedCount} "${type}" records but that document is missing at version ${cloudManifest.version}`);
-        }
-        restoredEntities[type]={};
-        continue;
-      }
-      const items=snap.data().items||{};
-      const actualCount=Object.keys(items).length;
-      if(expectedCount!==null && actualCount!==expectedCount){
-        throw new Error(`restore-integrity-error: "${type}" expected ${expectedCount} records, found ${actualCount} at version ${cloudManifest.version}`);
-      }
-      for(const id of Object.keys(items)){
-        const rec=items[id];
-        if(!rec || typeof rec!=='object') continue;
-        // Nested attachments[] entries (real, confirmed path for
-        // documents[id].attachments[]) — each one individually rehydrated.
-        if(Array.isArray(rec.attachments)){
-          for(let i=0;i<rec.attachments.length;i++){
-            const a=rec.attachments[i];
-            if(a && a.backedUp && a.storagePath){
-              const dataUrl=await cloudBackupDownloadAttachment(uid, a.storagePath, false);
-              rec.attachments[i]=Object.assign({}, a, {dataUrl, backedUp:undefined, storagePath:undefined});
-              delete rec.attachments[i].backedUp;
-              delete rec.attachments[i].storagePath;
-            }
-          }
-        }
-        // Top-level encryptedPayload (secure documents, vaultItems) —
-        // ciphertext-aware download, never the plain data: URL path.
-        if(rec.encryptedPayloadBackedUp && rec.encryptedPayloadStoragePath){
-          rec.encryptedPayload=await cloudBackupDownloadAttachment(uid, rec.encryptedPayloadStoragePath, true);
-          delete rec.encryptedPayloadBackedUp;
-          delete rec.encryptedPayloadStoragePath;
-        }
-      }
-      restoredEntities[type]=items;
-    }
-
-    const metaSnap=await versionCol.doc('_meta').get();
-    const restoredMeta=metaSnap.exists?metaSnap.data():{};
-
+    const {restoredEntities, restoredMeta}=await _cloudBackupFetchVersionEntities(uid, cloudManifest.version, cloudManifest.entityCounts);
+    await _cloudBackupReconcileLiveSync(restoredEntities); // throws on failure — nothing local touched yet
     // Replacing DB.entities wholesale is now safe — every type above
     // either matched its expected count exactly or threw, so there is no
     // path left where a silently-empty collection could reach this line.
     DB.entities=Object.assign(blankDB().entities, restoredEntities);
     for(const k of CLOUD_BACKUP_META_FIELDS){ if(k in restoredMeta) DB.meta[k]=restoredMeta[k]; }
-    DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {cloudBackupLastSyncedVersion:cloudManifest.version, lastRestoreAt:new Date().toISOString()});
-    persistDB();
+    DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {cloudBackupLastSyncedVersion:cloudManifest.version, lastRestoreAt:new Date().toISOString(), lastRestoredVersion:cloudManifest.version});
+    // Awaited on purpose (see _cloudBackupPersistLocalAwaited) — a
+    // restore reporting success before the write is actually confirmed
+    // on disk would be misleading, unlike ordinary autosave elsewhere.
+    const savedOk=await _cloudBackupPersistLocalAwaited();
+    if(!savedOk) return {ok:false, reason:'local-save-failed'}; // server already has the restored data; startListeners() below will re-pull it onto this device
     try{ if(typeof applyTheme==='function') applyTheme(); }catch(e){}
     return {ok:true, version:cloudManifest.version};
   }catch(e){
     console.error('cloudBackupPull failed:', e);
     return {ok:false, reason:'pull-failed', error:String(e&&e.message||e)};
+  }finally{
+    // Always resume — a failure above must never leave this device
+    // silently un-synced until the next full reboot.
+    try{ if(FB.user) startListeners(); }catch(e){}
+  }
+}
+
+// v[TEST BUILD] Restore a SPECIFIC past version the user hand-picked from
+// Settings, instead of whatever the live manifest currently points to.
+// Critically: on success we mark cloudBackupLastSyncedVersion as the
+// CURRENT LIVE manifest version (not the older one we just restored) —
+// otherwise cloudBackupCanPush() would permanently block this device's
+// next backup as "local-behind-cloud" (the exact trap already found and
+// fixed for the decline-restore-at-boot case). The picked version's data
+// becomes local; the device's push eligibility stays tied to the latest
+// known cloud state, which it has now explicitly acknowledged.
+async function cloudBackupPullVersion(version){
+  const uid=cloudBackupUid();
+  if(!uid) return {ok:false, reason:'not-signed-in'};
+  if(!cloudBackupAccountAllowed()) return {ok:false, reason:'not-enabled-for-account'};
+  let liveManifest=null, historyDoc=null;
+  try{
+    liveManifest=await cloudBackupReadManifest(uid);
+    const hSnap=await FB.db.collection('users').doc(uid).collection('backup').doc('historyIndex').collection('versions').doc(String(version)).get();
+    if(!hSnap.exists) return {ok:false, reason:'version-not-found'};
+    historyDoc=hSnap.data();
+  }catch(e){ return {ok:false, reason:'read-manifest-failed'}; }
+
+  try{ stopListeners(); }catch(e){}
+  try{
+    const {restoredEntities, restoredMeta}=await _cloudBackupFetchVersionEntities(uid, version, historyDoc.entityCounts);
+    await _cloudBackupReconcileLiveSync(restoredEntities); // throws on failure — nothing local touched yet
+    DB.entities=Object.assign(blankDB().entities, restoredEntities);
+    for(const k of CLOUD_BACKUP_META_FIELDS){ if(k in restoredMeta) DB.meta[k]=restoredMeta[k]; }
+    const ackVersion=(liveManifest && typeof liveManifest.version==='number') ? liveManifest.version : version;
+    DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {cloudBackupLastSyncedVersion:ackVersion, lastRestoreAt:new Date().toISOString(), lastRestoredVersion:version});
+    const savedOk=await _cloudBackupPersistLocalAwaited();
+    if(!savedOk) return {ok:false, reason:'local-save-failed'}; // server already has the restored data; startListeners() below will re-pull it onto this device
+    try{ if(typeof applyTheme==='function') applyTheme(); }catch(e){}
+    return {ok:true, version:version};
+  }catch(e){
+    console.error('cloudBackupPullVersion failed:', e);
+    return {ok:false, reason:'pull-failed', error:String(e&&e.message||e)};
+  }finally{
+    try{ if(FB.user) startListeners(); }catch(e){}
+  }
+}
+
+// v[TEST BUILD] List available versions for the Settings version-picker,
+// newest first. Relies on the history collection written by cloudBackupPush
+// — versions pushed before this test build shipped won't appear here (no
+// retroactive index), but every version pushed from now on will.
+// v[TEST BUILD] afterVersion: pass the LAST version number already shown
+// to page in the next batch (older versions), instead of re-fetching from
+// the top every time — a real device could have hundreds of pushes over
+// months of use, and 20 was silently a hard ceiling with no way to see
+// anything older until this was added.
+async function cloudBackupListVersionHistory(afterVersion){
+  const uid=cloudBackupUid();
+  if(!uid) return {items:[], hasMore:false, error:'not-signed-in'};
+  try{
+    let q=FB.db.collection('users').doc(uid).collection('backup').doc('historyIndex').collection('versions').orderBy('version','desc');
+    if(typeof afterVersion==='number') q=q.startAfter(afterVersion);
+    // Fetch one extra to know whether a further page exists, without
+    // showing it yet.
+    const snap=await q.limit(21).get();
+    const docs=snap.docs.map(d=>d.data());
+    const hasMore=docs.length>20;
+    return {items:docs.slice(0,20), hasMore};
+  }catch(e){
+    // v[TEST BUILD] A genuine failure (permission-denied, offline, etc.)
+    // must be distinguishable from "reached the end of the list" —
+    // returning the same {items:[], hasMore:false} shape for both meant
+    // a real error silently looked identical to an empty/exhausted
+    // history to every caller. error is only ever set on a real failure.
+    console.error('cloudBackupListVersionHistory failed:', e);
+    return {items:[], hasMore:false, error:String(e&&e.message||e)};
   }
 }
 
 async function cloudBackupMaybeAutoRestoreOnBoot(){
+  if(!cloudBackupAccountAllowed()) return {ok:false, reason:'not-enabled-for-account'};
   try{
     if(!cloudBackupIsLocalEmpty(DB)) return {ok:true, reason:'local-not-empty'};
     const uid=cloudBackupUid();
@@ -2832,12 +3371,121 @@ async function cloudBackupMaybeAutoRestoreOnBoot(){
   }
 }
 
+// v[TEST BUILD] Same eligibility check as cloudBackupMaybeAutoRestoreOnBoot,
+// but instead of silently restoring, ASKS the user first — matching the
+// WhatsApp-style "a backup was found, restore it?" pattern. If the user
+// declines, we must not leave this device permanently unable to push new
+// data: cloudBackupCanPush() blocks any push where localMeta's synced
+// version trails the cloud manifest, so declining without acknowledging
+// the cloud version would silently brick all future backups. We
+// therefore record the cloud version as "seen" (cloudBackupLastSyncedVersion)
+// WITHOUT importing its data. This does NOT delete or touch the old
+// backup's documents — push never deletes anything (see cloudBackupPush) —
+// so the declined backup remains intact in Firestore, just orphaned from
+// this device's future version chain (a version-history/retention feature,
+// tracked separately, is what would let a user recover it later).
+async function cloudBackupPromptOnBoot(){
+  try{
+    if(!cloudBackupIsLocalEmpty(DB)) return {ok:true, reason:'local-not-empty'};
+    const uid=cloudBackupUid();
+    if(!uid) return {ok:false, reason:'not-signed-in'};
+    const manifest=await cloudBackupReadManifest(uid);
+    const gate=cloudBackupCanRestore(manifest);
+    if(!gate.allowed) return {ok:false, reason:gate.reason};
+
+    const choice=await cloudBackupShowRestoreDialog(manifest);
+    if(choice==='restore'){
+      return await cloudBackupPull();
+    }else{
+      // Acknowledge the cloud version without importing it, so future
+      // pushes from this device are allowed (see cloudBackupCanPush) and
+      // start a NEW version chain — the declined backup's own documents
+      // are never touched or deleted by this.
+      DB.meta.cloudBackup=Object.assign({}, DB.meta.cloudBackup, {cloudBackupLastSyncedVersion:manifest.version});
+      try{ persistDB(true); }catch(e){}
+      return {ok:true, reason:'user-declined-restore', acknowledgedVersion:manifest.version};
+    }
+  }catch(e){
+    console.error('cloudBackupPromptOnBoot failed (non-fatal, app continues with local/empty state):', e);
+    return {ok:false, reason:'auto-restore-prompt-failed', error:e};
+  }
+}
+
+// Minimal blocking dialog (test build). Returns a Promise resolving to
+// 'restore' or 'skip'. Uses inline styles so it renders correctly even
+// before the main stylesheet/theme classes are guaranteed ready this
+// early in boot.
+function cloudBackupShowRestoreDialog(manifest){
+  return new Promise((resolve)=>{
+    const when=(function(){
+      try{
+        const raw=manifest && (manifest.savedAt || manifest.updatedAt);
+        if(!raw) return '';
+        const d=(raw && typeof raw.toDate==='function')?raw.toDate():new Date(raw);
+        return d.toLocaleString();
+      }catch(e){ return ''; }
+    })();
+    const isFa=(typeof L!=='undefined' && L==='fa');
+    const title=isFa?'یک بکاپ پیدا شد':'A backup was found';
+    const body=isFa
+      ? ('بکاپی از اطلاعاتِ شما'+(when?(' مربوط به '+when):'')+' پیدا شد. می‌خواهید بازیابی شود؟')
+      : ('A backup of your data'+(when?(' from '+when):'')+' was found. Would you like to restore it?');
+    const restoreLabel=isFa?'بازیابی اطلاعات':'Restore my data';
+    const skipLabel=isFa?'فعلاً بدون بازیابی ادامه بده':'Continue without restoring';
+
+    const overlay=document.createElement('div');
+    overlay.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:24px;font-family:inherit';
+    overlay.innerHTML=`
+      <div style="background:#16161d;color:#fff;border-radius:16px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.5)" dir="${isFa?'rtl':'ltr'}">
+        <div style="font-weight:700;font-size:16px;margin-bottom:8px">${title}</div>
+        <div style="font-size:13px;color:#c9c9d4;line-height:1.6;margin-bottom:18px">${body}</div>
+        <button id="cb-dlg-restore" style="width:100%;padding:12px;border:none;border-radius:10px;background:#6e56f8;color:#fff;font-weight:700;font-size:14px;margin-bottom:8px">${restoreLabel}</button>
+        <button id="cb-dlg-skip" style="width:100%;padding:12px;border:none;border-radius:10px;background:transparent;color:#9a9aa8;font-size:13px">${skipLabel}</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    const cleanup=(val)=>{ try{ overlay.remove(); }catch(e){} resolve(val); };
+    overlay.querySelector('#cb-dlg-restore').onclick=()=>cleanup('restore');
+    overlay.querySelector('#cb-dlg-skip').onclick=()=>cleanup('skip');
+  });
+}
+
 // Debounced push trigger — safe to call as often as persistDB() itself
 // is called; only ever actually pushes at most once per this interval.
 let _cloudBackupPushTimer=null;
+let _cloudBackupPushInFlight=false;
+let _cloudBackupDirtyDuringFlight=false;
 function cloudBackupSchedulePush(){
   if(_cloudBackupPushTimer) clearTimeout(_cloudBackupPushTimer);
-  _cloudBackupPushTimer=setTimeout(()=>{ cloudBackupPush().catch(e=>console.error('cloudBackupPush (scheduled) failed:',e)); }, 8000);
+  _cloudBackupPushTimer=setTimeout(cloudBackupRunScheduledPush, 8000);
+}
+// v[next] FIX (code review round 3, 2026-09-08): "تغییرِ واقعیِ کاربر
+// همچنان باید خودکار ذخیره شود، حتی حینِ آپلود" — if a real edit lands
+// while a push is still in flight (the whole point of a debounce means
+// pushes can genuinely take a few seconds for larger data), the OLD
+// code would just start a SECOND overlapping cloudBackupPush() call
+// once the 8s timer fired again. Two pushes can coexist correctly
+// (see the version-claim transaction), but starting a redundant one
+// mid-flight is wasteful and pointless. This guard instead marks the
+// change as "arrived during a flight" and re-schedules a single
+// follow-up push immediately after the current one finishes — so the
+// edit is never lost, and never causes an overlapping push either.
+async function cloudBackupRunScheduledPush(){
+  if(_cloudBackupPushInFlight){
+    _cloudBackupDirtyDuringFlight=true;
+    return;
+  }
+  _cloudBackupPushInFlight=true;
+  try{
+    await cloudBackupPush();
+  }catch(e){
+    console.error('cloudBackupPush (scheduled) failed:',e);
+  }finally{
+    _cloudBackupPushInFlight=false;
+    if(_cloudBackupDirtyDuringFlight){
+      _cloudBackupDirtyDuringFlight=false;
+      cloudBackupSchedulePush();
+    }
+  }
 }
 
 
@@ -2908,8 +3556,7 @@ function loadDB(){
   }catch(e){return seedDB(blankDB());}
 }
 function saveDB(){
-  DB.meta._savedAt=new Date().toISOString();
-  persistDB();
+  persistDB(); // bumps _savedAt/_saveSeq internally now (see persistDB's own comment)
   if(typeof syncPush==='function')syncPush();
 }
 
@@ -3012,7 +3659,21 @@ function downloadJSONBackup(dataObj,filenamePrefix){
 // The one function every write path calls. Primary store = IndexedDB.
 // localStorage is kept ONLY as a last-resort fallback for browsers without
 // IndexedDB (or if a write genuinely fails), and failures are now visible.
-function persistDB(){
+// v[migration to main, 2026-09-16] _saveSeq is a plain integer, incremented
+// on every save from BOTH the normal edit path (saveDB()) and the restore
+// path — unlike a wall-clock timestamp it only ever moves forward, so
+// idbMigrateAndLoad()'s boot-time comparison stays correct even if the
+// device clock ties or moves backward (DST, manual adjustment, NTP
+// correction). Moved inside persistDB() itself — the one genuinely shared
+// low-level writer every save path goes through (~40 call sites app-wide,
+// not just saveDB()) — so every caller advances the same counter with no
+// per-call-site opt-in required.
+function bumpSaveStamp(){
+  DB.meta._savedAt=new Date().toISOString();
+  DB.meta._saveSeq=((DB.meta&&typeof DB.meta._saveSeq==='number')?DB.meta._saveSeq:0)+1;
+}
+function persistDB(skipCloudBackupSchedule){
+  bumpSaveStamp();
   if(idbReady && _idbHandle){
     idbSet(IDB_BLOB_KEY,DB).then(()=>clearSaveError()).catch(e=>{
       console.error('IndexedDB save failed, falling back to localStorage:',e);
@@ -3031,10 +3692,15 @@ function persistDB(){
       showSaveError(L==='fa'?'⚠ ذخیره‌سازی ناموفق بود — فضای ذخیره‌ی دستگاه پر است. داده‌های جدید ممکن است ذخیره نشوند.':'⚠ Save failed — device storage may be full. New changes may not be saved.');
     }
   }
-  // v[next]: fire-and-forget, heavily debounced (see cloudBackupSchedulePush)
-  // cloud backup trigger. Wrapped defensively — a cloud backup problem
-  // must never surface as a local save error or block normal app use.
-  try{ if(typeof cloudBackupSchedulePush==='function') cloudBackupSchedulePush(); }catch(e){}
+  // v[next] FIX: skipCloudBackupSchedule breaks a real push→persistDB→
+  // schedulePush→push loop — cloudBackupPush itself calls persistDB() to
+  // save its OWN status (cloudBackupLastSyncedVersion etc.), and that call
+  // now passes true here, so saving backup STATUS never schedules ANOTHER
+  // backup. Every other caller in the app (actual user edits — tasks,
+  // notes, everything, and all ~40 non-saveDB call sites) calls persistDB()
+  // with no argument, completely unchanged, and still schedules a push
+  // exactly as before.
+  try{ if(!skipCloudBackupSchedule && typeof cloudBackupSchedulePush==='function') cloudBackupSchedulePush(); }catch(e){}
 }
 
 // Called once at boot, right after the synchronous localStorage-based
@@ -3054,9 +3720,36 @@ async function idbMigrateAndLoad(){
   try{
     const existing=await idbGet(IDB_BLOB_KEY);
     if(existing && existing.entities){
-      const idbTime=(existing.meta&&existing.meta._savedAt)||'';
-      const curTime=(DB.meta&&DB.meta._savedAt)||'';
-      if(idbTime>=curTime){
+      // v[migration to main, 2026-09-16] Prefer the monotonic _saveSeq
+      // counter over the wall-clock _savedAt string — a device clock tying
+      // or moving backward made this comparison pick the wrong store (see
+      // bumpSaveStamp()'s comment). Four cases, in order:
+      //   1. both sides have a _saveSeq        → compare the counters
+      //   2. only IndexedDB has one            → IndexedDB wins outright
+      //      (it went through a real save under the new code; the other
+      //      side predates _saveSeq entirely and its clock is not a
+      //      trustworthy tiebreaker against a side that HAS a counter —
+      //      this is also what protects against "one of the two storage
+      //      locations failed to write" leaving that side seq-less)
+      //   3. only the in-memory/current copy has one → current wins outright,
+      //      same reasoning, mirrored
+      //   4. neither side has one              → fall back to the old
+      //      timestamp-only comparison (legacy, pre-_saveSeq data only)
+      const idbSeq=(existing.meta&&typeof existing.meta._saveSeq==='number')?existing.meta._saveSeq:null;
+      const curSeq=(DB.meta&&typeof DB.meta._saveSeq==='number')?DB.meta._saveSeq:null;
+      let idbWins;
+      if(idbSeq!==null && curSeq!==null){
+        idbWins=idbSeq>=curSeq;
+      }else if(idbSeq!==null){
+        idbWins=true;
+      }else if(curSeq!==null){
+        idbWins=false;
+      }else{
+        const idbTime=(existing.meta&&existing.meta._savedAt)||'';
+        const curTime=(DB.meta&&DB.meta._savedAt)||'';
+        idbWins=idbTime>=curTime;
+      }
+      if(idbWins){
         DB.entities=existing.entities;
         // Never let a stale IDB copy override the auth identity of the
         // session currently signing in.
@@ -26497,10 +27190,167 @@ function openSettingsSheet(){
         </div>
       </div>
 
+      ${cloudBackupAccountAllowed() ? `
+      <div class="hub-sec-label">${L==='fa'?'بکاپ ابری':'Cloud Backup'}</div>
+      <div class="set-group" style="padding:12px 16px">
+        <div id="cb-status" style="font-size:11px;color:var(--ink3);margin-bottom:8px">${(()=>{
+          const cb=(DB.meta&&DB.meta.cloudBackup)||{};
+          const lines=[];
+          lines.push('Last backup: '+(cb.lastPushAt?new Date(cb.lastPushAt).toLocaleString():'never'));
+          lines.push('Last restore: '+(cb.lastRestoreAt?new Date(cb.lastRestoreAt).toLocaleString():'never'));
+          if(cb.lastPushError) lines.push('⚠ Last error: '+esc(cb.lastPushError));
+          return lines.join('<br>');
+        })()}</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" id="cb-push" style="flex:1">${L==='fa'?'بکاپِ دستی الان':'Backup now'}</button>
+          <button class="btn btn-ghost" id="cb-pull" style="flex:1">${L==='fa'?'بازیابیِ دستی':'Restore now'}</button>
+        </div>
+        <button class="btn btn-ghost" id="cb-history" style="width:100%;margin-top:8px">${L==='fa'?'بازیابیِ یه نسخه‌ی خاص…':'Restore a specific version…'}</button>
+        <div id="cb-history-list" style="margin-top:8px;display:none"></div>
+      </div>
+      ` : ''}
+
       <div style="padding:6px 14px 24px"><button class="set-signout" data-set="signout">${tr('signOut')}</button></div>
     </div>
     <input type="file" id="acct-file" accept="image/*" style="display:none">`;
   document.body.appendChild(ov);
+  {
+  {
+    const pushBtn=document.getElementById('cb-push');
+    const pullBtn=document.getElementById('cb-pull');
+    const statusEl=document.getElementById('cb-status');
+    const refreshStatus=(extra)=>{
+      const cb=(DB.meta&&DB.meta.cloudBackup)||{};
+      const lines=[];
+      lines.push('Last backup: '+(cb.lastPushAt?new Date(cb.lastPushAt).toLocaleString():'never'));
+      lines.push('Last restore: '+(cb.lastRestoreAt?new Date(cb.lastRestoreAt).toLocaleString():'never'));
+      if(cb.lastPushError) lines.push('⚠ Last error: '+esc(cb.lastPushError));
+      if(extra) lines.push('<b style="color:#f43f5e">'+esc(extra)+'</b>');
+      if(statusEl) statusEl.innerHTML=lines.join('<br>');
+    };
+    if(pushBtn) pushBtn.onclick=async()=>{
+      pushBtn.disabled=true; pushBtn.textContent='Backing up…';
+      let extra=null;
+      try{
+        const r=await cloudBackupPush();
+        if(r&&r.ok){ toast('Backup complete'); }
+        else { extra='FAILED — reason: '+JSON.stringify(r); toast('Backup failed, see status below'); }
+      }catch(e){ extra='THREW — '+(e&&e.stack||e); toast('Backup threw, see status below'); }
+      pushBtn.disabled=false; pushBtn.textContent='Backup now';
+      refreshStatus(extra);
+    };
+    if(pullBtn) pullBtn.onclick=async()=>{
+      const ok=confirm('This will overwrite your CURRENT data (tasks, notes, everything) — on THIS device and in shared/synced storage — with the latest cloud backup. If another device is editing right now, its changes could be lost. This cannot be undone locally. Continue?');
+      if(!ok) return;
+      pullBtn.disabled=true; pullBtn.textContent='Restoring…';
+      let extra=null;
+      try{
+        const r=await cloudBackupPull();
+        if(r&&r.ok){ toast('Restore complete'); }
+        else { extra='FAILED — reason: '+JSON.stringify(r); toast('Restore failed, see status below'); }
+      }catch(e){ extra='THREW — '+(e&&e.stack||e); toast('Restore threw, see status below'); }
+      pullBtn.disabled=false; pullBtn.textContent='Restore now';
+      refreshStatus(extra);
+      try{ render(); }catch(e){}
+    };
+
+    const historyBtn=document.getElementById('cb-history');
+    const historyListEl=document.getElementById('cb-history-list');
+    let historyLoadedVersions=[]; // accumulates across "show more" pages, oldest-loaded at the end
+    let historyLoadError=null;
+
+    function renderHistoryList(){
+      const rows=historyLoadedVersions.map(v=>{
+        const when=(()=>{ try{ return v.savedAt&&v.savedAt.toDate ? v.savedAt.toDate().toLocaleString() : ''; }catch(e){ return ''; } })();
+        const counts=v.entityCounts?Object.entries(v.entityCounts).filter(([k,n])=>n>0).map(([k,n])=>k+':'+n).join(', '):'';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid var(--b1);border-radius:8px;margin-bottom:6px">
+          <div style="font-size:11px;line-height:1.5">
+            <div style="font-weight:700">Version ${esc(String(v.version))} — ${esc(when)}</div>
+            <div style="color:var(--ink3)">${esc(counts)}</div>
+          </div>
+          <button class="btn btn-ghost cb-hist-restore" data-version="${esc(String(v.version))}" style="white-space:nowrap;font-size:12px">Restore</button>
+        </div>`;
+      }).join('');
+      // v[TEST BUILD] A real fetch error (permission-denied, offline,
+      // etc.) is rendered as its own row with a Retry button — NEVER
+      // silently collapsed into "no more versions", which would hide a
+      // genuine failure and make older backups look unreachable when
+      // they're actually just one retry away.
+      let tailHtml='';
+      if(historyLoadError){
+        tailHtml=`<div style="padding:8px;border:1px solid #f43f5e55;border-radius:8px;font-size:11px">
+          <div style="color:#f43f5e;margin-bottom:6px">Couldn't load more versions — ${esc(historyLoadError)}</div>
+          <button class="btn btn-ghost" id="cb-hist-retry" style="width:100%">Retry</button>
+        </div>`;
+      }else if(historyListEl.dataset.hasMore==='1'){
+        tailHtml=`<button class="btn btn-ghost" id="cb-hist-more" style="width:100%">Show older versions…</button>`;
+      }
+      historyListEl.innerHTML=rows+tailHtml;
+    }
+
+    if(historyBtn) historyBtn.onclick=async()=>{
+      if(historyListEl.style.display!=='none'){ historyListEl.style.display='none'; historyListEl.innerHTML=''; historyLoadedVersions=[]; historyLoadError=null; return; }
+      historyBtn.disabled=true; historyBtn.textContent='Loading versions…';
+      const {items, hasMore, error}=await cloudBackupListVersionHistory();
+      historyBtn.disabled=false; historyBtn.textContent='Restore a specific version…';
+      historyLoadedVersions=items;
+      historyListEl.dataset.hasMore=hasMore?'1':'0';
+      historyLoadError=error||null;
+      if(error){
+        historyListEl.innerHTML=`<div style="padding:8px;border:1px solid #f43f5e55;border-radius:8px;font-size:11px">
+          <div style="color:#f43f5e;margin-bottom:6px">Couldn't load version history — ${esc(error)}</div>
+          <button class="btn btn-ghost" id="cb-hist-retry" style="width:100%">Retry</button>
+        </div>`;
+        historyListEl.style.display='block';
+        return;
+      }
+      if(!items.length){
+        historyListEl.innerHTML='<div style="font-size:12px;color:var(--ink3);padding:8px 0">No version history found (only versions pushed by this test build are listed).</div>';
+        historyListEl.style.display='block';
+        return;
+      }
+      renderHistoryList();
+      historyListEl.style.display='block';
+    };
+
+    // Event delegation for "Restore" (per version), "Show older
+    // versions…" (pagination), and "Retry" (after a failed page fetch)
+    // — bound once on the container instead of re-attaching listeners
+    // every render, so paging in more items never double-binds or drops
+    // a handler.
+    historyListEl.addEventListener('click', async (e)=>{
+      const moreOrRetryBtn=e.target.closest('#cb-hist-more, #cb-hist-retry');
+      if(moreOrRetryBtn){
+        moreOrRetryBtn.disabled=true; moreOrRetryBtn.textContent='Loading…';
+        const lastVersion=historyLoadedVersions.length
+          ? historyLoadedVersions[historyLoadedVersions.length-1].version : null;
+        const {items, hasMore, error}=await cloudBackupListVersionHistory(lastVersion);
+        historyLoadError=error||null;
+        if(!error) historyLoadedVersions=historyLoadedVersions.concat(items);
+        historyListEl.dataset.hasMore=hasMore?'1':'0';
+        renderHistoryList();
+        return;
+      }
+      const restoreBtn=e.target.closest('.cb-hist-restore');
+      if(restoreBtn){
+        const v=parseInt(restoreBtn.dataset.version,10);
+        const ok=confirm('This will overwrite your CURRENT data (tasks, notes, everything) — on THIS device and in shared/synced storage — with version '+v+'. If another device is editing right now, its changes could be lost. This cannot be undone locally. Continue?');
+        if(!ok) return;
+        restoreBtn.disabled=true; restoreBtn.textContent='Restoring…';
+        let extra=null;
+        try{
+          const r=await cloudBackupPullVersion(v);
+          if(r&&r.ok){ toast('Restored version '+v); }
+          else { extra='FAILED — reason: '+JSON.stringify(r); toast('Restore failed, see status below'); }
+        }catch(e){ extra='THREW — '+(e&&e.stack||e); toast('Restore threw, see status below'); }
+        restoreBtn.disabled=false; restoreBtn.textContent='Restore';
+        refreshStatus(extra);
+        try{ render(); }catch(e){}
+      }
+    });
+  }
+
+  }
   requestAnimationFrame(()=>ov.classList.add('on'));
   const close=()=>{ov.classList.remove('on');setTimeout(()=>ov.remove(),200);};
 
