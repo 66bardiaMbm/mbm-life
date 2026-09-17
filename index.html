@@ -2211,7 +2211,7 @@ try{
     });
   });
 }catch(e){}
-const APP_VERSION='v586';
+const APP_VERSION='v587';
 const SCHEMA=1;
 const KEY='mbmlife_platform_v1';
 /* Global: true when running inside the MBM Life Android companion WebView
@@ -2439,7 +2439,7 @@ const CLOUD_BACKUP_ENTITY_TYPES=['tasks','lists','appts','people','events','expe
 // This is a client-side convenience gate; the real enforcement boundary is
 // the matching Firestore Rule (users/{uid}/backup/... restricted to this
 // same UID) — this check must NEVER be relied on alone.
-const CLOUD_BACKUP_ALLOWED_UID = '7n0neUeSTuSDe15MvXZA6yvK2ql2'; // ← replace with the real UID before any publish
+const CLOUD_BACKUP_ALLOWED_UID = 'rJyqiFbqajQO9C1lAY3Uu87OR6v2'; // ← replace with the real UID before any publish
 function cloudBackupAccountAllowed(){
   const uid = cloudBackupUid();
   return !!uid && uid === CLOUD_BACKUP_ALLOWED_UID;
